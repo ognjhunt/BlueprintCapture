@@ -400,6 +400,9 @@
 				DEVELOPMENT_TEAM = 6ZTS4C5F38;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = CAMERA_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = MICROPHONE_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = LOCATION_WHEN_IN_USE_DESCRIPTION;
+				INFOPLIST_KEY_NSMotionUsageDescription = MOTION_USAGE_DESCRIPTION;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
@@ -436,6 +439,9 @@
 				DEVELOPMENT_TEAM = 6ZTS4C5F38;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = CAMERA_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = MICROPHONE_USAGE_DESCRIPTION;
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = LOCATION_WHEN_IN_USE_DESCRIPTION;
+				INFOPLIST_KEY_NSMotionUsageDescription = MOTION_USAGE_DESCRIPTION;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
 				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "arkit metal";
