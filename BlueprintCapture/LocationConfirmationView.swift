@@ -1,33 +1,131 @@
 import SwiftUI
+import CoreLocation
 
 struct LocationConfirmationView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
+    @State private var showManualEntry = false
+    @State private var searchQuery = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Confirm location")
-                    .font(.title2)
-                    .bold()
+                    .font(.largeTitle.weight(.bold))
                 Text("We use your current position to anchor the walkthrough to an exact address.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            Group {
-                if let address = viewModel.currentAddress {
-                    Label(address, systemImage: "mappin.and.ellipse")
-                        .font(.body)
-                } else if let error = viewModel.locationError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                } else {
-                    ProgressView("Detecting your venue…")
+            BlueprintCard {
+                Group {
+                    if let address = viewModel.currentAddress {
+                        Label(address, systemImage: "mappin.and.ellipse")
+                            .font(.body)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(BlueprintTheme.primary)
+                    } else if let error = viewModel.locationError {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(BlueprintTheme.errorRed)
+                    } else {
+                        ProgressView("Detecting your venue…")
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
+
+            // Manual address entry toggle
+            if !showManualEntry {
+                Button {
+                    showManualEntry = true
+                } label: {
+                    HStack {
+                        Image(systemName: "pencil.circle")
+                        Text("Can't find it? Enter address manually")
+                    }
+                }
+                .foregroundStyle(BlueprintTheme.accentAqua)
+                .font(.subheadline)
+            } else {
+                // Manual address entry section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Enter address")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                        Spacer()
+                        Button("Done") {
+                            showManualEntry = false
+                            searchQuery = ""
+                            viewModel.addressSearchResults = []
+                        }
+                        .foregroundStyle(BlueprintTheme.primary)
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    }
+                    
+                    TextField("Search address...", text: $searchQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .textContentType(.addressCityAndState)
+                        .onChange(of: searchQuery) { oldValue, newValue in
+                            if newValue.count > 2 {
+                                Task {
+                                    await viewModel.searchAddresses(query: newValue)
+                                }
+                            } else {
+                                viewModel.addressSearchResults = []
+                            }
+                        }
+                    
+                    // Search results
+                    if viewModel.isSearchingAddress {
+                        HStack {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("Searching addresses...")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    } else if !viewModel.addressSearchResults.isEmpty {
+                        VStack(spacing: 8) {
+                            ForEach(viewModel.addressSearchResults) { result in
+                                Button {
+                                    viewModel.selectAddress(result)
+                                    showManualEntry = false
+                                    searchQuery = ""
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(result.title)
+                                            .font(.subheadline)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.primary)
+                                        
+                                        if !result.subtitle.isEmpty {
+                                            Text(result.subtitle)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(BlueprintTheme.surfaceElevated)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(BlueprintTheme.surface)
+                )
+            }
 
             Spacer()
 
@@ -39,10 +137,8 @@ struct LocationConfirmationView: View {
                 }
             } label: {
                 Text(viewModel.currentAddress == nil ? "Retry location" : "Use this location")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BlueprintPrimaryButtonStyle())
             .disabled(viewModel.currentAddress == nil && viewModel.locationError == nil)
         }
         .padding()

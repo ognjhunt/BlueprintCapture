@@ -7,16 +7,21 @@ struct PermissionRequestView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Enable capture sensors")
-                    .font(.title2)
-                    .bold()
+                    .font(.largeTitle.weight(.bold))
                 Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            PermissionRow(title: "Camera", description: "Records the visual walkthrough", granted: viewModel.cameraAuthorized)
-            PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
-            PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
+            BlueprintCard {
+                PermissionRow(title: "Camera", description: "Records the visual walkthrough", granted: viewModel.cameraAuthorized)
+            }
+            BlueprintCard {
+                PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
+            }
+            BlueprintCard {
+                PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
+            }
 
             Spacer()
 
@@ -24,10 +29,8 @@ struct PermissionRequestView: View {
                 viewModel.requestPermissions()
             } label: {
                 Text("Grant permissions")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BlueprintPrimaryButtonStyle())
         }
         .padding()
     }
@@ -40,9 +43,9 @@ private struct PermissionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle")
-                .symbolRenderingMode(.multicolor)
-                .foregroundStyle(granted ? .green : .orange)
+            Image(systemName: granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(granted ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
@@ -53,8 +56,7 @@ private struct PermissionRow: View {
             }
             Spacer()
         }
-        .padding()
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
+        .padding(.vertical, 4)
     }
 }
 

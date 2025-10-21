@@ -15,7 +15,7 @@ struct CaptureSessionView: View {
                         .padding()
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(radius: 4)
+                .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
 
             captureControls
 
@@ -59,7 +59,7 @@ struct CaptureSessionView: View {
                 } label: {
                     Label("End Session", systemImage: "stop.fill")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(BlueprintSecondaryButtonStyle())
             }
         }
     }
@@ -86,7 +86,10 @@ private struct CaptureOverlay: View {
                 .frame(maxWidth: 220, alignment: .leading)
         }
         .padding(12)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            BlueprintTheme.heroGradient.opacity(0.25),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
     }
 }
 
@@ -100,7 +103,7 @@ private struct RecordButton: View {
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 72, height: 72)
-                .foregroundStyle(isRecording ? Color.red : Color.red.opacity(0.85))
+                .foregroundStyle(isRecording ? BlueprintTheme.errorRed : Color.red.opacity(0.85))
                 .symbolRenderingMode(.palette)
         }
         .buttonStyle(.plain)

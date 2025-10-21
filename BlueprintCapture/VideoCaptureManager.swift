@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import CoreMotion
 
 final class VideoCaptureManager: NSObject, ObservableObject {

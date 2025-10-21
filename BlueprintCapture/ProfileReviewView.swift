@@ -8,30 +8,31 @@ struct ProfileReviewView: View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Welcome back")
-                    .font(.title2)
-                    .bold()
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.primary)
                 Text("Please confirm your details before we begin the capture walkthrough.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                ProfileRow(title: "Name", value: profile.fullName)
-                ProfileRow(title: "Email", value: profile.email)
-                ProfileRow(title: "Phone", value: profile.phoneNumber)
-                ProfileRow(title: "Company", value: profile.company)
+            BlueprintCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    ProfileRow(title: "Name", value: profile.fullName)
+                    Divider()
+                    ProfileRow(title: "Email", value: profile.email)
+                    Divider()
+                    ProfileRow(title: "Phone", value: profile.phoneNumber)
+                    Divider()
+                    ProfileRow(title: "Company", value: profile.company)
+                }
             }
-            .padding()
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Color(.secondarySystemBackground)))
 
             Spacer()
 
             Button(action: onContinue) {
                 Text("Looks good — continue")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(BlueprintPrimaryButtonStyle())
         }
         .padding()
     }
