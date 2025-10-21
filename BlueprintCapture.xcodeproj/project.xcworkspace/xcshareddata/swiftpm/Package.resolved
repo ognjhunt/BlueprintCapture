@@ -1,0 +1,15 @@
+{
+  "originHash" : "183c8ea1745b8a833e8446386062866a80f2a8750545b14c6c5d312cbaa9babb",
+  "pins" : [
+    {
+      "identity" : "geohasher",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/nenosllc/Geohasher.git",
+      "state" : {
+        "revision" : "c53b509c8816d325ecccae6d0e82fdff362ae5c5",
+        "version" : "1.2.1"
+      }
+    }
+  ],
+  "version" : 3
+}
