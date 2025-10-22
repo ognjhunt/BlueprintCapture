@@ -28,12 +28,12 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     // Profile Section
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "person.circle.fill")
                                     .font(.system(size: 50))
-                                    .foregroundStyle(BlueprintTheme.primary)
+                                    .foregroundStyle(BlueprintTheme.brandTeal)
 
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(viewModel.profile.fullName)
@@ -42,7 +42,7 @@ struct SettingsView: View {
 
                                     Text(viewModel.profile.email)
                                         .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                        .blueprintSecondaryOnDark()
                                 }
 
                                 Spacer()
@@ -51,7 +51,7 @@ struct SettingsView: View {
                     }
 
                     // Capture Activity
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "video.fill")
@@ -69,7 +69,7 @@ struct SettingsView: View {
                             if recentCaptures.isEmpty {
                                 Text("No captures yet. Your completed scans will appear here with their review status.")
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .blueprintSecondaryOnDark()
                             } else {
                                 VStack(alignment: .leading, spacing: 16) {
                                     ForEach(Array(recentCaptures.enumerated()), id: \.element.id) { index, entry in
@@ -84,7 +84,7 @@ struct SettingsView: View {
                     }
 
                     if let qcStatus = viewModel.qcStatus {
-                        BlueprintCard {
+                        BlueprintGlassCard {
                             VStack(alignment: .leading, spacing: 16) {
                                 HStack {
                                     Image(systemName: "checkmark.seal.fill")
@@ -105,7 +105,7 @@ struct SettingsView: View {
                     }
 
                     // Earnings Section
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "dollarsign.circle.fill")
@@ -123,7 +123,7 @@ struct SettingsView: View {
                             VStack(spacing: 12) {
                                 HStack {
                                     Text("Total Earned")
-                                        .foregroundStyle(.secondary)
+                                        .blueprintSecondaryOnDark()
                                     Spacer()
                                     Text(viewModel.totalEarnings, format: .currency(code: "USD"))
                                         .font(.headline)
@@ -132,7 +132,7 @@ struct SettingsView: View {
                                 
                                 HStack {
                                     Text("Pending Payout")
-                                        .foregroundStyle(.secondary)
+                                        .blueprintSecondaryOnDark()
                                     Spacer()
                                     Text(viewModel.pendingPayout, format: .currency(code: "USD"))
                                         .font(.headline)
@@ -140,7 +140,7 @@ struct SettingsView: View {
                                 
                                 HStack {
                                     Text("Scans Completed")
-                                        .foregroundStyle(.secondary)
+                                        .blueprintSecondaryOnDark()
                                     Spacer()
                                     Text("\(viewModel.scansCompleted)")
                                         .font(.headline)
@@ -149,7 +149,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "calendar.badge.clock")
@@ -167,7 +167,7 @@ struct SettingsView: View {
                             if upcomingPayouts.isEmpty {
                                 Text("No transfers scheduled. Once QC approves your captures you'll see payout dates here.")
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .blueprintSecondaryOnDark()
                             } else {
                                 VStack(alignment: .leading, spacing: 16) {
                                     ForEach(Array(upcomingPayouts.enumerated()), id: \.element.id) { index, entry in
@@ -182,7 +182,7 @@ struct SettingsView: View {
                     }
 
                     // Billing Info Section
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "creditcard.fill")
@@ -208,7 +208,7 @@ struct SettingsView: View {
                                             VStack(alignment: .leading, spacing: 4) {
                                                 Text("Connected Bank Account")
                                                     .font(.subheadline)
-                                                    .foregroundStyle(.secondary)
+                                                    .blueprintSecondaryOnDark()
 
                                                 Text("\(billingInfo.bankName) ••••\(billingInfo.lastFour)")
                                                     .font(.body)
@@ -249,7 +249,7 @@ struct SettingsView: View {
                                         VStack(alignment: .leading, spacing: 8) {
                                             Text("Payouts")
                                                 .font(.subheadline)
-                                                .foregroundStyle(.secondary)
+                                                .blueprintSecondaryOnDark()
                                             Button {
                                                 showingStripeOnboarding = true
                                             } label: {
@@ -265,7 +265,7 @@ struct SettingsView: View {
                                                 .foregroundStyle(BlueprintTheme.warningOrange)
 
                                             Text("No bank account connected")
-                                                .foregroundStyle(.secondary)
+                                                .blueprintSecondaryOnDark()
 
                                             Spacer()
                                         }
@@ -307,7 +307,7 @@ struct SettingsView: View {
                                 Spacer()
                                 Text("Powered by")
                                     .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                                    .blueprintSecondaryOnDark()
                                 Text("Stripe")
                                     .font(.caption)
                                     .fontWeight(.semibold)
@@ -319,7 +319,7 @@ struct SettingsView: View {
                     }
                     
                     // Account Settings
-                    BlueprintCard {
+                    BlueprintGlassCard {
                         VStack(alignment: .leading, spacing: 16) {
                             HStack {
                                 Image(systemName: "gear")
@@ -346,7 +346,7 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                             
                             Divider()
                             
@@ -361,7 +361,7 @@ struct SettingsView: View {
                                         .foregroundStyle(.secondary)
                                 }
                             }
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(.white)
                             
                             Divider()
                             
@@ -380,7 +380,7 @@ struct SettingsView: View {
                 .padding()
             }
             .navigationTitle("Settings")
-            .blueprintScreenBackground()
+            .blueprintAppBackground()
         }
         .sheet(isPresented: $showingBillingSetup) {
             StripeBillingSetupView(viewModel: viewModel)
@@ -444,7 +444,7 @@ private struct CaptureHistoryRow: View {
                     .foregroundStyle(.secondary)
 
                 if let payout = entry.estimatedPayout {
-                    Text("Est. payout \(payout, format: .currency(code: \"USD\"))")
+                    (Text("Est. payout ") + Text(payout, format: .currency(code: "USD")))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -589,7 +589,7 @@ private struct StripeAccountStatusSummary: View {
                 Text(state.isReadyForTransfers ? "Stripe account active" : "Complete onboarding")
                     .fontWeight(.semibold)
             } icon: {
-                Image(systemName: state.isReadyForTransfers ? "checkmark.shield.fill" : "exclamationmark.triangle.fill")
+                Image(systemName: state.isReadyForTransfers ? "checkmark.shield.fill" : "exclamationmark.triangle fill")
             }
             .foregroundStyle(state.isReadyForTransfers ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
 
@@ -602,7 +602,7 @@ private struct StripeAccountStatusSummary: View {
 
             if let next = state.nextPayout {
                 Label {
-                    Text("Next payout \(next.estimatedArrival.formatted(nextPayoutDateStyle)) · \(next.amount, format: .currency(code: \"USD\"))")
+                    (Text("Next payout \(next.estimatedArrival.formatted(nextPayoutDateStyle)) · ") + Text(next.amount, format: .currency(code: "USD")))
                 } icon: {
                     Image(systemName: "calendar.badge.clock")
                 }

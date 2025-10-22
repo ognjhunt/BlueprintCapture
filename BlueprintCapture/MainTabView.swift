@@ -23,7 +23,8 @@ struct MainTabView: View {
                 }
                 .tag(2)
         }
-        .tint(BlueprintTheme.primary)
+        .tint(BlueprintTheme.brandTeal)
+        .blueprintAppBackground()
     }
 }
 

@@ -17,6 +17,8 @@ struct NearbyTargetsView: View {
     @State private var now = Date()
     @Environment(\.openURL) private var openURL
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    // Controls whether the action sheet should remain open after dismissing the alert
+    @State private var keepActionsOpenAfterAlert = false
 
     var body: some View {
         NavigationStack {
@@ -35,11 +37,23 @@ struct NearbyTargetsView: View {
             .navigationTitle("Nearby Targets")
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(isPresented: $navigateToCapture) {
-                CaptureSessionView(viewModel: captureFlow)
+                CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id, reservationId: nil)
             }
         }
+        .blueprintAppBackground()
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
+            guard
+                let info = note.userInfo as? [String: Any],
+                let action = info["action"] as? String,
+                action == "checkin",
+                let targetId = info["targetId"] as? String,
+                let item = viewModel.items.first(where: { $0.id == targetId })
+            else { return }
+            selectedItem = item
+            showActions = true
+        }
         .onReceive(countdownTimer) { date in
             now = date
             if let res = activeReservation, res.reservedUntil <= date {
@@ -171,6 +185,8 @@ private extension NearbyTargetsView {
                         do {
                             let res = try await viewModel.reserveTarget(item.target)
                             reserveMessage = "This location is now reserved for you for 1 hour (until \(res.reservedUntil.formatted(date: .omitted, time: .shortened))). If you are not on-site and mapping within that hour, it will be un-reserved."
+                            // After reservation success, close the sheet when the alert is dismissed
+                            keepActionsOpenAfterAlert = false
                             showReserveConfirm = true
                             activeReservation = res
                             reservedItem = item
@@ -180,6 +196,8 @@ private extension NearbyTargetsView {
                             }
                         } catch {
                             reserveMessage = "Unable to reserve right now. Please try again."
+                            // Keep the sheet open to allow another action after error acknowledgement
+                            keepActionsOpenAfterAlert = true
                             showReserveConfirm = true
                         }
                     }
@@ -194,7 +212,7 @@ private extension NearbyTargetsView {
                         Task {
                             do {
                                 try await viewModel.checkIn(item.target)
-                                await MainActor {
+                                await MainActor.run {
                                     captureFlow.step = .readyToCapture
                                     captureFlow.captureManager.configureSession()
                                     captureFlow.captureManager.startSession()
@@ -202,7 +220,7 @@ private extension NearbyTargetsView {
                                     showActions = false
                                 }
                             } catch {
-                                await MainActor {
+                                await MainActor.run {
                                     reserveMessage = "We couldn't check you in. Please try again."
                                     showReserveConfirm = true
                                 }
@@ -210,6 +228,8 @@ private extension NearbyTargetsView {
                         }
                     } else {
                         reserveMessage = "You're not detected on-site yet. Head to the location, then tap Check in to begin mapping."
+                        // Do not dismiss the action sheet after closing this alert
+                        keepActionsOpenAfterAlert = true
                         showReserveConfirm = true
                     }
                 } label: {
@@ -246,7 +266,13 @@ private extension NearbyTargetsView {
         .padding()
         .presentationDetents([.medium, .large])
         .alert("Reservation", isPresented: $showReserveConfirm, actions: {
-            Button("OK", role: .cancel) { showReserveConfirm = false; showActions = false }
+            Button("OK", role: .cancel) {
+                // Dismiss alert and optionally keep the action sheet open
+                showReserveConfirm = false
+                if !keepActionsOpenAfterAlert { showActions = false }
+                // Reset for the next alert
+                keepActionsOpenAfterAlert = false
+            }
         }, message: {
             Text(reserveMessage ?? "")
         })

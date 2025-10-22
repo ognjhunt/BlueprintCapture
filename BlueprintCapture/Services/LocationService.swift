@@ -49,7 +49,11 @@ final class LocationService: NSObject, LocationServiceProtocol {
 
 extension LocationService: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        // Notify listener if needed
+        // If now authorized, request a one-shot location to prime latestLocation quickly
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
+            manager.requestLocation()
+        }
+        // Notify listener (may be nil on first grant)
         listener?(latestLocation)
     }
 

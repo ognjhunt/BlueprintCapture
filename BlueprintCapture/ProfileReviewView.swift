@@ -9,13 +9,13 @@ struct ProfileReviewView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Welcome back")
                     .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.primary)
+                    .blueprintGradientText()
                 Text("Please confirm your details before we begin the capture walkthrough.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .blueprintSecondaryOnDark()
             }
 
-            BlueprintCard {
+            BlueprintGlassCard {
                 VStack(alignment: .leading, spacing: 12) {
                     ProfileRow(title: "Name", value: profile.fullName)
                     Divider()
@@ -46,10 +46,11 @@ private struct ProfileRow: View {
         HStack {
             Text(title)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .blueprintSecondaryOnDark()
             Spacer()
             Text(value.isEmpty ? "—" : value)
                 .font(.body)
+                .blueprintPrimaryOnDark()
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title): \(value)")

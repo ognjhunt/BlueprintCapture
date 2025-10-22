@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import CoreMotion
+import CoreMedia
 
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
@@ -350,8 +351,9 @@ private extension VideoCaptureManager {
         let description = device.activeFormat.formatDescription
         let dimensions = CMVideoFormatDescriptionGetDimensions(description)
         var intrinsicMatrix: [Double]?
-        if let data = CMFormatDescriptionGetExtension(description, extensionKey: kCMFormatDescriptionExtension_CameraIntrinsicMatrix) as? Data {
-            intrinsicMatrix = data.withUnsafeBytes { rawBuffer -> [Double]? in
+        let intrinsicKey: CFString = "CameraIntrinsicMatrix" as CFString
+        if let cfData = CMFormatDescriptionGetExtension(description, extensionKey: intrinsicKey) as? Data {
+            intrinsicMatrix = cfData.withUnsafeBytes { rawBuffer -> [Double]? in
                 let floatCount = rawBuffer.count / MemoryLayout<Float32>.size
                 guard floatCount == 9 else { return nil }
                 let floatBuffer = rawBuffer.bindMemory(to: Float32.self)
@@ -365,7 +367,7 @@ private extension VideoCaptureManager {
             intrinsicMatrix: intrinsicMatrix,
             fieldOfView: device.activeFormat.videoFieldOfView,
             lensAperture: device.lensAperture,
-            minimumFocusDistance: device.minimumFocusDistance > 0 ? device.minimumFocusDistance : nil
+            minimumFocusDistance: device.minimumFocusDistance > 0 ? Float(device.minimumFocusDistance) : nil
         )
     }
 
@@ -406,16 +408,6 @@ private extension CMTime {
     var seconds: Double {
         guard isNumeric else { return 0 }
         return CMTimeGetSeconds(self)
-    }
-}
-
-private extension VideoCaptureManager.CaptureManifest.ExposureSample {
-    init(timestamp: Date, iso: Float, exposureDurationSeconds: Double, exposureTargetBias: Float, whiteBalanceGains: VideoCaptureManager.CaptureManifest.WhiteBalanceGains) {
-        self.timestamp = timestamp
-        self.iso = iso
-        self.exposureDurationSeconds = exposureDurationSeconds
-        self.exposureTargetBias = exposureTargetBias
-        self.whiteBalanceGains = whiteBalanceGains
     }
 }
 

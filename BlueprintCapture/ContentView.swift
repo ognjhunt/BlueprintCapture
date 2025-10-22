@@ -14,12 +14,13 @@ struct ContentView: View {
                 case .requestPermissions:
                     PermissionRequestView(viewModel: viewModel)
                 case .readyToCapture:
-                    CaptureSessionView(viewModel: viewModel)
+                    CaptureSessionView(viewModel: viewModel, targetId: nil, reservationId: nil)
                 }
             }
             .navigationTitle("Blueprint Capture")
             .navigationBarTitleDisplayMode(.inline)
         }
+        .blueprintAppBackground()
         .task {
             await viewModel.loadProfile()
         }

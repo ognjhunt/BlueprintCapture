@@ -46,7 +46,7 @@ struct StripeOnboardingView: View {
 
                                 if let next = state.nextPayout {
                                     Label {
-                                        Text("Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day().year())) · \(next.amount, format: .currency(code: \"USD\"))")
+                                        Text("Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day().year())) · \(next.amount, format: .currency(code: "USD"))")
                                     } icon: {
                                         Image(systemName: "calendar.badge.clock")
                                     }

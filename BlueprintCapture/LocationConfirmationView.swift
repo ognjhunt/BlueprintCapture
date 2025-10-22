@@ -11,18 +11,19 @@ struct LocationConfirmationView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Confirm location")
                     .font(.largeTitle.weight(.bold))
+                    .blueprintGradientText()
                 Text("We use your current position to anchor the walkthrough to an exact address.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .blueprintSecondaryOnDark()
             }
 
-            BlueprintCard {
+            BlueprintGlassCard {
                 Group {
                     if let address = viewModel.currentAddress {
                         Label(address, systemImage: "mappin.and.ellipse")
                             .font(.body)
                             .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(BlueprintTheme.primary)
+                            .foregroundStyle(BlueprintTheme.brandTeal)
                     } else if let error = viewModel.locationError {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(BlueprintTheme.errorRed)
@@ -58,7 +59,7 @@ struct LocationConfirmationView: View {
                             searchQuery = ""
                             viewModel.addressSearchResults = []
                         }
-                        .foregroundStyle(BlueprintTheme.primary)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
                         .font(.caption)
                         .fontWeight(.semibold)
                     }
@@ -84,7 +85,7 @@ struct LocationConfirmationView: View {
                                 .scaleEffect(0.8)
                             Text("Searching addresses...")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .blueprintSecondaryOnDark()
                             Spacer()
                         }
                         .padding(.vertical, 8)
@@ -100,12 +101,12 @@ struct LocationConfirmationView: View {
                                         Text(result.title)
                                             .font(.subheadline)
                                             .fontWeight(.medium)
-                                            .foregroundStyle(.primary)
+                                            .blueprintPrimaryOnDark()
                                         
                                         if !result.subtitle.isEmpty {
                                             Text(result.subtitle)
                                                 .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                                .blueprintSecondaryOnDark()
                                         }
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -113,7 +114,7 @@ struct LocationConfirmationView: View {
                                     .padding(.horizontal, 12)
                                     .background(
                                         RoundedRectangle(cornerRadius: 8)
-                                            .fill(BlueprintTheme.surfaceElevated)
+                                            .fill(BlueprintTheme.surfaceElevated.opacity(0.7))
                                     )
                                 }
                             }
@@ -123,7 +124,7 @@ struct LocationConfirmationView: View {
                 .padding(12)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .fill(BlueprintTheme.surface)
+                        .fill(BlueprintTheme.surface.opacity(0.85))
                 )
             }
 

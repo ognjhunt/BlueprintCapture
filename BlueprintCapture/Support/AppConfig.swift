@@ -63,4 +63,8 @@ enum AppConfig {
     }
 }
 
+extension Notification.Name {
+    static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
+}
+
 

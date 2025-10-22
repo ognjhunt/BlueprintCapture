@@ -32,20 +32,20 @@ struct CaptureSessionView: View {
             }
         }
         .padding()
+        .blueprintAppBackground()
         .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
             case .finished(let artifacts):
                 recordedArtifacts = artifacts
                 showingShareSheet = true
-            case .finished(let url):
-                viewModel.handleRecordingFinished(fileURL: url, targetId: targetId, reservationId: reservationId)
+                viewModel.handleRecordingFinished(fileURL: artifacts.videoURL, targetId: targetId, reservationId: reservationId)
             default:
                 break
             }
         }
         .sheet(isPresented: $showingShareSheet) {
             if let artifacts = recordedArtifacts {
-                ShareSheet(activityItems: [
+                ActivityView(activityItems: [
                     artifacts.videoURL,
                     artifacts.motionLogURL,
                     artifacts.manifestURL
@@ -104,6 +104,18 @@ struct CaptureSessionView: View {
             viewModel.captureManager.startRecording()
         }
     }
+}
+
+// Simple UIActivityViewController wrapper for SwiftUI
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct CaptureOverlay: View {

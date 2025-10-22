@@ -21,6 +21,7 @@ struct TargetRow: View {
                         Text(item.target.displayName)
                             .font(.headline)
                             .lineLimit(1)
+                            .blueprintPrimaryOnDark()
 
                         if let seconds = reservationSecondsRemaining {
                             reservedPill(seconds: seconds)
@@ -29,13 +30,13 @@ struct TargetRow: View {
 
                     Text(item.target.address ?? "Address pending…")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .blueprintSecondaryOnDark()
                         .lineLimit(1)
 
                     HStack(spacing: 8) {
                         Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .blueprintTertiaryOnDark()
 
                         timeBadge()
 
@@ -44,7 +45,7 @@ struct TargetRow: View {
                         Text("Est. $\(formatCurrency(item.estimatedPayoutUsd))")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundStyle(BlueprintTheme.primary)
+                            .foregroundStyle(BlueprintTheme.brandTeal)
                     }
                 }
 

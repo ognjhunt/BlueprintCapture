@@ -8,18 +8,19 @@ struct PermissionRequestView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Enable capture sensors")
                     .font(.largeTitle.weight(.bold))
+                    .blueprintGradientText()
                 Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .blueprintSecondaryOnDark()
             }
 
-            BlueprintCard {
+            BlueprintGlassCard {
                 PermissionRow(title: "Camera", description: "Records the visual walkthrough", granted: viewModel.cameraAuthorized)
             }
-            BlueprintCard {
+            BlueprintGlassCard {
                 PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
             }
-            BlueprintCard {
+            BlueprintGlassCard {
                 PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
             }
 
@@ -33,6 +34,7 @@ struct PermissionRequestView: View {
             .buttonStyle(BlueprintPrimaryButtonStyle())
         }
         .padding()
+        .blueprintAppBackground()
     }
 }
 
@@ -52,7 +54,7 @@ private struct PermissionRow: View {
                     .font(.headline)
                 Text(description)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .blueprintSecondaryOnDark()
             }
             Spacer()
         }

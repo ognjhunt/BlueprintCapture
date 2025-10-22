@@ -1,7 +1,6 @@
 import Foundation
 #if canImport(FirebaseFirestore)
 import FirebaseFirestore
-import FirebaseFirestoreSwift
 #endif
 #if canImport(FirebaseAuth)
 import FirebaseAuth

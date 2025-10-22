@@ -43,6 +43,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let reservationService: ReservationServiceProtocol
     private let discoveryService: GeminiDiscoveryServiceProtocol
     private let placesDetailsService: PlacesDetailsServiceProtocol
+    private let notifications: NotificationServiceProtocol
 
     // Data
     private var pricing: [SKU: SkuPricing] = defaultPricing
@@ -58,7 +59,8 @@ final class NearbyTargetsViewModel: ObservableObject {
          geocoding: GeocodingServiceProtocol = GeocodingService(),
          reservationService: ReservationServiceProtocol = ReservationService(),
          discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(),
-         placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService()) {
+         placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
+         notifications: NotificationServiceProtocol = NotificationService()) {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
@@ -67,23 +69,34 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.reservationService = reservationService
         self.discoveryService = discoveryService
         self.placesDetailsService = placesDetailsService
+        self.notifications = notifications
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
                 self?.userLocation = loc
+                // Kick off initial refresh as soon as we have a real location
+                if loc != nil {
+                    if let self = self { await self.refresh() }
+                }
             }
         }
     }
 
     deinit {
-        clearReservationObservers()
+        // Ensure observer cleanup even when deinit runs off-main
+        Task { @MainActor in
+            clearReservationObservers()
+        }
     }
 
     func onAppear() {
         locationService.requestWhenInUseAuthorization()
         locationService.startUpdatingLocation()
         Task { await loadPricing() }
-        Task { await refresh() }
+        // Show loading until the first location arrives; listener will trigger refresh
+        state = .loading
+        // Ask for notification permission early (one-time)
+        Task { await notifications.requestAuthorizationIfNeeded() }
         logAPIStatus()
     }
 
@@ -250,6 +263,8 @@ final class NearbyTargetsViewModel: ObservableObject {
             }
 
             self.items = mapped
+            // Refresh proximity notifications for the top results so we can nudge users when nearby
+            notifications.scheduleProximityNotifications(for: mapped.map { $0.target }, maxRegions: 10, radiusMeters: 150)
             applySort()
             state = mapped.isEmpty ? .loaded : .loaded
         } catch {
@@ -297,6 +312,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         }
     }
 
+    @MainActor
     private func clearReservationObservers() {
         reservationObservers.values.forEach { $0.cancel() }
         reservationObservers.removeAll()

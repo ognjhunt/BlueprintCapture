@@ -7,10 +7,42 @@
 
 import UIKit
 import FirebaseCore
+import UserNotifications
 
 class AppDelegate: NSObject, UIApplicationDelegate {
+    private let notificationService = NotificationService()
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        // Present notifications while app is foregrounded
+        UNUserNotificationCenter.current().delegate = self
+        notificationService.registerCategories()
         return true
+    }
+}
+
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Show alert/sound in foreground as well
+        completionHandler([.banner, .sound, .badge, .list])
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        switch response.actionIdentifier {
+        case NotificationService.actionDirections:
+            if let lat = userInfo["lat"] as? Double,
+               let lng = userInfo["lng"] as? Double,
+               let url = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d") {
+                UIApplication.shared.open(url)
+            }
+        case NotificationService.actionCheckIn:
+            NotificationCenter.default.post(name: .blueprintNotificationAction, object: nil, userInfo: [
+                "action": "checkin",
+                "targetId": userInfo["targetId"] as Any
+            ])
+        default:
+            break
+        }
+        completionHandler()
     }
 }
