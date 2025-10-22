@@ -8,6 +8,7 @@ struct StripeOnboardingView: View {
     @State private var instantAmount: String = ""
     @State private var showConfirmation = false
     @State private var errorMessage: String?
+    @State private var accountState: StripeAccountState?
 
     var body: some View {
         NavigationStack {
@@ -24,6 +25,42 @@ struct StripeOnboardingView: View {
                             .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.top, 24)
+
+                    if let state = accountState {
+                        BlueprintCard {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Label {
+                                    Text(state.isReadyForTransfers ? "Account ready for payouts" : "Complete onboarding to enable payouts")
+                                        .fontWeight(.semibold)
+                                } icon: {
+                                    Image(systemName: state.isReadyForTransfers ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                }
+                                .foregroundStyle(state.isReadyForTransfers ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
+
+                                Label {
+                                    Text("Payout schedule: \(state.payoutSchedule.displayName)")
+                                } icon: {
+                                    Image(systemName: "calendar")
+                                }
+                                .foregroundStyle(.secondary)
+
+                                if let next = state.nextPayout {
+                                    Label {
+                                        Text("Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day().year())) · \(next.amount, format: .currency(code: \"USD\"))")
+                                    } icon: {
+                                        Image(systemName: "calendar.badge.clock")
+                                    }
+                                    .foregroundStyle(.secondary)
+                                }
+
+                                if let requirements = state.requirementsDue, !requirements.isEmpty {
+                                    Text("Pending: \(requirements.joined(separator: ", "))")
+                                        .font(.caption)
+                                        .foregroundStyle(BlueprintTheme.warningOrange)
+                                }
+                            }
+                        }
+                    }
 
                     // KYC & Onboarding
                     BlueprintCard {
@@ -95,9 +132,19 @@ struct StripeOnboardingView: View {
                                 HStack { Image(systemName: "paperplane.fill"); Text("Cash Out Now") }
                             }
                             .buttonStyle(BlueprintPrimaryButtonStyle())
-                            .disabled(isLoading || Int(instantAmount) == nil)
-                            Text("Uses Stripe Instant Payouts to debit card or bank when eligible.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            .disabled(
+                                isLoading ||
+                                Int(instantAmount) == nil ||
+                                !(accountState?.instantPayoutEligible ?? false)
+                            )
+
+                            if accountState?.instantPayoutEligible == true {
+                                Text("Uses Stripe Instant Payouts to debit card or bank when eligible.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Instant cash-out unlocks once Stripe approves your account and you have an eligible balance.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                     }
                 }
@@ -111,6 +158,27 @@ struct StripeOnboardingView: View {
             }
             .alert("Done", isPresented: $showConfirmation) { Button("OK") { showConfirmation = false } } message: { Text("Action completed successfully.") }
             .alert("Error", isPresented: .constant(errorMessage != nil)) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "") }
+            .task {
+                isLoading = true
+                await loadAccountState()
+                isLoading = false
+            }
+        }
+    }
+
+    private func loadAccountState() async {
+        do {
+            let state = try await StripeConnectService.shared.fetchAccountState()
+            await MainActor.run {
+                self.accountState = state
+                self.selectedSchedule = state.payoutSchedule
+            }
+        } catch {
+            await MainActor.run {
+                if self.accountState == nil {
+                    self.errorMessage = "Unable to load Stripe account status."
+                }
+            }
         }
     }
 
@@ -134,6 +202,7 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 try await StripeConnectService.shared.updatePayoutSchedule(selectedSchedule)
+                await loadAccountState()
                 await MainActor.run { isLoading = false; showConfirmation = true }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = "Failed to update schedule." }
@@ -148,6 +217,7 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 try await StripeConnectService.shared.triggerInstantPayout(amountCents: cents)
+                await loadAccountState()
                 await MainActor.run { isLoading = false; showConfirmation = true; instantAmount = "" }
             } catch {
                 await MainActor.run { isLoading = false; errorMessage = "Instant payout failed." }
