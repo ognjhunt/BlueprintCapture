@@ -25,6 +25,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var motionAuthorized = false
     @Published var addressSearchResults: [AddressResult] = []
     @Published var isSearchingAddress = false
+    @Published private(set) var uploadStatuses: [UploadStatus] = []
 
     let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
@@ -33,8 +34,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     private var hasRequestedPermissions = false
     private let onboardingKey = "com.blueprint.isOnboarded"
+    private let uploadService: CaptureUploadServiceProtocol
+    private var uploadStatusMap: [UUID: UploadStatus] = [:]
+    private var cancellables: Set<AnyCancellable> = []
 
-    override init() {
+    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
+        self.uploadService = uploadService
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
@@ -45,9 +50,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         } else {
             motionAuthorized = true
         }
-        
+
         // Check if user has already completed onboarding
         isOnboarded = UserDefaults.standard.bool(forKey: onboardingKey)
+
+        observeUploadEvents()
     }
 
     func loadProfile() async {
@@ -201,6 +208,68 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         captureManager.configureSession()
         captureManager.startSession()
     }
+
+    func handleRecordingFinished(fileURL: URL, targetId: String?, reservationId: String?) {
+        let jobId = reservationId ?? targetId ?? UUID().uuidString
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: targetId,
+            reservationId: reservationId,
+            jobId: jobId,
+            creatorId: profile.id.uuidString,
+            capturedAt: Date(),
+            uploadedAt: nil
+        )
+        let request = CaptureUploadRequest(fileURL: fileURL, metadata: metadata)
+        uploadService.enqueue(request)
+    }
+
+    func retryUpload(id: UUID) {
+        uploadService.retryUpload(id: id)
+    }
+
+    func dismissUpload(id: UUID) {
+        uploadStatusMap.removeValue(forKey: id)
+        refreshUploadStatuses()
+    }
+
+    private func observeUploadEvents() {
+        uploadService.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handleUpload(event)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleUpload(_ event: CaptureUploadService.Event) {
+        switch event {
+        case .queued(let request):
+            uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
+        case .progress(let id, let progress):
+            guard var status = uploadStatusMap[id] else { break }
+            status.state = .uploading(progress: progress)
+            uploadStatusMap[id] = status
+        case .completed(let request):
+            guard var status = uploadStatusMap[request.metadata.id] else { break }
+            status.metadata = request.metadata
+            status.state = .completed
+            uploadStatusMap[request.metadata.id] = status
+        case .failed(let request, let error):
+            guard var status = uploadStatusMap[request.metadata.id] else { break }
+            status.metadata = request.metadata
+            status.state = .failed(message: error.localizedDescription)
+            uploadStatusMap[request.metadata.id] = status
+        }
+
+        refreshUploadStatuses()
+    }
+
+    private func refreshUploadStatuses() {
+        uploadStatuses = uploadStatusMap
+            .values
+            .sorted { $0.metadata.capturedAt > $1.metadata.capturedAt }
+    }
 }
 
 extension CaptureFlowViewModel: CLLocationManagerDelegate {
@@ -227,6 +296,29 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         locationError = error.localizedDescription
+    }
+}
+
+extension CaptureFlowViewModel {
+    struct UploadStatus: Identifiable, Equatable {
+        var metadata: CaptureUploadMetadata
+        let fileURL: URL
+        var state: State
+
+        var id: UUID { metadata.id }
+
+        enum State: Equatable {
+            case queued
+            case uploading(progress: Double)
+            case completed
+            case failed(message: String)
+        }
+
+        init(request: CaptureUploadRequest) {
+            self.metadata = request.metadata
+            self.fileURL = request.fileURL
+            self.state = .queued
+        }
     }
 }
 
