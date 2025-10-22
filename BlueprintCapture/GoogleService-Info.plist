@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>744608654760-24h47506rj2ljqt5ghb7utamkb21nvt8.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.744608654760-24h47506rj2ljqt5ghb7utamkb21nvt8</string>
+	<key>API_KEY</key>
+	<string>AIzaSyDZAZsM4ePsV9ZCZkuNBG7KkpcoToT3AQE</string>
+	<key>GCM_SENDER_ID</key>
+	<string>744608654760</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>Public.BlueprintCapture</string>
+	<key>PROJECT_ID</key>
+	<string>blueprint-8c1ca</string>
+	<key>STORAGE_BUCKET</key>
+	<string>blueprint-8c1ca.appspot.com</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:744608654760:ios:2376cc6e3086339ff4a99d</string>
+	<key>DATABASE_URL</key>
+	<string>https://blueprint-8c1ca-default-rtdb.firebaseio.com</string>
+</dict>
+</plist>

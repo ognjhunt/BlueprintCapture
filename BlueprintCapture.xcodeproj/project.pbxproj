@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		89BA63FB2EA834670038ECD0 /* Geohasher in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA63FA2EA834670038ECD0 /* Geohasher */; };
+		89BA64082EA885A10038ECD0 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64072EA885A10038ECD0 /* FirebaseAnalytics */; };
+		89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64092EA885A10038ECD0 /* FirebaseAuth */; };
+		89BA640C2EA885A10038ECD0 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA640B2EA885A10038ECD0 /* FirebaseFirestore */; };
+		89BA640E2EA885A10038ECD0 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA640D2EA885A10038ECD0 /* FirebaseStorage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +73,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				89BA64082EA885A10038ECD0 /* FirebaseAnalytics in Frameworks */,
+				89BA640C2EA885A10038ECD0 /* FirebaseFirestore in Frameworks */,
+				89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */,
+				89BA640E2EA885A10038ECD0 /* FirebaseStorage in Frameworks */,
 				89BA63FB2EA834670038ECD0 /* Geohasher in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -131,6 +139,10 @@
 			name = BlueprintCapture;
 			packageProductDependencies = (
 				89BA63FA2EA834670038ECD0 /* Geohasher */,
+				89BA64072EA885A10038ECD0 /* FirebaseAnalytics */,
+				89BA64092EA885A10038ECD0 /* FirebaseAuth */,
+				89BA640B2EA885A10038ECD0 /* FirebaseFirestore */,
+				89BA640D2EA885A10038ECD0 /* FirebaseStorage */,
 			);
 			productName = BlueprintCapture;
 			productReference = 8901D86C2EA7DB6000DF72ED /* BlueprintCapture.app */;
@@ -216,6 +228,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				89BA63F92EA834670038ECD0 /* XCRemoteSwiftPackageReference "Geohasher" */,
+				89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8901D86D2EA7DB6000DF72ED /* Products */;
@@ -604,6 +617,14 @@
 				minimumVersion = 1.2.1;
 			};
 		};
+		89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.4.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -611,6 +632,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 89BA63F92EA834670038ECD0 /* XCRemoteSwiftPackageReference "Geohasher" */;
 			productName = Geohasher;
+		};
+		89BA64072EA885A10038ECD0 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		89BA64092EA885A10038ECD0 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		89BA640B2EA885A10038ECD0 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+		89BA640D2EA885A10038ECD0 /* FirebaseStorage */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseStorage;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

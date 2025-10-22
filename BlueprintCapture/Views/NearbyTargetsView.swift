@@ -95,10 +95,15 @@ struct NearbyTargetsView: View {
                     }
 
                     ForEach(viewModel.items) { item in
+                        let status = viewModel.reservationStatus(for: item.id)
                         let secondsRemaining: Int? = {
                             if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id {
                                 let secs = Int(res.reservedUntil.timeIntervalSince(now))
                                 return max(0, secs)
+                            }
+                            if case .reserved(let until) = status {
+                                let secs = Int(until.timeIntervalSince(now))
+                                return secs > 0 ? secs : nil
                             }
                             return nil
                         }()
@@ -112,7 +117,6 @@ struct NearbyTargetsView: View {
                             .onTapGesture {
                                 selectedItem = item
                                 showActions = true
-                                if secondsRemaining != nil { showDirectionsPrompt = true }
                             }
                             }
                     }
@@ -187,11 +191,23 @@ private extension NearbyTargetsView {
                 Button {
                     // If user is on site, go straight to capture flow
                     if viewModel.isOnSite(item.target) {
-                        captureFlow.step = .readyToCapture
-                        captureFlow.captureManager.configureSession()
-                        captureFlow.captureManager.startSession()
-                        navigateToCapture = true
-                        showActions = false
+                        Task {
+                            do {
+                                try await viewModel.checkIn(item.target)
+                                await MainActor {
+                                    captureFlow.step = .readyToCapture
+                                    captureFlow.captureManager.configureSession()
+                                    captureFlow.captureManager.startSession()
+                                    navigateToCapture = true
+                                    showActions = false
+                                }
+                            } catch {
+                                await MainActor {
+                                    reserveMessage = "We couldn't check you in. Please try again."
+                                    showReserveConfirm = true
+                                }
+                            }
+                        }
                     } else {
                         reserveMessage = "You're not detected on-site yet. Head to the location, then tap Check in to begin mapping."
                         showReserveConfirm = true

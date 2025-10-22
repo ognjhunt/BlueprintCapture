@@ -6,6 +6,8 @@ struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
     @State private var showingShareSheet = false
     @State private var recordedArtifacts: VideoCaptureManager.RecordingArtifacts?
+    let targetId: String?
+    let reservationId: String?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -19,6 +21,10 @@ struct CaptureSessionView: View {
 
             captureControls
 
+            if !viewModel.uploadStatuses.isEmpty {
+                uploadStatusList
+            }
+
             if case .error(let message) = viewModel.captureManager.captureState {
                 Label(message, systemImage: "exclamationmark.octagon")
                     .foregroundStyle(.red)
@@ -31,6 +37,8 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 recordedArtifacts = artifacts
                 showingShareSheet = true
+            case .finished(let url):
+                viewModel.handleRecordingFinished(fileURL: url, targetId: targetId, reservationId: reservationId)
             default:
                 break
             }
@@ -66,6 +74,26 @@ struct CaptureSessionView: View {
                 .buttonStyle(BlueprintSecondaryButtonStyle())
             }
         }
+    }
+
+    private var uploadStatusList: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Uploads")
+                .font(.headline)
+            ForEach(viewModel.uploadStatuses) { status in
+                UploadStatusRow(
+                    status: status,
+                    retry: { viewModel.retryUpload(id: status.id) },
+                    dismiss: { viewModel.dismissUpload(id: status.id) }
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 
     private func toggleRecording() {
@@ -146,16 +174,6 @@ private final class PreviewView: UIView {
     }
 }
 
-private struct ShareSheet: UIViewControllerRepresentable {
-    let activityItems: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
         if case .recording = self { return true }
@@ -164,5 +182,92 @@ private extension VideoCaptureManager.CaptureState {
 }
 
 #Preview {
-    CaptureSessionView(viewModel: CaptureFlowViewModel())
+    CaptureSessionView(
+        viewModel: CaptureFlowViewModel(),
+        targetId: "target-123",
+        reservationId: "reservation-456"
+    )
+}
+
+private struct UploadStatusRow: View {
+    let status: CaptureFlowViewModel.UploadStatus
+    let retry: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(status.metadata.jobId)
+                        .font(.subheadline.weight(.semibold))
+                    if let targetId = status.metadata.targetId {
+                        Text("Target: \(targetId)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let reservationId = status.metadata.reservationId {
+                        Text("Reservation: \(reservationId)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Text(status.metadata.capturedAt, style: .time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch status.state {
+            case .queued:
+                Label("Waiting to upload…", systemImage: "tray.full")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+            case .uploading(let progress):
+                VStack(alignment: .leading, spacing: 6) {
+                    ProgressView(value: progress)
+                    Text("Uploading… \(Int(progress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+            case .completed:
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Upload complete", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    if let uploadedAt = status.metadata.uploadedAt {
+                        Text("Uploaded \(uploadedAt, style: .time)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Dismiss", action: dismiss)
+                        .buttonStyle(.borderless)
+                        .font(.caption)
+                }
+
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Label("Upload failed", systemImage: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        Button("Retry", action: retry)
+                            .buttonStyle(.borderedProminent)
+                            .font(.caption)
+                        Button("Dismiss", action: dismiss)
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        )
+    }
 }
