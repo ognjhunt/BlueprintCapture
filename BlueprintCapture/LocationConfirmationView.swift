@@ -143,6 +143,7 @@ struct LocationConfirmationView: View {
             .disabled(viewModel.currentAddress == nil && viewModel.locationError == nil)
         }
         .padding()
+        .blueprintAppBackground()
         .task {
             if viewModel.currentAddress == nil {
                 viewModel.locationManager.requestLocation()

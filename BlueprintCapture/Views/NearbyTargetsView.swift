@@ -40,6 +40,8 @@ struct NearbyTargetsView: View {
                 CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id, reservationId: nil)
             }
         }
+        .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
         .blueprintAppBackground()
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
@@ -136,6 +138,8 @@ struct NearbyTargetsView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                                .background(Color.clear)
                 .refreshable {
                     await viewModel.refresh()
                 }
