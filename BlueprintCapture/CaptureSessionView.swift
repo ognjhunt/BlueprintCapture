@@ -4,6 +4,8 @@ import UIKit
 
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
+    @State private var showingShareSheet = false
+    @State private var recordedArtifacts: VideoCaptureManager.RecordingArtifacts?
     let targetId: String?
     let reservationId: String?
 
@@ -32,10 +34,22 @@ struct CaptureSessionView: View {
         .padding()
         .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
+            case .finished(let artifacts):
+                recordedArtifacts = artifacts
+                showingShareSheet = true
             case .finished(let url):
                 viewModel.handleRecordingFinished(fileURL: url, targetId: targetId, reservationId: reservationId)
             default:
                 break
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if let artifacts = recordedArtifacts {
+                ShareSheet(activityItems: [
+                    artifacts.videoURL,
+                    artifacts.motionLogURL,
+                    artifacts.manifestURL
+                ])
             }
         }
     }
@@ -162,9 +176,7 @@ private final class PreviewView: UIView {
 
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
-        if case .recording = self {
-            return true
-        }
+        if case .recording = self { return true }
         return false
     }
 }
