@@ -48,16 +48,18 @@ final class NearbyTargetsViewModel: ObservableObject {
     private var pricing: [SKU: SkuPricing] = defaultPricing
     private var userLocation: CLLocation?
     private var streetViewCache: [String: (has: Bool, url: URL?)] = [:]
+    @Published private(set) var reservations: [String: ReservationStatus] = [:]
+    private var reservationObservers: [String: ReservationObservation] = [:]
 
     init(locationService: LocationServiceProtocol = LocationService(),
          targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
          pricingAPI: PricingAPIProtocol = MockPricingAPI(),
          streetService: StreetViewServiceProtocol = StreetViewService(apiKeyProvider: { AppConfig.streetViewAPIKey() }),
          geocoding: GeocodingServiceProtocol = GeocodingService(),
-         reservationService: ReservationServiceProtocol = MockReservationService(),
+         reservationService: ReservationServiceProtocol = ReservationService(),
          discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(),
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService()) {
-        self.locationService = locationService
+         self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
         self.streetService = streetService
@@ -73,6 +75,10 @@ final class NearbyTargetsViewModel: ObservableObject {
         }
     }
 
+    deinit {
+        clearReservationObservers()
+    }
+
     func onAppear() {
         locationService.requestWhenInUseAuthorization()
         locationService.startUpdatingLocation()
@@ -83,6 +89,7 @@ final class NearbyTargetsViewModel: ObservableObject {
 
     func onDisappear() {
         locationService.stopUpdatingLocation()
+        clearReservationObservers()
     }
 
     // MARK: - Logging
@@ -119,15 +126,21 @@ final class NearbyTargetsViewModel: ObservableObject {
     func reserveTarget(_ target: Target) async throws -> Reservation {
         let oneHour: TimeInterval = 60 * 60
         let reservation = try await reservationService.reserve(target: target, for: oneHour)
+        reservations[target.id] = .reserved(until: reservation.reservedUntil)
         return reservation
     }
 
     func reservationStatus(for targetId: String) -> ReservationStatus {
-        reservationService.reservationStatus(for: targetId)
+        reservations[targetId] ?? reservationService.reservationStatus(for: targetId)
     }
 
     func cancelReservation(for targetId: String) async {
         await reservationService.cancelReservation(for: targetId)
+        reservations.removeValue(forKey: targetId)
+    }
+
+    func checkIn(_ target: Target) async throws {
+        try await reservationService.checkIn(targetId: target.id)
     }
 
     private func loadPricing() async {
@@ -256,6 +269,38 @@ final class NearbyTargetsViewModel: ObservableObject {
         if items.count > selectedLimit.rawValue {
             items = Array(items.prefix(selectedLimit.rawValue))
         }
+        updateReservationObservers(for: items.map { $0.id })
+    }
+
+    private func updateReservationObservers(for targetIds: [String]) {
+        let ids = Set(targetIds)
+
+        for (id, observer) in reservationObservers where !ids.contains(id) {
+            observer.cancel()
+            reservationObservers.removeValue(forKey: id)
+            reservations.removeValue(forKey: id)
+        }
+
+        for id in ids where reservationObservers[id] == nil {
+            let observation = reservationService.observeReservation(for: id) { [weak self] status in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    switch status {
+                    case .none:
+                        self.reservations.removeValue(forKey: id)
+                    case .reserved:
+                        self.reservations[id] = status
+                    }
+                }
+            }
+            reservationObservers[id] = observation
+        }
+    }
+
+    private func clearReservationObservers() {
+        reservationObservers.values.forEach { $0.cancel() }
+        reservationObservers.removeAll()
+        reservations.removeAll()
     }
 }
 
