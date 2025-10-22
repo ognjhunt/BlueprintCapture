@@ -381,6 +381,8 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .blueprintAppBackground()
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .sheet(isPresented: $showingBillingSetup) {
             StripeBillingSetupView(viewModel: viewModel)

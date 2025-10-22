@@ -16,6 +16,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Present notifications while app is foregrounded
         UNUserNotificationCenter.current().delegate = self
         notificationService.registerCategories()
+        // Ensure SwiftUI List (UITableView) backgrounds are transparent so our gradient shows through
+        let tableAppearance = UITableView.appearance()
+        tableAppearance.backgroundColor = .clear
+        let cellAppearance = UITableViewCell.appearance()
+        cellAppearance.backgroundColor = .clear
         return true
     }
 }

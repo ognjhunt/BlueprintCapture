@@ -19,6 +19,8 @@ struct ContentView: View {
             }
             .navigationTitle("Blueprint Capture")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .blueprintAppBackground()
         .task {

@@ -4,36 +4,38 @@ struct PermissionRequestView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Enable capture sensors")
-                    .font(.largeTitle.weight(.bold))
-                    .blueprintGradientText()
-                Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Enable capture sensors")
+                        .font(.largeTitle.weight(.bold))
+                        .blueprintGradientText()
+                    Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
+                        .font(.callout)
+                        .blueprintSecondaryOnDark()
+                }
 
-            BlueprintGlassCard {
-                PermissionRow(title: "Camera", description: "Records the visual walkthrough", granted: viewModel.cameraAuthorized)
-            }
-            BlueprintGlassCard {
-                PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
-            }
-            BlueprintGlassCard {
-                PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
-            }
+                BlueprintGlassCard {
+                    PermissionRow(title: "Camera", description: "Records the visual walkthrough", granted: viewModel.cameraAuthorized)
+                }
+                BlueprintGlassCard {
+                    PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
+                }
+                BlueprintGlassCard {
+                    PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
+                }
 
-            Spacer()
+                Spacer()
 
-            Button {
-                viewModel.requestPermissions()
-            } label: {
-                Text("Grant permissions")
+                Button {
+                    viewModel.requestPermissions()
+                } label: {
+                    Text("Grant permissions")
+                }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
             }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .padding()
         }
-        .padding()
         .blueprintAppBackground()
     }
 }

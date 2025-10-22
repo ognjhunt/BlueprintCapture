@@ -7,6 +7,7 @@ enum BlueprintTheme {
     static let primary        = Color(red: 0.12, green: 0.44, blue: 0.98)    // Blueprint Blue
     static let primaryDeep    = Color(red: 0.04, green: 0.20, blue: 0.55)    // Deep Navy
     static let brandTeal      = Color(red: 0.32, green: 0.93, blue: 0.84)    // Website accent teal
+    static let payoutTeal     = Color(red: 0.16, green: 0.72, blue: 0.64)    // Darker teal for payout values
     static let accentAqua     = Color(red: 0.12, green: 0.76, blue: 0.95)
     static let successGreen   = Color(red: 0.18, green: 0.68, blue: 0.43)
     static let warningOrange  = Color(red: 0.98, green: 0.58, blue: 0.20)

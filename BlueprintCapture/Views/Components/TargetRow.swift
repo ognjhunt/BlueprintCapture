@@ -7,7 +7,7 @@ struct TargetRow: View {
     var body: some View {
         let isReserved = reservationSecondsRemaining != nil
         ZStack(alignment: .topLeading) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 thumbnail
                     .frame(width: 96, height: 72)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -21,7 +21,7 @@ struct TargetRow: View {
                         Text(item.target.displayName)
                             .font(.headline)
                             .lineLimit(1)
-                            .blueprintPrimaryOnDark()
+                            .foregroundStyle(.primary)
 
                         if let seconds = reservationSecondsRemaining {
                             reservedPill(seconds: seconds)
@@ -30,22 +30,23 @@ struct TargetRow: View {
 
                     Text(item.target.address ?? "Address pending…")
                         .font(.subheadline)
-                        .blueprintSecondaryOnDark()
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
 
-                    HStack(spacing: 8) {
-                        Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
-                            .font(.caption)
-                            .blueprintTertiaryOnDark()
+                    HStack(spacing: 6) {
+                        distanceView()
+                            .layoutPriority(2)
 
                         timeBadge()
+                            .layoutPriority(1)
 
                         Spacer()
 
                         Text("Est. $\(formatCurrency(item.estimatedPayoutUsd))")
                             .font(.subheadline)
                             .fontWeight(.semibold)
-                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .foregroundStyle(BlueprintTheme.payoutTeal)
+                            .lineLimit(1)
                     }
                 }
 
@@ -53,7 +54,9 @@ struct TargetRow: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(8)
+            .padding(.vertical, 8)
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
 
             if isReserved {
                 // Corner ribbon accent for reserved state
@@ -69,7 +72,7 @@ struct TargetRow: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isReserved ? BlueprintTheme.primary.opacity(0.06) : Color.clear)
+                .fill(isReserved ? BlueprintTheme.primary.opacity(0.06) : Color(.systemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -93,15 +96,34 @@ struct TargetRow: View {
         }
     }
 
+    private func distanceView() -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "location")
+            Text("\(String(format: "%.1f", item.distanceMiles)) mi")
+                .lineLimit(1)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     private func timeBadge() -> some View {
         let minutes = estimatedScanTimeMinutes(for: item.target)
         let timeText = formatDuration(minutes)
-        return Text(timeText)
-            .font(.caption).fontWeight(.semibold)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
-            .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.5), lineWidth: 1))
-            .foregroundStyle(BlueprintTheme.primary)
+        return HStack(spacing: 4) {
+            Image(systemName: "clock")
+            Text(timeText)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .font(.caption).fontWeight(.semibold)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
+        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.5), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.primary)
+        .accessibilityLabel("Estimated scan time \(timeText)")
+        .accessibilityHint("Approximate time required to complete this capture")
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func reservedPill(seconds: Int) -> some View {

@@ -22,10 +22,13 @@ struct NearbyTargetsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
+                currentAddressChip()
+                    .padding(.horizontal)
+                    .padding(.top, 4)
                 FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
                     .padding(.horizontal)
-                    .padding(.top)
+                    .padding(.top, 0)
 
                 if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
                     reservationBanner(item: item, reservation: reservation)
@@ -40,9 +43,10 @@ struct NearbyTargetsView: View {
                 CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id, reservationId: nil)
             }
         }
-        .toolbarBackground(.hidden, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-        .blueprintAppBackground()
+        // Restore default navigation bar appearance and light background
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.light, for: .navigationBar)
+        .background(Color(.systemBackground))
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
@@ -139,7 +143,8 @@ struct NearbyTargetsView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                                .background(Color.clear)
+                .listRowBackground(Color.clear)
+                .background(Color.clear)
                 .refreshable {
                     await viewModel.refresh()
                 }
@@ -164,6 +169,40 @@ struct NearbyTargetsView: View {
 }
 
 private extension NearbyTargetsView {
+    @ViewBuilder
+    func currentAddressChip() -> some View {
+        if let address = viewModel.currentAddress {
+            HStack(spacing: 8) {
+                Image(systemName: "mappin.and.ellipse")
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                Text(address)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(BlueprintTheme.surface)
+            )
+        } else {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Detecting your location…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(BlueprintTheme.surface)
+            )
+        }
+    }
     @ViewBuilder func actionSheet(for item: NearbyTargetsViewModel.NearbyItem) -> some View {
         VStack(spacing: 16) {
             Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 36, height: 5).padding(.top, 8)

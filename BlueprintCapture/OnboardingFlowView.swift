@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import CoreMotion
 import UserNotifications
+import CoreLocation
 
 /// First-run onboarding flow inspired by modern gig apps (Uber, DoorDash):
 /// 1) Value prop intro → 2) Enable capture permissions → 3) Optional payouts connection → 4) Done
@@ -42,41 +43,42 @@ private struct WelcomeIntroView: View {
     let onContinue: () -> Void
 
     var body: some View {
-        VStack(spacing: 28) {
-            VStack(alignment: .leading, spacing: 10) {
-                (Text("What you can do with ") + Text("Blueprint").bold())
-                    .font(.title3)
+        VStack(spacing: 24) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Start mapping with Blueprint")
+                    .font(.callout)
                     .blueprintSecondaryOnDark()
-                Text("Space scans, agent flows, and hardware provisioning.")
-                    .font(.system(size: 32, weight: .heavy))
+                Text("Earn $50/hr mapping spaces")
+                    .font(.system(size: 28, weight: .heavy))
                     .blueprintGradientText()
                     .lineLimit(2)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 12)
+            .padding(.top, 8)
 
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 HStack(spacing: 8) {
-                    BlueprintPill("Venue scan < 60 min", icon: "timer")
-                    BlueprintPill("All smart glasses", icon: "eyeglasses")
+                    BlueprintPill("Scans < 30 min", icon: "timer")
+                    BlueprintPill("iPhone or glasses", icon: "camera")
                 }
                 HStack(spacing: 8) {
                     BlueprintPill("Playbooks included", icon: "book")
-                    BlueprintPill("Analytics ready", icon: "chart.bar")
+                    BlueprintPill("Earn in 5 mins", icon: "bolt.fill")
                 }
             }
 
             TabView {
                 ValueCard(icon: "mappin.and.ellipse", title: "Find nearby jobs", subtitle: "Pick locations near you and start a walkthrough.")
-                ValueCard(icon: "camera.viewfinder", title: "Simple capture flow", subtitle: "Our AI guides you—no special hardware required.")
-                ValueCard(icon: "dollarsign.circle.fill", title: "Get paid fast", subtitle: "Payouts through Stripe. Connect your bank in minutes.")
+                ValueCard(icon: "camera.viewfinder", title: "Simple capture flow", subtitle: "Use your iPhone or pair smart glasses—we guide you through each scan.")
+                ValueCard(icon: "dollarsign.circle.fill", title: "Get paid fast", subtitle: "Quick setup through Stripe. Start earning within 5 minutes.")
             }
             .tabViewStyle(.page)
             .frame(height: 280)
 
             Spacer(minLength: 16)
 
-            Button(action: onContinue) { Text("Launch your solution") }
+            Button(action: onContinue) { Text("Get started — earn in 5 mins") }
                 .buttonStyle(BlueprintPrimaryButtonStyle())
                 .padding(.horizontal)
         }
@@ -124,6 +126,10 @@ private struct PermissionsEnableView: View {
             return CMMotionActivityManager.authorizationStatus() == .authorized
         } else { return true }
     }()
+    @State private var locationGranted: Bool = {
+        let status = CLLocationManager().authorizationStatus
+        return status == .authorizedWhenInUse || status == .authorizedAlways
+    }()
     @State private var notificationsGranted = false
     @State private var isRequesting = false
 
@@ -146,6 +152,8 @@ private struct PermissionsEnableView: View {
                 PermissionsRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: microphoneGranted)
                 Divider()
                 PermissionsRow(title: "Motion & Fitness", description: "Adds device pose for metric scale", granted: motionGranted)
+                Divider()
+                PermissionsRow(title: "Location", description: "Pins your captures to the correct address", granted: locationGranted)
             }
 
             BlueprintGlassCard {
@@ -154,7 +162,7 @@ private struct PermissionsEnableView: View {
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(notificationsGranted ? BlueprintTheme.successGreen : BlueprintTheme.primary)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Notifications (optional)").font(.headline).blueprintPrimaryOnDark()
+                        Text("Notifications (recommended)").font(.headline).blueprintPrimaryOnDark()
                         Text("Get reminders when you’re near a job.")
                             .font(.subheadline).blueprintSecondaryOnDark()
                         Button(action: requestNotifications) { Text(notificationsGranted ? "Enabled" : "Enable notifications") }
@@ -180,7 +188,7 @@ private struct PermissionsEnableView: View {
         .task { refreshNotificationStatus() }
     }
 
-    private var grantedAll: Bool { cameraGranted && microphoneGranted && motionGranted }
+    private var grantedAll: Bool { cameraGranted && microphoneGranted && motionGranted && locationGranted }
 
     private func enableAll() {
         if grantedAll {
@@ -192,6 +200,7 @@ private struct PermissionsEnableView: View {
             await requestCamera()
             await requestMicrophone()
             await requestMotion()
+            await requestLocation()
             await MainActor.run {
                 isRequesting = false
                 onContinue()
@@ -237,6 +246,11 @@ private struct PermissionsEnableView: View {
         }
     }
 
+    private func requestLocation() async {
+        let granted = await LocationPermissionRequester.requestWhenInUse()
+        await MainActor.run { self.locationGranted = granted }
+    }
+
     private func requestNotifications() {
         Task { await notificationService.requestAuthorizationIfNeeded(); refreshNotificationStatus() }
     }
@@ -262,11 +276,24 @@ private struct PermissionsRow: View {
                 .foregroundStyle(granted ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.headline)
-                Text(description).font(.subheadline).foregroundStyle(.secondary)
+                Text(title)
+                    .font(.headline)
+                    .blueprintPrimaryOnDark()
+                Text(description)
+                    .font(.subheadline)
+                    .blueprintSecondaryOnDark()
             }
             Spacer()
         }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(granted ? 0.10 : 0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(granted ? 0.14 : 0.06), lineWidth: 1)
+        )
     }
 }
 
@@ -285,25 +312,35 @@ private struct PayoutsPromptView: View {
                     .font(.callout).blueprintSecondaryOnDark()
             }
 
-            BlueprintGlassCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "building.columns.fill").foregroundStyle(BlueprintTheme.accentAqua)
-                        Text("Secure bank connection via Plaid")
-                            .font(.subheadline)
-                    }
-                    HStack(spacing: 12) {
-                        Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
-                        Text("Standard payouts in ~2 business days")
-                            .font(.subheadline)
-                    }
-                    HStack(spacing: 12) {
-                        Image(systemName: "bolt.fill").foregroundStyle(BlueprintTheme.warningOrange)
-                        Text("Instant cash-out available once eligible")
-                            .font(.subheadline)
-                    }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "building.columns.fill").foregroundStyle(BlueprintTheme.accentAqua)
+                    Text("Secure bank connection via Plaid")
+                        .font(.subheadline)
+                        .blueprintPrimaryOnDark()
+                }
+                HStack(spacing: 12) {
+                    Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
+                    Text("Standard payouts in ~2 business days")
+                        .font(.subheadline)
+                        .blueprintPrimaryOnDark()
+                }
+                HStack(spacing: 12) {
+                    Image(systemName: "bolt.fill").foregroundStyle(BlueprintTheme.warningOrange)
+                    Text("Instant cash-out available once eligible")
+                        .font(.subheadline)
+                        .blueprintPrimaryOnDark()
                 }
             }
+            .padding(18)
+            .background(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.white.opacity(0.16))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
 
             Spacer()
 

@@ -21,6 +21,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     // Outputs
     @Published private(set) var state: State = .idle
     @Published private(set) var items: [NearbyItem] = []
+    @Published private(set) var currentAddress: String?
 
     struct NearbyItem: Identifiable, Equatable {
         let id: String
@@ -51,6 +52,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private var streetViewCache: [String: (has: Bool, url: URL?)] = [:]
     @Published private(set) var reservations: [String: ReservationStatus] = [:]
     private var reservationObservers: [String: ReservationObservation] = [:]
+    private var addressTask: Task<Void, Never>?
 
     init(locationService: LocationServiceProtocol = LocationService(),
          targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
@@ -77,6 +79,7 @@ final class NearbyTargetsViewModel: ObservableObject {
                 // Kick off initial refresh as soon as we have a real location
                 if loc != nil {
                     if let self = self { await self.refresh() }
+                    if let self = self { await self.updateCurrentAddress() }
                 }
             }
         }
@@ -98,11 +101,13 @@ final class NearbyTargetsViewModel: ObservableObject {
         // Ask for notification permission early (one-time)
         Task { await notifications.requestAuthorizationIfNeeded() }
         logAPIStatus()
+        startAddressUpdates()
     }
 
     func onDisappear() {
         locationService.stopUpdatingLocation()
         clearReservationObservers()
+        stopAddressUpdates()
     }
 
     // MARK: - Logging
@@ -317,6 +322,30 @@ final class NearbyTargetsViewModel: ObservableObject {
         reservationObservers.values.forEach { $0.cancel() }
         reservationObservers.removeAll()
         reservations.removeAll()
+    }
+
+    // MARK: - Address updates
+
+    private func startAddressUpdates() {
+        addressTask?.cancel()
+        addressTask = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                await self.updateCurrentAddress()
+                try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s
+            }
+        }
+    }
+
+    private func stopAddressUpdates() {
+        addressTask?.cancel()
+        addressTask = nil
+    }
+
+    private func updateCurrentAddress() async {
+        guard let loc = locationService.latestLocation ?? userLocation else { return }
+        if let address = try? await geocoding.reverseGeocode(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude) {
+            await MainActor.run { self.currentAddress = address }
+        }
     }
 }
 
