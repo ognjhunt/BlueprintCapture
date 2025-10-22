@@ -8,42 +8,57 @@ enum MapProvider: String {
 enum AppConfig {
     static let mapProvider: MapProvider = .appleSnapshot
 
-    static func streetViewAPIKey() -> String? {
+    private static func secretsPlist() -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
               let data = try? Data(contentsOf: url) else { return nil }
-        do {
-            if let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                return plist["STREET_VIEW_API_KEY"] as? String
-            }
-        } catch {
-            return nil
-        }
-        return nil
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+    }
+
+    static func streetViewAPIKey() -> String? {
+        secretsPlist()? ["STREET_VIEW_API_KEY"] as? String
     }
 
     static func placesAPIKey() -> String? {
-        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
-              let data = try? Data(contentsOf: url) else { return nil }
-        do {
-            if let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                return plist["PLACES_API_KEY"] as? String ?? plist["GOOGLE_PLACES_API_KEY"] as? String
-            }
-        } catch {
-            return nil
+        if let plist = secretsPlist() {
+            return plist["PLACES_API_KEY"] as? String ?? plist["GOOGLE_PLACES_API_KEY"] as? String
         }
         return nil
     }
 
     static func geminiAPIKey() -> String? {
-        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
-              let data = try? Data(contentsOf: url) else { return nil }
-        do {
-            if let plist = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] {
-                return plist["GEMINI_API_KEY"] as? String ?? plist["GOOGLE_AI_API_KEY"] as? String ?? plist["GEMINI_MAPS_API_KEY"] as? String
-            }
-        } catch {
-            return nil
+        if let plist = secretsPlist() {
+            return plist["GEMINI_API_KEY"] as? String ?? plist["GOOGLE_AI_API_KEY"] as? String ?? plist["GEMINI_MAPS_API_KEY"] as? String
         }
+        return nil
+    }
+
+    // MARK: - Stripe / Plaid
+    static func stripePublishableKey() -> String? {
+        secretsPlist()? ["STRIPE_PUBLISHABLE_KEY"] as? String
+    }
+
+    static func backendBaseURL() -> URL? {
+        if let string = secretsPlist()? ["BACKEND_BASE_URL"] as? String { return URL(string: string) }
+        return nil
+    }
+
+    static func plaidLinkTokenURL() -> URL? {
+        if let string = secretsPlist()? ["PLAID_LINK_TOKEN_URL"] as? String { return URL(string: string) }
+        return nil
+    }
+
+    static func stripeOnboardingURL() -> URL? {
+        if let string = secretsPlist()? ["STRIPE_ONBOARDING_URL"] as? String { return URL(string: string) }
+        return nil
+    }
+
+    static func stripePayoutScheduleURL() -> URL? {
+        if let string = secretsPlist()? ["STRIPE_PAYOUT_SCHEDULE_URL"] as? String { return URL(string: string) }
+        return nil
+    }
+
+    static func stripeInstantPayoutURL() -> URL? {
+        if let string = secretsPlist()? ["STRIPE_INSTANT_PAYOUT_URL"] as? String { return URL(string: string) }
         return nil
     }
 }

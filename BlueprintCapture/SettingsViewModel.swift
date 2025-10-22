@@ -130,8 +130,9 @@ class APIService {
     
     // MARK: User Profile
     func fetchUserProfile() async throws -> UserProfile {
-        try await Task.sleep(nanoseconds: 500_000_000)
-        return UserProfile.sample
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // Return empty profile until backend integration is provided
+        return UserProfile.placeholder
     }
     
     func updateUserProfile(_ profile: UserProfile) async throws -> UserProfile {
@@ -142,40 +143,36 @@ class APIService {
     
     // MARK: Earnings
     func fetchEarnings() async throws -> (total: Decimal, pending: Decimal, scansCompleted: Int) {
-        try await Task.sleep(nanoseconds: 500_000_000)
-        return (total: 1250.50, pending: 325.00, scansCompleted: 42)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // No mock amounts; backend should supply real figures
+        return (total: 0, pending: 0, scansCompleted: 0)
     }
     
     // MARK: Billing/Bank Connection
     func fetchBillingInfo() async throws -> BillingInfo? {
-        try await Task.sleep(nanoseconds: 500_000_000)
-        // Return nil on first load (no bank connected yet)
-        // In production, this would fetch from your backend
-        return BillingInfo(
-            bankName: "Chase Bank",
-            lastFour: "4242",
-            accountHolderName: "Jordan Smith",
-            stripeAccountId: "acct_sample123"
-        )
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // Until backend is wired, show no connected bank
+        return nil
     }
     
     func exchangePlaidToken(_ publicToken: String) async throws -> String {
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+        try await Task.sleep(nanoseconds: 300_000_000)
         // In production, this would call your backend which exchanges with Plaid
         // and returns an access token
         return "access_token_from_plaid_\(UUID().uuidString.prefix(8))"
     }
     
     func createStripeAccount(accessToken: String, accountId: String, bankName: String) async throws -> BillingInfo {
-        try await Task.sleep(nanoseconds: 1_500_000_000)
+        try await Task.sleep(nanoseconds: 400_000_000)
         // In production, this would:
         // 1. Create a Stripe Connect account
         // 2. Link the Plaid bank account
         // 3. Set up transfers
+        // Here we return minimal data; backend should provide real last4/name
         return BillingInfo(
             bankName: bankName,
-            lastFour: "4242",
-            accountHolderName: "Jordan Smith",
+            lastFour: "",
+            accountHolderName: "",
             stripeAccountId: "acct_\(UUID().uuidString.prefix(16))"
         )
     }

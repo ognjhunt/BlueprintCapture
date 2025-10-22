@@ -5,9 +5,19 @@ struct StripeBillingSetupView: View {
     @ObservedObject var viewModel: SettingsViewModel
     
     @State private var showPlaidSimulation = false
+    @State private var showPlaidOptions = false
+    @State private var selectedPlaidFlow: PlaidFlow = .instantAuth
     @State private var simulatedBankName = ""
     @State private var simulatedLastFour = ""
     @State private var isConnectingPlaid = false
+    @State private var linkToken: String?
+    private var isLinkKitAvailable: Bool {
+        #if canImport(LinkKit)
+        return true
+        #else
+        return false
+        #endif
+    }
     
     var body: some View {
         NavigationStack {
@@ -89,7 +99,17 @@ struct StripeBillingSetupView: View {
                     // Connect Button
                     VStack(spacing: 12) {
                         Button {
-                            showPlaidSimulation = true
+                            Task {
+                                // Try to fetch a real Link token first
+                                if let token = try? await PlaidLinkService.shared.fetchLinkToken(preferredFlow: selectedPlaidFlow) {
+                                    linkToken = token
+                                    // If you integrate Plaid LinkKit, present it here using the token
+                                    // For now, if LinkKit isn't integrated, fall back to simulation
+                                    showPlaidOptions = true
+                                } else {
+                                    showPlaidOptions = true
+                                }
+                            }
                         } label: {
                             HStack {
                                 if isConnectingPlaid {
@@ -150,6 +170,14 @@ struct StripeBillingSetupView: View {
                 isConnecting: $isConnectingPlaid,
                 onConnect: handlePlaidConnection
             )
+        }
+        .confirmationDialog("Select Plaid flow", isPresented: $showPlaidOptions, titleVisibility: .visible) {
+            Button("Instant Auth (default)") { selectedPlaidFlow = .instantAuth; showPlaidSimulation = !(isLinkKitAvailable && linkToken != nil) }
+            Button("Instant Micro-deposits (RTP/FedNow)") { selectedPlaidFlow = .instantMicroDeposits; showPlaidSimulation = !(isLinkKitAvailable && linkToken != nil) }
+            Button("Automated Micro-deposits") { selectedPlaidFlow = .automatedMicroDeposits; showPlaidSimulation = !(isLinkKitAvailable && linkToken != nil) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text((isLinkKitAvailable && linkToken != nil) ? "Plaid Link token ready. Presenting Plaid UX is supported once LinkKit is added." : "Using simulation until LinkKit is added and a backend link_token endpoint is available.")
         }
         .alert("Error", isPresented: $viewModel.showError) {
             Button("OK") {

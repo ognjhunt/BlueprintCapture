@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     @State private var showingBillingSetup = false
+    @State private var showingStripeOnboarding = false
     @State private var showingEditProfile = false
     
     var body: some View {
@@ -139,6 +140,20 @@ struct SettingsView: View {
                                         }
                                         .buttonStyle(BlueprintSecondaryButtonStyle())
                                     }
+                                    
+                                    Divider()
+                                    
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Payouts")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                        Button {
+                                            showingStripeOnboarding = true
+                                        } label: {
+                                            HStack { Image(systemName: "banknote.fill"); Text("Manage Payouts & Onboarding") }
+                                        }
+                                        .buttonStyle(BlueprintSecondaryButtonStyle())
+                                    }
                                 }
                             } else {
                                 VStack(spacing: 16) {
@@ -166,6 +181,16 @@ struct SettingsView: View {
                                         }
                                     }
                                     .buttonStyle(BlueprintPrimaryButtonStyle())
+                                    
+                                    Button {
+                                        showingStripeOnboarding = true
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "banknote.fill")
+                                            Text("Payouts & Onboarding")
+                                        }
+                                    }
+                                    .buttonStyle(BlueprintSecondaryButtonStyle())
                                 }
                             }
                             
@@ -251,6 +276,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showingBillingSetup) {
             StripeBillingSetupView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingStripeOnboarding) {
+            StripeOnboardingView()
         }
         .sheet(isPresented: $showingEditProfile) {
             EditProfileView(viewModel: viewModel)
