@@ -5,7 +5,7 @@ import UIKit
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
     @State private var showingShareSheet = false
-    @State private var recordedURL: URL?
+    @State private var recordedArtifacts: VideoCaptureManager.RecordingArtifacts?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -28,16 +28,20 @@ struct CaptureSessionView: View {
         .padding()
         .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
-            case .finished(let url):
-                recordedURL = url
+            case .finished(let artifacts):
+                recordedArtifacts = artifacts
                 showingShareSheet = true
             default:
                 break
             }
         }
         .sheet(isPresented: $showingShareSheet) {
-            if let url = recordedURL {
-                ShareSheet(activityItems: [url])
+            if let artifacts = recordedArtifacts {
+                ShareSheet(activityItems: [
+                    artifacts.videoURL,
+                    artifacts.motionLogURL,
+                    artifacts.manifestURL
+                ])
             }
         }
     }
@@ -154,9 +158,7 @@ private struct ShareSheet: UIViewControllerRepresentable {
 
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
-        if case .recording = self {
-            return true
-        }
+        if case .recording = self { return true }
         return false
     }
 }
