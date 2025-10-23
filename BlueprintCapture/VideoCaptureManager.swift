@@ -1,7 +1,9 @@
+import ARKit
 import AVFoundation
 import Combine
 import CoreMotion
 import CoreMedia
+import Metal
 
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
@@ -12,27 +14,57 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     struct RecordingArtifacts: Equatable {
+        struct ARKitArtifacts: Equatable {
+            let rootDirectoryURL: URL
+            let frameLogURL: URL
+            let depthDirectoryURL: URL?
+            let confidenceDirectoryURL: URL?
+            let meshDirectoryURL: URL?
+        }
+
         let baseFilename: String
+        let directoryURL: URL
         let videoURL: URL
         let motionLogURL: URL
         let manifestURL: URL
+        let arKit: ARKitArtifacts?
+        let packageURL: URL
         let startedAt: Date
 
+        var shareItems: [Any] {
+            var items: [Any] = [packageURL, videoURL, motionLogURL, manifestURL]
+            if let arKit {
+                items.append(arKit.frameLogURL)
+            }
+            return items
+        }
+
         var uploadPayload: CaptureUploadPayload {
-            CaptureUploadPayload(videoURL: videoURL, motionLogURL: motionLogURL, manifestURL: manifestURL)
+            CaptureUploadPayload(packageURL: packageURL)
         }
     }
 
     struct CaptureUploadPayload: Codable, Equatable {
-        let videoURL: URL
-        let motionLogURL: URL
-        let manifestURL: URL
+        let packageURL: URL
+    }
+
+    private struct ARFrameLogEntry: Codable {
+        let frameIndex: Int
+        let timestamp: TimeInterval
+        let capturedAt: Date
+        let cameraTransform: [Float]
+        let intrinsics: [Float]
+        let imageResolution: [Int]
+        let sceneDepthFile: String?
+        let smoothedSceneDepthFile: String?
+        let confidenceFile: String?
     }
 
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
 
     let session = AVCaptureSession()
+    private let arSession = ARSession()
 
     private let movieOutput = AVCaptureMovieFileOutput()
     private let motionManager = CMMotionManager()
@@ -45,6 +77,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }()
     private let motionLogQueue = DispatchQueue(label: "com.blueprint.capture.motionlog")
     private let manifestQueue = DispatchQueue(label: "com.blueprint.capture.manifest")
+    private let arDataQueue = DispatchQueue(label: "com.blueprint.capture.arkit", qos: .userInitiated)
     private let motionJSONEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -56,14 +89,28 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
         return encoder
     }()
+    private let arFrameEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
 
     private var videoDevice: AVCaptureDevice?
     private var currentArtifacts: RecordingArtifacts?
     private var motionLogFileHandle: FileHandle?
+    private var arFrameLogFileHandle: FileHandle?
     private var currentCameraIntrinsics: CaptureManifest.CameraIntrinsics?
     private var currentExposureSettings: CaptureManifest.ExposureSettings?
     private var exposureSamples: [CaptureManifest.ExposureSample] = []
     private var exposureTimer: Timer?
+    private var currentARKitArtifacts: RecordingArtifacts.ARKitArtifacts?
+    private var arFrameCount: Int = 0
+    private var exportedMeshAnchors: Set<UUID> = []
+
+    override init() {
+        super.init()
+        arSession.delegate = self
+    }
 
     func configureSession() {
         guard session.inputs.isEmpty else { return }
@@ -113,19 +160,18 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     func startRecording() {
         guard !movieOutput.isRecording else { return }
         let baseName = "walkthrough-\(UUID().uuidString)"
-        let tempDir = FileManager.default.temporaryDirectory
-        let videoURL = tempDir.appendingPathComponent("\(baseName).mov")
-        let motionURL = tempDir.appendingPathComponent("\(baseName)-motion.jsonl")
-        let manifestURL = tempDir.appendingPathComponent("\(baseName)-manifest.json")
-        let artifacts = RecordingArtifacts(
-            baseFilename: baseName,
-            videoURL: videoURL,
-            motionLogURL: motionURL,
-            manifestURL: manifestURL,
-            startedAt: Date()
-        )
+        let artifacts: RecordingArtifacts
+        do {
+            artifacts = try makeRecordingArtifacts(baseName: baseName)
+        } catch {
+            captureState = .error("Failed to prepare capture workspace: \(error.localizedDescription)")
+            return
+        }
 
         currentArtifacts = artifacts
+        currentARKitArtifacts = artifacts.arKit
+        arFrameCount = 0
+        exportedMeshAnchors.removeAll()
         latestUploadPayload = nil
         exposureSamples = []
         currentCameraIntrinsics = videoDevice.map(makeCameraIntrinsics)
@@ -137,10 +183,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             currentArtifacts = nil
             return
         }
+        prepareARKitLoggingIfNeeded(for: artifacts)
         startMotionUpdates()
         startExposureLogging()
+        startARSessionIfAvailable()
 
-        movieOutput.startRecording(to: videoURL, recordingDelegate: self)
+        movieOutput.startRecording(to: artifacts.videoURL, recordingDelegate: self)
         captureState = .recording(artifacts)
     }
 
@@ -149,6 +197,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         movieOutput.stopRecording()
         stopMotionUpdates()
         stopExposureLogging()
+        stopARSession()
     }
 
     private func prepareMotionLog(for artifacts: RecordingArtifacts) {
@@ -161,6 +210,113 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         } catch {
             motionLogFileHandle = nil
             captureState = .error("Failed to create motion log: \(error.localizedDescription)")
+        }
+    }
+
+    private func makeRecordingArtifacts(baseName: String) throws -> RecordingArtifacts {
+        let tempDir = FileManager.default.temporaryDirectory
+        let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
+        let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
+        let videoURL = recordingDir.appendingPathComponent("\(baseName).mov")
+        let motionURL = recordingDir.appendingPathComponent("\(baseName)-motion.jsonl")
+        let manifestURL = recordingDir.appendingPathComponent("\(baseName)-manifest.json")
+
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: recordingDir.path) {
+            try fileManager.removeItem(at: recordingDir)
+        }
+        try fileManager.createDirectory(at: recordingDir, withIntermediateDirectories: true)
+
+        let arKitArtifacts = setupARKitArtifacts(in: recordingDir)
+
+        return RecordingArtifacts(
+            baseFilename: baseName,
+            directoryURL: recordingDir,
+            videoURL: videoURL,
+            motionLogURL: motionURL,
+            manifestURL: manifestURL,
+            arKit: arKitArtifacts,
+            packageURL: packageURL,
+            startedAt: Date()
+        )
+    }
+
+    private func setupARKitArtifacts(in directory: URL) -> RecordingArtifacts.ARKitArtifacts? {
+        guard ARWorldTrackingConfiguration.isSupported else { return nil }
+
+        let fileManager = FileManager.default
+        let root = directory.appendingPathComponent("arkit", isDirectory: true)
+        let depth = root.appendingPathComponent("depth", isDirectory: true)
+        let confidence = root.appendingPathComponent("confidence", isDirectory: true)
+        let mesh = root.appendingPathComponent("meshes", isDirectory: true)
+        let frameLog = root.appendingPathComponent("frames.jsonl")
+
+        do {
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: depth, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: confidence, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: mesh, withIntermediateDirectories: true)
+            fileManager.createFile(atPath: frameLog.path, contents: nil)
+            return RecordingArtifacts.ARKitArtifacts(
+                rootDirectoryURL: root,
+                frameLogURL: frameLog,
+                depthDirectoryURL: depth,
+                confidenceDirectoryURL: confidence,
+                meshDirectoryURL: mesh
+            )
+        } catch {
+            print("Failed to set up ARKit capture directories: \(error)")
+            return nil
+        }
+    }
+
+    private func prepareARKitLoggingIfNeeded(for artifacts: RecordingArtifacts) {
+        guard let arKit = artifacts.arKit else {
+            arFrameLogFileHandle = nil
+            return
+        }
+
+        do {
+            if !FileManager.default.fileExists(atPath: arKit.frameLogURL.path) {
+                FileManager.default.createFile(atPath: arKit.frameLogURL.path, contents: nil)
+            }
+            arFrameLogFileHandle = try FileHandle(forWritingTo: arKit.frameLogURL)
+        } catch {
+            print("Failed to open ARKit frame log: \(error)")
+            arFrameLogFileHandle = nil
+            currentARKitArtifacts = nil
+        }
+    }
+
+    private func startARSessionIfAvailable() {
+        guard currentARKitArtifacts != nil else { return }
+
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.environmentTexturing = .automatic
+        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            configuration.sceneReconstruction = .mesh
+        }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            configuration.frameSemantics.insert(.sceneDepth)
+        }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+            configuration.frameSemantics.insert(.smoothedSceneDepth)
+        }
+
+        arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+    }
+
+    private func stopARSession() {
+        arSession.pause()
+        arDataQueue.sync {
+            if let handle = arFrameLogFileHandle {
+                do {
+                    try handle.close()
+                } catch {
+                    print("Failed to close ARKit frame log: \(error)")
+                }
+            }
+            arFrameLogFileHandle = nil
         }
     }
 
@@ -224,6 +380,91 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
+    private func writeARFrame(_ frame: ARFrame) {
+        guard let artifacts = currentArtifacts, let arKit = artifacts.arKit else { return }
+        guard let handle = arFrameLogFileHandle else { return }
+
+        let frameIndex = arFrameCount
+        let cameraTransform = matrixToArray(frame.camera.transform)
+        let intrinsics = matrixToArray(frame.camera.intrinsics)
+        let resolution = [Int(frame.camera.imageResolution.width), Int(frame.camera.imageResolution.height)]
+
+        var sceneDepthFile: String?
+        var smoothedDepthFile: String?
+        var confidenceFile: String?
+
+        if let depth = frame.sceneDepth, let depthDirectory = arKit.depthDirectoryURL {
+            let filename = String(format: "scene-depth-%05d.bin", frameIndex)
+            let fileURL = depthDirectory.appendingPathComponent(filename)
+            do {
+                try writeFloatPixelBuffer(depth.depthMap, to: fileURL)
+                sceneDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
+            } catch {
+                print("Failed to persist scene depth map: \(error)")
+            }
+        }
+
+        if let smoothedDepth = frame.smoothedSceneDepth, let depthDirectory = arKit.depthDirectoryURL {
+            let filename = String(format: "smoothed-depth-%05d.bin", frameIndex)
+            let fileURL = depthDirectory.appendingPathComponent(filename)
+            do {
+                try writeFloatPixelBuffer(smoothedDepth.depthMap, to: fileURL)
+                smoothedDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
+            } catch {
+                print("Failed to persist smoothed depth map: \(error)")
+            }
+        }
+
+        if let confidenceMap = frame.smoothedSceneDepth?.confidenceMap ?? frame.sceneDepth?.confidenceMap,
+           let confidenceDirectory = arKit.confidenceDirectoryURL {
+            let filename = String(format: "confidence-%05d.bin", frameIndex)
+            let fileURL = confidenceDirectory.appendingPathComponent(filename)
+            do {
+                try writeUInt8PixelBuffer(confidenceMap, to: fileURL)
+                confidenceFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
+            } catch {
+                print("Failed to persist confidence map: \(error)")
+            }
+        }
+
+        let entry = ARFrameLogEntry(
+            frameIndex: frameIndex,
+            timestamp: frame.timestamp,
+            capturedAt: Date(),
+            cameraTransform: cameraTransform,
+            intrinsics: intrinsics,
+            imageResolution: resolution,
+            sceneDepthFile: sceneDepthFile,
+            smoothedSceneDepthFile: smoothedDepthFile,
+            confidenceFile: confidenceFile
+        )
+
+        do {
+            let data = try arFrameEncoder.encode(entry)
+            handle.write(data)
+            if let newline = "\n".data(using: .utf8) {
+                handle.write(newline)
+            }
+        } catch {
+            print("Failed to encode ARKit frame log entry: \(error)")
+        }
+
+        arFrameCount += 1
+    }
+
+    private func exportMeshAnchors(_ anchors: [ARAnchor]) {
+        guard let meshDirectory = currentArtifacts?.arKit?.meshDirectoryURL else { return }
+
+        for case let meshAnchor as ARMeshAnchor in anchors {
+            do {
+                try writeMesh(meshAnchor, to: meshDirectory)
+                exportedMeshAnchors.insert(meshAnchor.identifier)
+            } catch {
+                print("Failed to export mesh anchor: \(error)")
+            }
+        }
+    }
+
     private func startExposureLogging() {
         captureExposureSample()
         exposureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -257,11 +498,17 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 extension VideoCaptureManager {
     enum CaptureError: LocalizedError {
         case missingCamera
+        case archiveUnavailable
+        case pixelBufferEncodingFailed
 
         var errorDescription: String? {
             switch self {
             case .missingCamera:
                 return "Unable to access the back camera on this device."
+            case .archiveUnavailable:
+                return "This device cannot create capture archives."
+            case .pixelBufferEncodingFailed:
+                return "Unable to persist depth or confidence data."
             }
         }
     }
@@ -271,6 +518,7 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         stopMotionUpdates()
         stopExposureLogging()
+        stopARSession()
         if let error {
             latestUploadPayload = nil
             captureState = .error(error.localizedDescription)
@@ -285,24 +533,48 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
             persistManifest(duration: durationSeconds, synchronous: true)
 
             if let artifacts = currentArtifacts {
-                latestUploadPayload = artifacts.uploadPayload
-                captureState = .finished(artifacts)
+                do {
+                    try packageArtifacts(artifacts)
+                    latestUploadPayload = artifacts.uploadPayload
+                    captureState = .finished(artifacts)
+                } catch {
+                    latestUploadPayload = nil
+                    captureState = .error(error.localizedDescription)
+                }
             } else {
-                captureState = .finished(
-                    RecordingArtifacts(
-                        baseFilename: outputFileURL.deletingPathExtension().lastPathComponent,
-                        videoURL: outputFileURL,
-                        motionLogURL: outputFileURL.deletingPathExtension().appendingPathExtension("motion.jsonl"),
-                        manifestURL: outputFileURL.deletingPathExtension().appendingPathExtension("manifest.json"),
-                        startedAt: Date()
-                    )
-                )
+                latestUploadPayload = nil
+                captureState = .error("Capture artifacts were unavailable.")
             }
         }
         currentArtifacts = nil
+        currentARKitArtifacts = nil
         currentCameraIntrinsics = nil
         currentExposureSettings = nil
         exposureSamples = []
+        arDataQueue.async { [weak self] in
+            self?.arFrameCount = 0
+            self?.exportedMeshAnchors.removeAll()
+        }
+    }
+}
+
+extension VideoCaptureManager: ARSessionDelegate {
+    func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        arDataQueue.async { [weak self] in
+            self?.writeARFrame(frame)
+        }
+    }
+
+    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+        arDataQueue.async { [weak self] in
+            self?.exportMeshAnchors(anchors)
+        }
+    }
+
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+        arDataQueue.async { [weak self] in
+            self?.exportMeshAnchors(anchors)
+        }
     }
 }
 
@@ -330,7 +602,8 @@ private extension VideoCaptureManager {
                 durationSeconds: duration,
                 cameraIntrinsics: intrinsics,
                 exposureSettings: exposureSettings,
-                exposureSamples: samples
+                exposureSamples: samples,
+                arKit: self.makeARKitManifest(for: artifacts)
             )
             do {
                 let data = try encoder.encode(manifest)
@@ -401,6 +674,168 @@ private extension VideoCaptureManager {
             pointOfInterest: pointOfInterest,
             whiteBalanceMode: whiteBalanceMode
         )
+    }
+
+    func makeARKitManifest(for artifacts: RecordingArtifacts) -> CaptureManifest.ARKitArtifacts? {
+        guard let arKit = artifacts.arKit else { return nil }
+        let frameCount = arDataQueue.sync { arFrameCount }
+
+        return CaptureManifest.ARKitArtifacts(
+            frameLogFile: relativePath(for: arKit.frameLogURL, relativeTo: artifacts.directoryURL),
+            depthDirectory: arKit.depthDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
+            confidenceDirectory: arKit.confidenceDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
+            meshDirectory: arKit.meshDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
+            frameCount: frameCount
+        )
+    }
+
+    func relativePath(for url: URL, relativeTo directory: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let basePath = directory.standardizedFileURL.path
+        guard path.hasPrefix(basePath) else {
+            return url.lastPathComponent
+        }
+
+        let startIndex = path.index(path.startIndex, offsetBy: basePath.count)
+        var relative = String(path[startIndex...])
+        while relative.hasPrefix("/") {
+            relative.removeFirst()
+        }
+
+        return relative.isEmpty ? url.lastPathComponent : relative
+    }
+
+    func writeFloatPixelBuffer(_ pixelBuffer: CVPixelBuffer, to url: URL) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            throw CaptureError.pixelBufferEncodingFailed
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let floatsPerRow = bytesPerRow / MemoryLayout<Float32>.size
+
+        var values = [Float32](repeating: 0, count: width * height)
+        values.withUnsafeMutableBufferPointer { buffer in
+            let floatPointer = baseAddress.assumingMemoryBound(to: Float32.self)
+            for y in 0..<height {
+                let destination = buffer.baseAddress!.advanced(by: y * width)
+                let source = floatPointer.advanced(by: y * floatsPerRow)
+                destination.assign(from: source, count: width)
+            }
+        }
+
+        let data = values.withUnsafeBytes { Data($0) }
+        try data.write(to: url, options: .atomic)
+    }
+
+    func writeUInt8PixelBuffer(_ pixelBuffer: CVPixelBuffer, to url: URL) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            throw CaptureError.pixelBufferEncodingFailed
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+
+        var values = [UInt8](repeating: 0, count: width * height)
+        values.withUnsafeMutableBufferPointer { buffer in
+            for y in 0..<height {
+                let destination = buffer.baseAddress!.advanced(by: y * width)
+                let source = baseAddress.advanced(by: y * bytesPerRow)
+                destination.assign(from: source.assumingMemoryBound(to: UInt8.self), count: width)
+            }
+        }
+
+        let data = Data(values)
+        try data.write(to: url, options: .atomic)
+    }
+
+    func packageArtifacts(_ artifacts: RecordingArtifacts) throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: artifacts.packageURL.path) {
+            try fileManager.removeItem(at: artifacts.packageURL)
+        }
+
+        if #available(iOS 16.0, *) {
+            try fileManager.zipItem(
+                at: artifacts.directoryURL,
+                to: artifacts.packageURL,
+                shouldKeepParent: true,
+                compressionMethod: .deflate
+            )
+        } else {
+            throw CaptureError.archiveUnavailable
+        }
+    }
+
+    func matrixToArray(_ matrix: simd_float4x4) -> [Float] {
+        var values: [Float] = []
+        values.reserveCapacity(16)
+        for column in 0..<4 {
+            let col = matrix[column]
+            values.append(col.x)
+            values.append(col.y)
+            values.append(col.z)
+            values.append(col.w)
+        }
+        return values
+    }
+
+    func matrixToArray(_ matrix: simd_float3x3) -> [Float] {
+        var values: [Float] = []
+        values.reserveCapacity(9)
+        for column in 0..<3 {
+            let col = matrix[column]
+            values.append(col.x)
+            values.append(col.y)
+            values.append(col.z)
+        }
+        return values
+    }
+
+    func writeMesh(_ anchor: ARMeshAnchor, to directory: URL) throws {
+        let geometry = anchor.geometry
+        let vertexCount = geometry.vertices.count
+        var lines: [String] = ["# ARKit mesh anchor \(anchor.identifier.uuidString)"]
+
+        for index in 0..<vertexCount {
+            let vertex = geometry.vertex(at: index)
+            let worldPosition = anchor.transform * simd_float4(vertex, 1.0)
+            lines.append(String(format: "v %.6f %.6f %.6f", worldPosition.x, worldPosition.y, worldPosition.z))
+        }
+
+        if geometry.hasNormals {
+            let rotation = simd_float3x3(anchor.transform)
+            for index in 0..<geometry.normals.count {
+                let normal = geometry.normal(at: index)
+                let worldNormal = normalize(rotation * normal)
+                lines.append(String(format: "vn %.6f %.6f %.6f", worldNormal.x, worldNormal.y, worldNormal.z))
+            }
+        }
+
+        let faceCount = geometry.faceCount
+        for faceIndex in 0..<faceCount {
+            let indices = geometry.faceIndices(at: faceIndex)
+            guard indices.count >= 3 else { continue }
+            let a = indices[0] + 1
+            let b = indices[1] + 1
+            let c = indices[2] + 1
+            if geometry.hasNormals {
+                lines.append("f \(a)//\(a) \(b)//\(b) \(c)//\(c)")
+            } else {
+                lines.append("f \(a) \(b) \(c)")
+            }
+        }
+
+        let fileURL = directory.appendingPathComponent("mesh-\(anchor.identifier.uuidString).obj")
+        try lines.joined(separator: "\n").appending("\n").write(to: fileURL, atomically: true, encoding: .utf8)
     }
 }
 
@@ -494,5 +929,73 @@ extension VideoCaptureManager {
         let cameraIntrinsics: CameraIntrinsics
         let exposureSettings: ExposureSettings
         let exposureSamples: [ExposureSample]
+        let arKit: ARKitArtifacts?
+
+        struct ARKitArtifacts: Codable, Equatable {
+            let frameLogFile: String
+            let depthDirectory: String?
+            let confidenceDirectory: String?
+            let meshDirectory: String?
+            let frameCount: Int
+        }
+    }
+}
+
+private extension ARMeshGeometry {
+    var hasNormals: Bool { normals.count > 0 }
+
+    var faceCount: Int {
+        let perPrimitive = indicesPerPrimitive
+        guard perPrimitive > 0 else { return 0 }
+        return faces.indexCount / perPrimitive
+    }
+
+    var indicesPerPrimitive: Int {
+        switch faces.primitiveType {
+        case .triangle:
+            return 3
+        case .line:
+            return 2
+        case .point:
+            return 1
+        @unknown default:
+            return 3
+        }
+    }
+
+    func vertex(at index: Int) -> simd_float3 {
+        vector(from: vertices, at: index)
+    }
+
+    func normal(at index: Int) -> simd_float3 {
+        vector(from: normals, at: index)
+    }
+
+    func faceIndices(at index: Int) -> [UInt32] {
+        let perPrimitive = indicesPerPrimitive
+        let primitiveStart = index * perPrimitive
+        guard perPrimitive > 0, primitiveStart + perPrimitive <= faces.indexCount else { return [] }
+
+        let byteOffset = faces.offset + primitiveStart * faces.bytesPerIndex
+        let pointer = faces.buffer.contents().advanced(by: byteOffset)
+
+        switch faces.indexType {
+        case .uint16:
+            let base = pointer.assumingMemoryBound(to: UInt16.self)
+            return (0..<perPrimitive).map { UInt32(base[$0]) }
+        case .uint32:
+            let base = pointer.assumingMemoryBound(to: UInt32.self)
+            return (0..<perPrimitive).map { base[$0] }
+        @unknown default:
+            return []
+        }
+    }
+
+    private func vector(from source: ARGeometrySource, at index: Int) -> simd_float3 {
+        let stride = source.stride
+        let offset = source.offset
+        let pointer = source.buffer.contents().advanced(by: offset + index * stride)
+        let floatPointer = pointer.assumingMemoryBound(to: Float.self)
+        return simd_float3(floatPointer[0], floatPointer[1], floatPointer[2])
     }
 }

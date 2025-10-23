@@ -12,7 +12,7 @@ struct CaptureUploadMetadata: Identifiable, Equatable {
 }
 
 struct CaptureUploadRequest: Equatable {
-    let fileURL: URL
+    let packageURL: URL
     var metadata: CaptureUploadMetadata
 }
 
@@ -101,9 +101,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     private func performUpload(for id: UUID) async {
         guard let record = queue.sync(execute: { uploads[id] }) else { return }
-        let fileURL = record.request.fileURL
+        let packageURL = record.request.packageURL
 
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+        guard FileManager.default.fileExists(atPath: packageURL.path) else {
             queue.async {
                 guard var failingRecord = self.uploads[id] else { return }
                 failingRecord.task = nil
