@@ -209,7 +209,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         captureManager.startSession()
     }
 
-    func handleRecordingFinished(fileURL: URL, targetId: String?, reservationId: String?) {
+    func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
         let jobId = reservationId ?? targetId ?? UUID().uuidString
         let metadata = CaptureUploadMetadata(
             id: UUID(),
@@ -220,7 +220,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             capturedAt: Date(),
             uploadedAt: nil
         )
-        let request = CaptureUploadRequest(fileURL: fileURL, metadata: metadata)
+        let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         uploadService.enqueue(request)
     }
 
@@ -302,7 +302,7 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
 extension CaptureFlowViewModel {
     struct UploadStatus: Identifiable, Equatable {
         var metadata: CaptureUploadMetadata
-        let fileURL: URL
+        let packageURL: URL
         var state: State
 
         var id: UUID { metadata.id }
@@ -316,7 +316,7 @@ extension CaptureFlowViewModel {
 
         init(request: CaptureUploadRequest) {
             self.metadata = request.metadata
-            self.fileURL = request.fileURL
+            self.packageURL = request.packageURL
             self.state = .queued
         }
     }

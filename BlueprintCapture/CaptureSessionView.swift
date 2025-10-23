@@ -38,18 +38,14 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 recordedArtifacts = artifacts
                 showingShareSheet = true
-                viewModel.handleRecordingFinished(fileURL: artifacts.videoURL, targetId: targetId, reservationId: reservationId)
+                viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
             default:
                 break
             }
         }
         .sheet(isPresented: $showingShareSheet) {
             if let artifacts = recordedArtifacts {
-                ActivityView(activityItems: [
-                    artifacts.videoURL,
-                    artifacts.motionLogURL,
-                    artifacts.manifestURL
-                ])
+                ActivityView(activityItems: artifacts.shareItems)
             }
         }
     }
