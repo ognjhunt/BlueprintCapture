@@ -1,16 +1,10 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @State private var selectedTab = 0
+    @State private var selectedTab = 1
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            ContentView()
-                .tabItem {
-                    Label("Scan", systemImage: "camera.viewfinder")
-                }
-                .tag(0)
-            
             NearbyTargetsView()
                 .tabItem {
                     Label("Nearby", systemImage: "mappin.and.ellipse")

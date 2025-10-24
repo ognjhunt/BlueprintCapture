@@ -39,6 +39,7 @@ public class User {
     private(set) var hasEnteredInventory     : Bool?
     private(set) var hasEnteredCameraRoll     : Bool?
     private(set) var amountEarned     : Double?
+    private(set) var amountPaidOut     : Double?
     private(set) var blockedUserIDs    = [String]()
     // Followers and Following
     private(set) var followers    = [String]()
@@ -57,6 +58,12 @@ public class User {
     private(set) var createdBlueprintIDs    = [String]()
     
     private(set) var likedAnchorIDs    = [String]()
+    // BlueprintCapture counters/preferences used on device until auth
+    private(set) var numLocationsScanned: Int = 0
+    private(set) var permissions: [String: Bool] = [:]
+    private(set) var deviceModel: String = ""
+    private(set) var deviceName: String = ""
+    private(set) var systemVersion: String = ""
     
     // Subscriptions
     private(set) var subscriptions  = [String]()
@@ -192,6 +199,9 @@ public class User {
         if let amountEarned = userFirDoc["amountEarned"] as? Double {
             self.amountEarned = amountEarned
         }
+        if let amountPaidOut = userFirDoc["amountPaidOut"] as? Double {
+            self.amountPaidOut = amountPaidOut
+        }
         
         if let numSessions = userFirDoc["numSessions"] as? Int {
             self.numSessions = numSessions
@@ -248,6 +258,15 @@ public class User {
         if let createdContentIDs = userFirDoc["createdContentIDs"] as? [String] {
             self.createdContentIDs = createdContentIDs
         }
+        if let numLocationsScanned = userFirDoc["numLocationsScanned"] as? Int {
+            self.numLocationsScanned = numLocationsScanned
+        }
+        if let permissions = userFirDoc["permissions"] as? [String: Bool] {
+            self.permissions = permissions
+        }
+        if let model = userFirDoc["deviceModel"] as? String { self.deviceModel = model }
+        if let name = userFirDoc["deviceName"] as? String { self.deviceName = name }
+        if let sys = userFirDoc["systemVersion"] as? String { self.systemVersion = sys }
         
         if let latitude = userFirDoc["latitude"] as? Double {
             self.latitude = latitude

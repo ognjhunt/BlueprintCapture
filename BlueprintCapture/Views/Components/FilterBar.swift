@@ -10,10 +10,12 @@ struct FilterBar: View {
             VStack(spacing: 12) {
                 // Radius chips
                 HStack(spacing: 8) {
+                    Spacer(minLength: 0)
                     radiusChip(.half, label: "0.5 mi")
                     radiusChip(.one, label: "1 mi")
                     radiusChip(.five, label: "5 mi")
-                    Spacer()
+                    radiusChip(.ten, label: "10 mi")
+                    Spacer(minLength: 0)
                 }
 
                 // Top selector

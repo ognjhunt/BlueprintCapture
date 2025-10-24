@@ -13,6 +13,8 @@ protocol ReservationServiceProtocol: AnyObject {
     @discardableResult
     func observeReservation(for targetId: String, onChange: @escaping (ReservationStatus) -> Void) -> ReservationObservation
     func checkIn(targetId: String) async throws
+    /// Returns the active reservation created by the current user if any exists and is not expired.
+    func fetchActiveReservationForCurrentUser() async -> Reservation?
 }
 
 struct Reservation: Equatable {
@@ -71,6 +73,15 @@ final class ReservationService: ReservationServiceProtocol {
     func reserve(target: Target, for duration: TimeInterval) async throws -> Reservation {
         let now = Date()
         let newExpiration = now.addingTimeInterval(duration)
+        // Enforce at most one active reservation per user by cancelling any previous active reservation
+        if let existing = await fetchActiveReservationForCurrentUser(), existing.targetId != target.id {
+            do {
+                try await reservationsCollection.document(existing.targetId).delete()
+                cache.removeValue(forKey: existing.targetId)
+            } catch {
+                // Non-fatal: continue to create the new reservation
+            }
+        }
         var data: [String: Any] = [
             "targetId": target.id,
             "reservedUntil": Timestamp(date: newExpiration),
@@ -88,6 +99,18 @@ final class ReservationService: ReservationServiceProtocol {
         }
         let reservation = Reservation(targetId: target.id, reservedUntil: newExpiration)
         cache[target.id] = reservation
+        // Mirror into target_state for global visibility
+        let targetState = db.collection("target_state").document(target.id)
+        var mirror: [String: Any] = [
+            "status": "reserved",
+            "reservedUntil": Timestamp(date: newExpiration),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        #if canImport(FirebaseAuth)
+        if let uid = auth.currentUser?.uid { mirror["reservedBy"] = uid }
+        #endif
+        // Note: we don't have full Target here; caller also uses TargetStateService for mutations in the new path
+        try? await targetState.setData(mirror, merge: true)
         return reservation
     }
 
@@ -95,6 +118,14 @@ final class ReservationService: ReservationServiceProtocol {
         do {
             try await reservationsCollection.document(targetId).delete()
             cache.removeValue(forKey: targetId)
+            // Mirror cancellation
+            let targetState = db.collection("target_state").document(targetId)
+            try? await targetState.setData([
+                "status": "available",
+                "reservedBy": FieldValue.delete(),
+                "reservedUntil": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
         } catch {
             print("⚠️ Failed to cancel reservation for \(targetId): \(error)")
         }
@@ -154,6 +185,37 @@ final class ReservationService: ReservationServiceProtocol {
         }
         #endif
         try await reservationsCollection.document(targetId).setData(data, merge: true)
+        // Mirror into target_state
+        let targetState = db.collection("target_state").document(targetId)
+        try? await targetState.setData([
+            "status": "in_progress",
+            "updatedAt": FieldValue.serverTimestamp()
+        ], merge: true)
+    }
+
+    func fetchActiveReservationForCurrentUser() async -> Reservation? {
+        #if canImport(FirebaseAuth)
+        guard let uid = auth.currentUser?.uid else { return nil }
+        #else
+        return nil
+        #endif
+        do {
+            let nowTs = Timestamp(date: Date())
+            var query: Query = reservationsCollection.whereField("creatorId", isEqualTo: uid)
+            query = query.whereField("reservedUntil", isGreaterThan: nowTs)
+            let snapshot = try await query.getDocuments()
+            if let doc = snapshot.documents.first {
+                let data = doc.data()
+                if let targetId = data["targetId"] as? String, let ts = data["reservedUntil"] as? Timestamp {
+                    let res = Reservation(targetId: targetId, reservedUntil: ts.dateValue())
+                    cache[targetId] = res
+                    return res
+                }
+            }
+        } catch {
+            // Swallow and treat as none
+        }
+        return nil
     }
 }
 #else
@@ -197,6 +259,14 @@ final class ReservationService: ReservationServiceProtocol {
         if let handler = observers[targetId]?.1 {
             handler(status)
         }
+    }
+
+    func fetchActiveReservationForCurrentUser() async -> Reservation? {
+        let now = Date()
+        if let (targetId, until) = storage.first(where: { $0.value > now }) {
+            return Reservation(targetId: targetId, reservedUntil: until)
+        }
+        return nil
     }
 }
 #endif

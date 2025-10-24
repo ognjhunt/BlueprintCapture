@@ -47,13 +47,16 @@ final class GooglePlacesNearby: PlacesNearbyProtocol {
 
     enum ServiceError: Error { case missingAPIKey, badResponse }
 
-    func nearby(lat: Double, lng: Double, radiusMeters: Int, limit: Int, types: [String]) async throws -> [PlaceDetailsLite] {
+        func nearby(lat: Double, lng: Double, radiusMeters: Int, limit: Int, types: [String]) async throws -> [PlaceDetailsLite] {
         guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
-        var comps = URLComponents(string: "https://places.googleapis.com/v1/places:searchNearby")!
-        comps.queryItems = [URLQueryItem(name: "key", value: apiKey)]
-        var request = URLRequest(url: comps.url!)
+            let url = URL(string: "https://places.googleapis.com/v1/places:searchNearby")!
+            var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+            // New Places API (v1) requires a field mask header for POST methods
+            request.addValue("places.id,places.displayName,places.formattedAddress,places.location,places.types", forHTTPHeaderField: "X-Goog-FieldMask")
+            // Provide the API key in header (supported and recommended)
+            request.addValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         // Use includedTypes filter; prefer grocery/electronics if provided
         struct Circle: Encodable { let center: Center; let radius: Int }
         struct Center: Encodable { let latitude: Double; let longitude: Double }
@@ -67,10 +70,12 @@ final class GooglePlacesNearby: PlacesNearbyProtocol {
         )
         request.httpBody = try JSONEncoder().encode(body)
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw ServiceError.badResponse
-        }
+            let (data, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+                print("❌ [Places Nearby] HTTP \(http.statusCode) — \(body.prefix(400))")
+                throw ServiceError.badResponse
+            }
         // Minimal parse of Places search results
         struct DisplayName: Decodable { let text: String? }
         struct LocationLatLng: Decodable { let latitude: Double?; let longitude: Double? }
@@ -78,6 +83,7 @@ final class GooglePlacesNearby: PlacesNearbyProtocol {
         struct Response: Decodable { let places: [Place]? }
         let decoded = try JSONDecoder().decode(Response.self, from: data)
         let places = decoded.places ?? []
+        print("✅ [Places Nearby] Decoded \(places.count) places")
         return places.compactMap { p in
             // id or placeId may be present depending on endpoint
             guard let id = p.id ?? p.placeId,

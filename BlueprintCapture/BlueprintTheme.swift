@@ -10,6 +10,7 @@ enum BlueprintTheme {
     static let payoutTeal     = Color(red: 0.16, green: 0.72, blue: 0.64)    // Darker teal for payout values
     static let accentAqua     = Color(red: 0.12, green: 0.76, blue: 0.95)
     static let successGreen   = Color(red: 0.18, green: 0.68, blue: 0.43)
+    static let successGreenDeep = Color(red: 0.10, green: 0.48, blue: 0.30)
     static let warningOrange  = Color(red: 0.98, green: 0.58, blue: 0.20)
     static let errorRed       = Color(red: 0.92, green: 0.20, blue: 0.20)
 
@@ -24,6 +25,19 @@ enum BlueprintTheme {
         colors: [primaryDeep.opacity(0.95), primary.opacity(0.85)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
+    )
+
+    // Accent gradients used across the Nearby page
+    static let reservedGradient = LinearGradient(
+        colors: [accentAqua, brandTeal],
+        startPoint: .leading,
+        endPoint: .trailing
+    )
+
+    static let payoutGradient = LinearGradient(
+        colors: [successGreen, payoutTeal],
+        startPoint: .leading,
+        endPoint: .trailing
     )
 
     // Onboarding gradient, tuned to match website hero
@@ -47,6 +61,23 @@ struct BlueprintPrimaryButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(LinearGradient(colors: [BlueprintTheme.primary, BlueprintTheme.primaryDeep], startPoint: .top, endPoint: .bottom))
                     .shadow(color: BlueprintTheme.primary.opacity(configuration.isPressed ? 0.15 : 0.25), radius: configuration.isPressed ? 4 : 10, x: 0, y: configuration.isPressed ? 2 : 8)
+            )
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}
+
+struct BlueprintSuccessButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(.white)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: [BlueprintTheme.successGreen, BlueprintTheme.successGreenDeep], startPoint: .top, endPoint: .bottom))
+                    .shadow(color: BlueprintTheme.successGreen.opacity(configuration.isPressed ? 0.15 : 0.25), radius: configuration.isPressed ? 4 : 10, x: 0, y: configuration.isPressed ? 2 : 8)
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.easeOut(duration: 0.15), value: configuration.isPressed)

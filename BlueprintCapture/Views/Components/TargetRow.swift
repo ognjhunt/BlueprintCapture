@@ -3,11 +3,12 @@ import SwiftUI
 struct TargetRow: View {
     let item: NearbyTargetsViewModel.NearbyItem
     let reservationSecondsRemaining: Int?
+    let isOnSite: Bool
 
     var body: some View {
         let isReserved = reservationSecondsRemaining != nil
         ZStack(alignment: .topLeading) {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 thumbnail
                     .frame(width: 96, height: 72)
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -15,6 +16,13 @@ struct TargetRow: View {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .stroke(Color.black.opacity(0.05), lineWidth: 1)
                     )
+                    .overlay(alignment: .bottomLeading) {
+                        if let seconds = reservationSecondsRemaining {
+                            reservedPill(seconds: seconds)
+                                .padding(.leading, 4)
+                                .padding(.bottom, 4)
+                        }
+                    }
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
@@ -23,8 +31,8 @@ struct TargetRow: View {
                             .lineLimit(1)
                             .foregroundStyle(.primary)
 
-                        if let seconds = reservationSecondsRemaining {
-                            reservedPill(seconds: seconds)
+                        if isOnSite && reservationSecondsRemaining == nil {
+                            onsitePill()
                         }
                     }
 
@@ -33,30 +41,29 @@ struct TargetRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
 
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         distanceView()
-                            .layoutPriority(2)
+                            .layoutPriority(0)
 
                         timeBadge()
-                            .layoutPriority(1)
+                            .layoutPriority(0)
 
                         Spacer()
-
-                        Text("Est. $\(formatCurrency(item.estimatedPayoutUsd))")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(BlueprintTheme.payoutTeal)
-                            .lineLimit(1)
                     }
+                }
+                .overlay(alignment: .topTrailing) {
+                    payoutBadge()
+                        .padding(.top, 2)
+                        .padding(.trailing, -4) // nudge slightly closer to chevron to free title space
+                        .allowsHitTesting(false)
                 }
 
                 Image(systemName: "chevron.right")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 8)
-            .padding(.leading, 8)
-            .padding(.trailing, 4)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
 
             if isReserved {
                 // Corner ribbon accent for reserved state
@@ -64,20 +71,37 @@ struct TargetRow: View {
                     .font(.caption2).fontWeight(.semibold)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(
-                        Capsule().fill(BlueprintTheme.primary)
+                        Capsule().fill(BlueprintTheme.reservedGradient)
                     )
                     .foregroundStyle(.white)
                     .offset(x: -4, y: -4)
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isReserved ? BlueprintTheme.primary.opacity(0.06) : Color(.systemBackground))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isReserved ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(isReserved ? BlueprintTheme.primary.opacity(0.35) : Color.clear, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
+        .overlay(
+            Group {
+                if isReserved {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.2)
+                }
+            }
+        )
+        .overlay(alignment: .leading) {
+            if isOnSite && !isReserved {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(BlueprintTheme.successGreen)
+                    .frame(width: 4)
+                    .opacity(0.9)
+            }
+        }
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
         .accessibilityLabel(item.accessibilityLabel)
     }
 
@@ -97,14 +121,39 @@ struct TargetRow: View {
     }
 
     private func distanceView() -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "location")
-            Text("\(String(format: "%.1f", item.distanceMiles)) mi")
+        if isOnSite {
+            return AnyView(
+                HStack(spacing: 4) {
+                    Image(systemName: "location.fill")
+                    Text("Nearby")
+                        .lineLimit(1)
+                }
+                .font(.caption)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.12)))
+                .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+                .foregroundStyle(BlueprintTheme.successGreen)
+                .fixedSize(horizontal: true, vertical: false)
                 .lineLimit(1)
+                .minimumScaleFactor(0.9)
+            )
+        } else {
+            return AnyView(
+                HStack(spacing: 4) {
+                    Image(systemName: "location")
+                    Text("\(String(format: "%.1f", item.distanceMiles)) mi")
+                        .lineLimit(1)
+                }
+                .font(.caption).fontWeight(.semibold)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color(.systemFill)))
+                .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+            )
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func timeBadge() -> some View {
@@ -119,11 +168,31 @@ struct TargetRow: View {
         .font(.caption).fontWeight(.semibold)
         .padding(.horizontal, 8).padding(.vertical, 4)
         .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
-        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.5), lineWidth: 1))
+        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.45), lineWidth: 1))
         .foregroundStyle(BlueprintTheme.primary)
         .accessibilityLabel("Estimated scan time \(timeText)")
         .accessibilityHint("Approximate time required to complete this capture")
         .fixedSize(horizontal: true, vertical: false)
+        .lineLimit(1)
+        .minimumScaleFactor(0.9)
+    }
+
+    private func payoutBadge() -> some View {
+        let payoutText = "Est. $\(formatCurrency(item.estimatedPayoutUsd))"
+        return HStack(spacing: 6) {
+            Image(systemName: "dollarsign.circle")
+            Text(payoutText)
+                .lineLimit(1)
+        }
+        .font(.caption2).fontWeight(.bold)
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.12)))
+        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.payoutGradient)
+        .fixedSize(horizontal: true, vertical: false)
+        .lineLimit(1)
+        .minimumScaleFactor(0.95)
+        .accessibilityLabel("Estimated payout \(payoutText)")
     }
 
     private func reservedPill(seconds: Int) -> some View {
@@ -136,10 +205,21 @@ struct TargetRow: View {
                 .monospacedDigit()
         }
         .font(.caption2).fontWeight(.bold)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Capsule().fill(BlueprintTheme.reservedGradient))
+        .foregroundStyle(.white)
+    }
+
+    private func onsitePill() -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "figure.walk.circle.fill")
+            Text("Nearby")
+        }
+        .font(.caption2).fontWeight(.bold)
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.15)))
-        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.4), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.primary)
+        .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.18)))
+        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.successGreen)
     }
 
     private var placeholder: some View {

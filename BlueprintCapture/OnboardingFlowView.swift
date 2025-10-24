@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
-import CoreMotion
 import UserNotifications
 import CoreLocation
+import FirebaseAuth
 
 /// First-run onboarding flow inspired by modern gig apps (Uber, DoorDash):
 /// 1) Value prop intro → 2) Enable capture permissions → 3) Optional payouts connection → 4) Done
@@ -25,7 +25,12 @@ struct OnboardingFlowView: View {
                 case .payouts:
                     PayoutsPromptView(onConnect: { showingBankSetup = true }, onSkip: { withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .complete } })
                 case .complete:
-                    CompletionView(onFinish: { isOnboarded = true })
+                    CompletionView(onFinish: {
+                        isOnboarded = true
+                        // Mark onboarding finished on local user
+                        UserDeviceService.updateLocalUser(fields: ["finishedOnboarding": true])
+                        AppSessionService.shared.log("onboardingComplete")
+                    })
                 }
             }
             .toolbar { ToolbarTitleContent(step: step) }
@@ -69,9 +74,9 @@ private struct WelcomeIntroView: View {
             }
 
             TabView {
-                ValueCard(icon: "mappin.and.ellipse", title: "Find nearby jobs", subtitle: "Pick locations near you and start a walkthrough.")
-                ValueCard(icon: "camera.viewfinder", title: "Simple capture flow", subtitle: "Use your iPhone or pair smart glasses—we guide you through each scan.")
-                ValueCard(icon: "dollarsign.circle.fill", title: "Get paid fast", subtitle: "Quick setup through Stripe. Start earning within 5 minutes.")
+                ValueCard(icon: "mappin.and.ellipse", title: "Discover nearby spaces", subtitle: "Find high-value indoor locations near you ready to capture for detailed 3D scans.")
+                ValueCard(icon: "camera.viewfinder", title: "Capture with your phone", subtitle: "Record a guided walkthrough using your iPhone or AI glasses—we handle the rest.")
+                ValueCard(icon: "dollarsign.circle.fill", title: "Earn while you map", subtitle: "Get paid for each scan after processing. Fast payouts via Stripe.")
             }
             .tabViewStyle(.page)
             .frame(height: 280)
@@ -121,11 +126,6 @@ private struct PermissionsEnableView: View {
 
     @State private var cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
     @State private var microphoneGranted = AVAudioSession.sharedInstance().recordPermission == .granted
-    @State private var motionGranted: Bool = {
-        if CMMotionActivityManager.isActivityAvailable() {
-            return CMMotionActivityManager.authorizationStatus() == .authorized
-        } else { return true }
-    }()
     @State private var locationGranted: Bool = {
         let status = CLLocationManager().authorizationStatus
         return status == .authorizedWhenInUse || status == .authorizedAlways
@@ -136,59 +136,59 @@ private struct PermissionsEnableView: View {
     private let notificationService = NotificationService()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Enable capture sensors")
-                    .font(.title2).fontWeight(.bold)
-                    .blueprintGradientText()
-                Text("We use your camera, microphone and motion sensors to build metrically-accurate walkthroughs.")
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Enable capture sensors")
+                        .font(.title2).fontWeight(.bold)
+                        .blueprintGradientText()
+                    Text("We use your camera, microphone and motion sensors to build metrically-accurate walkthroughs.")
+                        .font(.callout)
+                        .blueprintSecondaryOnDark()
+                }
 
-            BlueprintGlassCard {
-                PermissionsRow(title: "Camera", description: "Records the visual walkthrough", granted: cameraGranted)
-                Divider()
-                PermissionsRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: microphoneGranted)
-                Divider()
-                PermissionsRow(title: "Motion & Fitness", description: "Adds device pose for metric scale", granted: motionGranted)
-                Divider()
-                PermissionsRow(title: "Location", description: "Pins your captures to the correct address", granted: locationGranted)
-            }
+                BlueprintGlassCard {
+                    PermissionsRow(title: "Camera", description: "Records the visual walkthrough", granted: cameraGranted)
+                    Divider()
+                    PermissionsRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: microphoneGranted)
+                    Divider()
+                    PermissionsRow(title: "Location", description: "Pins your captures to the correct address", granted: locationGranted)
+                }
 
-            BlueprintGlassCard {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: notificationsGranted ? "checkmark.seal.fill" : "bell.badge.fill")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(notificationsGranted ? BlueprintTheme.successGreen : BlueprintTheme.primary)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Notifications (recommended)").font(.headline).blueprintPrimaryOnDark()
-                        Text("Get reminders when you’re near a job.")
-                            .font(.subheadline).blueprintSecondaryOnDark()
-                        Button(action: requestNotifications) { Text(notificationsGranted ? "Enabled" : "Enable notifications") }
-                            .buttonStyle(BlueprintSecondaryButtonStyle())
-                            .disabled(notificationsGranted)
+                BlueprintGlassCard {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: notificationsGranted ? "checkmark.seal.fill" : "bell.badge.fill")
+                            .symbolRenderingMode(.palette)
+                            .foregroundStyle(notificationsGranted ? BlueprintTheme.successGreen : BlueprintTheme.primary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Notifications (recommended)").font(.headline).blueprintPrimaryOnDark()
+                            Text("Get reminders when you're near a job.")
+                                .font(.subheadline).blueprintSecondaryOnDark()
+                            Button(action: requestNotifications) { Text(notificationsGranted ? "Enabled" : "Enable notifications") }
+                                .buttonStyle(BlueprintSecondaryButtonStyle())
+                                .disabled(notificationsGranted)
+                        }
+                        Spacer()
                     }
-                    Spacer()
                 }
-            }
 
-            Spacer()
-
-            Button(action: enableAll) {
-                HStack {
-                    if isRequesting { ProgressView().tint(.white) }
-                    Text(grantedAll ? "Continue" : "Enable & continue")
+                Button(action: enableAll) {
+                    HStack {
+                        if isRequesting { ProgressView().tint(.white) }
+                        Text(grantedAll ? "Continue" : "Enable & continue")
+                    }
                 }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
+                .disabled(isRequesting)
+                .padding(.bottom, 8)
             }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
-            .disabled(isRequesting)
+            .padding(.horizontal)
+            .padding(.top, -15)
         }
-        .padding()
         .task { refreshNotificationStatus() }
     }
 
-    private var grantedAll: Bool { cameraGranted && microphoneGranted && motionGranted && locationGranted }
+    private var grantedAll: Bool { cameraGranted && microphoneGranted && locationGranted }
 
     private func enableAll() {
         if grantedAll {
@@ -199,7 +199,6 @@ private struct PermissionsEnableView: View {
         Task {
             await requestCamera()
             await requestMicrophone()
-            await requestMotion()
             await requestLocation()
             await MainActor.run {
                 isRequesting = false
@@ -211,6 +210,8 @@ private struct PermissionsEnableView: View {
     private func requestCamera() async {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         await MainActor.run { self.cameraGranted = granted }
+        UserDeviceService.setPermission("camera", granted: granted)
+        AppSessionService.shared.log("permission.camera", metadata: ["granted": granted])
     }
 
     private func requestMicrophone() async {
@@ -220,39 +221,35 @@ private struct PermissionsEnableView: View {
             }
         }
         await MainActor.run { self.microphoneGranted = granted }
-    }
-
-    private func requestMotion() async {
-        guard CMMotionActivityManager.isActivityAvailable() else {
-            await MainActor.run { self.motionGranted = true }
-            return
-        }
-        switch CMMotionActivityManager.authorizationStatus() {
-        case .authorized:
-            await MainActor.run { self.motionGranted = true }
-        case .denied, .restricted:
-            await MainActor.run { self.motionGranted = false }
-        case .notDetermined:
-            let manager = CMMotionActivityManager()
-            let start = Date().addingTimeInterval(-60)
-            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                manager.queryActivityStarting(from: start, to: Date(), to: OperationQueue.main) { _, error in
-                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-                }
-            }
-            await MainActor.run { self.motionGranted = CMMotionActivityManager.authorizationStatus() == .authorized }
-        @unknown default:
-            await MainActor.run { self.motionGranted = false }
-        }
+        UserDeviceService.setPermission("microphone", granted: granted)
+        AppSessionService.shared.log("permission.microphone", metadata: ["granted": granted])
     }
 
     private func requestLocation() async {
         let granted = await LocationPermissionRequester.requestWhenInUse()
         await MainActor.run { self.locationGranted = granted }
+        UserDeviceService.setPermission("location", granted: granted)
+        AppSessionService.shared.log("permission.location", metadata: ["granted": granted])
+        // Kick off discovery prefetch as soon as we have permission and a coordinate
+        if granted {
+            if let coord = await OneShotLocationFetcher.fetch() {
+                let prefetcher = NearbyDiscoveryPrefetcher()
+                prefetcher.runOnceIfPossible(userLocation: coord, radiusMeters: 1609, limit: 25)
+                AppSessionService.shared.log("prefetch.nearby", metadata: ["lat": coord.latitude, "lng": coord.longitude])
+            }
+        }
     }
 
     private func requestNotifications() {
-        Task { await notificationService.requestAuthorizationIfNeeded(); refreshNotificationStatus() }
+        Task {
+            await notificationService.requestAuthorizationIfNeeded();
+            refreshNotificationStatus()
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                let granted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+                UserDeviceService.setPermission("notifications", granted: granted)
+                AppSessionService.shared.log("permission.notifications", metadata: ["granted": granted])
+            }
+        }
     }
 
     private func refreshNotificationStatus() {

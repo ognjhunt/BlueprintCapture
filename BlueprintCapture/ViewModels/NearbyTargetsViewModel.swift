@@ -2,6 +2,7 @@ import Foundation
 import CoreLocation
 import SwiftUI
 import Combine
+import MapKit
 #if canImport(Geohasher)
 import Geohasher
 #endif
@@ -9,9 +10,9 @@ import Geohasher
 @MainActor
 final class NearbyTargetsViewModel: ObservableObject {
     enum SortOption: Int, CaseIterable { case highestPayout, nearest, highestDemand }
-    enum RadiusMi: Double, CaseIterable { case half = 0.5, one = 1.0, five = 5.0 }
+    enum RadiusMi: Double, CaseIterable { case half = 0.5, one = 1.0, five = 5.0, ten = 10.0 }
     enum Limit: Int, CaseIterable { case top10 = 10, top25 = 25 }
-    enum State { case idle, loading, loaded, error(String) }
+    enum State: Equatable { case idle, loading, loaded, error(String) }
 
     // Inputs
     @Published var selectedRadius: RadiusMi = .one { didSet { Task { await refresh() } } }
@@ -22,6 +23,9 @@ final class NearbyTargetsViewModel: ObservableObject {
     @Published private(set) var state: State = .idle
     @Published private(set) var items: [NearbyItem] = []
     @Published private(set) var currentAddress: String?
+    @Published private(set) var isUsingCustomSearchCenter: Bool = false
+    @Published var isSearchingAddress: Bool = false
+    @Published var addressSearchResults: [LocationSearchResult] = []
 
     struct NearbyItem: Identifiable, Equatable {
         let id: String
@@ -35,6 +39,16 @@ final class NearbyTargetsViewModel: ObservableObject {
         }
     }
 
+    struct LocationSearchResult: Identifiable {
+        let id = UUID()
+        let title: String
+        let subtitle: String
+        let coordinate: CLLocationCoordinate2D
+        let isEstablishment: Bool // true for businesses/stores, false for addresses
+        let types: [String]
+        var formatted: String { subtitle.isEmpty ? title : "\(title), \(subtitle)" }
+    }
+
     // Services
     private let locationService: LocationServiceProtocol
     private let targetsAPI: TargetsAPIProtocol
@@ -42,8 +56,10 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let streetService: StreetViewServiceProtocol
     private let geocoding: GeocodingServiceProtocol
     private let reservationService: ReservationServiceProtocol
-    private let discoveryService: GeminiDiscoveryServiceProtocol
+    private let targetStateService: TargetStateServiceProtocol
+    // private let discoveryService: GeminiDiscoveryServiceProtocol // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
     private let placesDetailsService: PlacesDetailsServiceProtocol
+    private let placesAutocomplete: PlacesAutocompleteServiceProtocol
     private let notifications: NotificationServiceProtocol
 
     // Data
@@ -51,8 +67,13 @@ final class NearbyTargetsViewModel: ObservableObject {
     private var userLocation: CLLocation?
     private var streetViewCache: [String: (has: Bool, url: URL?)] = [:]
     @Published private(set) var reservations: [String: ReservationStatus] = [:]
-    private var reservationObservers: [String: ReservationObservation] = [:]
+    @Published private(set) var targetStates: [String: TargetState] = [:]
+    private var stateObservers: [String: TargetStateObservation] = [:]
     private var addressTask: Task<Void, Never>?
+    private var customSearchCenter: CLLocationCoordinate2D?
+    private var placesSessionToken: String?
+    private var searchDebounceTask: Task<Void, Never>?
+    private var currentSearchQuery: String = ""
 
     init(locationService: LocationServiceProtocol = LocationService(),
          targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
@@ -60,8 +81,10 @@ final class NearbyTargetsViewModel: ObservableObject {
          streetService: StreetViewServiceProtocol = StreetViewService(apiKeyProvider: { AppConfig.streetViewAPIKey() }),
          geocoding: GeocodingServiceProtocol = GeocodingService(),
          reservationService: ReservationServiceProtocol = ReservationService(),
-         discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(),
+         targetStateService: TargetStateServiceProtocol = TargetStateService(),
+         // discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(), // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
+         placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
          notifications: NotificationServiceProtocol = NotificationService()) {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
@@ -69,8 +92,10 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.streetService = streetService
         self.geocoding = geocoding
         self.reservationService = reservationService
-        self.discoveryService = discoveryService
+        self.targetStateService = targetStateService
+        // self.discoveryService = discoveryService
         self.placesDetailsService = placesDetailsService
+        self.placesAutocomplete = placesAutocomplete
         self.notifications = notifications
 
         self.locationService.setListener { [weak self] loc in
@@ -78,7 +103,16 @@ final class NearbyTargetsViewModel: ObservableObject {
                 self?.userLocation = loc
                 // Kick off initial refresh as soon as we have a real location
                 if loc != nil {
-                    if let self = self { await self.refresh() }
+                    if let self = self {
+                        // If we have prefetch seeds, use them immediately for instant UI
+                        let seeds = NearbySeedsStore.shared.read()
+                        if !seeds.isEmpty {
+                            print("⚡️ [Nearby] Using \(seeds.count) prefetched seeds for instant list")
+                            let targets = self.mapDetailsToTargets(details: seeds, fallbackSKU: .B, candidateScores: [:])
+                            await self.applyTargetsImmediate(targets)
+                        }
+                        await self.refresh()
+                    }
                     if let self = self { await self.updateCurrentAddress() }
                 }
             }
@@ -88,7 +122,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     deinit {
         // Ensure observer cleanup even when deinit runs off-main
         Task { @MainActor in
-            clearReservationObservers()
+            clearTargetStateObservers()
         }
     }
 
@@ -102,6 +136,15 @@ final class NearbyTargetsViewModel: ObservableObject {
         Task { await notifications.requestAuthorizationIfNeeded() }
         logAPIStatus()
         startAddressUpdates()
+        // If prefetched seeds exist and we don't have a location yet, show them
+        let seeds = NearbySeedsStore.shared.read()
+        if !seeds.isEmpty {
+            Task { [weak self] in
+                guard let self = self else { return }
+                let targets = self.mapDetailsToTargets(details: seeds, fallbackSKU: .B, candidateScores: [:])
+                await self.applyTargetsImmediate(targets)
+            }
+        }
     }
 
     func onDisappear() {
@@ -113,19 +156,15 @@ final class NearbyTargetsViewModel: ObservableObject {
     // MARK: - Logging
 
     private func logAPIStatus() {
-        let geminiKey = AppConfig.geminiAPIKey()
         let placesKey = AppConfig.placesAPIKey()
         let streetViewKey = AppConfig.streetViewAPIKey()
 
         print("🔍 [Blueprint Nearby] API Configuration Status:")
-        print("  ✅ Gemini API Key: \(geminiKey != nil ? "✓ Present" : "✗ Missing")")
         print("  ✅ Places API Key: \(placesKey != nil ? "✓ Present" : "✗ Missing")")
         print("  ✅ Street View API Key: \(streetViewKey != nil ? "✓ Present" : "✗ Missing")")
 
-        if geminiKey != nil && placesKey != nil {
-            print("  🚀 Hybrid pipeline ENABLED: Gemini → Places Nearby → Legacy")
-        } else if placesKey != nil {
-            print("  🚀 Places Nearby fallback ENABLED (Gemini unavailable)")
+        if placesKey != nil {
+            print("  🚀 Places Nearby pipeline ENABLED (Gemini temporarily disabled)")
         } else {
             print("  ⚠️  No Google APIs configured; using Legacy TargetsAPI only")
         }
@@ -143,22 +182,64 @@ final class NearbyTargetsViewModel: ObservableObject {
     /// Attempts to reserve the target for one hour
     func reserveTarget(_ target: Target) async throws -> Reservation {
         let oneHour: TimeInterval = 60 * 60
-        let reservation = try await reservationService.reserve(target: target, for: oneHour)
-        reservations[target.id] = .reserved(until: reservation.reservedUntil)
-        return reservation
+        // Use new target_state path first; fall back to older service if fails
+        do {
+            let reservation = try await targetStateService.reserve(target: target, for: oneHour)
+            reservations[target.id] = .reserved(until: reservation.reservedUntil)
+            notifications.scheduleReservationExpiryNotification(target: target, at: reservation.reservedUntil)
+            return reservation
+        } catch {
+            let reservation = try await reservationService.reserve(target: target, for: oneHour)
+            reservations[target.id] = .reserved(until: reservation.reservedUntil)
+            notifications.scheduleReservationExpiryNotification(target: target, at: reservation.reservedUntil)
+            return reservation
+        }
     }
 
     func reservationStatus(for targetId: String) -> ReservationStatus {
-        reservations[targetId] ?? reservationService.reservationStatus(for: targetId)
+        // Prefer live target_state for UI badges when available
+        if let state = targetStates[targetId] {
+            switch state.status {
+            case .reserved:
+                if let until = state.reservedUntil { return .reserved(until: until) }
+            case .in_progress:
+                // Treat in_progress like reserved without countdown
+                if let until = state.reservedUntil { return .reserved(until: until) }
+                return .reserved(until: Date().addingTimeInterval(5 * 60))
+            case .completed, .available:
+                return .none
+            }
+        }
+        return reservations[targetId] ?? reservationService.reservationStatus(for: targetId)
     }
 
     func cancelReservation(for targetId: String) async {
         await reservationService.cancelReservation(for: targetId)
+        await targetStateService.cancelReservation(for: targetId)
         reservations.removeValue(forKey: targetId)
+        notifications.cancelReservationExpiryNotification(for: targetId)
     }
 
     func checkIn(_ target: Target) async throws {
         try await reservationService.checkIn(targetId: target.id)
+        try? await targetStateService.checkIn(targetId: target.id)
+        // User started mapping → do not send expiry notification anymore
+        notifications.cancelReservationExpiryNotification(for: target.id)
+    }
+
+    // MARK: - Reservation expiry notifications
+    func scheduleReservationExpiryNotification(for target: Target, at date: Date) {
+        notifications.scheduleReservationExpiryNotification(target: target, at: date)
+    }
+
+    func cancelReservationExpiryNotification(for targetId: String) {
+        notifications.cancelReservationExpiryNotification(for: targetId)
+    }
+
+    /// Returns the user's current active reservation if it exists (based on backend state), regardless of local UI state
+    func fetchCurrentUserActiveReservation() async -> Reservation? {
+        if let r = await targetStateService.fetchActiveReservationForCurrentUser() { return r }
+        return await reservationService.fetchActiveReservationForCurrentUser()
     }
 
     private func loadPricing() async {
@@ -166,7 +247,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     }
 
     func refresh() async {
-        guard let loc = locationService.latestLocation ?? userLocation else {
+        guard let loc = currentSearchLocation() else {
             state = .error("Location unavailable. Enable location or enter an address.")
             return
         }
@@ -175,19 +256,19 @@ final class NearbyTargetsViewModel: ObservableObject {
             let meters = Int(selectedRadius.rawValue * 1609.34)
             let limit = selectedLimit.rawValue
             var targets: [Target] = []
-            // Try the hybrid Gemini + Places pipeline first
-            if AppConfig.geminiAPIKey() != nil, AppConfig.placesAPIKey() != nil {
-                if let hybrid = try? await loadUsingHybridPipeline(loc: loc, radiusMeters: meters, limit: limit) {
-                    targets = hybrid
+            // Use Places Nearby pipeline (Gemini disabled)
+            if AppConfig.placesAPIKey() != nil {
+                if let places = try? await loadUsingHybridPipeline(loc: loc, radiusMeters: meters, limit: limit) { // function now uses Places only
+                    targets = places
                 }
             }
-            // Fallback to legacy pipeline if hybrid produced nothing
+            // Fallback to legacy pipeline if Places produced nothing
             if targets.isEmpty {
                 print("📡 [Pipeline] Falling back to Legacy TargetsAPI...")
                 targets = try await targetsAPI.fetchTargets(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude, radiusMeters: meters, limit: limit)
                 print("✅ [Legacy] Fetched \(targets.count) targets")
             } else {
-                print("🎯 [Pipeline] Using hybrid results: \(targets.count) targets")
+                print("🎯 [Pipeline] Using Places results: \(targets.count) targets")
             }
 
             // Parallelize missing address resolution instead of sequential
@@ -267,11 +348,22 @@ final class NearbyTargetsViewModel: ObservableObject {
                 return arr.map { $0.0 }
             }
 
-            self.items = mapped
+            // Merge with live target_state to filter and badge
+            let ids = mapped.map { $0.id }
+            let stateMap = await targetStateService.batchFetchStates(for: ids)
+            self.targetStates = stateMap
+            // Filter out completed
+            let visible = mapped.filter { item in
+                if let s = stateMap[item.id], s.status == .completed { return false }
+                return true
+            }
+            self.items = visible
             // Refresh proximity notifications for the top results so we can nudge users when nearby
-            notifications.scheduleProximityNotifications(for: mapped.map { $0.target }, maxRegions: 10, radiusMeters: 150)
+            notifications.scheduleProximityNotifications(for: visible.map { $0.target }, maxRegions: 10, radiusMeters: 150)
             applySort()
-            state = mapped.isEmpty ? .loaded : .loaded
+            // Attach observers for visible items
+            updateTargetStateObservers(for: visible.map { $0.id })
+            state = visible.isEmpty ? .loaded : .loaded
         } catch {
             state = .error("Failed to load targets. Please try again.")
         }
@@ -290,6 +382,50 @@ final class NearbyTargetsViewModel: ObservableObject {
             items = Array(items.prefix(selectedLimit.rawValue))
         }
         updateReservationObservers(for: items.map { $0.id })
+        updateTargetStateObservers(for: items.map { $0.id })
+    }
+
+    private func applyTargetsImmediate(_ targets: [Target]) async {
+        let origin = currentSearchLocation() ?? CLLocation(latitude: userLocation?.coordinate.latitude ?? 0, longitude: userLocation?.coordinate.longitude ?? 0)
+        let currentPricing = pricing
+        let streetService = self.streetService
+        do {
+            let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double).self) { group in
+                for t in targets {
+                    group.addTask { @MainActor [weak self] in
+                        let distanceMeters = origin.distance(from: CLLocation(latitude: t.lat, longitude: t.lng))
+                        let miles = distanceMeters / 1609.34
+                        let payout = estimatedPayout(for: t, pricing: currentPricing)
+                        let cacheKey = "\(t.lat.rounded(to: 5)),\(t.lng.rounded(to: 5))"
+                        var hasSV = false
+                        var url: URL? = nil
+                        if let cached = self?.streetViewCache[cacheKey] {
+                            hasSV = cached.has
+                            url = cached.url
+                        } else if let service = streetService as? StreetViewServiceProtocol {
+                            hasSV = (try? await service.hasStreetView(lat: t.lat, lng: t.lng)) ?? false
+                            url = hasSV ? service.imageURL(lat: t.lat, lng: t.lng, size: CGSize(width: 600, height: 400)) : nil
+                            self?.streetViewCache[cacheKey] = (hasSV, url)
+                        }
+                        let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
+                        let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
+                        let coverage = hasSV ? 1.0 : 0.7
+                        let score = Double(payout) * demand * proximity * coverage
+                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV)
+                        return (item, score)
+                    }
+                }
+                var arr: [(NearbyItem, Double)] = []
+                for try await tuple in group { arr.append(tuple) }
+                arr.sort { $0.1 > $1.1 }
+                return arr.map { $0.0 }
+            }
+            self.items = mapped
+            applySort()
+            state = .loaded
+        } catch {
+            // Ignore; normal refresh will follow
+        }
     }
 
     private func updateReservationObservers(for targetIds: [String]) {
@@ -317,11 +453,51 @@ final class NearbyTargetsViewModel: ObservableObject {
         }
     }
 
+    private func updateTargetStateObservers(for targetIds: [String]) {
+        let ids = Set(targetIds)
+
+        // Remove observers for items no longer visible
+        for (id, obs) in stateObservers where !ids.contains(id) {
+            obs.cancel()
+            stateObservers.removeValue(forKey: id)
+            targetStates.removeValue(forKey: id)
+        }
+
+        for id in ids where stateObservers[id] == nil {
+            let obs = targetStateService.observeState(for: id) { [weak self] state in
+                Task { @MainActor in
+                    guard let self = self else { return }
+                    if let state = state {
+                        self.targetStates[id] = state
+                        // If it flipped to completed, remove from list
+                        if state.status == .completed {
+                            self.items.removeAll { $0.id == id }
+                        }
+                        // If reservation expired, clear local reservation badge
+                        if state.status == .available {
+                            self.reservations.removeValue(forKey: id)
+                        }
+                    } else {
+                        self.targetStates.removeValue(forKey: id)
+                    }
+                }
+            }
+            stateObservers[id] = obs
+        }
+    }
+
     @MainActor
     private func clearReservationObservers() {
         reservationObservers.values.forEach { $0.cancel() }
         reservationObservers.removeAll()
         reservations.removeAll()
+    }
+
+    @MainActor
+    private func clearTargetStateObservers() {
+        stateObservers.values.forEach { $0.cancel() }
+        stateObservers.removeAll()
+        targetStates.removeAll()
     }
 
     // MARK: - Address updates
@@ -342,6 +518,8 @@ final class NearbyTargetsViewModel: ObservableObject {
     }
 
     private func updateCurrentAddress() async {
+        // If user picked a custom center, keep showing that address and do not override
+        if isUsingCustomSearchCenter { return }
         guard let loc = locationService.latestLocation ?? userLocation else { return }
         if let address = try? await geocoding.reverseGeocode(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude) {
             await MainActor.run { self.currentAddress = address }
@@ -353,47 +531,72 @@ final class NearbyTargetsViewModel: ObservableObject {
 
 extension NearbyTargetsViewModel {
     private func loadUsingHybridPipeline(loc: CLLocation, radiusMeters: Int, limit: Int) async throws -> [Target] {
-        // Build categories from UI intent; for now favor Grocery and Electronics
-        let categories = ["grocery", "electronics"]
-        // Use geohash hint if Geohasher package is available at runtime
-        let geohashHint = computeGeohash(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
+        // Build categories from UI intent - retail & commercial properties with high demand (kept for reference)
+        // let categories = [
+        //     "grocery", "supermarket", "electronics", "shopping_mall",
+        //     "department_store", "home_goods_store", "convenience_store",
+        //     "pharmacy", "clothing_store"
+        // ]
+        // Use geohash hint if Geohasher package is available at runtime (unused while Gemini disabled)
+        // let geohashHint = computeGeohash(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
 
         // Ask for SKU B by default for higher payout, but we can adjust later
-        if AppConfig.geminiAPIKey() != nil {
-            print("📡 [Pipeline] Attempting Gemini grounded discovery...")
-            do {
-                let candidates = try await discoveryService.discoverCandidates(
-                    userLocation: loc.coordinate,
-                    radiusMeters: radiusMeters,
-                    limit: limit,
-                    categories: categories,
-                    sku: .B,
-                    geohashHint: geohashHint
-                )
-                if !candidates.isEmpty {
-                    print("✅ [Gemini] Found \(candidates.count) candidates")
-                    let details = try await placesDetailsService.fetchDetails(placeIds: candidates.map { $0.placeId })
-                    if !details.isEmpty {
-                        print("✅ [Places Details] Fetched \(details.count) place details")
-                        return mapDetailsToTargets(details: details, fallbackSKU: .B, candidateScores: Dictionary(uniqueKeysWithValues: candidates.map { ($0.placeId, $0.score) }))
-                    } else {
-                        print("⚠️  [Places Details] Failed to fetch details for candidates")
-                    }
-                } else {
-                    print("⚠️  [Gemini] No candidates returned")
-                }
-            } catch {
-                print("❌ [Gemini] Error: \(error.localizedDescription)")
-            }
-        } else {
-            print("⏭️  [Pipeline] Gemini API key not configured, skipping")
-        }
+        // 🔕 Gemini grounded discovery temporarily disabled — using Places Nearby directly
+        // if AppConfig.geminiAPIKey() != nil {
+        //     print("📡 [Pipeline] Attempting Gemini grounded discovery...")
+        //     do {
+        //         let candidates = try await discoveryService.discoverCandidates(
+        //             userLocation: loc.coordinate,
+        //             radiusMeters: radiusMeters,
+        //             limit: limit,
+        //             categories: categories,
+        //             sku: .B,
+        //             geohashHint: geohashHint
+        //         )
+        //         if !candidates.isEmpty {
+        //             print("✅ [Gemini] Found \(candidates.count) candidates")
+        //             for c in candidates { print("   - \(c.name) [\(c.placeId)] types=\(c.types.joined(separator: ", ")) score=\(String(format: "%.2f", c.score ?? 0))") }
+        //             let details = try await placesDetailsService.fetchDetails(placeIds: candidates.map { $0.placeId })
+        //             if !details.isEmpty {
+        //                 print("✅ [Places Details] Fetched \(details.count) place details")
+        //                 for d in details { print("   • \(d.displayName) — \(d.formattedAddress ?? "(no address)") [\(d.placeId)] @ (\(d.lat), \(d.lng))") }
+        //                 return mapDetailsToTargets(details: details, fallbackSKU: .B, candidateScores: Dictionary(uniqueKeysWithValues: candidates.map { ($0.placeId, $0.score) }))
+        //             } else {
+        //                 print("⚠️  [Places Details] Failed to fetch details for candidates")
+        //             }
+        //         } else {
+        //             print("⚠️  [Gemini] No candidates returned")
+        //         }
+        //     } catch {
+        //         print("❌ [Gemini] Error: \(error.localizedDescription)")
+        //     }
+        // } else {
+        //     print("⏭️  [Pipeline] Gemini API key not configured, skipping")
+        // }
 
         // Fallback 2: Google Places Nearby Search (types-based)
-        print("📡 [Pipeline] Attempting Places Nearby Search...")
+        print("📡 [Pipeline] Using Places Nearby Search…")
         let nearby = GooglePlacesNearby()
         do {
-            let nearbyPlaces = try await nearby.nearby(lat: loc.coordinate.latitude, lng: loc.coordinate.longitude, radiusMeters: radiusMeters, limit: limit, types: ["grocery_or_supermarket", "electronics_store"])
+            // Places v1 includedTypes aligned to our prior demand targets
+            let includedTypes: [String] = [
+                // Valid Table A types for Nearby Search per Google docs
+                // https://developers.google.com/maps/documentation/places/web-service/place-types
+                "supermarket",
+                "electronics_store",
+                "shopping_mall",
+                "department_store",
+                "convenience_store",
+                "pharmacy",
+                "clothing_store"
+            ]
+            let nearbyPlaces = try await nearby.nearby(
+                lat: loc.coordinate.latitude,
+                lng: loc.coordinate.longitude,
+                radiusMeters: radiusMeters,
+                limit: 2,
+                types: includedTypes
+            )
             if !nearbyPlaces.isEmpty {
                 print("✅ [Places Nearby] Found \(nearbyPlaces.count) places")
                 return mapDetailsToTargets(details: nearbyPlaces, fallbackSKU: .B, candidateScores: [:])
@@ -469,4 +672,229 @@ private extension Double {
     }
 }
 
+// MARK: - Custom search center & address search
+extension NearbyTargetsViewModel {
+    private func currentSearchLocation() -> CLLocation? {
+        if let custom = customSearchCenter {
+            return CLLocation(latitude: custom.latitude, longitude: custom.longitude)
+        }
+        return locationService.latestLocation ?? userLocation
+    }
 
+    func clearCustomSearchCenter() {
+        customSearchCenter = nil
+        isUsingCustomSearchCenter = false
+        Task { await refresh() }
+        Task { await updateCurrentAddress() }
+    }
+
+    func setCustomSearchCenter(coordinate: CLLocationCoordinate2D, address: String) {
+        customSearchCenter = coordinate
+        isUsingCustomSearchCenter = true
+        currentAddress = address
+        // Clear session token on selection (matching React solution approach)
+        placesSessionToken = nil
+        // Clear search results
+        addressSearchResults = []
+        Task { await refresh() }
+    }
+
+    /// Debounced address search with proper cleanup and state management
+    /// Matches the approach from the React autocomplete solution
+    func searchAddresses(query: String) async {
+        // Cancel any pending search task
+        searchDebounceTask?.cancel()
+        
+        // Update current query immediately
+        currentSearchQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Clear results if query is too short
+        guard trimmed.count >= 3 else {
+            await MainActor.run { 
+                self.addressSearchResults = []
+                self.isSearchingAddress = false
+            }
+            // Reset session token when clearing search
+            placesSessionToken = nil
+            return
+        }
+        
+        // Set loading state immediately
+        await MainActor.run { self.isSearchingAddress = true }
+        
+        // Create debounced search task (350ms delay matching React solution)
+        searchDebounceTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 350_000_000) // 350ms
+                
+                // Check if this task was cancelled during sleep
+                guard !Task.isCancelled else {
+                    print("🔍 [Autocomplete] Search cancelled for '\(trimmed)'")
+                    return
+                }
+                
+                // Perform the actual search
+                await performAddressSearch(query: trimmed)
+            } catch {
+                // Task was cancelled
+                print("🔍 [Autocomplete] Search task cancelled")
+            }
+        }
+    }
+    
+    /// Internal method that performs the actual autocomplete search
+    /// This is called after debounce delay
+    private func performAddressSearch(query: String) async {
+        // Ensure session token exists (reuse across autocomplete requests, reset on selection)
+        if placesSessionToken == nil {
+            placesSessionToken = UUID().uuidString
+            print("🔑 [Autocomplete] Created new session token: \(placesSessionToken ?? "")")
+        }
+        
+        // Check if query still matches current query (prevent stale results)
+        guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            print("🔍 [Autocomplete] Query changed, skipping stale search for '\(query)'")
+            await MainActor.run { self.isSearchingAddress = false }
+            return
+        }
+        
+        defer { 
+            Task { @MainActor in 
+                self.isSearchingAddress = false 
+            } 
+        }
+
+        // Prefer Google Places Autocomplete if configured; otherwise fall back to MapKit
+        if AppConfig.placesAPIKey() != nil {
+            do {
+                let origin = currentSearchLocation()?.coordinate
+                let radius = Int(selectedRadius.rawValue * 1609.34)
+                let suggestions = try await placesAutocomplete.autocomplete(
+                    input: query,
+                    sessionToken: placesSessionToken ?? UUID().uuidString,
+                    origin: origin,
+                    radiusMeters: radius
+                )
+                print("🔍 [Autocomplete] Got \(suggestions.count) suggestions for '\(query)'")
+                
+                // Check again if query is still current
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after fetch, discarding results")
+                    return
+                }
+                
+                guard !suggestions.isEmpty else {
+                    print("⚠️ [Autocomplete] No suggestions returned, falling back to MapKit")
+                    throw NSError(domain: "AutocompleteError", code: -1, userInfo: nil)
+                }
+                
+                let details = try await placesDetailsService.fetchDetails(placeIds: suggestions.map { $0.placeId })
+                print("📋 [Places Details] Got details for \(details.count) of \(suggestions.count) suggestions")
+                
+                // Final check if query is still current before showing results
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after details fetch, discarding results")
+                    return
+                }
+                
+                let detailById = Dictionary(uniqueKeysWithValues: details.map { ($0.placeId, $0) })
+                let results: [LocationSearchResult] = suggestions.compactMap { s in
+                    // If we have details, use them; otherwise use the suggestion text
+                    if let d = detailById[s.placeId] {
+                        let coord = CLLocationCoordinate2D(latitude: d.lat, longitude: d.lng)
+                        let title = s.primaryText.isEmpty ? d.displayName : s.primaryText
+                        let subtitle = s.secondaryText.isEmpty ? (d.formattedAddress ?? "") : s.secondaryText
+                        
+                        // Determine if this is an establishment (business/store) or just an address/location
+                        let types = s.types.isEmpty ? (d.types ?? []) : s.types
+                        let isEstablishment = isPlaceAnEstablishment(types: types)
+                        
+                        return LocationSearchResult(
+                            title: title,
+                            subtitle: subtitle,
+                            coordinate: coord,
+                            isEstablishment: isEstablishment,
+                            types: types
+                        )
+                    } else {
+                        // Fallback: use suggestion text alone (this will require reverse geocoding the place ID, but at least show it)
+                        print("⚠️ [Autocomplete] Missing details for placeId \(s.placeId), using suggestion text only")
+                        // For now, skip results without details since we need coordinates
+                        return nil
+                    }
+                }
+                
+                // Sort results: establishments first (stores/businesses), then addresses
+                let sorted = results.sorted { lhs, rhs in
+                    if lhs.isEstablishment != rhs.isEstablishment {
+                        return lhs.isEstablishment // establishments first
+                    }
+                    return false // keep original order within same category
+                }
+                
+                print("✅ [Autocomplete] Displaying \(sorted.count) search results (\(sorted.filter { $0.isEstablishment }.count) establishments, \(sorted.filter { !$0.isEstablishment }.count) addresses)")
+                await MainActor.run { self.addressSearchResults = Array(sorted.prefix(10)) }
+                return
+            } catch {
+                print("❌ [Autocomplete] Error: \(error.localizedDescription)")
+                // Fall through to MapKit fallback below
+            }
+        }
+
+        // MapKit Fallback
+        print("📍 [MapKit] Falling back to MapKit search for '\(query)'")
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        let search = MKLocalSearch(request: request)
+        do {
+            let response = try await search.start()
+            
+            // Final check if query is still current
+            guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                print("📍 [MapKit] Query changed after fetch, discarding results")
+                return
+            }
+            
+            let results: [LocationSearchResult] = response.mapItems.prefix(8).compactMap { item in
+                guard let coord = item.placemark.location?.coordinate else { return nil }
+                let title = item.name ?? item.placemark.name ?? "Unknown"
+                let subtitle = [item.placemark.locality, item.placemark.administrativeArea]
+                    .compactMap { $0 }
+                    .joined(separator: ", ")
+                // Assume MapKit POI results are establishments
+                let isEstablishment = item.pointOfInterestCategory != nil
+                return LocationSearchResult(
+                    title: title,
+                    subtitle: subtitle,
+                    coordinate: coord,
+                    isEstablishment: isEstablishment,
+                    types: []
+                )
+            }
+            print("📍 [MapKit] Displaying \(results.count) search results")
+            await MainActor.run { self.addressSearchResults = results }
+        } catch {
+            print("❌ [MapKit Search] Error: \(error.localizedDescription)")
+            await MainActor.run { self.addressSearchResults = [] }
+        }
+    }
+    
+    /// Determines if a place is an establishment (business/store) vs just an address/location
+    private func isPlaceAnEstablishment(types: [String]) -> Bool {
+        let establishmentTypes = Set([
+            "store", "supermarket", "shopping_mall", "convenience_store",
+            "grocery_store", "department_store", "electronics_store",
+            "clothing_store", "pharmacy", "gas_station", "restaurant",
+            "cafe", "bar", "lodging", "establishment", "point_of_interest",
+            "food", "school", "hospital", "bank", "post_office",
+            "gym", "hair_care", "beauty_salon", "car_dealer", "car_rental",
+            "car_repair", "car_wash", "veterinary_care", "meal_takeaway",
+            "meal_delivery", "bakery", "book_store", "furniture_store",
+            "hardware_store", "home_goods_store", "jewelry_store",
+            "liquor_store", "pet_store", "shoe_store", "store",
+            "shopping_center"
+        ])
+        return types.contains(where: { establishmentTypes.contains($0) })
+    }
+}

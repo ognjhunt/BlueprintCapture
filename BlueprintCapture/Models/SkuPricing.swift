@@ -26,11 +26,11 @@ extension ClosedRange: Codable where Bound == Int {
     }
 }
 
-// Pricing tiers updated for $100/hr average payout target
+// Pricing tiers updated for $50/hr average payout target
 // Based on estimated walkthrough times (TWO complete passes):
-// - SKU C (Small retail): ~45 min (0.75 hr) → $75
-// - SKU A (Medium grocery): ~90 min (1.5 hr) → $150
-// - SKU B (Large warehouse): ~120 min (2 hr) → $200
+// - SKU C (Small retail): ~45 min (0.75 hr) → $37.50
+// - SKU A (Medium grocery): ~90 min (1.5 hr) → $75
+// - SKU B (Large warehouse): ~120 min (2 hr) → $100
 let defaultPricing: [SKU: SkuPricing] = [
     .A: .init(baseUsd: 150,  rangeUsd: 100...250),
     .B: .init(baseUsd: 200,  rangeUsd: 150...400),
@@ -38,11 +38,11 @@ let defaultPricing: [SKU: SkuPricing] = [
 ]
 
 func estimatedPayout(for target: Target, pricing: [SKU: SkuPricing]) -> Int {
-    // Payout is based on estimated scan time at $100/hour
+    // Payout is based on estimated scan time at $50/hour
     // This ensures fair compensation regardless of property size
     let timeMinutes = estimatedScanTimeMinutes(for: target)
     let hours = Double(timeMinutes) / 60.0
-    let payout = Int(hours * 100.0)
+    let payout = Int(hours * 50.0)
     return payout
 }
 

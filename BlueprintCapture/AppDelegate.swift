@@ -8,6 +8,7 @@
 import UIKit
 import FirebaseCore
 import UserNotifications
+import FirebaseAuth
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     private let notificationService = NotificationService()
@@ -21,7 +22,22 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         tableAppearance.backgroundColor = .clear
         let cellAppearance = UITableViewCell.appearance()
         cellAppearance.backgroundColor = .clear
+
+        // Ensure a device-local user exists and print the doc
+        UserDeviceService.ensureTemporaryUser()
+        UserDeviceService.printLocalUser()
+
+        // Start a new app session
+        AppSessionService.shared.startIfNeeded()
         return true
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {
+        AppSessionService.shared.end(reasonCrash: false)
+    }
+
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        AppSessionService.shared.end(reasonCrash: false)
     }
 }
 

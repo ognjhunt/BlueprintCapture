@@ -29,6 +29,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
+    // Google Places
+    private let placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService()
+    private let placesDetails: PlacesDetailsServiceProtocol = PlacesDetailsService()
+    private var placesSessionToken: String?
     private let motionManager = CMMotionActivityManager()
     let captureManager = VideoCaptureManager()
 
@@ -37,6 +41,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let uploadService: CaptureUploadServiceProtocol
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
+    private var searchDebounceTask: Task<Void, Never>?
+    private var currentSearchQuery: String = ""
 
     init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
         self.uploadService = uploadService
@@ -93,26 +99,108 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         moveToCapture()
     }
 
+    /// Debounced address search with proper cleanup and state management
+    /// Matches the approach from the React autocomplete solution
     func searchAddresses(query: String) async {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
-            addressSearchResults = []
+        // Cancel any pending search task
+        searchDebounceTask?.cancel()
+        
+        // Update current query immediately
+        currentSearchQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Clear results if query is too short
+        guard trimmed.count >= 3 else {
+            await MainActor.run { 
+                self.addressSearchResults = []
+                self.isSearchingAddress = false
+            }
+            // Reset session token when clearing search
+            placesSessionToken = nil
             return
         }
         
-        isSearchingAddress = true
-        defer { isSearchingAddress = false }
+        // Set loading state immediately
+        await MainActor.run { self.isSearchingAddress = true }
         
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = query
+        // Create debounced search task (350ms delay matching React solution)
+        searchDebounceTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 350_000_000) // 350ms
+                
+                // Check if this task was cancelled during sleep
+                guard !Task.isCancelled else {
+                    print("🔍 [Autocomplete] Search cancelled for '\(trimmed)'")
+                    return
+                }
+                
+                // Perform the actual search
+                await performAddressSearch(query: trimmed)
+            } catch {
+                // Task was cancelled
+                print("🔍 [Autocomplete] Search task cancelled")
+            }
+        }
+    }
+    
+    /// Internal method that performs the actual autocomplete search
+    /// This is called after debounce delay
+    private func performAddressSearch(query: String) async {
+        // Ensure session token exists (reuse across autocomplete requests, reset on selection)
+        if placesSessionToken == nil {
+            placesSessionToken = UUID().uuidString
+            print("🔑 [Autocomplete] Created new session token: \(placesSessionToken ?? "")")
+        }
         
-        let search = MKLocalSearch(request: searchRequest)
+        // Check if query still matches current query (prevent stale results)
+        guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            print("🔍 [Autocomplete] Query changed, skipping stale search for '\(query)'")
+            await MainActor.run { self.isSearchingAddress = false }
+            return
+        }
         
-        do {
-            let response = try await search.start()
-            await MainActor.run {
-                self.addressSearchResults = response.mapItems.prefix(5).map { mapItem in
-                    let title = mapItem.name ?? "Unknown"
-                    let subtitle = mapItem.placemark.locality ?? mapItem.placemark.administrativeArea ?? ""
+        defer { 
+            Task { @MainActor in 
+                self.isSearchingAddress = false 
+            } 
+        }
+        
+        if AppConfig.placesAPIKey() != nil {
+            do {
+                let suggestions = try await placesAutocomplete.autocomplete(
+                    input: query,
+                    sessionToken: placesSessionToken ?? UUID().uuidString,
+                    origin: nil,
+                    radiusMeters: nil
+                )
+                print("🔍 [Autocomplete] Got \(suggestions.count) suggestions for '\(query)'")
+                
+                // Check again if query is still current
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after fetch, discarding results")
+                    return
+                }
+                
+                guard !suggestions.isEmpty else {
+                    print("⚠️ [Autocomplete] No suggestions returned, falling back to MapKit")
+                    throw NSError(domain: "AutocompleteError", code: -1, userInfo: nil)
+                }
+                
+                // Fetch details for display-friendly address fragments
+                let details = try await placesDetails.fetchDetails(placeIds: suggestions.map { $0.placeId })
+                print("📋 [Places Details] Got details for \(details.count) of \(suggestions.count) suggestions")
+                
+                // Final check if query is still current before showing results
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after details fetch, discarding results")
+                    return
+                }
+                
+                let byId = Dictionary(uniqueKeysWithValues: details.map { ($0.placeId, $0) })
+                let mapped: [AddressResult] = suggestions.compactMap { s in
+                    let d = byId[s.placeId]
+                    let title = s.primaryText
+                    let subtitle = s.secondaryText.isEmpty ? (d?.formattedAddress ?? "") : s.secondaryText
                     return AddressResult(
                         title: title,
                         subtitle: subtitle,
@@ -120,17 +208,52 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                         completionSubtitle: subtitle
                     )
                 }
+                print("✅ [Autocomplete] Displaying \(mapped.count) search results")
+                await MainActor.run { self.addressSearchResults = Array(mapped.prefix(5)) }
+                return
+            } catch {
+                print("❌ [Autocomplete] Error: \(error.localizedDescription)")
+                // Fall through to MapKit on error
             }
+        }
+
+        // MapKit Fallback
+        print("📍 [MapKit] Falling back to MapKit search for '\(query)'")
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.naturalLanguageQuery = query
+        let search = MKLocalSearch(request: searchRequest)
+        do {
+            let response = try await search.start()
+            
+            // Final check if query is still current
+            guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                print("📍 [MapKit] Query changed after fetch, discarding results")
+                return
+            }
+            
+            let results = response.mapItems.prefix(5).map { mapItem in
+                let title = mapItem.name ?? "Unknown"
+                let subtitle = mapItem.placemark.locality ?? mapItem.placemark.administrativeArea ?? ""
+                return AddressResult(
+                    title: title,
+                    subtitle: subtitle,
+                    completionTitle: title,
+                    completionSubtitle: subtitle
+                )
+            }
+            print("📍 [MapKit] Displaying \(results.count) search results")
+            await MainActor.run { self.addressSearchResults = Array(results) }
         } catch {
-            await MainActor.run {
-                self.addressSearchResults = []
-            }
+            print("❌ [MapKit Search] Error: \(error.localizedDescription)")
+            await MainActor.run { self.addressSearchResults = [] }
         }
     }
     
     func selectAddress(_ result: AddressResult) {
         currentAddress = "\(result.title), \(result.subtitle)"
         addressSearchResults = []
+        // Clear session token on selection (matching React solution approach)
+        placesSessionToken = nil
     }
 
     func requestPermissions() {

@@ -33,23 +33,32 @@ final class PlacesDetailsService: PlacesDetailsServiceProtocol {
         // Places API (New) Place Details: GET per place, but we can parallelize on client.
         // FieldMask: id,displayName,formattedAddress,location,types
         let fieldMask = "id,displayName,formattedAddress,location,types"
+        // Use header-based API key + field mask per new Places API practices
         let urls: [URL] = placeIds.compactMap { id in
-            var comps = URLComponents(string: "https://places.googleapis.com/v1/places/\(id)")!
-            comps.queryItems = [URLQueryItem(name: "key", value: apiKey), URLQueryItem(name: "fields", value: fieldMask)]
-            return comps.url
+            URL(string: "https://places.googleapis.com/v1/places/\(id)")
         }
 
         return try await withThrowingTaskGroup(of: PlaceDetailsLite?.self) { group in
-            for url in urls { group.addTask { try? await Self.fetchOne(url: url, session: self.session) } }
+            for url in urls { group.addTask { try? await Self.fetchOne(url: url, session: self.session, apiKey: apiKey, fieldMask: fieldMask) } }
             var out: [PlaceDetailsLite] = []
             for try await item in group { if let item = item { out.append(item) } }
             return out
         }
     }
 
-    private static func fetchOne(url: URL, session: URLSession) async throws -> PlaceDetailsLite? {
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
+    private static func fetchOne(url: URL, session: URLSession, apiKey: String, fieldMask: String) async throws -> PlaceDetailsLite? {
+        var req = URLRequest(url: url)
+        req.addValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
+        req.addValue(fieldMask, forHTTPHeaderField: "X-Goog-FieldMask")
+        if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
+            req.addValue(bundleId, forHTTPHeaderField: "X-Ios-Bundle-Identifier")
+        }
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+            print("❌ [Places Details] HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1) — \(body.prefix(400))")
+            return nil
+        }
         // Minimal decode of the Place object
         struct DisplayName: Decodable { let text: String? }
         struct LocationLatLng: Decodable { let latitude: Double?; let longitude: Double? }

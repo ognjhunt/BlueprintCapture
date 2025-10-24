@@ -17,12 +17,34 @@ enum LocationPermissionRequester {
         }
 
         // Ask and wait for the response via delegate
+        // IMPORTANT: retain the delegate proxy until it invokes the callback, otherwise
+        // the continuation can be leaked if ARC deallocates the proxy before delegate fires.
         return await withCheckedContinuation { continuation in
-            let delegateProxy = AuthorizationDelegateProxy { status in
-                let allowed = (status == .authorizedAlways || status == .authorizedWhenInUse)
-                continuation.resume(returning: allowed)
+            // Retain both the proxy and continuation safely; allows timeout to resume
+            // exactly once if the delegate never fires for any reason.
+            final class Box {
+                var proxy: AuthorizationDelegateProxy?
+                var cont: CheckedContinuation<Bool, Never>?
             }
-            delegateProxy.request()
+            let box = Box()
+            box.cont = continuation
+            box.proxy = AuthorizationDelegateProxy { status in
+                let allowed = (status == .authorizedAlways || status == .authorizedWhenInUse)
+                if let cont = box.cont { cont.resume(returning: allowed) }
+                box.cont = nil
+                box.proxy = nil
+            }
+
+            // Fallback timeout to avoid indefinite spinner if the system never calls back
+            // (rare, but can happen due to OS bugs or app lifecycle interruptions).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 12) {
+                guard let cont = box.cont else { return }
+                cont.resume(returning: false)
+                box.cont = nil
+                box.proxy = nil
+            }
+
+            box.proxy?.request()
         }
     }
 }

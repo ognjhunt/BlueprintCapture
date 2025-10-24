@@ -6,12 +6,17 @@ protocol NotificationServiceProtocol: AnyObject {
     func requestAuthorizationIfNeeded() async
     func scheduleProximityNotifications(for targets: [Target], maxRegions: Int, radiusMeters: CLLocationDistance)
     func clearProximityNotifications()
+    /// Schedules a one-shot local notification at the reservation expiry time.
+    func scheduleReservationExpiryNotification(target: Target, at date: Date)
+    /// Cancels a previously scheduled reservation-expiry notification for the given target.
+    func cancelReservationExpiryNotification(for targetId: String)
 }
 
 final class NotificationService: NSObject, NotificationServiceProtocol {
     private let center: UNUserNotificationCenter
     private let authorizationAskedKey = "notifications.authorization.asked"
     private let proximityPrefix = "proximity_"
+    private let expiryPrefix = "reservation_expiry_"
     static let categoryId = "TARGET_PROXIMITY"
     static let actionCheckIn = "ACTION_CHECK_IN"
     static let actionDirections = "ACTION_DIRECTIONS"
@@ -94,6 +99,33 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
                 self.center.removePendingNotificationRequests(withIdentifiers: ids)
             }
         }
+    }
+
+    // MARK: - Reservation Expiry Notifications
+
+    func scheduleReservationExpiryNotification(target: Target, at date: Date) {
+        let seconds = max(1, Int(date.timeIntervalSinceNow))
+        // If already scheduled for this target, cancel and reschedule to avoid duplicates
+        cancelReservationExpiryNotification(for: target.id)
+
+        let content = UNMutableNotificationContent()
+        content.title = "Reservation expired"
+        content.body = "We auto-cancelled your reservation at \(target.displayName) because mapping didn’t start within 1 hour."
+        content.sound = .default
+        content.userInfo = [
+            "targetId": target.id,
+            "title": target.displayName,
+            "lat": target.lat,
+            "lng": target.lng
+        ]
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(seconds), repeats: false)
+        let request = UNNotificationRequest(identifier: expiryPrefix + target.id, content: content, trigger: trigger)
+        center.add(request)
+    }
+
+    func cancelReservationExpiryNotification(for targetId: String) {
+        center.removePendingNotificationRequests(withIdentifiers: [expiryPrefix + targetId])
     }
 }
 

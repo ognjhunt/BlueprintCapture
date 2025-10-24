@@ -1,9 +1,13 @@
+import Foundation
 import ARKit
 import AVFoundation
 import Combine
 import CoreMotion
 import CoreMedia
 import Metal
+#if canImport(ZIPFoundation)
+import ZIPFoundation
+#endif
 
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
@@ -763,16 +767,15 @@ private extension VideoCaptureManager {
             try fileManager.removeItem(at: artifacts.packageURL)
         }
 
-        if #available(iOS 16.0, *) {
-            try fileManager.zipItem(
-                at: artifacts.directoryURL,
-                to: artifacts.packageURL,
-                shouldKeepParent: true,
-                compressionMethod: .deflate
-            )
-        } else {
-            throw CaptureError.archiveUnavailable
-        }
+        #if canImport(ZIPFoundation)
+        try fileManager.zipItem(
+            at: artifacts.directoryURL,
+            to: artifacts.packageURL,
+            shouldKeepParent: true
+        )
+        #else
+        throw CaptureError.archiveUnavailable
+        #endif
     }
 
     func matrixToArray(_ matrix: simd_float4x4) -> [Float] {
@@ -812,7 +815,10 @@ private extension VideoCaptureManager {
         }
 
         if geometry.hasNormals {
-            let rotation = simd_float3x3(anchor.transform)
+            let c0 = simd_float3(anchor.transform.columns.0.x, anchor.transform.columns.0.y, anchor.transform.columns.0.z)
+            let c1 = simd_float3(anchor.transform.columns.1.x, anchor.transform.columns.1.y, anchor.transform.columns.1.z)
+            let c2 = simd_float3(anchor.transform.columns.2.x, anchor.transform.columns.2.y, anchor.transform.columns.2.z)
+            let rotation = simd_float3x3(columns: (c0, c1, c2))
             for index in 0..<geometry.normals.count {
                 let normal = geometry.normal(at: index)
                 let worldNormal = normalize(rotation * normal)
@@ -947,7 +953,9 @@ private extension ARMeshGeometry {
     var faceCount: Int {
         let perPrimitive = indicesPerPrimitive
         guard perPrimitive > 0 else { return 0 }
-        return faces.indexCount / perPrimitive
+        let totalBytes = faces.buffer.length
+        let totalIndices = totalBytes / faces.bytesPerIndex
+        return totalIndices / perPrimitive
     }
 
     var indicesPerPrimitive: Int {
@@ -956,8 +964,6 @@ private extension ARMeshGeometry {
             return 3
         case .line:
             return 2
-        case .point:
-            return 1
         @unknown default:
             return 3
         }
@@ -974,19 +980,21 @@ private extension ARMeshGeometry {
     func faceIndices(at index: Int) -> [UInt32] {
         let perPrimitive = indicesPerPrimitive
         let primitiveStart = index * perPrimitive
-        guard perPrimitive > 0, primitiveStart + perPrimitive <= faces.indexCount else { return [] }
+        let totalBytes = faces.buffer.length
+        let totalIndices = totalBytes / faces.bytesPerIndex
+        guard perPrimitive > 0, primitiveStart + perPrimitive <= totalIndices else { return [] }
 
-        let byteOffset = faces.offset + primitiveStart * faces.bytesPerIndex
+        let byteOffset = primitiveStart * faces.bytesPerIndex
         let pointer = faces.buffer.contents().advanced(by: byteOffset)
 
-        switch faces.indexType {
-        case .uint16:
+        let bpi = faces.bytesPerIndex
+        if bpi == MemoryLayout<UInt16>.size {
             let base = pointer.assumingMemoryBound(to: UInt16.self)
             return (0..<perPrimitive).map { UInt32(base[$0]) }
-        case .uint32:
+        } else if bpi == MemoryLayout<UInt32>.size {
             let base = pointer.assumingMemoryBound(to: UInt32.self)
             return (0..<perPrimitive).map { base[$0] }
-        @unknown default:
+        } else {
             return []
         }
     }

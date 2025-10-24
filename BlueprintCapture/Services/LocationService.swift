@@ -52,6 +52,8 @@ extension LocationService: CLLocationManagerDelegate {
         // If now authorized, request a one-shot location to prime latestLocation quickly
         if status == .authorizedWhenInUse || status == .authorizedAlways {
             manager.requestLocation()
+            // Also notify listener immediately to allow discovery prefetch
+            listener?(latestLocation)
         }
         // Notify listener (may be nil on first grant)
         listener?(latestLocation)

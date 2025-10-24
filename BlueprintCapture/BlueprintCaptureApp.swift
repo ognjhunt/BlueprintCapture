@@ -15,6 +15,10 @@ struct BlueprintCaptureApp: App {
                     OnboardingFlowView()
                 }
             }
+            .onAppear {
+                // Guarantee a local user exists even if user bypasses onboarding in dev
+                UserDeviceService.ensureTemporaryUser()
+            }
                 .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { _ in }
         }
     }
