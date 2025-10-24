@@ -67,6 +67,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private var userLocation: CLLocation?
     private var streetViewCache: [String: (has: Bool, url: URL?)] = [:]
     @Published private(set) var reservations: [String: ReservationStatus] = [:]
+    private var reservationObservers: [String: ReservationObservation] = [:]
     @Published private(set) var targetStates: [String: TargetState] = [:]
     private var stateObservers: [String: TargetStateObservation] = [:]
     private var addressTask: Task<Void, Never>?
