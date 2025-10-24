@@ -4,6 +4,7 @@ struct TargetRow: View {
     let item: NearbyTargetsViewModel.NearbyItem
     let reservationSecondsRemaining: Int?
     let isOnSite: Bool
+    let reservedByMe: Bool
 
     var body: some View {
         let isReserved = reservationSecondsRemaining != nil
@@ -18,7 +19,7 @@ struct TargetRow: View {
                     )
                     .overlay(alignment: .bottomLeading) {
                         if let seconds = reservationSecondsRemaining {
-                            reservedPill(seconds: seconds)
+                            reservedPill(seconds: seconds, isMine: reservedByMe)
                                 .padding(.leading, 4)
                                 .padding(.bottom, 4)
                         }
@@ -30,8 +31,11 @@ struct TargetRow: View {
                             .font(.headline)
                             .lineLimit(1)
                             .foregroundStyle(.primary)
+                            .layoutPriority(1)
 
-                        if isOnSite && reservationSecondsRemaining == nil {
+                        if reservationSecondsRemaining != nil {
+                            // No inline badge when reserved (top-left ribbon already indicates state)
+                        } else if isOnSite {
                             onsitePill()
                         }
                     }
@@ -52,9 +56,10 @@ struct TargetRow: View {
                     }
                 }
                 .overlay(alignment: .topTrailing) {
+                    // Float payout badge above content so the name can use full width
                     payoutBadge()
-                        .padding(.top, 2)
-                        .padding(.trailing, -4) // nudge slightly closer to chevron to free title space
+                        .padding(.top, -2)
+                        .padding(.trailing, -20)
                         .allowsHitTesting(false)
                 }
 
@@ -67,19 +72,32 @@ struct TargetRow: View {
 
             if isReserved {
                 // Corner ribbon accent for reserved state
-                Text("Reserved")
+                if reservedByMe {
+                    Text("Reserved")
+                        .font(.caption2).fontWeight(.semibold)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(BlueprintTheme.reservedGradient)
+                        )
+                        .foregroundStyle(.white)
+                        .offset(x: -4, y: -4)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                        Text("Held")
+                    }
                     .font(.caption2).fontWeight(.semibold)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(
-                        Capsule().fill(BlueprintTheme.reservedGradient)
-                    )
-                    .foregroundStyle(.white)
+                    .background(Capsule().fill(Color(.systemFill)))
+                    .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
+                    .foregroundStyle(.secondary)
                     .offset(x: -4, y: -4)
+                }
             }
         }
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isReserved ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground))
+                .fill(isReserved ? (reservedByMe ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground)) : Color(.systemBackground))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -87,7 +105,7 @@ struct TargetRow: View {
         )
         .overlay(
             Group {
-                if isReserved {
+                if isReserved && reservedByMe {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.2)
                 }
@@ -161,9 +179,13 @@ struct TargetRow: View {
         let timeText = formatDuration(minutes)
         return HStack(spacing: 4) {
             Image(systemName: "clock")
-            Text(timeText)
-                .monospacedDigit()
-                .lineLimit(1)
+            HStack(spacing: 2) {
+                Text("Scan")
+                    .fontWeight(.medium)
+                Text(timeText)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
         }
         .font(.caption).fontWeight(.semibold)
         .padding(.horizontal, 8).padding(.vertical, 4)
@@ -186,7 +208,13 @@ struct TargetRow: View {
         }
         .font(.caption2).fontWeight(.bold)
         .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.12)))
+        // Opaque base so overlapping the title never shows through
+        .background(
+            ZStack {
+                Capsule().fill(Color(.systemBackground))
+                Capsule().fill(BlueprintTheme.successGreen.opacity(0.18))
+            }
+        )
         .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
         .foregroundStyle(BlueprintTheme.payoutGradient)
         .fixedSize(horizontal: true, vertical: false)
@@ -195,7 +223,7 @@ struct TargetRow: View {
         .accessibilityLabel("Estimated payout \(payoutText)")
     }
 
-    private func reservedPill(seconds: Int) -> some View {
+    private func reservedPill(seconds: Int, isMine: Bool) -> some View {
         let mins = max(0, seconds) / 60
         let secs = max(0, seconds) % 60
         let text = String(format: "%02d:%02d", mins, secs)
@@ -206,8 +234,21 @@ struct TargetRow: View {
         }
         .font(.caption2).fontWeight(.bold)
         .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(Capsule().fill(BlueprintTheme.reservedGradient))
-        .foregroundStyle(.white)
+        .background(
+            Group {
+                if isMine {
+                    Capsule().fill(BlueprintTheme.reservedGradient)
+                } else {
+                    Capsule().fill(Color(.systemFill))
+                }
+            }
+        )
+        .overlay(
+            Group {
+                if !isMine { Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1) }
+            }
+        )
+        .foregroundStyle(isMine ? .white : .secondary)
     }
 
     private func onsitePill() -> some View {
@@ -228,6 +269,24 @@ struct TargetRow: View {
             Image(systemName: "photo")
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func reservationOwnerBadge() -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: reservedByMe ? "person.fill.checkmark" : "lock.fill")
+            Text(reservedByMe ? "Yours" : "Held")
+                .lineLimit(1)
+        }
+        .font(.caption2).fontWeight(.semibold)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(
+            Capsule().fill(reservedByMe ? BlueprintTheme.successGreen.opacity(0.16) : Color(.systemFill))
+        )
+        .overlay(
+            Capsule().stroke(reservedByMe ? BlueprintTheme.successGreen.opacity(0.45) : Color.black.opacity(0.08), lineWidth: 1)
+        )
+        .foregroundStyle(reservedByMe ? BlueprintTheme.successGreen : .secondary)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private func formatCurrency(_ value: Int) -> String {

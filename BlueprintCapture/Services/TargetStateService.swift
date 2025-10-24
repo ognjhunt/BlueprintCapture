@@ -126,17 +126,18 @@ final class TargetStateService: TargetStateServiceProtocol {
     func reserve(target: Target, for duration: TimeInterval) async throws -> Reservation {
         let now = Date()
         let until = now.addingTimeInterval(duration)
+        // Resolve a stable identifier for the current user/device (works even when not authenticated)
         #if canImport(FirebaseAuth)
-        let uid = auth.currentUser?.uid
+        let userId = auth.currentUser?.uid ?? UserDeviceService.resolvedUserId()
         #else
-        let uid: String? = nil
+        let userId = UserDeviceService.resolvedUserId()
         #endif
         let doc = collection.document(target.id)
         // Read-then-write with simple guards; acceptable for MVP
         do {
             let snapshot = try await doc.getDocument()
             if let data = snapshot.data(), let state = toState(data) {
-                if state.status == .reserved, let exp = state.reservedUntil, exp > now, state.reservedBy != uid {
+                if state.status == .reserved, let exp = state.reservedUntil, exp > now, state.reservedBy != userId {
                     throw NSError(domain: "TargetStateService", code: 409, userInfo: [NSLocalizedDescriptionKey: "Already reserved"])
                 }
                 if state.status == .completed { throw NSError(domain: "TargetStateService", code: 410, userInfo: [NSLocalizedDescriptionKey: "Already completed"]) }
@@ -148,7 +149,7 @@ final class TargetStateService: TargetStateServiceProtocol {
             "reservedUntil": Timestamp(date: until),
             "updatedAt": FieldValue.serverTimestamp()
         ]
-        if let uid { payload["reservedBy"] = uid }
+        payload["reservedBy"] = userId
         payload["lat"] = target.lat
         payload["lng"] = target.lng
         #if canImport(Geohasher)
@@ -160,13 +161,26 @@ final class TargetStateService: TargetStateServiceProtocol {
 
     func cancelReservation(for targetId: String) async {
         let doc = collection.document(targetId)
+        // Only allow cancel if the current user/device is the reserver
+        #if canImport(FirebaseAuth)
+        let userId = auth.currentUser?.uid ?? UserDeviceService.resolvedUserId()
+        #else
+        let userId = UserDeviceService.resolvedUserId()
+        #endif
         do {
-            try await doc.setData([
-                "status": TargetState.Status.available.rawValue,
-                "reservedBy": FieldValue.delete(),
-                "reservedUntil": FieldValue.delete(),
-                "updatedAt": FieldValue.serverTimestamp()
-            ], merge: true)
+            let snapshot = try await doc.getDocument()
+            let data = snapshot.data() ?? [:]
+            let reservedBy = data["reservedBy"] as? String
+            if reservedBy == nil || reservedBy == userId {
+                try await doc.setData([
+                    "status": TargetState.Status.available.rawValue,
+                    "reservedBy": FieldValue.delete(),
+                    "reservedUntil": FieldValue.delete(),
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            } else {
+                print("⚠️ Refusing to cancel reservation for \(targetId): owned by another user")
+            }
         } catch {
             print("⚠️ Failed to cancel target_state for \(targetId): \(error)")
         }
@@ -174,18 +188,18 @@ final class TargetStateService: TargetStateServiceProtocol {
 
     func checkIn(targetId: String) async throws {
         #if canImport(FirebaseAuth)
-        let uid = auth.currentUser?.uid
+        let userId = auth.currentUser?.uid ?? UserDeviceService.resolvedUserId()
         #else
-        let uid: String? = nil
+        let userId = UserDeviceService.resolvedUserId()
         #endif
         let doc = collection.document(targetId)
         let snapshot = try await doc.getDocument()
         if let data = snapshot.data(), let state = toState(data) {
             let now = Date()
-            if state.status == .reserved, (state.reservedBy == uid || uid == nil), (state.reservedUntil ?? now) > now {
+            if state.status == .reserved, (state.reservedBy == userId), (state.reservedUntil ?? now) > now {
                 try await doc.setData([
                     "status": TargetState.Status.in_progress.rawValue,
-                    "checkedInBy": uid as Any,
+                    "checkedInBy": userId,
                     "updatedAt": FieldValue.serverTimestamp()
                 ], merge: true)
                 return
@@ -196,14 +210,14 @@ final class TargetStateService: TargetStateServiceProtocol {
 
     func complete(targetId: String) async throws {
         #if canImport(FirebaseAuth)
-        let uid = auth.currentUser?.uid
+        let userId = auth.currentUser?.uid ?? UserDeviceService.resolvedUserId()
         #else
-        let uid: String? = nil
+        let userId = UserDeviceService.resolvedUserId()
         #endif
         let doc = collection.document(targetId)
         let snapshot = try await doc.getDocument()
         if let data = snapshot.data(), let state = toState(data) {
-            if state.status == .in_progress && (state.checkedInBy == uid || uid == nil) {
+            if state.status == .in_progress && (state.checkedInBy == userId) {
                 try await doc.setData([
                     "status": TargetState.Status.completed.rawValue,
                     "completedAt": FieldValue.serverTimestamp(),
@@ -217,9 +231,9 @@ final class TargetStateService: TargetStateServiceProtocol {
 
     func fetchActiveReservationForCurrentUser() async -> Reservation? {
         #if canImport(FirebaseAuth)
-        guard let uid = auth.currentUser?.uid else { return nil }
+        let uid = auth.currentUser?.uid ?? UserDeviceService.resolvedUserId()
         #else
-        return nil
+        let uid = UserDeviceService.resolvedUserId()
         #endif
         do {
             let nowTs = Timestamp(date: Date())

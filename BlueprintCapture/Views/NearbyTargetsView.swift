@@ -149,7 +149,8 @@ struct NearbyTargetsView: View {
                             TargetRow(
                                 item: pinned,
                                 reservationSecondsRemaining: secondsRemaining,
-                                isOnSite: viewModel.isOnSite(pinned.target)
+                                isOnSite: viewModel.isOnSite(pinned.target),
+                                reservedByMe: true
                             )
                             .contentShape(Rectangle())
                             .onTapGesture {
@@ -174,12 +175,17 @@ struct NearbyTargetsView: View {
                             }
                             return nil
                         }()
+                        let isReservedByMe: Bool = {
+                            if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id, res.reservedUntil > now { return true }
+                            return false
+                        }()
                         // Skip duplicate of pinned row in the main list
                         if reservedItem?.id == item.id { EmptyView() } else {
                             TargetRow(
                                 item: item,
                                 reservationSecondsRemaining: secondsRemaining,
-                                isOnSite: viewModel.isOnSite(item.target)
+                                isOnSite: viewModel.isOnSite(item.target),
+                                reservedByMe: isReservedByMe
                             )
                             .contentShape(Rectangle())
                             .onTapGesture {
@@ -434,8 +440,16 @@ private extension NearbyTargetsView {
             return false
         }()
         let isReservedByMe: Bool = {
+            // Prefer live target_state owner comparison to work across sessions
+            if let s = viewModel.targetStates[item.id], let owner = s.reservedBy {
+                return owner == UserDeviceService.resolvedUserId()
+            }
             if let res = activeReservation { return res.targetId == item.id && res.reservedUntil > now }
             return false
+        }()
+        let reservedUntilTime: Date? = {
+            if case .reserved(let until) = status { return until }
+            return nil
         }()
 
         VStack(spacing: 16) {
@@ -468,21 +482,28 @@ private extension NearbyTargetsView {
 
                 if viewModel.isOnSite(item.target) {
                     Button {
-                        // On-site: perform check-in and navigate to capture
-                        Task {
-                            do {
-                                try await viewModel.checkIn(item.target)
-                                await MainActor.run {
-                                    captureFlow.step = .readyToCapture
-                                    captureFlow.captureManager.configureSession()
-                                    captureFlow.captureManager.startSession()
-                                    navigateToCapture = true
-                                    showActions = false
-                                }
-                            } catch {
-                                await MainActor.run {
-                                    reserveMessage = "We couldn't check you in. Please try again."
-                                    showReserveConfirm = true
+                        // If someone else reserved it, inform instead of attempting check-in
+                        if isReservedHere && !isReservedByMe, let until = reservedUntilTime {
+                            reserveMessage = "This venue is reserved until \(until.formatted(date: .omitted, time: .shortened)). If that user isn’t checked in and actively mapping by then, you can start mapping once you’re on-site."
+                            keepActionsOpenAfterAlert = true
+                            showReserveConfirm = true
+                        } else {
+                            // On-site: perform check-in and navigate to capture
+                            Task {
+                                do {
+                                    try await viewModel.checkIn(item.target)
+                                    await MainActor.run {
+                                        captureFlow.step = .readyToCapture
+                                        captureFlow.captureManager.configureSession()
+                                        captureFlow.captureManager.startSession()
+                                        navigateToCapture = true
+                                        showActions = false
+                                    }
+                                } catch {
+                                    await MainActor.run {
+                                        reserveMessage = "We couldn't check you in. Please try again."
+                                        showReserveConfirm = true
+                                    }
                                 }
                             }
                         }
@@ -492,8 +513,12 @@ private extension NearbyTargetsView {
                     .buttonStyle(BlueprintSuccessButtonStyle())
                 } else {
                     Button {
-                        // Off-site: show guidance alert and keep sheet open
-                        reserveMessage = "You're not detected on-site yet. Head to the location, then tap Check in to begin mapping."
+                        // Off-site: show guidance alert and keep sheet open; include reservation info if held by someone else
+                        if isReservedHere && !isReservedByMe, let until = reservedUntilTime {
+                            reserveMessage = "This venue is reserved until \(until.formatted(date: .omitted, time: .shortened)). If that user isn’t checked in and actively mapping by then, you can start once you’re on‑site. You’re not detected on‑site yet."
+                        } else {
+                            reserveMessage = "You're not detected on-site yet. Head to the location, then tap Check in to begin mapping."
+                        }
                         keepActionsOpenAfterAlert = true
                         showReserveConfirm = true
                     } label: {
