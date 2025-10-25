@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import FirebaseAuth
 
 enum SettingsError: LocalizedError {
     case networkError
@@ -36,15 +37,38 @@ class SettingsViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: SettingsError?
     @Published var showError = false
+    @Published var isAuthenticated: Bool = false
     
     private let apiService = APIService.shared
     private let stripeService = StripeConnectService.shared
+    
+    init() {
+        isAuthenticated = Auth.auth().currentUser != nil
+        NotificationCenter.default.addObserver(forName: .AuthStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            self.isAuthenticated = Auth.auth().currentUser != nil
+            Task { await self.loadUserData() }
+        }
+    }
     
     func loadUserData() async {
         isLoading = true
         defer { isLoading = false }
         
         do {
+            // If not authenticated, load only public-safe defaults and return
+            guard Auth.auth().currentUser != nil else {
+                self.profile = .placeholder
+                self.totalEarnings = 0
+                self.pendingPayout = 0
+                self.scansCompleted = 0
+                self.billingInfo = nil
+                self.captureHistory = []
+                self.qcStatus = nil
+                self.payoutLedger = []
+                self.stripeAccountState = nil
+                return
+            }
             async let profileTask = apiService.fetchUserProfile()
             async let earningsTask = apiService.fetchEarnings()
             async let billingTask = apiService.fetchBillingInfo()
@@ -74,6 +98,19 @@ class SettingsViewModel: ObservableObject {
             self.stripeAccountState = try await stripeTask
         } catch {
             self.error = error as? SettingsError ?? .networkError
+            self.showError = true
+        }
+    }
+    
+    func signOut() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            try Auth.auth().signOut()
+            NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+            await loadUserData()
+        } catch {
+            self.error = .networkError
             self.showError = true
         }
     }

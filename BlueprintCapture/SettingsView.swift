@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State private var showingBillingSetup = false
     @State private var showingStripeOnboarding = false
     @State private var showingEditProfile = false
+    @State private var showingAuth = false
 
     private var recentCaptures: [CaptureHistoryEntry] {
         Array(
@@ -334,19 +335,21 @@ struct SettingsView: View {
                             
                             Divider()
                             
-                            Button {
-                                viewModel.startEditingProfile()
-                                showingEditProfile = true
-                            } label: {
-                                HStack {
-                                    Text("Edit Profile")
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            if viewModel.isAuthenticated {
+                                Button {
+                                    viewModel.startEditingProfile()
+                                    showingEditProfile = true
+                                } label: {
+                                    HStack {
+                                        Text("Edit Profile")
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
+                                .foregroundStyle(.white)
                             }
-                            .foregroundStyle(.white)
                             
                             Divider()
                             
@@ -364,16 +367,32 @@ struct SettingsView: View {
                             .foregroundStyle(.white)
                             
                             Divider()
-                            
-                            Button {
-                                // Sign out action
-                            } label: {
-                                HStack {
-                                    Text("Sign Out")
-                                    Spacer()
+
+                            if viewModel.isAuthenticated {
+                                Button {
+                                    Task { await viewModel.signOut() }
+                                } label: {
+                                    HStack {
+                                        Text("Sign Out")
+                                        Spacer()
+                                    }
                                 }
+                                .foregroundStyle(BlueprintTheme.errorRed)
+                            } else {
+                                Button {
+                                    showingAuth = true
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "person.crop.circle.badge.plus")
+                                        Text("Sign up / Log in")
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .foregroundStyle(.white)
                             }
-                            .foregroundStyle(BlueprintTheme.errorRed)
                         }
                     }
                 }
@@ -392,6 +411,9 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showingEditProfile) {
             EditProfileView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showingAuth) {
+            AuthView()
         }
         .overlay {
             if viewModel.isLoading {

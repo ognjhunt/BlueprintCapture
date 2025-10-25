@@ -41,5 +41,16 @@
     <string>Motion data provides pose tracking for metric scale alignment.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Your location anchors the capture to the correct address.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.744608654760-24h47506rj2ljqt5ghb7utamkb21nvt8</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

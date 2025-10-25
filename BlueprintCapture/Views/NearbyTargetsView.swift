@@ -667,7 +667,11 @@ private extension NearbyTargetsView {
                 showDirectionsPrompt = true
             }
         } catch {
-            reserveMessage = "Unable to reserve right now. Please try again."
+            if let guardError = error as? NearbyTargetsViewModel.ReservationGuardError {
+                reserveMessage = guardError.localizedDescription
+            } else {
+                reserveMessage = "Unable to reserve right now. Please try again."
+            }
             keepActionsOpenAfterAlert = true
             showReserveConfirm = true
         }
@@ -691,9 +695,11 @@ private extension NearbyTargetsView {
     // Keep local active reservation in sync with backend across sessions so the action sheet is accurate
     private func syncActiveReservationState() async {
         if let res = await viewModel.fetchCurrentUserActiveReservation() {
+            // If the reserved item isn't in the current filtered list, build it explicitly and pin it
+            let item = await viewModel.buildItemForTargetId(res.targetId)
             await MainActor.run {
                 self.activeReservation = res
-                self.reservedItem = viewModel.items.first(where: { $0.id == res.targetId })
+                self.reservedItem = item ?? viewModel.items.first(where: { $0.id == res.targetId })
             }
         } else {
             await MainActor.run {

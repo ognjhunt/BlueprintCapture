@@ -61,10 +61,28 @@ enum AppConfig {
         if let string = secretsPlist()? ["STRIPE_INSTANT_PAYOUT_URL"] as? String { return URL(string: string) }
         return nil
     }
+
+    // MARK: - Reservation Guards
+    static func maxReservationDriveMinutes() -> Int {
+        if let plist = secretsPlist() {
+            if let num = plist["MAX_RESERVATION_DRIVE_MINUTES"] as? NSNumber { return num.intValue }
+            if let str = plist["MAX_RESERVATION_DRIVE_MINUTES"] as? String, let val = Int(str) { return val }
+        }
+        return 60
+    }
+
+    static func fallbackMaxReservationAirMiles() -> Double {
+        if let plist = secretsPlist() {
+            if let num = plist["FALLBACK_MAX_RESERVATION_AIR_MILES"] as? NSNumber { return num.doubleValue }
+            if let str = plist["FALLBACK_MAX_RESERVATION_AIR_MILES"] as? String, let val = Double(str) { return val }
+        }
+        return 35.0
+    }
 }
 
 extension Notification.Name {
     static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
+    static let AuthStateDidChange = Notification.Name("Blueprint.AuthStateDidChange")
 }
 
 

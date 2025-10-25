@@ -9,6 +9,10 @@ import UIKit
 import FirebaseCore
 import UserNotifications
 import FirebaseAuth
+import Foundation
+#if canImport(GoogleSignIn)
+import GoogleSignIn
+#endif
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     private let notificationService = NotificationService()
@@ -67,3 +71,14 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         completionHandler()
     }
 }
+
+#if canImport(GoogleSignIn)
+extension AppDelegate {
+    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
+        if GIDSignIn.sharedInstance.handle(url) {
+            return true
+        }
+        return false
+    }
+}
+#endif

@@ -180,8 +180,42 @@ final class NearbyTargetsViewModel: ObservableObject {
         return user.distance(from: targetLocation) <= thresholdMeters
     }
 
+    enum ReservationGuardError: LocalizedError {
+        case tooFar(minutes: Int)
+        case locationUnavailable
+
+        var errorDescription: String? {
+            switch self {
+            case .tooFar(let minutes):
+                return "This location is approximately \(minutes) minutes away. Reservations are limited to within \(AppConfig.maxReservationDriveMinutes()) minutes of your current location."
+            case .locationUnavailable:
+                return "We couldn’t determine your current location. Enable Location Services to reserve."
+            }
+        }
+    }
+
     /// Attempts to reserve the target for one hour
     func reserveTarget(_ target: Target) async throws -> Reservation {
+        // Pre‑guard: block reservations that are beyond configured travel time threshold
+        if let origin = locationService.latestLocation ?? userLocation {
+            let dest = CLLocationCoordinate2D(latitude: target.lat, longitude: target.lng)
+            let maxMinutes = AppConfig.maxReservationDriveMinutes()
+            // Try driving ETA first; fall back to air miles heuristic
+            let etaMinutes = await estimateDriveMinutes(from: origin.coordinate, to: dest)
+            if let eta = etaMinutes {
+                if eta > maxMinutes { throw ReservationGuardError.tooFar(minutes: eta) }
+            } else {
+                let miles = origin.distance(from: CLLocation(latitude: dest.latitude, longitude: dest.longitude)) / 1609.34
+                if miles > AppConfig.fallbackMaxReservationAirMiles() {
+                    // Approximate minutes at 35 mph average urban speed
+                    let approx = Int(ceil(miles / 35.0 * 60.0))
+                    throw ReservationGuardError.tooFar(minutes: max(approx, maxMinutes + 1))
+                }
+            }
+        } else {
+            throw ReservationGuardError.locationUnavailable
+        }
+
         let oneHour: TimeInterval = 60 * 60
         // Use new target_state path first; fall back to older service if fails
         do {
@@ -429,6 +463,96 @@ final class NearbyTargetsViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Reservation pinning helpers
+    /// Builds a NearbyItem for a given targetId even if it is outside current filters
+    func buildItemForTargetId(_ targetId: String) async -> NearbyItem? {
+        if let existing = items.first(where: { $0.id == targetId }) { return existing }
+
+        // Attempt to retrieve coordinates from live state
+        let stateMap = await targetStateService.batchFetchStates(for: [targetId])
+        let state = stateMap[targetId]
+
+        var lat: Double? = state?.lat
+        var lng: Double? = state?.lng
+        var displayName: String? = nil
+        var address: String? = nil
+        var types: [String] = []
+
+        // If this is a Google Place ID, try to fetch details for nicer name/address
+        if let details = try? await placesDetailsService.fetchDetails(placeIds: [targetId]), let d = details.first {
+            displayName = d.displayName
+            address = d.formattedAddress
+            lat = lat ?? d.lat
+            lng = lng ?? d.lng
+            types = d.types ?? []
+        }
+
+        guard let latVal = lat, let lngVal = lng else { return nil }
+
+        // Fill in an address if missing via reverse geocoding
+        if address == nil {
+            if let a = try? await geocoding.reverseGeocode(lat: latVal, lng: lngVal) { address = a }
+        }
+
+        let origin = currentSearchLocation() ?? locationService.latestLocation ?? userLocation ?? CLLocation(latitude: latVal, longitude: lngVal)
+        let distanceMeters = origin.distance(from: CLLocation(latitude: latVal, longitude: lngVal))
+        let miles = distanceMeters / 1609.34
+        let target = Target(
+            id: targetId,
+            displayName: displayName ?? "Reserved location",
+            sku: .B,
+            lat: latVal,
+            lng: lngVal,
+            address: address,
+            demandScore: dynamicDemand(forTypes: types),
+            sizeSqFt: nil,
+            category: types.first,
+            computedDistanceMeters: distanceMeters
+        )
+        let payout = estimatedPayout(for: target, pricing: pricing)
+
+        // Street View availability (optional)
+        var hasSV = false
+        var url: URL? = nil
+        let cacheKey = "\(latVal.rounded(to: 5)),\(lngVal.rounded(to: 5))"
+        if let cached = streetViewCache[cacheKey] {
+            hasSV = cached.has
+            url = cached.url
+        } else if let service = streetService as? StreetViewServiceProtocol {
+            hasSV = (try? await service.hasStreetView(lat: latVal, lng: lngVal)) ?? false
+            url = hasSV ? service.imageURL(lat: latVal, lng: lngVal, size: CGSize(width: 600, height: 400)) : nil
+            streetViewCache[cacheKey] = (hasSV, url)
+        }
+
+        return NearbyItem(id: targetId, target: target, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV)
+    }
+
+    /// Estimates driving minutes using MapKit; returns nil if unable to compute quickly
+    private func estimateDriveMinutes(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async -> Int? {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: MKPlacemark(coordinate: from))
+        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: to))
+        request.transportType = .automobile
+        request.requestsAlternateRoutes = false
+
+        return await withTaskGroup(of: Int?.self) { group -> Int? in
+            // Calculation task
+            group.addTask {
+                await withCheckedContinuation { continuation in
+                    let directions = MKDirections(request: request)
+                    directions.calculate { response, _ in
+                        if let eta = response?.routes.first?.expectedTravelTime { continuation.resume(returning: Int(ceil(eta / 60.0))) }
+                        else { continuation.resume(returning: nil) }
+                    }
+                }
+            }
+            // Timeout task (3 seconds)
+            group.addTask { try? await Task.sleep(nanoseconds: 3_000_000_000); return nil }
+            for await result in group { if let val = result { return val } }
+            return nil
+        }
+    }
+
     private func updateReservationObservers(for targetIds: [String]) {
         let ids = Set(targetIds)
 
@@ -630,7 +754,7 @@ extension NearbyTargetsViewModel {
         }
     }
 
-    private func dynamicDemand(forTypes types: [String]) -> Double {
+    fileprivate func dynamicDemand(forTypes types: [String]) -> Double {
         // Type-driven baseline demand learned from AI lab requests (tweak as needed)
         // 0.0 - 1.0 scale
         let table: [String: Double] = [
