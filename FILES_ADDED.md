@@ -38,7 +38,7 @@ struct MainTabView: View {
 **Dependencies**: 
 - SettingsViewModel (state)
 - EditProfileView (sheet)
-- StripeBillingSetupView (sheet)
+- StripeOnboardingView (sheet)
 
 ---
 
@@ -94,47 +94,15 @@ struct MainTabView: View {
 
 ---
 
-## Bank Connection
+## Payouts
 
-### StripeBillingSetupView.swift
-**Purpose**: Bank connection setup flow
+### StripeOnboardingView.swift
+**Purpose**: Stripe Connect onboarding & payout management
 **Sections**:
-1. Header with icon and description
-2. Feature highlights (3 rows)
-3. Plaid + Stripe info box
-4. Connect button
-5. Legal links (Plaid & Stripe terms)
-
-**Features**:
-- Opens PlaidLinkSimulationView as sheet
-- Handles successful connections
-- Shows error alerts
-- Loading states
-- Links to external terms
-
----
-
-### PlaidLinkSimulationView.swift
-**Purpose**: Simulates Plaid Link interface (replace with real Plaid SDK)
-**Components**:
-- Bank selection picker (5 sample banks)
-- Account details card preview
-- Confirm & Connect button
-- Cancel button
-
-**Sample Banks**:
-1. Chase Bank
-2. Bank of America
-3. Wells Fargo
-4. Citibank
-5. US Bank
-
-**Features**:
-- Wheel picker for bank selection
-- Account type display (Checking)
-- Account number preview (masked)
-- Async connection with delay
-- Callback to parent when complete
+1. Account status and requirements
+2. Open hosted onboarding
+3. Payout schedule controls
+4. Instant payout (when eligible)
 
 ---
 
@@ -169,22 +137,15 @@ struct UserProfile: Identifiable {
 | File | Lines | Purpose |
 |------|-------|---------|
 | MainTabView.swift | ~20 | Tab navigation container |
-| SettingsView.swift | ~250 | Main settings UI |
-| SettingsViewModel.swift | ~200 | State + API service |
+| SettingsView.swift | ~430 | Main settings UI |
+| SettingsViewModel.swift | ~585 | State + API service |
 | EditProfileView.swift | ~70 | Profile editing form |
-| StripeBillingSetupView.swift | ~350 | Bank setup flow |
-| PlaidLinkSimulationView.swift | ~150 | Bank picker simulation |
+| StripeOnboardingView.swift | ~230 | Stripe onboarding & payouts |
 | **Total** | **~1,040** | **New functionality** |
 
 ---
 
 ## Integration Points
-
-### To Connect Real Plaid:
-1. Install Plaid SDK
-2. Replace PlaidLinkSimulationView with PlaidLinkViewController
-3. Pass real Plaid public key
-4. Handle real public tokens
 
 ### To Connect Real Backend:
 1. Update APIService base URL
@@ -193,10 +154,10 @@ struct UserProfile: Identifiable {
 4. Handle real error responses
 
 ### To Connect Stripe:
-1. Backend exchanges Plaid token
-2. Create Stripe Connect account
+1. Enable Connect (Express) in Dashboard
+2. Implement account link + account state endpoints
 3. Store Stripe account ID
-4. Set up payout schedules
+4. Set up payout schedules / instant payouts
 
 ---
 

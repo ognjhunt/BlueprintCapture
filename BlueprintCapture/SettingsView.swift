@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
-    @State private var showingBillingSetup = false
     @State private var showingStripeOnboarding = false
     @State private var showingEditProfile = false
     @State private var showingAuth = false
@@ -229,7 +228,7 @@ struct SettingsView: View {
 
                                         HStack(spacing: 12) {
                                             Button {
-                                                showingBillingSetup = true
+                                                showingStripeOnboarding = true
                                             } label: {
                                                 Text("Change Bank Account")
                                             }
@@ -277,7 +276,7 @@ struct SettingsView: View {
                                         )
 
                                         Button {
-                                            showingBillingSetup = true
+                                            showingStripeOnboarding = true
                                         } label: {
                                             HStack {
                                                 Image(systemName: "plus.circle.fill")
@@ -402,9 +401,6 @@ struct SettingsView: View {
             .blueprintAppBackground()
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-        }
-        .sheet(isPresented: $showingBillingSetup) {
-            StripeBillingSetupView(viewModel: viewModel)
         }
         .sheet(isPresented: $showingStripeOnboarding) {
             StripeOnboardingView()

@@ -7,8 +7,7 @@
 2. **SettingsView.swift** - Main settings page with profile, earnings, and billing sections
 3. **SettingsViewModel.swift** - State management + mock API service
 4. **EditProfileView.swift** - Profile editing form
-5. **StripeBillingSetupView.swift** - Bank connection setup flow
-6. **PlaidLinkSimulationView.swift** - Simulated Plaid Link interface
+5. **StripeOnboardingView.swift** - Stripe Connect onboarding & payouts
 
 ### Modified Files
 1. **BlueprintCaptureApp.swift** - Updated root view to MainTabView
@@ -53,13 +52,10 @@ Account Settings
 - Async save with loading state
 - Cancel option
 
-### 4. Bank Connection Flow
-- Plaid Link simulation with bank picker
-- Multiple sample banks available
-- Account details preview
-- Confirmation flow
-- Async connection with loading states
-- Error handling and display
+### 4. Payouts & Onboarding
+- Stripe hosted onboarding for bank/KYC
+- Payout schedule controls
+- Instant payouts trigger when eligible
 
 ## Data Flow
 
@@ -82,8 +78,7 @@ SwiftUI automatically updates UI
 All functionality works with mock data:
 - Profile can be edited (UI responds but doesn't persist)
 - Earnings show sample data: $1,250.50 total, $325 pending
-- Bank connection simulates Plaid flow
-- 5 sample banks available to "connect"
+- Payouts onboarding opens Stripe hosted onboarding (requires backend to return link)
 - All loading states and animations work
 - Error handling tested and functional
 
@@ -108,15 +103,11 @@ All functionality works with mock data:
 
 To connect real services, follow these steps:
 
-- [ ] Set up Plaid account and get public key
-- [ ] Set up Stripe Connect
+- [ ] Enable Stripe Connect (Express)
 - [ ] Create backend endpoints (see SETTINGS_INTEGRATION_GUIDE.md)
 - [ ] Update APIService URLs to backend
-- [ ] Install Plaid SDK: `pod 'Plaid'`
-- [ ] Replace PlaidLinkSimulationView with real Plaid Link
 - [ ] Implement authentication/token headers
-- [ ] Test with real bank connections
-- [ ] Test with Stripe Connect dashboard
+- [ ] Test Stripe onboarding/account status
 
 ## Security Notes
 
@@ -140,8 +131,7 @@ Key components:
 - SettingsView.swift: 250+ lines (main UI)
 - SettingsViewModel.swift: 200+ lines (logic + API service)
 - EditProfileView.swift: 70+ lines (profile form)
-- StripeBillingSetupView.swift: 350+ lines (bank connection UI)
-- PlaidLinkSimulationView.swift: 150+ lines (bank picker)
+- StripeOnboardingView.swift: 230+ lines (onboarding & payouts)
 
 Total new code: ~1,000 lines of production-ready Swift/SwiftUI
 
@@ -149,7 +139,7 @@ Total new code: ~1,000 lines of production-ready Swift/SwiftUI
 
 1. Review the SETTINGS_INTEGRATION_GUIDE.md for detailed integration instructions
 2. Set up your backend API endpoints
-3. Integrate Plaid SDK
+3. Implement Stripe Connect endpoints
 4. Connect Stripe for payouts
 5. Test with real bank connections
 6. Deploy to TestFlight for beta testing
@@ -159,5 +149,4 @@ Total new code: ~1,000 lines of production-ready Swift/SwiftUI
 For questions about:
 - SwiftUI implementation: See code comments
 - API integration: See SETTINGS_INTEGRATION_GUIDE.md
-- Plaid setup: https://plaid.com/docs/link/ios/
 - Stripe Connect: https://stripe.com/docs/connect

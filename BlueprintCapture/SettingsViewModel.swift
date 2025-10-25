@@ -139,29 +139,7 @@ class SettingsViewModel: ObservableObject {
         }
     }
     
-    func connectPlaidBank(publicToken: String, accountId: String, bankName: String) async {
-        isLoading = true
-        defer { isLoading = false }
-        
-        do {
-            // Exchange public token for access token (would happen on backend in production)
-            let accessToken = try await apiService.exchangePlaidToken(publicToken)
-            
-            // Create Stripe account and link bank
-            let billingInfo = try await apiService.createStripeAccount(
-                accessToken: accessToken,
-                accountId: accountId,
-                bankName: bankName
-            )
-
-            self.billingInfo = billingInfo
-            self.stripeAccountState = try? await stripeService.fetchAccountState()
-            self.payoutLedger = (try? await apiService.fetchPayoutLedger()) ?? self.payoutLedger
-        } catch {
-            self.error = .bankConnectionFailed
-            self.showError = true
-        }
-    }
+    // Bank connection is completed within Stripe Connect onboarding; no client-side Plaid flow.
     
     func disconnectBankAccount() async {
         guard let billingInfo = billingInfo else { return }
@@ -264,26 +242,7 @@ class APIService {
         return try decoder.decode([PayoutLedgerEntry].self, from: data)
     }
 
-    func exchangePlaidToken(_ publicToken: String) async throws -> String {
-        var request = try makeRequest(path: "v1/plaid/exchange", method: "POST")
-        let payload = PlaidExchangeRequest(publicToken: publicToken)
-        request.httpBody = try encoder.encode(payload)
-        let data = try await perform(request: request, expecting: 200)
-        let response = try decoder.decode(PlaidExchangeResponse.self, from: data)
-        return response.accessToken
-    }
-
-    func createStripeAccount(accessToken: String, accountId: String, bankName: String) async throws -> BillingInfo {
-        var request = try makeRequest(path: "v1/stripe/accounts", method: "POST")
-        let payload = StripeAccountCreateRequest(
-            plaidAccessToken: accessToken,
-            accountId: accountId,
-            bankName: bankName
-        )
-        request.httpBody = try encoder.encode(payload)
-        let data = try await perform(request: request, expecting: 200)
-        return try decoder.decode(BillingInfo.self, from: data)
-    }
+    
 
     func disconnectBankAccount(stripeAccountId: String) async throws {
         let path = "v1/stripe/accounts/\(stripeAccountId)"
@@ -340,33 +299,7 @@ private struct EarningsResponse: Codable {
     }
 }
 
-private struct PlaidExchangeRequest: Codable {
-    let publicToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case publicToken = "public_token"
-    }
-}
-
-private struct PlaidExchangeResponse: Codable {
-    let accessToken: String
-
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-    }
-}
-
-private struct StripeAccountCreateRequest: Codable {
-    let plaidAccessToken: String
-    let accountId: String
-    let bankName: String
-
-    enum CodingKeys: String, CodingKey {
-        case plaidAccessToken = "plaid_access_token"
-        case accountId = "account_id"
-        case bankName = "bank_name"
-    }
-}
+    
 
 struct BillingInfo: Codable, Identifiable {
     let id = UUID()

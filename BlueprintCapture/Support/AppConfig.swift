@@ -32,9 +32,13 @@ enum AppConfig {
         return nil
     }
 
-    // MARK: - Stripe / Plaid
+    // MARK: - Stripe
     static func stripePublishableKey() -> String? {
         secretsPlist()? ["STRIPE_PUBLISHABLE_KEY"] as? String
+    }
+
+    static func stripeAccountID() -> String? {
+        secretsPlist()? ["STRIPE_ACCOUNT_ID"] as? String
     }
 
     static func backendBaseURL() -> URL? {
@@ -42,10 +46,6 @@ enum AppConfig {
         return nil
     }
 
-    static func plaidLinkTokenURL() -> URL? {
-        if let string = secretsPlist()? ["PLAID_LINK_TOKEN_URL"] as? String { return URL(string: string) }
-        return nil
-    }
 
     static func stripeOnboardingURL() -> URL? {
         if let string = secretsPlist()? ["STRIPE_ONBOARDING_URL"] as? String { return URL(string: string) }

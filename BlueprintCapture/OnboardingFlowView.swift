@@ -35,8 +35,7 @@ struct OnboardingFlowView: View {
             }
             .toolbar { ToolbarTitleContent(step: step) }
             .sheet(isPresented: $showingBankSetup) {
-                // Lightweight handoff into existing bank connection flow
-                StripeBillingSetupView(viewModel: SettingsViewModel())
+                StripeOnboardingView()
             }
             .blueprintOnboardingBackground()
         }
@@ -312,7 +311,7 @@ private struct PayoutsPromptView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     Image(systemName: "building.columns.fill").foregroundStyle(BlueprintTheme.accentAqua)
-                    Text("Secure bank connection via Plaid")
+                    Text("Secure bank connection via Stripe")
                         .font(.subheadline)
                         .blueprintPrimaryOnDark()
                 }

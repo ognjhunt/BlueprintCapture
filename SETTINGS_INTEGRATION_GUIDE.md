@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Settings tab provides comprehensive user account management with integrated bank connection functionality using Plaid and Stripe. The implementation uses a mock API service that can be easily swapped for real backend services.
+The Settings tab provides comprehensive user account management with integrated payouts using Stripe Connect (Express). Bank connection and KYC are handled entirely by Stripe's hosted onboarding.
 
 ## Features Implemented
 
@@ -16,8 +16,8 @@ The Settings tab provides comprehensive user account management with integrated 
 - Pending payout tracking
 - Number of scans completed
 
-### 3. **Bank Connection (Plaid + Stripe)**
-- Secure bank account connection via Plaid Link
+### 3. **Payouts (Stripe Connect)**
+- Stripe Connect Express onboarding (KYC + bank collection)
 - Stripe Connect integration for payouts
 - Display connected bank information
 - Change or disconnect bank account
@@ -63,11 +63,11 @@ Form for editing profile:
 - Input validation
 - Save/cancel actions
 
-#### `StripeBillingSetupView.swift`
-Bank connection setup flow:
-- Feature highlights
-- Plaid Link simulation (shows bank picker)
-- Links to Plaid/Stripe terms
+#### `StripeOnboardingView.swift`
+Stripe Connect onboarding & payout management:
+- Open Stripe hosted onboarding
+- Manage payout schedule
+- Trigger instant payouts (when eligible)
 
 #### `PlaidLinkSimulationView.swift`
 Simulates Plaid Link interface:
@@ -77,95 +77,18 @@ Simulates Plaid Link interface:
 
 ## Integration with Real Services
 
-### Plaid Integration
+### Stripe Connect Integration
 
-1. **Install Plaid SDK:**
-   ```bash
-   # Add to your Podfile
-   pod 'Plaid'
-   ```
-
-2. **Update `StripeBillingSetupView.swift`:**
-   ```swift
-   import PlaidLink
-   
-   // Replace PlaidLinkSimulationView with real Plaid Link
-   func openPlaidLink() {
-       let configuration = PLKConfiguration(
-           clientName: "Blueprint Capture",
-           environment: .sandbox, // Use .production in production
-           products: [.auth],
-           publicKey: "YOUR_PLAID_PUBLIC_KEY"
-       )
-       
-       PLKPlaidLinkViewController.create(configuration: configuration) { publicToken, metadata in
-           if let publicToken = publicToken {
-               Task {
-                   await viewModel.connectPlaidBank(
-                       publicToken: publicToken,
-                       accountId: metadata?.accounts.first?.id ?? "",
-                       bankName: metadata?.institution?.name ?? ""
-                   )
-               }
-           }
-       }.present(from: self)
-   }
-   ```
+1. Enable Connect (Express) in Stripe Dashboard.
+2. Backend endpoints used by the app:
+   - GET `v1/stripe/account` → returns account state
+   - GET `v1/stripe/account/onboarding_link` → returns `onboarding_url`
+   - PUT `v1/stripe/account/payout_schedule` → update schedule
+   - POST `v1/stripe/account/instant_payout` → trigger instant payout
 
 ### Backend API Integration
 
-1. **Update `APIService` in `SettingsViewModel.swift`:**
-
-   ```swift
-   class APIService {
-       let baseURL = "https://your-api.com"
-       
-       func fetchUserProfile() async throws -> UserProfile {
-           let url = URL(string: "\(baseURL)/api/user/profile")!
-           let (data, _) = try await URLSession.shared.data(from: url)
-           return try JSONDecoder().decode(UserProfile.self, from: data)
-       }
-       
-       func updateUserProfile(_ profile: UserProfile) async throws -> UserProfile {
-           var request = URLRequest(url: URL(string: "\(baseURL)/api/user/profile")!)
-           request.httpMethod = "PUT"
-           request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-           request.httpBody = try JSONEncoder().encode(profile)
-           
-           let (data, _) = try await URLSession.shared.data(for: request)
-           return try JSONDecoder().decode(UserProfile.self, from: data)
-       }
-       
-       func exchangePlaidToken(_ publicToken: String) async throws -> String {
-           var request = URLRequest(url: URL(string: "\(baseURL)/api/plaid/exchange-token")!)
-           request.httpMethod = "POST"
-           request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-           
-           let payload = ["public_token": publicToken]
-           request.httpBody = try JSONEncoder().encode(payload)
-           
-           let (data, _) = try await URLSession.shared.data(for: request)
-           let response = try JSONDecoder().decode(["access_token": String].self, from: data)
-           return response["access_token"] ?? ""
-       }
-       
-       func createStripeAccount(accessToken: String, accountId: String, bankName: String) async throws -> BillingInfo {
-           var request = URLRequest(url: URL(string: "\(baseURL)/api/stripe/create-account")!)
-           request.httpMethod = "POST"
-           request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-           
-           let payload = [
-               "plaid_access_token": accessToken,
-               "account_id": accountId,
-               "bank_name": bankName
-           ] as [String : Any]
-           request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-           
-           let (data, _) = try await URLSession.shared.data(for: request)
-           return try JSONDecoder().decode(BillingInfo.self, from: data)
-       }
-   }
-   ```
+Point the app’s `BACKEND_BASE_URL` to your server and implement the endpoints above; no Plaid token exchange is required.
 
 2. **Backend Endpoints Required:**
    - `GET /api/user/profile` - Get user profile
