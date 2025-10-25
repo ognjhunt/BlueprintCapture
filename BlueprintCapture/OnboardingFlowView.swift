@@ -301,7 +301,7 @@ private struct PayoutsPromptView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Get paid with Stripe")
+                Text("How payouts work")
                     .font(.title2).fontWeight(.bold)
                     .blueprintGradientText()
                 Text("Connect a bank account now or later. You can start scanning immediately.")
@@ -310,20 +310,20 @@ private struct PayoutsPromptView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
-                    Image(systemName: "building.columns.fill").foregroundStyle(BlueprintTheme.accentAqua)
-                    Text("Secure bank connection via Stripe")
+                    Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
+                    Text("Default: Weekly payouts for Mon–Sun, deposited Wed–Thu")
                         .font(.subheadline)
                         .blueprintPrimaryOnDark()
                 }
                 HStack(spacing: 12) {
-                    Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
-                    Text("Standard payouts in ~2 business days")
+                    Image(systemName: "creditcard.fill").foregroundStyle(BlueprintTheme.accentAqua)
+                    Text("After each capture: Auto-deposit to Blueprint Card (no fee)")
                         .font(.subheadline)
                         .blueprintPrimaryOnDark()
                 }
                 HStack(spacing: 12) {
                     Image(systemName: "bolt.fill").foregroundStyle(BlueprintTheme.warningOrange)
-                    Text("Instant cash-out available once eligible")
+                    Text("Instant Pay: Same-day cash out to your debit (fee applies)")
                         .font(.subheadline)
                         .blueprintPrimaryOnDark()
                 }

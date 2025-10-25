@@ -4,7 +4,6 @@ struct StripeOnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @State private var isLoading = false
-    @State private var selectedSchedule: PayoutSchedule = .weekly
     @State private var instantAmount: String = ""
     @State private var showConfirmation = false
     @State private var errorMessage: String?
@@ -38,7 +37,7 @@ struct StripeOnboardingView: View {
                                 .foregroundStyle(state.isReadyForTransfers ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
 
                                 Label {
-                                    Text("Payout schedule: \(state.payoutSchedule.displayName)")
+                                    Text("Payout cadence: Weekly (Mon–Sun, paid Wed–Thu)")
                                 } icon: {
                                     Image(systemName: "calendar")
                                 }
@@ -84,30 +83,48 @@ struct StripeOnboardingView: View {
                         }
                     }
 
-                    // Payout Schedule
+                    // Payout Options (Uber/DoorDash style)
                     BlueprintCard {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
                                 Image(systemName: "calendar")
                                     .foregroundStyle(BlueprintTheme.primary)
-                                Text("Payout Schedule")
+                                Text("Payout Options")
                                     .font(.headline)
                                 Spacer()
                             }
-                            Text("Choose when Stripe pays out your earnings.")
+                            Text("We follow the same approach as Uber/DoorDash.")
                                 .font(.subheadline).foregroundStyle(.secondary)
-                            Picker("Schedule", selection: $selectedSchedule) {
-                                ForEach(PayoutSchedule.allCases, id: \.self) { schedule in
-                                    Text(schedule.rawValue.capitalized).tag(schedule)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
+                                    Text("Default: Weekly (Mon–Sun earnings paid Wed–Thu)")
+                                        .font(.subheadline)
+                                        .blueprintPrimaryOnDark()
+                                }
+                                HStack(spacing: 12) {
+                                    Image(systemName: "creditcard.fill").foregroundStyle(BlueprintTheme.accentAqua)
+                                    Text("After each capture: Auto-deposit to Blueprint Card (no fee)")
+                                        .font(.subheadline)
+                                        .blueprintPrimaryOnDark()
+                                }
+                                HStack(spacing: 12) {
+                                    Image(systemName: "bolt.fill").foregroundStyle(BlueprintTheme.warningOrange)
+                                    Text("Instant Pay: Same-day cash out to your debit (fee applies)")
+                                        .font(.subheadline)
+                                        .blueprintPrimaryOnDark()
                                 }
                             }
-                            .pickerStyle(.segmented)
-                            Button(action: updateSchedule) {
-                                HStack { Image(systemName: "arrow.triangle.2.circlepath"); Text("Update Schedule") }
-                            }
-                            .buttonStyle(BlueprintSecondaryButtonStyle())
-                            Text("Default: ACH T+2 after QC passes.")
-                                .font(.caption).foregroundStyle(.secondary)
+                            .padding(12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.white.opacity(0.10))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                            )
                         }
                     }
 
@@ -117,11 +134,11 @@ struct StripeOnboardingView: View {
                             HStack {
                                 Image(systemName: "bolt.fill")
                                     .foregroundStyle(BlueprintTheme.warningOrange)
-                                Text("Instant Cash-out")
+                                Text("Instant Pay")
                                     .font(.headline)
                                 Spacer()
                             }
-                            Text("Get funds in ~30 minutes, 24/7 (fees may apply).")
+                            Text("Same-day cash out to your debit. Usually minutes; bank timing may vary.")
                                 .font(.subheadline).foregroundStyle(.secondary)
                             HStack {
                                 TextField("Amount (USD)", text: $instantAmount)
@@ -171,7 +188,6 @@ struct StripeOnboardingView: View {
             let state = try await StripeConnectService.shared.fetchAccountState()
             await MainActor.run {
                 self.accountState = state
-                self.selectedSchedule = state.payoutSchedule
             }
         } catch {
             print("[StripeUI] ✗ Error loading account state: \(error)")
@@ -200,20 +216,7 @@ struct StripeOnboardingView: View {
         }
     }
 
-    private func updateSchedule() {
-        isLoading = true
-        Task {
-            do {
-                try await StripeConnectService.shared.updatePayoutSchedule(selectedSchedule)
-                print("[StripeUI] ✓ Schedule updated successfully")
-                await loadAccountState()
-                await MainActor.run { isLoading = false; showConfirmation = true }
-            } catch {
-                print("[StripeUI] ✗ Error updating schedule: \(error)")
-                await MainActor.run { isLoading = false; errorMessage = "Failed to update schedule." }
-            }
-        }
-    }
+    // removed schedule update per Uber/DoorDash payout model
 
     private func triggerInstantPayout() {
         guard let dollars = Int(instantAmount) else { return }

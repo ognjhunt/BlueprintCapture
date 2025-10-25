@@ -256,6 +256,9 @@ struct SettingsView: View {
                                                 HStack { Image(systemName: "banknote.fill"); Text("Manage Payouts & Onboarding") }
                                             }
                                             .buttonStyle(BlueprintSecondaryButtonStyle())
+                                            Text("Default weekly deposits; after-each-capture via card; Instant Pay available.")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
                                         }
                                     }
                                 } else {
@@ -614,7 +617,7 @@ private struct StripeAccountStatusSummary: View {
             .foregroundStyle(state.isReadyForTransfers ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
 
             Label {
-                Text("Payout schedule: \(state.payoutSchedule.displayName)")
+                Text("Payout cadence: Weekly (Mon–Sun, paid Wed–Thu)")
             } icon: {
                 Image(systemName: "calendar")
             }
@@ -630,7 +633,7 @@ private struct StripeAccountStatusSummary: View {
             }
 
             Label {
-                Text(state.instantPayoutEligible ? "Instant payouts available" : "Instant payouts locked")
+                Text(state.instantPayoutEligible ? "Instant Pay available" : "Instant Pay locked")
             } icon: {
                 Image(systemName: "bolt.fill")
             }
