@@ -1,0 +1,201 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    STRIPE ERROR REFERENCE CARD                            ║
+║                    Keep This Open While Debugging                          ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+CONSOLE FILTER:
+┌────────────────────────────────────────────────────────────────────────────┐
+│ Xcode → View → Debug Area → Show Debug Area (⌘⇧Y)                         │
+│ Then type "Stripe" in the console search box                              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+ERROR REFERENCE TABLE:
+═════════════════════════════════════════════════════════════════════════════
+
+Error Message                    | Log Pattern              | Fix
+─────────────────────────────────┼──────────────────────────┼──────────────────
+"Unable to load Stripe           | ✗ Missing backend URL   | Add BACKEND_BASE_URL
+ account status"                 | configuration           | to Secrets.plist
+─────────────────────────────────┼──────────────────────────┼──────────────────
+(User shows alert)               | ✗ Network error         | 1. Check internet
+                                 |                         | 2. Verify backend URL
+                                 |                         | 3. Start backend
+─────────────────────────────────┼──────────────────────────┼──────────────────
+(User shows alert)               | ✗ HTTP 401             | 1. Check Stripe keys
+                                 |                         | 2. Verify auth token
+                                 |                         | 3. Check endpoint
+─────────────────────────────────┼──────────────────────────┼──────────────────
+(User shows alert)               | ✗ HTTP 404             | Implement endpoint:
+                                 |                         | /v1/stripe/account
+─────────────────────────────────┼──────────────────────────┼──────────────────
+(User shows alert)               | ✗ HTTP 500             | Check backend logs
+─────────────────────────────────┼──────────────────────────┼──────────────────
+(User shows alert)               | ✗ Decoding error       | Check response JSON
+                                 | Response body: {...}   | matches schema
+─────────────────────────────────┼──────────────────────────┼──────────────────
+"Failed to open onboarding"      | ✗ Missing configuration| Add BACKEND_BASE_URL
+(No Stripe link opens)           | or HTTP error          | or fix backend
+
+SUCCESS LOG PATTERN:
+═════════════════════════════════════════════════════════════════════════════
+
+For GET /v1/stripe/account:
+  [Stripe] Fetching account state...
+  [Stripe] Using backend URL: https://...
+  [Stripe] Request URL: https://...
+  [Stripe] Response status: 200
+  [Stripe] ✓ Account state fetched successfully
+  [Stripe] Account ready: true, Payouts enabled: true
+
+For POST /v1/stripe/account/onboarding_link:
+  [Stripe] Creating onboarding link...
+  [Stripe] Using backend URL: https://...
+  [Stripe] Response status: 200
+  [Stripe] ✓ Onboarding link created successfully
+
+REQUIRED CONFIGURATION:
+═════════════════════════════════════════════════════════════════════════════
+
+Secrets.plist MUST have:
+  ✓ BACKEND_BASE_URL=https://your-backend.com
+
+Backend MUST have:
+  ✓ STRIPE_SECRET_KEY
+  ✓ STRIPE_CONNECT_ACCOUNT_ID  
+  ✓ /v1/stripe/account endpoint
+  ✓ /v1/stripe/account/onboarding_link endpoint
+
+QUICK TROUBLESHOOTING STEPS:
+═════════════════════════════════════════════════════════════════════════════
+
+Step 1: Check Console
+  └─ Open Xcode Debug Area (⌘⇧Y)
+  └─ Type "Stripe" in filter
+  └─ Look for ✗ markers
+
+Step 2: Identify Error Type
+  └─ Missing configuration? → Add to Secrets.plist
+  └─ Network error? → Check backend is running
+  └─ HTTP 4xx/5xx? → Check backend error
+  └─ Decoding error? → Check JSON schema
+
+Step 3: Apply Fix
+  └─ Make the change
+  └─ Rebuild app (⌘B)
+  └─ Run again
+  
+Step 4: Verify
+  └─ Check console for ✓ success markers
+  └─ Should see "Account state fetched successfully"
+
+COMMON ENDPOINT ISSUES:
+═════════════════════════════════════════════════════════════════════════════
+
+If you see: HTTP 404: Not Found
+  Likely issue: Endpoint doesn't exist on backend
+  Check:
+    - Is backend running?
+    - Does endpoint path match exactly?
+    - GET /v1/stripe/account (for fetching state)
+    - POST /v1/stripe/account/onboarding_link (for onboarding)
+    - PUT /v1/stripe/account/payout_schedule (for schedule)
+    - POST /v1/stripe/account/instant_payout (for payouts)
+
+If you see: HTTP 401: Unauthorized
+  Likely issue: Auth or Stripe API keys are wrong
+  Check:
+    - STRIPE_SECRET_KEY is set on backend
+    - Stripe account ID is correct
+    - API keys are for the right Stripe environment (test vs live)
+
+If you see: HTTP 500: Internal Server Error
+  Likely issue: Backend code error
+  Action: Check backend logs for actual error
+
+If you see: Decoding error + Response body shows incomplete JSON
+  Likely issue: Backend isn't returning all required fields
+  Check:
+    - Response has: onboarding_complete, payouts_enabled, payout_schedule
+    - Date fields are ISO8601 formatted
+    - All CodingKeys match (snake_case in JSON)
+
+CONSOLE EXAMPLES:
+═════════════════════════════════════════════════════════════════════════════
+
+EXAMPLE 1 - SUCCESS
+  [Stripe] Fetching account state...
+  [Stripe] Using backend URL: https://api.example.com
+  [Stripe] Request URL: https://api.example.com/v1/stripe/account
+  [Stripe] Response status: 200
+  [Stripe] ✓ Request successful (status 200)
+  [Stripe] ✓ Account state fetched successfully
+  [Stripe] Account ready: true, Payouts enabled: true
+  Result: UI shows account state, no error
+
+EXAMPLE 2 - MISSING CONFIG
+  [Stripe] Fetching account state...
+  [Stripe] ✗ Missing backend URL configuration
+  [StripeUI] ✗ Error loading account state: missingConfiguration
+  Result: "Unable to load Stripe account status" alert shown
+  Action: Add BACKEND_BASE_URL to Secrets.plist
+
+EXAMPLE 3 - BACKEND ERROR
+  [Stripe] Fetching account state...
+  [Stripe] Using backend URL: https://api.example.com
+  [Stripe] Request URL: https://api.example.com/v1/stripe/account
+  [Stripe] Response status: 500
+  [Stripe] ✗ HTTP 500: {"error":"Database connection failed"}
+  [StripeUI] ✗ Error loading account state: invalidResponse(status: 500)
+  Result: "Unable to load Stripe account status" alert shown
+  Action: Check backend logs
+
+EXAMPLE 4 - DECODING ERROR
+  [Stripe] Fetching account state...
+  [Stripe] Response status: 200
+  [Stripe] ✗ Decoding error: keyNotFound(CodingKeys(stringValue: "payout_schedule"...))
+  [Stripe] Response body: {"onboarding_complete":true,"payouts_enabled":false}
+  Result: "Unable to load Stripe account status" alert shown
+  Action: Backend response missing payout_schedule field
+
+DEBUGGING WORKFLOW:
+═════════════════════════════════════════════════════════════════════════════
+
+1. Open Debug Area        (⌘⇧Y)
+2. Filter for "Stripe"    (type in console search)
+3. Open Stripe screen     (tap button or navigate)
+4. Read console output    (look for ✗ error marker)
+5. Match to this card     (find error pattern)
+6. Apply fix              (make changes)
+7. Rebuild app            (⌘B)
+8. Test again             (look for ✓ success)
+9. Verify UI              (check data displays)
+
+FILES WITH LOGGING:
+═════════════════════════════════════════════════════════════════════════════
+
+Service Layer [Stripe] Logs:
+  └─ BlueprintCapture/Services/StripeConnectService.swift
+     - fetchAccountState()
+     - createOnboardingLink()
+     - updatePayoutSchedule()
+     - triggerInstantPayout()
+     - perform() (network layer)
+
+UI Layer [StripeUI] Logs:
+  └─ BlueprintCapture/StripeOnboardingView.swift
+     - loadAccountState()
+     - openStripeOnboarding()
+     - updateSchedule()
+     - triggerInstantPayout()
+
+REFERENCE GUIDES:
+═════════════════════════════════════════════════════════════════════════════
+
+Quick fixes:       → STRIPE_DEBUG_QUICK_START.md
+Detailed guide:    → STRIPE_DEBUGGING_GUIDE.md
+Configuration:     → STRIPE_CONFIGURATION_CHECKLIST.md
+Architecture:      → STRIPE_FLOW_DIAGRAM.md
+This card:         → STRIPE_ERROR_REFERENCE.txt
+
+═════════════════════════════════════════════════════════════════════════════
+Last updated: October 25, 2025

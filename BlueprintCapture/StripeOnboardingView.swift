@@ -174,6 +174,7 @@ struct StripeOnboardingView: View {
                 self.selectedSchedule = state.payoutSchedule
             }
         } catch {
+            print("[StripeUI] ✗ Error loading account state: \(error)")
             await MainActor.run {
                 if self.accountState == nil {
                     self.errorMessage = "Unable to load Stripe account status."
@@ -187,11 +188,13 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 let url = try await StripeConnectService.shared.createOnboardingLink()
+                print("[StripeUI] ✓ Onboarding link obtained: \(url.absoluteString)")
                 await MainActor.run {
                     isLoading = false
                     _ = openURL(url)
                 }
             } catch {
+                print("[StripeUI] ✗ Error creating onboarding link: \(error)")
                 await MainActor.run { isLoading = false; errorMessage = "Failed to open onboarding." }
             }
         }
@@ -202,9 +205,11 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 try await StripeConnectService.shared.updatePayoutSchedule(selectedSchedule)
+                print("[StripeUI] ✓ Schedule updated successfully")
                 await loadAccountState()
                 await MainActor.run { isLoading = false; showConfirmation = true }
             } catch {
+                print("[StripeUI] ✗ Error updating schedule: \(error)")
                 await MainActor.run { isLoading = false; errorMessage = "Failed to update schedule." }
             }
         }
@@ -217,9 +222,11 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 try await StripeConnectService.shared.triggerInstantPayout(amountCents: cents)
+                print("[StripeUI] ✓ Instant payout triggered successfully")
                 await loadAccountState()
                 await MainActor.run { isLoading = false; showConfirmation = true; instantAmount = "" }
             } catch {
+                print("[StripeUI] ✗ Error triggering instant payout: \(error)")
                 await MainActor.run { isLoading = false; errorMessage = "Instant payout failed." }
             }
         }
