@@ -24,17 +24,32 @@ struct CaptureSessionView: View {
 
                 Spacer()
 
-                // Error banner (if camera unavailable)
-                if case .error(let message) = viewModel.captureManager.captureState {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .padding(10)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.red.opacity(0.15))
-                        )
-                        .foregroundStyle(.red)
-                        .padding(.horizontal)
+                // Error banner + retry control when recording fails
+                if case .error(let reason) = viewModel.captureManager.captureState {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Recording failed", systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.red)
+
+                        Text(reason)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+
+                        Button {
+                            retryRecording()
+                        } label: {
+                            Label("Retry Recording", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(BlueprintPrimaryButtonStyle())
+                        .disabled(viewModel.captureManager.captureState.isRecording)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.red.opacity(0.15))
+                    )
+                    .padding(.horizontal)
                 }
 
                 // End Session button only
@@ -57,8 +72,11 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
                 isEnding = false
-            case .idle, .error:
+            case .idle:
                 isEnding = false
+            case .error:
+                isEnding = false
+                didAutoStart = false
             default:
                 break
             }
@@ -81,6 +99,24 @@ struct CaptureSessionView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             print("⏺️ [Capture] Auto-start recording…")
             viewModel.captureManager.startRecording()
+        }
+    }
+
+    private func retryRecording() {
+        guard !viewModel.captureManager.captureState.isRecording else { return }
+        print("🔄 [Capture] Retry Recording tapped")
+        didAutoStart = true
+
+        let manager = viewModel.captureManager
+        manager.configureSession()
+
+        if !manager.session.isRunning {
+            manager.startSession()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                manager.startRecording()
+            }
+        } else {
+            manager.startRecording()
         }
     }
 
