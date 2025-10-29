@@ -4,71 +4,80 @@ import UIKit
 
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
-    @State private var showingShareSheet = false
-    @State private var recordedArtifacts: VideoCaptureManager.RecordingArtifacts?
+    @State private var didAutoStart = false
+    @State private var isEnding = false
     let targetId: String?
     let reservationId: String?
 
     var body: some View {
-        VStack(spacing: 16) {
+        ZStack {
+            // Full-screen camera preview
             CameraPreview(session: viewModel.captureManager.session)
-                .overlay(alignment: .topLeading) {
-                    CaptureOverlay()
-                        .padding()
+                .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                // Upload progress overlay (if any)
+                if !viewModel.uploadStatuses.isEmpty {
+                    uploadStatusList
+                        .padding(.horizontal)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 8)
 
-            captureControls
+                Spacer()
 
-            if !viewModel.uploadStatuses.isEmpty {
-                uploadStatusList
-            }
+                // Error banner (if camera unavailable)
+                if case .error(let message) = viewModel.captureManager.captureState {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.red.opacity(0.15))
+                        )
+                        .foregroundStyle(.red)
+                        .padding(.horizontal)
+                }
 
-            if case .error(let message) = viewModel.captureManager.captureState {
-                Label(message, systemImage: "exclamationmark.octagon")
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
+                // End Session button only
+                HStack {
+                    Spacer()
+                    Button {
+                        endSession()
+                    } label: {
+                        Label(isEnding ? "Ending…" : "End Session", systemImage: isEnding ? "hourglass" : "stop.fill")
+                    }
+                    .buttonStyle(BlueprintSecondaryButtonStyle())
+                    .disabled(isEnding)
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
             }
         }
-        .padding()
-        .blueprintAppBackground()
         .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
             case .finished(let artifacts):
-                recordedArtifacts = artifacts
-                showingShareSheet = true
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
             default:
                 break
             }
         }
-        .sheet(isPresented: $showingShareSheet) {
-            if let artifacts = recordedArtifacts {
-                ActivityView(activityItems: artifacts.shareItems)
-            }
+        .onAppear {
+            autoStartRecordingIfNeeded()
         }
     }
 
-    private var captureControls: some View {
-        VStack(spacing: 12) {
-            Text("When you're ready, tap record and walk each room twice: once at waist height and once at eye level.")
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 24) {
-                RecordButton(isRecording: viewModel.captureManager.captureState.isRecording) {
-                    toggleRecording()
-                }
-
-                Button {
-                    viewModel.captureManager.stopSession()
-                } label: {
-                    Label("End Session", systemImage: "stop.fill")
-                }
-                .buttonStyle(BlueprintSecondaryButtonStyle())
-            }
+    private func autoStartRecordingIfNeeded() {
+        guard !didAutoStart else { return }
+        didAutoStart = true
+        print("🎬 [Capture] View appeared — auto start flow")
+        // Ensure the session is configured and running, then start recording automatically
+        if !viewModel.captureManager.session.isRunning {
+            print("🎥 [Capture] Starting AVCaptureSession…")
+            viewModel.captureManager.configureSession()
+            viewModel.captureManager.startSession()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            print("⏺️ [Capture] Auto-start recording…")
+            viewModel.captureManager.startRecording()
         }
     }
 
@@ -92,64 +101,21 @@ struct CaptureSessionView: View {
         )
     }
 
-    private func toggleRecording() {
-        switch viewModel.captureManager.captureState {
-        case .recording:
+    private func endSession() {
+        guard !isEnding else { return }
+        isEnding = true
+        print("🛑 [Capture] End Session tapped — stopping recording & session")
+        // Stop recording (if active) and the camera session
+        if viewModel.captureManager.captureState.isRecording {
             viewModel.captureManager.stopRecording()
-        default:
-            viewModel.captureManager.startRecording()
+        } else {
+            print("ℹ️ [Capture] No active recording when ending session")
         }
+        viewModel.captureManager.stopSession()
     }
 }
 
-// Simple UIActivityViewController wrapper for SwiftUI
-private struct ActivityView: UIViewControllerRepresentable {
-    let activityItems: [Any]
-    let applicationActivities: [UIActivity]? = nil
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
-private struct CaptureOverlay: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Capturing video", systemImage: "video.fill")
-                .font(.headline)
-                .labelStyle(.titleAndIcon)
-            Text("Ensure AprilTag or IMU pose marker is visible briefly to lock scale.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: 220, alignment: .leading)
-        }
-        .padding(12)
-        .background(
-            BlueprintTheme.heroGradient.opacity(0.25),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-        )
-    }
-}
-
-private struct RecordButton: View {
-    let isRecording: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: isRecording ? "stop.circle.fill" : "record.circle")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 72, height: 72)
-                .foregroundStyle(isRecording ? BlueprintTheme.errorRed : Color.red.opacity(0.85))
-                .symbolRenderingMode(.palette)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
-    }
-}
+// (Removed old CaptureOverlay, RecordButton and share sheet for the simplified UX)
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession

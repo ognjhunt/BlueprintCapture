@@ -256,8 +256,10 @@ final class NearbyTargetsViewModel: ObservableObject {
     }
 
     func checkIn(_ target: Target) async throws {
-        try await reservationService.checkIn(targetId: target.id)
-        try? await targetStateService.checkIn(targetId: target.id)
+        let oneHour: TimeInterval = 60 * 60
+        // Implicitly reserve to ensure target_state has full metadata (lat/lng/geohash/reservedBy)
+        _ = try? await targetStateService.reserve(target: target, for: oneHour)
+        try await targetStateService.checkIn(targetId: target.id)
         // User started mapping → do not send expiry notification anymore
         notifications.cancelReservationExpiryNotification(for: target.id)
     }
@@ -387,10 +389,26 @@ final class NearbyTargetsViewModel: ObservableObject {
             let ids = mapped.map { $0.id }
             let stateMap = await targetStateService.batchFetchStates(for: ids)
             self.targetStates = stateMap
-            // Filter out completed
+            // Filter out completed and any reserved/in_progress targets owned by others
+            let currentUserId = UserDeviceService.resolvedUserId()
             let visible = mapped.filter { item in
-                if let s = stateMap[item.id], s.status == .completed { return false }
-                return true
+                guard let s = stateMap[item.id] else { return true }
+                switch s.status {
+                case .completed:
+                    return false
+                case .reserved:
+                    if let owner = s.reservedBy, owner != currentUserId { return false }
+                    return true
+                case .in_progress:
+                    // Hide if someone else is mapping; show if it's me
+                    if let owner = s.checkedInBy ?? s.reservedBy {
+                        return owner == currentUserId
+                    }
+                    // Unknown owner (legacy): hide by default
+                    return false
+                case .available:
+                    return true
+                }
             }
             self.items = visible
             // Refresh proximity notifications for the top results so we can nudge users when nearby
@@ -597,6 +615,14 @@ final class NearbyTargetsViewModel: ObservableObject {
                         // If it flipped to completed, remove from list
                         if state.status == .completed {
                             self.items.removeAll { $0.id == id }
+                        }
+                        // Hide if reserved/in_progress by another user
+                        if state.status == .reserved || state.status == .in_progress {
+                            let uid = UserDeviceService.resolvedUserId()
+                            let owner = state.checkedInBy ?? state.reservedBy
+                            if owner == nil || owner != uid {
+                                self.items.removeAll { $0.id == id }
+                            }
                         }
                         // If reservation expired, clear local reservation badge
                         if state.status == .available {

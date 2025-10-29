@@ -1,5 +1,8 @@
 import Foundation
 import Combine
+#if canImport(FirebaseStorage)
+import FirebaseStorage
+#endif
 
 struct CaptureUploadMetadata: Identifiable, Equatable {
     let id: UUID
@@ -24,7 +27,7 @@ protocol CaptureUploadServiceProtocol: AnyObject {
 }
 
 final class CaptureUploadService: CaptureUploadServiceProtocol {
-    /// TODO: Replace the simulated upload pipeline with Firebase Storage + Firestore integrations.
+    /// Firebase-backed upload pipeline that emits progress/completion events
     enum Event {
         case queued(CaptureUploadRequest)
         case progress(id: UUID, progress: Double)
@@ -35,6 +38,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     enum UploadError: LocalizedError, Equatable {
         case fileMissing
         case cancelled
+        case uploadFailed
 
         var errorDescription: String? {
             switch self {
@@ -42,6 +46,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "The recorded file could not be found."
             case .cancelled:
                 return "Upload cancelled."
+            case .uploadFailed:
+                return "Upload failed. Please try again."
             }
         }
     }
@@ -113,6 +119,61 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             return
         }
 
+        #if canImport(FirebaseStorage)
+        let storage = Storage.storage()
+        let path = makeStoragePath(for: record.request)
+        let ref = storage.reference(withPath: path)
+
+        let metadata = StorageMetadata()
+        metadata.contentType = "application/zip"
+        var custom: [String: String] = [:]
+        custom["jobId"] = record.request.metadata.jobId
+        custom["creatorId"] = record.request.metadata.creatorId
+        custom["capturedAt"] = ISO8601DateFormatter().string(from: record.request.metadata.capturedAt)
+        if let t = record.request.metadata.targetId { custom["targetId"] = t }
+        if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
+        metadata.customMetadata = custom
+
+        let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
+
+        // Observe progress
+        let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+            guard let self else { return }
+            let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
+            self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
+        }
+
+        // Await completion
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let successHandle = uploadTask.observe(.success) { [weak self] _ in
+                guard let self else { continuation.resume(); return }
+                self.queue.async {
+                    guard var latestRecord = self.uploads[id] else { continuation.resume(); return }
+                    latestRecord.request.metadata.uploadedAt = Date()
+                    latestRecord.task = nil
+                    self.uploads[id] = latestRecord
+                    self.subject.send(.progress(id: id, progress: 1.0))
+                    self.subject.send(.completed(latestRecord.request))
+                }
+                continuation.resume()
+            }
+
+            let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
+                guard let self else { continuation.resume(); return }
+                self.queue.async {
+                    guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
+                    failingRecord.task = nil
+                    self.uploads[id] = failingRecord
+                    self.subject.send(.failed(failingRecord.request, .uploadFailed))
+                }
+                continuation.resume()
+            }
+
+            // Keep observers alive until continuation resumes
+            _ = (progressHandle, successHandle, failureHandle)
+        }
+        #else
+        // Fallback: simulate progress if FirebaseStorage is unavailable (e.g., in previews)
         let steps = 12
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 150_000_000)
@@ -120,7 +181,6 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             let progress = Double(step) / Double(steps)
             subject.send(.progress(id: id, progress: min(progress, 0.999)))
         }
-
         queue.async {
             guard var latestRecord = self.uploads[id] else { return }
             latestRecord.request.metadata.uploadedAt = Date()
@@ -129,5 +189,17 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.subject.send(.progress(id: id, progress: 1.0))
             self.subject.send(.completed(latestRecord.request))
         }
+        #endif
     }
+
+    #if canImport(FirebaseStorage)
+    private func makeStoragePath(for request: CaptureUploadRequest) -> String {
+        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
+        let basename = request.packageURL.lastPathComponent
+        return "targets/\(placeId)/\(ts)/\(basename)"
+    }
+    #endif
 }

@@ -110,6 +110,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var currentARKitArtifacts: RecordingArtifacts.ARKitArtifacts?
     private var arFrameCount: Int = 0
     private var exportedMeshAnchors: Set<UUID> = []
+    private var isARRunning: Bool = false
 
     override init() {
         super.init()
@@ -117,7 +118,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func configureSession() {
-        guard session.inputs.isEmpty else { return }
+        guard session.inputs.isEmpty else { print("⚙️ [Capture] configureSession: inputs already configured (inputs=\(session.inputs.count))"); return }
 
         session.beginConfiguration()
         session.sessionPreset = .high
@@ -143,31 +144,39 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 session.addOutput(movieOutput)
             }
         } catch {
+            print("❌ [Capture] configureSession failed: \(error.localizedDescription)")
             captureState = .error(error.localizedDescription)
         }
 
         session.commitConfiguration()
+        print("✅ [Capture] configureSession complete: inputs=\(session.inputs.count), outputs=\(session.outputs.count)")
     }
 
     func startSession() {
-        guard !session.isRunning else { return }
+        guard !session.isRunning else { print("ℹ️ [Capture] startSession ignored — already running"); return }
         DispatchQueue.global(qos: .userInitiated).async {
+            print("🎥 [Capture] startRunning() …")
             self.session.startRunning()
+            print("🎥 [Capture] session started (isRunning=\(self.session.isRunning))")
         }
     }
 
     func stopSession() {
-        guard session.isRunning else { return }
+        guard session.isRunning else { print("ℹ️ [Capture] stopSession ignored — not running"); return }
+        print("🛑 [Capture] stopRunning() …")
         session.stopRunning()
+        print("🛑 [Capture] session stopped (isRunning=\(session.isRunning))")
     }
 
     func startRecording() {
-        guard !movieOutput.isRecording else { return }
+        guard !movieOutput.isRecording else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
+        print("⏺️ [Capture] startRecording begin")
         let baseName = "walkthrough-\(UUID().uuidString)"
         let artifacts: RecordingArtifacts
         do {
             artifacts = try makeRecordingArtifacts(baseName: baseName)
         } catch {
+            print("❌ [Capture] Failed to prepare capture workspace: \(error.localizedDescription)")
             captureState = .error("Failed to prepare capture workspace: \(error.localizedDescription)")
             return
         }
@@ -194,14 +203,17 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         movieOutput.startRecording(to: artifacts.videoURL, recordingDelegate: self)
         captureState = .recording(artifacts)
+        print("⏺️ [Capture] startRecording started → file=\(artifacts.videoURL.lastPathComponent)")
     }
 
     func stopRecording() {
-        guard movieOutput.isRecording else { return }
+        guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
+        print("⏹️ [Capture] stopRecording begin")
         movieOutput.stopRecording()
         stopMotionUpdates()
         stopExposureLogging()
         stopARSession()
+        print("⏹️ [Capture] stopRecording requested")
     }
 
     private func prepareMotionLog(for artifacts: RecordingArtifacts) {
@@ -294,6 +306,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private func startARSessionIfAvailable() {
         guard currentARKitArtifacts != nil else { return }
+        guard !isARRunning else { print("ℹ️ [AR] startSession ignored — already running"); return }
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.environmentTexturing = .automatic
@@ -307,10 +320,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             configuration.frameSemantics.insert(.smoothedSceneDepth)
         }
 
+        print("🔵 [AR] run(configuration)")
         arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        isARRunning = true
     }
 
     private func stopARSession() {
+        guard isARRunning else { return }
+        print("⚪️ [AR] pause()")
         arSession.pause()
         arDataQueue.sync {
             if let handle = arFrameLogFileHandle {
@@ -322,6 +339,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             }
             arFrameLogFileHandle = nil
         }
+        isARRunning = false
     }
 
     private func startMotionUpdates() {
@@ -536,18 +554,29 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
 
             persistManifest(duration: durationSeconds, synchronous: true)
 
-            if let artifacts = currentArtifacts {
-                do {
-                    try packageArtifacts(artifacts)
-                    latestUploadPayload = artifacts.uploadPayload
-                    captureState = .finished(artifacts)
-                } catch {
-                    latestUploadPayload = nil
-                    captureState = .error(error.localizedDescription)
-                }
-            } else {
+            guard let artifacts = currentArtifacts else {
                 latestUploadPayload = nil
                 captureState = .error("Capture artifacts were unavailable.")
+                return
+            }
+
+            print("📦 [Capture] Packaging artifacts …")
+            let artifactsToPackage = artifacts
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try self.packageArtifacts(artifactsToPackage)
+                    DispatchQueue.main.async {
+                        self.latestUploadPayload = artifactsToPackage.uploadPayload
+                        self.captureState = .finished(artifactsToPackage)
+                        print("✅ [Capture] Packaging complete → \(artifactsToPackage.packageURL.lastPathComponent)")
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.latestUploadPayload = nil
+                        self.captureState = .error(error.localizedDescription)
+                        print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
+                    }
+                }
             }
         }
         currentArtifacts = nil

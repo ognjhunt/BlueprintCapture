@@ -187,10 +187,14 @@ final class ReservationService: ReservationServiceProtocol {
         try await reservationsCollection.document(targetId).setData(data, merge: true)
         // Mirror into target_state
         let targetState = db.collection("target_state").document(targetId)
-        try? await targetState.setData([
+        var mirror: [String: Any] = [
             "status": "in_progress",
             "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
+        ]
+        #if canImport(FirebaseAuth)
+        if let uid = auth.currentUser?.uid { mirror["checkedInBy"] = uid }
+        #endif
+        try? await targetState.setData(mirror, merge: true)
     }
 
     func fetchActiveReservationForCurrentUser() async -> Reservation? {
