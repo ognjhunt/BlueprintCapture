@@ -111,6 +111,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var arFrameCount: Int = 0
     private var exportedMeshAnchors: Set<UUID> = []
     private var isARRunning: Bool = false
+    private var shouldSkipARKitOnNextRecording: Bool = false
     private let supportsARCapture: Bool = VideoCaptureManager.evaluateARCaptureSupport()
     private let supportsMeshReconstruction: Bool = VideoCaptureManager.evaluateMeshSupport()
 
@@ -209,9 +210,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         guard !movieOutput.isRecording else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
         print("⏺️ [Capture] startRecording begin")
         let baseName = "walkthrough-\(UUID().uuidString)"
+        let includeARKit = !shouldSkipARKitOnNextRecording
         let artifacts: RecordingArtifacts
         do {
-            artifacts = try makeRecordingArtifacts(baseName: baseName)
+            artifacts = try makeRecordingArtifacts(baseName: baseName, includeARKit: includeARKit)
         } catch {
             print("❌ [Capture] Failed to prepare capture workspace: \(error.localizedDescription)")
             captureState = .error("Failed to prepare capture workspace: \(error.localizedDescription)")
@@ -236,9 +238,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         prepareARKitLoggingIfNeeded(for: artifacts)
         startMotionUpdates()
         startExposureLogging()
-        startARSessionIfAvailable()
 
         movieOutput.startRecording(to: artifacts.videoURL, recordingDelegate: self)
+        if !includeARKit && supportsARCapture {
+            print("⚠️ [AR] AR session startup skipped due to previous camera conflict; manifest will omit AR data.")
+        }
+        shouldSkipARKitOnNextRecording = false
         captureState = .recording(artifacts)
         print("⏺️ [Capture] startRecording started → file=\(artifacts.videoURL.lastPathComponent)")
     }
@@ -266,7 +271,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    private func makeRecordingArtifacts(baseName: String) throws -> RecordingArtifacts {
+    private func makeRecordingArtifacts(baseName: String, includeARKit: Bool) throws -> RecordingArtifacts {
         let tempDir = FileManager.default.temporaryDirectory
         let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
         let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
@@ -280,7 +285,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         try fileManager.createDirectory(at: recordingDir, withIntermediateDirectories: true)
 
-        let arKitArtifacts = setupARKitArtifacts(in: recordingDir)
+        let arKitArtifacts = includeARKit ? setupARKitArtifacts(in: recordingDir) : nil
 
         return RecordingArtifacts(
             baseFilename: baseName,
@@ -579,14 +584,29 @@ extension VideoCaptureManager {
 }
 
 extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
+    func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
+        startARSessionIfAvailable()
+    }
+
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         stopMotionUpdates()
         stopExposureLogging()
         stopARSession()
         if let error {
+            let nsError = error as NSError
+            let avError = (error as? AVError) ?? AVError(_nsError: nsError)
+            let friendlyMessage: String
+            if avError.errorCode == .recordingStopped || avError.errorCode == .videoDeviceInUseByAnotherClient {
+                shouldSkipARKitOnNextRecording = true
+                currentARKitArtifacts = nil
+                friendlyMessage = "Recording stopped because the camera was busy. AR capture will be disabled on the next attempt."
+                print("⚠️ [Capture] Camera ownership conflict detected; AR startup will be skipped on the next recording.")
+            } else {
+                friendlyMessage = error.localizedDescription
+            }
             print("❌ [Capture] Recording failed: \(error.localizedDescription)")
             latestUploadPayload = nil
-            captureState = .error(error.localizedDescription)
+            captureState = .error(friendlyMessage)
         } else {
             let durationSeconds: Double?
             if output.recordedDuration.isNumeric {
