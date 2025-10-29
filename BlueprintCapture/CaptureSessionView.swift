@@ -56,6 +56,9 @@ struct CaptureSessionView: View {
             switch state {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
+                isEnding = false
+            case .idle, .error:
+                isEnding = false
             default:
                 break
             }
