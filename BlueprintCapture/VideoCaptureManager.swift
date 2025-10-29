@@ -111,10 +111,47 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var arFrameCount: Int = 0
     private var exportedMeshAnchors: Set<UUID> = []
     private var isARRunning: Bool = false
+    private let supportsARCapture: Bool = VideoCaptureManager.evaluateARCaptureSupport()
+    private let supportsMeshReconstruction: Bool = VideoCaptureManager.evaluateMeshSupport()
 
     override init() {
         super.init()
         arSession.delegate = self
+    }
+
+    private static func evaluateARCaptureSupport() -> Bool {
+#if targetEnvironment(simulator)
+        return false
+#else
+#if targetEnvironment(macCatalyst)
+        return false
+#else
+        if #available(iOS 14.0, *) {
+            if ProcessInfo.processInfo.isiOSAppOnMac {
+                return false
+            }
+        }
+        guard ARWorldTrackingConfiguration.isSupported else { return false }
+        guard MTLCreateSystemDefaultDevice() != nil else { return false }
+        return true
+#endif
+#endif
+    }
+
+    private static func evaluateMeshSupport() -> Bool {
+#if targetEnvironment(simulator)
+        return false
+#else
+#if targetEnvironment(macCatalyst)
+        return false
+#else
+        if #available(iOS 13.4, *) {
+            return ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+        } else {
+            return false
+        }
+#endif
+#endif
     }
 
     func configureSession() {
@@ -258,7 +295,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func setupARKitArtifacts(in directory: URL) -> RecordingArtifacts.ARKitArtifacts? {
-        guard ARWorldTrackingConfiguration.isSupported else { return nil }
+        guard supportsARCapture else { return nil }
 
         let fileManager = FileManager.default
         let root = directory.appendingPathComponent("arkit", isDirectory: true)
@@ -305,12 +342,17 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func startARSessionIfAvailable() {
-        guard currentARKitArtifacts != nil else { return }
+        guard supportsARCapture, currentARKitArtifacts != nil else {
+            if currentARKitArtifacts != nil {
+                print("ℹ️ [AR] Capture artifacts prepared but AR session disabled")
+            }
+            return
+        }
         guard !isARRunning else { print("ℹ️ [AR] startSession ignored — already running"); return }
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.environmentTexturing = .automatic
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+        if supportsMeshReconstruction && ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
             configuration.sceneReconstruction = .mesh
         }
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
@@ -542,6 +584,7 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
         stopExposureLogging()
         stopARSession()
         if let error {
+            print("❌ [Capture] Recording failed: \(error.localizedDescription)")
             latestUploadPayload = nil
             captureState = .error(error.localizedDescription)
         } else {
@@ -607,6 +650,15 @@ extension VideoCaptureManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         arDataQueue.async { [weak self] in
             self?.exportMeshAnchors(anchors)
+        }
+    }
+
+    func session(_ session: ARSession, didFailWithError error: Error) {
+        print("❌ [AR] session failed: \(error.localizedDescription)")
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.currentARKitArtifacts = nil
+            self.stopARSession()
         }
     }
 }
