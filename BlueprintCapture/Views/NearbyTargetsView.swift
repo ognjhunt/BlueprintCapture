@@ -25,8 +25,9 @@ struct NearbyTargetsView: View {
     @State private var switchFromTargetId: String?
     @State private var showAddressSheet = false
     @State private var addressQuery: String = ""
-    @AppStorage("NearbyTargetsAddressHintShown") private var addressHintShown: Bool = false
-    @State private var showChipHint = false
+    @State private var showWalkthrough = false
+    @AppStorage("NearbyTargetsWalkthroughShown") private var walkthroughShown: Bool = false
+    @State private var walkthroughPage = 0
     // Alert for reservation expiry while app is active
     @State private var showExpiryAlert = false
     @State private var expiryMessage: String?
@@ -34,23 +35,38 @@ struct NearbyTargetsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                currentAddressChip()
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                    .onTapGesture { showAddressSheet = true }
-                FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
-                    .padding(.horizontal)
-                    .padding(.top, 0)
-                metaBar()
-                    .padding(.horizontal)
-
-                if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
-                    reservationBanner(item: item, reservation: reservation)
+            ZStack {
+                VStack(spacing: 8) {
+                    currentAddressChip()
                         .padding(.horizontal)
+                        .padding(.top, 4)
+                        .onTapGesture { showAddressSheet = true }
+                    FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
+                        .padding(.horizontal)
+                        .padding(.top, 0)
+                    metaBar()
+                        .padding(.horizontal)
+
+                    if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
+                        reservationBanner(item: item, reservation: reservation)
+                            .padding(.horizontal)
+                    }
+
+                    content
                 }
 
-                content
+                if showWalkthrough {
+                    NearbyWalkthroughOverlay(
+                        isVisible: $showWalkthrough,
+                        pageIndex: $walkthroughPage,
+                        items: viewModel.items,
+                        onComplete: {
+                            walkthroughShown = true
+                            showWalkthrough = false
+                        }
+                    )
+                    .transition(.opacity)
+                }
             }
             .navigationTitle("Nearby Targets")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,17 +81,6 @@ struct NearbyTargetsView: View {
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .sheet(isPresented: $showAddressSheet) { addressSearchSheet }
-            .onAppear {
-                if !addressHintShown {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        showChipHint = true
-                        addressHintShown = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                            showChipHint = false
-                        }
-                    }
-                }
-            }
         .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
             guard
                 let info = note.userInfo as? [String: Any],
@@ -111,6 +116,14 @@ struct NearbyTargetsView: View {
             if case .loaded = newValue {
                 lastRefreshedAt = Date()
                 Task { await syncActiveReservationState() }
+                if !walkthroughShown {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            walkthroughPage = 0
+                            showWalkthrough = true
+                        }
+                    }
+                }
             }
         }
     }
@@ -273,17 +286,6 @@ private extension NearbyTargetsView {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Current area: \(address)")
                 .accessibilityHint("Double tap to search a different location")
-                .popover(isPresented: $showChipHint) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tip")
-                            .font(.caption).fontWeight(.semibold)
-                        Text("Tap here to change the area you're searching")
-                            .font(.footnote)
-                        Button("Got it") { showChipHint = false }
-                            .font(.caption)
-                    }
-                    .padding(12)
-                }
                 Spacer(minLength: 0)
             }
         } else {
