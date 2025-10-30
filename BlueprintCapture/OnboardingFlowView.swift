@@ -3,6 +3,7 @@ import AVFoundation
 import UserNotifications
 import CoreLocation
 import FirebaseAuth
+import UIKit
 
 /// First-run onboarding flow inspired by modern gig apps (Uber, DoorDash):
 /// 1) Value prop intro → 2) Enable capture permissions → 3) Optional payouts connection → 4) Done
@@ -131,7 +132,10 @@ private struct PermissionsEnableView: View {
     }()
     @State private var notificationsGranted = false
     @State private var isRequesting = false
+    @State private var showingPermissionAlert = false
 
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     private let notificationService = NotificationService()
 
     var body: some View {
@@ -185,9 +189,26 @@ private struct PermissionsEnableView: View {
             .padding(.top, -15)
         }
         .task { refreshNotificationStatus() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                refreshPermissionStatuses()
+                refreshNotificationStatus()
+            }
+        }
+        .alert("Permissions required", isPresented: $showingPermissionAlert) {
+            Button("Open Settings") {
+                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                    openURL(settingsURL)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Blueprint needs access to your camera and location to continue. Please enable these permissions in Settings to proceed.")
+        }
     }
 
     private var grantedAll: Bool { cameraGranted && microphoneGranted && locationGranted }
+    private var requiredPermissionsGranted: Bool { cameraGranted && locationGranted }
 
     private func enableAll() {
         if grantedAll {
@@ -201,9 +222,20 @@ private struct PermissionsEnableView: View {
             await requestLocation()
             await MainActor.run {
                 isRequesting = false
-                onContinue()
+                if requiredPermissionsGranted {
+                    onContinue()
+                } else {
+                    showingPermissionAlert = true
+                }
             }
         }
+    }
+
+    private func refreshPermissionStatuses() {
+        cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        microphoneGranted = AVAudioSession.sharedInstance().recordPermission == .granted
+        let status = CLLocationManager().authorizationStatus
+        locationGranted = status == .authorizedWhenInUse || status == .authorizedAlways
     }
 
     private func requestCamera() async {
