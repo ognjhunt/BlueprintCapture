@@ -412,7 +412,25 @@ final class NearbyTargetsViewModel: ObservableObject {
             }
             self.items = visible
             // Refresh proximity notifications for the top results so we can nudge users when nearby
-            notifications.scheduleProximityNotifications(for: visible.map { $0.target }, maxRegions: 10, radiusMeters: 150)
+            let reservedIds = Set(visible.compactMap { item -> String? in
+                switch reservationStatus(for: item.id) {
+                case .reserved:
+                    return item.id
+                case .none:
+                    return nil
+                }
+            })
+            let metersPerMile = 1609.34
+            let proximityTargets = visible.map { item -> ProximityNotificationTarget in
+                let distanceMeters = item.target.computedDistanceMeters ?? (item.distanceMiles * metersPerMile)
+                return ProximityNotificationTarget(
+                    target: item.target,
+                    distanceMeters: distanceMeters,
+                    estimatedPayoutUsd: item.estimatedPayoutUsd,
+                    isReserved: reservedIds.contains(item.id)
+                )
+            }
+            notifications.scheduleProximityNotifications(for: proximityTargets, maxRegions: 10, radiusMeters: 402)
             applySort()
             // Attach observers for visible items
             updateTargetStateObservers(for: visible.map { $0.id })

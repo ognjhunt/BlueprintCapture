@@ -2,9 +2,26 @@ import Foundation
 import UserNotifications
 import CoreLocation
 
+struct ProximityNotificationTarget {
+    let target: Target
+    let distanceMeters: Double?
+    let estimatedPayoutUsd: Int?
+    let isReserved: Bool
+
+    init(target: Target,
+         distanceMeters: Double? = nil,
+         estimatedPayoutUsd: Int? = nil,
+         isReserved: Bool = false) {
+        self.target = target
+        self.distanceMeters = distanceMeters
+        self.estimatedPayoutUsd = estimatedPayoutUsd
+        self.isReserved = isReserved
+    }
+}
+
 protocol NotificationServiceProtocol: AnyObject {
     func requestAuthorizationIfNeeded() async
-    func scheduleProximityNotifications(for targets: [Target], maxRegions: Int, radiusMeters: CLLocationDistance)
+    func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int, radiusMeters: CLLocationDistance)
     func clearProximityNotifications()
     /// Schedules a one-shot local notification at the reservation expiry time.
     func scheduleReservationExpiryNotification(target: Target, at date: Date)
@@ -20,6 +37,13 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     static let categoryId = "TARGET_PROXIMITY"
     static let actionCheckIn = "ACTION_CHECK_IN"
     static let actionDirections = "ACTION_DIRECTIONS"
+    private lazy var currencyFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
 
     override init() {
         self.center = UNUserNotificationCenter.current()
@@ -62,26 +86,65 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
         center.setNotificationCategories([category])
     }
 
-    func scheduleProximityNotifications(for targets: [Target], maxRegions: Int = 10, radiusMeters: CLLocationDistance = 150) {
+    func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int = 10, radiusMeters: CLLocationDistance = 402) {
         // iOS limits total monitored regions per app (~20). Keep ours conservative.
-        let subset = Array(targets.prefix(maxRegions))
         clearProximityNotifications()
 
-        for target in subset {
+        guard !targets.isEmpty else { return }
+
+        let reserved = targets.filter { $0.isReserved }
+        let sortedByDistance = targets.sorted {
+            let lhs = $0.distanceMeters ?? .greatestFiniteMagnitude
+            let rhs = $1.distanceMeters ?? .greatestFiniteMagnitude
+            if lhs == rhs { return $0.target.id < $1.target.id }
+            return lhs < rhs
+        }
+
+        var finalTargets: [ProximityNotificationTarget] = []
+        var seen = Set<String>()
+
+        for entry in reserved where !seen.contains(entry.target.id) {
+            finalTargets.append(entry)
+            seen.insert(entry.target.id)
+        }
+
+        for entry in sortedByDistance where finalTargets.count < maxRegions {
+            guard !seen.contains(entry.target.id) else { continue }
+            finalTargets.append(entry)
+            seen.insert(entry.target.id)
+        }
+
+        let regionRadius = max(50, radiusMeters)
+
+        for entry in finalTargets {
+            let target = entry.target
             let content = UNMutableNotificationContent()
-            content.title = "You're near a Blueprint location"
-            content.body = "You can check in at \(target.displayName). Start mapping to earn now."
+            if entry.isReserved {
+                content.title = "Reserved location nearby"
+            } else {
+                content.title = "You're near a Blueprint location"
+            }
+            if let payout = entry.estimatedPayoutUsd,
+               let formatted = currencyFormatter.string(from: NSNumber(value: payout)) {
+                content.body = "\(target.displayName) needs scanning. Estimated payout \(formatted)."
+            } else {
+                content.body = "\(target.displayName) needs scanning. Start mapping to earn now."
+            }
             content.sound = .default
             content.categoryIdentifier = Self.categoryId
-            content.userInfo = [
+            var userInfo: [String: Any] = [
                 "targetId": target.id,
                 "title": target.displayName,
                 "lat": target.lat,
                 "lng": target.lng
             ]
+            if let payout = entry.estimatedPayoutUsd {
+                userInfo["estimatedPayoutUsd"] = payout
+            }
+            content.userInfo = userInfo
 
             let centerCoord = CLLocationCoordinate2D(latitude: target.lat, longitude: target.lng)
-            let region = CLCircularRegion(center: centerCoord, radius: max(50, radiusMeters), identifier: proximityPrefix + target.id)
+            let region = CLCircularRegion(center: centerCoord, radius: regionRadius, identifier: proximityPrefix + target.id)
             region.notifyOnEntry = true
             region.notifyOnExit = false
 
