@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AVFoundation
 
 struct NearbyTargetsView: View {
     @StateObject private var viewModel = NearbyTargetsViewModel()
@@ -25,8 +26,9 @@ struct NearbyTargetsView: View {
     @State private var switchFromTargetId: String?
     @State private var showAddressSheet = false
     @State private var addressQuery: String = ""
-    @AppStorage("NearbyTargetsAddressHintShown") private var addressHintShown: Bool = false
-    @State private var showChipHint = false
+    @AppStorage("NearbyTargetsWalkthroughCompleted") private var hasCompletedWalkthrough = false
+    @State private var showWalkthrough = false
+    @State private var didTriggerWalkthrough = false
     // Alert for reservation expiry while app is active
     @State private var showExpiryAlert = false
     @State private var expiryMessage: String?
@@ -34,23 +36,38 @@ struct NearbyTargetsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                currentAddressChip()
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                    .onTapGesture { showAddressSheet = true }
-                FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
-                    .padding(.horizontal)
-                    .padding(.top, 0)
-                metaBar()
-                    .padding(.horizontal)
-
-                if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
-                    reservationBanner(item: item, reservation: reservation)
+            ZStack {
+                VStack(spacing: 8) {
+                    currentAddressChip()
                         .padding(.horizontal)
+                        .padding(.top, 4)
+                        .onTapGesture { showAddressSheet = true }
+                    FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
+                        .padding(.horizontal)
+                        .padding(.top, 0)
+                    metaBar()
+                        .padding(.horizontal)
+
+                    if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
+                        reservationBanner(item: item, reservation: reservation)
+                            .padding(.horizontal)
+                    }
+
+                    content
                 }
 
-                content
+                if showWalkthrough {
+                    NearbyTargetsWalkthroughOverlay(
+                        isPresented: $showWalkthrough,
+                        sampleItem: viewModel.items.first,
+                        currentAddress: viewModel.currentAddress,
+                        onDismiss: {
+                            hasCompletedWalkthrough = true
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(1)
+                }
             }
             .navigationTitle("Nearby Targets")
             .navigationBarTitleDisplayMode(.inline)
@@ -65,17 +82,6 @@ struct NearbyTargetsView: View {
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .sheet(isPresented: $showAddressSheet) { addressSearchSheet }
-            .onAppear {
-                if !addressHintShown {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        showChipHint = true
-                        addressHintShown = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                            showChipHint = false
-                        }
-                    }
-                }
-            }
         .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
             guard
                 let info = note.userInfo as? [String: Any],
@@ -111,6 +117,14 @@ struct NearbyTargetsView: View {
             if case .loaded = newValue {
                 lastRefreshedAt = Date()
                 Task { await syncActiveReservationState() }
+                if !hasCompletedWalkthrough && !didTriggerWalkthrough {
+                    didTriggerWalkthrough = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                            showWalkthrough = true
+                        }
+                    }
+                }
             }
         }
     }
@@ -273,17 +287,6 @@ private extension NearbyTargetsView {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Current area: \(address)")
                 .accessibilityHint("Double tap to search a different location")
-                .popover(isPresented: $showChipHint) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tip")
-                            .font(.caption).fontWeight(.semibold)
-                        Text("Tap here to change the area you're searching")
-                            .font(.footnote)
-                        Button("Got it") { showChipHint = false }
-                            .font(.caption)
-                    }
-                    .padding(12)
-                }
                 Spacer(minLength: 0)
             }
         } else {
@@ -704,5 +707,615 @@ private extension NearbyTargetsView {
                 self.reservedItem = nil
             }
         }
+    }
+}
+
+// MARK: - Nearby Walkthrough Overlay
+
+private struct NearbyTargetsWalkthroughOverlay: View {
+    @Binding var isPresented: Bool
+    let sampleItem: NearbyTargetsViewModel.NearbyItem?
+    let currentAddress: String?
+    let onDismiss: () -> Void
+
+    @State private var currentPage = 0
+    @StateObject private var cameraController = WalkthroughCameraController()
+    @State private var cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+    @State private var cameraDenied = AVCaptureDevice.authorizationStatus(for: .video) == .denied
+    @State private var cameraUnavailable = false
+    @State private var didTriggerDismiss = false
+
+    private var steps: [Step] { Step.all }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .topTrailing) {
+                TabView(selection: $currentPage) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                        WalkthroughStepPage(
+                            step: step,
+                            sampleItem: sampleItem,
+                            currentAddress: currentAddress,
+                            size: geometry.size,
+                            safeArea: geometry.safeAreaInsets,
+                            cameraController: cameraController,
+                            cameraAuthorized: cameraAuthorized,
+                            cameraDenied: cameraDenied,
+                            cameraUnavailable: cameraUnavailable,
+                            selection: $currentPage,
+                            index: index,
+                            totalSteps: steps.count,
+                            onFinish: dismiss
+                        )
+                        .tag(index)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea()
+
+                Button(action: dismiss) {
+                    HStack(spacing: 6) {
+                        Text("Skip tour")
+                            .font(.callout.weight(.semibold))
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 16)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .foregroundStyle(.white)
+                }
+                .padding(.top, geometry.safeAreaInsets.top + 16)
+                .padding(.trailing, 20)
+            }
+        }
+        .onAppear { updateCamera(for: currentPage) }
+        .onChange(of: currentPage) { _, newValue in updateCamera(for: newValue) }
+        .onDisappear { cameraController.stop() }
+    }
+
+    private func dismiss() {
+        guard !didTriggerDismiss else {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+                isPresented = false
+            }
+            return
+        }
+        didTriggerDismiss = true
+        cameraController.stop()
+        onDismiss()
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
+            isPresented = false
+        }
+    }
+
+    private func updateCamera(for index: Int) {
+        guard steps.indices.contains(index) else { return }
+        let step = steps[index]
+        if step.usesCameraBackground {
+            ensureCameraSession()
+        } else {
+            cameraController.stop()
+        }
+    }
+
+    private func ensureCameraSession() {
+#if targetEnvironment(simulator)
+        cameraUnavailable = true
+        cameraAuthorized = false
+        cameraDenied = false
+        return
+#else
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            cameraAuthorized = true
+            do {
+                try cameraController.prepareSession()
+                cameraUnavailable = false
+                cameraController.start()
+            } catch {
+                cameraUnavailable = true
+            }
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    cameraAuthorized = granted
+                    cameraDenied = !granted
+                    if granted {
+                        do {
+                            try cameraController.prepareSession()
+                            cameraUnavailable = false
+                            cameraController.start()
+                        } catch {
+                            cameraUnavailable = true
+                        }
+                    }
+                }
+            }
+        default:
+            cameraAuthorized = false
+            cameraDenied = true
+            cameraUnavailable = false
+            cameraController.stop()
+        }
+#endif
+    }
+
+    private struct Step: Identifiable {
+        enum Highlight {
+            case none
+            case addressChip
+            case filterBar
+            case targetList
+            case bottomTabs
+        }
+
+        enum Kind {
+            case targets
+            case filters
+            case search
+            case reserve
+            case checkIn
+            case captureQuality
+            case payout
+        }
+
+        let id: Int
+        let icon: String
+        let title: String
+        let message: String
+        let highlight: Highlight
+        let usesCameraBackground: Bool
+        let kind: Kind
+        let accent: Color
+
+        static let all: [Step] = [
+            Step(
+                id: 0,
+                icon: "mappin.circle.fill",
+                title: "Spot your next target",
+                message: "Your Nearby list shows real locations ready to map.",
+                highlight: .targetList,
+                usesCameraBackground: false,
+                kind: .targets,
+                accent: BlueprintTheme.brandTeal
+            ),
+            Step(
+                id: 1,
+                icon: "slider.horizontal.3",
+                title: "Fine-tune with filters",
+                message: "Prioritize distance, payout, or demand with quick toggles.",
+                highlight: .filterBar,
+                usesCameraBackground: false,
+                kind: .filters,
+                accent: BlueprintTheme.primary
+            ),
+            Step(
+                id: 2,
+                icon: "magnifyingglass",
+                title: "Search other areas",
+                message: "Jump to cities or stores you plan to visit soon.",
+                highlight: .addressChip,
+                usesCameraBackground: false,
+                kind: .search,
+                accent: BlueprintTheme.accentAqua
+            ),
+            Step(
+                id: 3,
+                icon: "clock.badge.checkmark",
+                title: "Reserve when you're en route",
+                message: "Hold a target for up to an hour if you’re heading there next.",
+                highlight: .targetList,
+                usesCameraBackground: false,
+                kind: .reserve,
+                accent: BlueprintTheme.primaryDeep
+            ),
+            Step(
+                id: 4,
+                icon: "mappin.and.ellipse",
+                title: "Check in & start mapping",
+                message: "Kick off your scan the moment you arrive on-site.",
+                highlight: .targetList,
+                usesCameraBackground: false,
+                kind: .checkIn,
+                accent: BlueprintTheme.successGreen
+            ),
+            Step(
+                id: 5,
+                icon: "camera.viewfinder",
+                title: "Capture with care",
+                message: "Use your rear camera (or connected glasses) for a smooth walkthrough.",
+                highlight: .none,
+                usesCameraBackground: true,
+                kind: .captureQuality,
+                accent: BlueprintTheme.brandTeal
+            ),
+            Step(
+                id: 6,
+                icon: "dollarsign.circle.fill",
+                title: "Earn after review",
+                message: "Quality scans get paid quickly after we verify them.",
+                highlight: .bottomTabs,
+                usesCameraBackground: false,
+                kind: .payout,
+                accent: BlueprintTheme.payoutTeal
+            )
+        ]
+    }
+
+    private static let payoutFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = "USD"
+        formatter.maximumFractionDigits = 0
+        return formatter
+    }()
+}
+
+private struct WalkthroughStepPage: View {
+    let step: NearbyTargetsWalkthroughOverlay.Step
+    let sampleItem: NearbyTargetsViewModel.NearbyItem?
+    let currentAddress: String?
+    let size: CGSize
+    let safeArea: EdgeInsets
+    @ObservedObject var cameraController: WalkthroughCameraController
+    let cameraAuthorized: Bool
+    let cameraDenied: Bool
+    let cameraUnavailable: Bool
+    @Binding var selection: Int
+    let index: Int
+    let totalSteps: Int
+    let onFinish: () -> Void
+
+    var body: some View {
+        ZStack {
+            background
+
+            if let rect = highlightRect(for: step.highlight) {
+                WalkthroughHighlightView(rect: rect)
+            }
+
+            VStack {
+                Spacer()
+                VStack(spacing: 18) {
+                    WalkthroughInfoCard(
+                        step: step,
+                        sampleItem: sampleItem,
+                        currentAddress: currentAddress,
+                        cameraDenied: cameraDenied,
+                        cameraUnavailable: cameraUnavailable
+                    )
+
+                    WalkthroughPageIndicator(currentIndex: selection, total: totalSteps)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        if index > 0 {
+                            Button(action: goBack) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "chevron.left")
+                                    Text("Back")
+                                        .fontWeight(.semibold)
+                                }
+                                .font(.callout)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 10)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .foregroundStyle(.white.opacity(0.9))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button(action: advance) {
+                            Text(index == totalSteps - 1 ? "I'm ready to map" : "Next")
+                        }
+                        .buttonStyle(BlueprintPrimaryButtonStyle())
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, safeArea.bottom + 24)
+            }
+        }
+        .ignoresSafeArea()
+    }
+
+    private var background: some View {
+        Group {
+            if step.usesCameraBackground {
+                if cameraAuthorized && !cameraUnavailable {
+                    WalkthroughCameraPreview(session: cameraController.session)
+                        .ignoresSafeArea()
+                        .overlay(Color.black.opacity(0.35).ignoresSafeArea())
+                } else {
+                    LinearGradient(
+                        colors: [BlueprintTheme.primaryDeep.opacity(0.9), BlueprintTheme.primary.opacity(0.85)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .ignoresSafeArea()
+                }
+            } else {
+                Color.black.opacity(0.68)
+                    .ignoresSafeArea()
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: step.usesCameraBackground)
+    }
+
+    private func highlightRect(for highlight: NearbyTargetsWalkthroughOverlay.Step.Highlight) -> CGRect? {
+        switch highlight {
+        case .none:
+            return nil
+        case .addressChip:
+            let width = max(0, size.width - 32)
+            let height: CGFloat = 76
+            let y = safeArea.top + 70
+            return CGRect(x: 16, y: y, width: width, height: height)
+        case .filterBar:
+            let width = max(0, size.width - 32)
+            let height: CGFloat = 120
+            let y = safeArea.top + 160
+            return CGRect(x: 16, y: y, width: width, height: height)
+        case .targetList:
+            let width = max(0, size.width - 32)
+            let top = safeArea.top + 260
+            let bottomPadding = safeArea.bottom + 220
+            let rawHeight = size.height - top - bottomPadding
+            let height = max(220, min(rawHeight, size.height - top - safeArea.bottom - 100))
+            return CGRect(x: 16, y: top, width: width, height: height)
+        case .bottomTabs:
+            let width = max(180, size.width - 120)
+            let height: CGFloat = 110
+            let x = (size.width - width) / 2
+            let y = size.height - safeArea.bottom - height - 36
+            return CGRect(x: x, y: y, width: width, height: height)
+        }
+    }
+
+    private func goBack() {
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+            selection = max(0, index - 1)
+        }
+    }
+
+    private func advance() {
+        if index == totalSteps - 1 {
+            onFinish()
+        } else {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) {
+                selection = min(totalSteps - 1, index + 1)
+            }
+        }
+    }
+}
+
+private struct WalkthroughHighlightView: View {
+    let rect: CGRect
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .stroke(Color.white.opacity(0.9), lineWidth: 2)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color.white.opacity(0.12))
+            )
+            .frame(width: rect.width, height: rect.height)
+            .position(x: rect.midX, y: rect.midY)
+            .shadow(color: Color.white.opacity(0.22), radius: 18)
+            .blendMode(.screen)
+            .transition(.opacity)
+    }
+}
+
+private struct WalkthroughInfoCard: View {
+    let step: NearbyTargetsWalkthroughOverlay.Step
+    let sampleItem: NearbyTargetsViewModel.NearbyItem?
+    let currentAddress: String?
+    let cameraDenied: Bool
+    let cameraUnavailable: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: step.icon)
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(step.accent)
+                    .frame(width: 52, height: 52)
+                    .background(step.accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(step.title)
+                        .font(.title3).fontWeight(.bold)
+                    Text(step.message)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(bulletPoints, id: \.self) { bullet in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(step.accent)
+                            .padding(.top, 2)
+                        Text(bullet)
+                            .font(.callout)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+        }
+        .padding(24)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    private var bulletPoints: [String] {
+        switch step.kind {
+        case .targets:
+            var lines: [String] = [
+                "See the nearby locations we've highlighted for you to map."
+            ]
+            if let item = sampleItem {
+                let payout = NearbyTargetsWalkthroughOverlay.payoutFormatter.string(from: NSNumber(value: item.estimatedPayoutUsd)) ?? "$\(item.estimatedPayoutUsd)"
+                let duration = formatDuration(estimatedScanTimeMinutes(for: item.target))
+                let distance = String(format: "%.1f", item.distanceMiles)
+                lines.append("\(item.target.displayName) · \(distance) mi · \(duration) · est. \(payout)")
+            } else if let address = currentAddress {
+                lines.append("We're finding top targets around \(address).")
+            }
+            lines.append("Each card shows the address, scan time, and estimated payout.")
+            return lines
+        case .filters:
+            return [
+                "Use the radius chips (0.5–10 mi) to match how far you’ll travel.",
+                "Tap Highest payout, Nearest, or Highest demand to reorder the list instantly."
+            ]
+        case .search:
+            var lines: [String] = []
+            if let address = currentAddress {
+                lines.append("You're currently browsing around \(address).")
+            }
+            lines.append("Tap the address bar to look up another city, neighborhood, or store.")
+            lines.append("Plan trips ahead and line up earning opportunities before you arrive.")
+            return lines
+        case .reserve:
+            return [
+                "Open a target and tap Reserve to hold it just for you for up to one hour.",
+                "Reservations are optional—save them for when you’re on the way." 
+            ]
+        case .checkIn:
+            return [
+                "Once you're on-site, tap Check in & start mapping to launch the capture flow.",
+                "We'll walk you through connecting glasses (if any) and open the camera right away."
+            ]
+        case .captureQuality:
+            var lines: [String] = [
+                "Walk slowly and let the camera see every aisle, wall, and corner.",
+                "Go down and back each aisle so the whole space is captured—quality beats speed."
+            ]
+            if cameraDenied {
+                lines.append("Enable camera access in Settings to record your walkthroughs.")
+            } else if cameraUnavailable {
+                lines.append("Camera preview unavailable here—use your rear camera during real captures.")
+            }
+            return lines
+        case .payout:
+            return [
+                "We review your video and typically pay out within 2–3 days.",
+                "Final payout depends on quality, demand for the space, and square footage.",
+                "Repeated low-quality scans can pause your access—we’ll warn you well before that happens."
+            ]
+        }
+    }
+}
+
+private struct WalkthroughPageIndicator: View {
+    let currentIndex: Int
+    let total: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<total, id: \.self) { index in
+                Capsule()
+                    .fill(index == currentIndex ? Color.white : Color.white.opacity(0.35))
+                    .frame(width: index == currentIndex ? 28 : 10, height: 8)
+                    .animation(.easeInOut(duration: 0.25), value: currentIndex)
+            }
+        }
+    }
+}
+
+private final class WalkthroughCameraController: ObservableObject {
+    let session = AVCaptureSession()
+    private let queue = DispatchQueue(label: "com.blueprint.walkthrough.camera")
+    private var isConfigured = false
+
+    enum ConfigurationError: Error {
+        case unavailable
+    }
+
+    func prepareSession() throws {
+        var capturedError: Error?
+        queue.sync {
+            if !self.isConfigured {
+#if targetEnvironment(simulator)
+                capturedError = ConfigurationError.unavailable
+#else
+                do {
+                    try self.configureSession()
+                    self.isConfigured = true
+                } catch {
+                    capturedError = error
+                }
+#endif
+            }
+        }
+        if let error = capturedError { throw error }
+    }
+
+    private func configureSession() throws {
+        session.beginConfiguration()
+        session.sessionPreset = .high
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
+            session.commitConfiguration()
+            throw ConfigurationError.unavailable
+        }
+        let input = try AVCaptureDeviceInput(device: device)
+        if session.canAddInput(input) {
+            session.addInput(input)
+        }
+        session.commitConfiguration()
+    }
+
+    func start() {
+        queue.async {
+            guard !self.session.isRunning else { return }
+            self.session.startRunning()
+        }
+    }
+
+    func stop() {
+        queue.async {
+            guard self.session.isRunning else { return }
+            self.session.stopRunning()
+        }
+    }
+}
+
+private struct WalkthroughCameraPreview: UIViewRepresentable {
+    let session: AVCaptureSession
+
+    func makeUIView(context: Context) -> WalkthroughPreviewView {
+        let view = WalkthroughPreviewView()
+        view.session = session
+        return view
+    }
+
+    func updateUIView(_ uiView: WalkthroughPreviewView, context: Context) {}
+}
+
+private final class WalkthroughPreviewView: UIView {
+    override class var layerClass: AnyClass {
+        AVCaptureVideoPreviewLayer.self
+    }
+
+    var session: AVCaptureSession? {
+        get { previewLayer.session }
+        set { previewLayer.session = newValue }
+    }
+
+    private var previewLayer: AVCaptureVideoPreviewLayer {
+        guard let layer = layer as? AVCaptureVideoPreviewLayer else {
+            fatalError("Expected AVCaptureVideoPreviewLayer")
+        }
+        layer.videoGravity = .resizeAspectFill
+        return layer
     }
 }
