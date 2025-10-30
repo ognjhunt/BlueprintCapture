@@ -655,9 +655,6 @@ private extension NearbyTargetsView {
     private func performReservation(for item: NearbyTargetsViewModel.NearbyItem) async {
         do {
             let res = try await viewModel.reserveTarget(item.target)
-            reserveMessage = "This location is now reserved for you for 1 hour (until \(res.reservedUntil.formatted(date: .omitted, time: .shortened))). If you are not on-site and mapping within that hour, it will be un-reserved."
-            keepActionsOpenAfterAlert = false
-            showReserveConfirm = true
             activeReservation = res
             reservedItem = item
             // Also schedule a background expiry notification just in case user backgrounds the app

@@ -596,7 +596,7 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
             let nsError = error as NSError
             let avError = (error as? AVError) ?? AVError(_nsError: nsError)
             let friendlyMessage: String
-            if avError.code == .recordingStopped || avError.code == .videoDeviceInUseByAnotherClient {
+            if avError.code == .deviceAlreadyUsedByAnotherSession {
                 shouldSkipARKitOnNextRecording = true
                 currentARKitArtifacts = nil
                 friendlyMessage = "Recording stopped because the camera was busy. AR capture will be disabled on the next attempt."
