@@ -430,7 +430,7 @@ final class NearbyTargetsViewModel: ObservableObject {
                     isReserved: reservedIds.contains(item.id)
                 )
             }
-            notifications.scheduleProximityNotifications(for: proximityTargets, maxRegions: 10, radiusMeters: 402)
+            notifications.scheduleProximityNotifications(for: proximityTargets, maxRegions: 10, radiusMeters: 200)
             applySort()
             // Attach observers for visible items
             updateTargetStateObservers(for: visible.map { $0.id })

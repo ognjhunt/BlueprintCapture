@@ -86,7 +86,7 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
         center.setNotificationCategories([category])
     }
 
-    func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int = 10, radiusMeters: CLLocationDistance = 402) {
+    func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int = 10, radiusMeters: CLLocationDistance = 200) {
         // iOS limits total monitored regions per app (~20). Keep ours conservative.
         clearProximityNotifications()
 
