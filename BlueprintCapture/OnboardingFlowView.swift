@@ -197,9 +197,12 @@ private struct PermissionsEnableView: View {
         }
         .alert("Permissions required", isPresented: $showingPermissionAlert) {
             Button("Open Settings") {
-                if let settingsURL = URL(string: UIApplication.openSettingsURLString) {
-                    openURL(settingsURL)
-                }
+                guard
+                    let settingsURL = URL(string: UIApplication.openSettingsURLString),
+                    UIApplication.shared.canOpenURL(settingsURL)
+                else { return }
+
+                UIApplication.shared.open(settingsURL, options: [:], completionHandler: nil)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
