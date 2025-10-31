@@ -25,6 +25,8 @@ struct NearbyTargetsView: View {
     @State private var switchFromTargetId: String?
     @State private var showAddressSheet = false
     @State private var addressQuery: String = ""
+    @State private var recentQueries: [RecentQuery] = []
+    @FocusState private var isAddressFieldFocused: Bool
     @State private var showWalkthrough = false
     @AppStorage("NearbyTargetsWalkthroughShown") private var walkthroughShown: Bool = false
     @State private var walkthroughPage = 0
@@ -353,94 +355,79 @@ private extension NearbyTargetsView {
 
     private var addressSearchSheet: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search another address", text: $addressQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: addressQuery) { _, newVal in
-                            Task { await viewModel.searchAddresses(query: newVal) }
+            ZStack {
+                LinearGradient(colors: [
+                    BlueprintTheme.brandTeal.opacity(0.18),
+                    Color(.systemBackground)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 20) {
+                    searchHeader
+
+                    ScrollView(showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 28) {
+                            searchResultsSection
+
+                            if !recentQueries.isEmpty {
+                                sectionHeader("Recent searches")
+                                VStack(spacing: 12) {
+                                    ForEach(recentQueries) { recent in
+                                        Button {
+                                            addressQuery = recent.primary
+                                            isAddressFieldFocused = true
+                                            Task { await viewModel.searchAddresses(query: recent.primary) }
+                                        } label: {
+                                            recentRow(for: recent)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+
+                            sectionHeader("Quick filters")
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(quickSuggestionItems) { suggestion in
+                                        Button {
+                                            addressQuery = suggestion.query
+                                            isAddressFieldFocused = true
+                                            Task { await viewModel.searchAddresses(query: suggestion.query) }
+                                        } label: {
+                                            suggestionChip(for: suggestion)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
                         }
-                }
-                .padding(.horizontal)
+                        .padding(.vertical, 4)
+                    }
 
-                if viewModel.isSearchingAddress {
-                    ProgressView("Searching…")
-                        .padding(.top, 8)
-                }
-
-                if !viewModel.addressSearchResults.isEmpty {
-                    List(viewModel.addressSearchResults) { result in
+                    if viewModel.isUsingCustomSearchCenter {
                         Button {
-                            viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
+                            viewModel.clearCustomSearchCenter()
                             addressQuery = ""
                             showAddressSheet = false
                         } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: result.isEstablishment ? "building.2.fill" : "mappin.circle.fill")
-                                    .foregroundStyle(result.isEstablishment ? BlueprintTheme.brandTeal : .secondary)
-                                    .font(.title3)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(result.title)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 4)
+                            Label("Use my current location", systemImage: "location.fill")
+                                .fontWeight(.semibold)
                         }
+                        .buttonStyle(BlueprintSecondaryButtonStyle())
                     }
-                    .listStyle(.plain)
-                } else if addressQuery.count >= 3 && !viewModel.isSearchingAddress {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("No results found")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text("Try a different search term")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else if addressQuery.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.5))
-                        VStack(spacing: 6) {
-                            Text("Search for a location")
-                                .font(.headline)
-                            Text("Enter a store name or street address")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                }
 
-                if viewModel.isUsingCustomSearchCenter {
-                    Button {
-                        viewModel.clearCustomSearchCenter()
-                        addressQuery = ""
-                        showAddressSheet = false
-                    } label: {
-                        Label("Use my current location", systemImage: "location.fill")
+                    HStack {
+                        Spacer()
+                        Label("Powered by Google", systemImage: "globe.americas.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
-                    .padding(.horizontal)
+                    .padding(.top, -4)
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
+                .padding(.top, 12)
             }
             .navigationTitle("Search location")
             .navigationBarTitleDisplayMode(.inline)
@@ -449,7 +436,276 @@ private extension NearbyTargetsView {
                     Button("Done") { showAddressSheet = false }
                 }
             }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    isAddressFieldFocused = true
+                }
+            }
         }
+    }
+
+    private var searchHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Search anywhere")
+                .font(.title3.weight(.semibold))
+            Text("Find businesses, landmarks, or street addresses powered by Google Places.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                TextField("Search another address", text: $addressQuery)
+                    .textInputAutocapitalization(.words)
+                    .disableAutocorrection(true)
+                    .focused($isAddressFieldFocused)
+                    .onChange(of: addressQuery) { _, newValue in
+                        Task { await viewModel.searchAddresses(query: newValue) }
+                    }
+
+                if !addressQuery.isEmpty {
+                    Button {
+                        addressQuery = ""
+                        Task { await viewModel.searchAddresses(query: "") }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Color.secondary.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .shadow(color: .black.opacity(0.04), radius: 10, x: 0, y: 8)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var searchResultsSection: some View {
+        if viewModel.isSearchingAddress {
+            VStack(spacing: 16) {
+                ProgressView()
+                    .tint(BlueprintTheme.brandTeal)
+                Text("Searching Google Places…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(.secondarySystemBackground).opacity(0.92))
+            )
+        } else if !viewModel.addressSearchResults.isEmpty {
+            sectionHeader("Results")
+            VStack(spacing: 14) {
+                ForEach(viewModel.addressSearchResults) { result in
+                    Button {
+                        registerRecentSearch(from: result)
+                        viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
+                        addressQuery = ""
+                        showAddressSheet = false
+                    } label: {
+                        searchResultRow(for: result)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        } else if addressQuery.count >= 3 {
+            VStack(spacing: 12) {
+                Image(systemName: "mappin.slash.circle")
+                    .font(.system(size: 46))
+                    .foregroundStyle(.secondary)
+                Text("No matches yet")
+                    .font(.headline)
+                Text("Try refining the name or adding the city.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 40)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(.secondarySystemBackground).opacity(0.92))
+            )
+        } else {
+            VStack(spacing: 16) {
+                Image(systemName: "mappin.and.ellipse")
+                    .font(.system(size: 56))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                Text("Search for a location")
+                    .font(.title3.weight(.semibold))
+                Text("Start typing to see live suggestions for stores, landmarks, and addresses nearby.")
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 44)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(.secondarySystemBackground).opacity(0.92))
+            )
+        }
+    }
+
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.leading, 2)
+    }
+
+    private func searchResultRow(for result: NearbyTargetsViewModel.LocationSearchResult) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(result.isEstablishment ? BlueprintTheme.brandTeal.opacity(0.2) : Color(.tertiarySystemFill))
+                    .frame(width: 44, height: 44)
+                Image(systemName: result.isEstablishment ? "building.2.fill" : "mappin.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(result.isEstablishment ? BlueprintTheme.brandTeal : .secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(result.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    if result.isEstablishment {
+                        Text("Business")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(BlueprintTheme.brandTeal.opacity(0.15))
+                            )
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                    }
+                }
+
+                if !result.subtitle.isEmpty {
+                    Text(result.subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                if !result.types.isEmpty {
+                    Text(result.types.prefix(3).joined(separator: " • "))
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary.opacity(0.6))
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Image(systemName: "chevron.forward")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.secondary.opacity(0.5))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.05), radius: 18, x: 0, y: 12)
+        )
+    }
+
+    private func recentRow(for recent: RecentQuery) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "clock.fill")
+                .font(.subheadline)
+                .foregroundStyle(BlueprintTheme.brandTeal)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(recent.primary)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                if !recent.secondary.isEmpty {
+                    Text(recent.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "arrow.up.left")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.secondary.opacity(0.5))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
+    }
+
+    private func suggestionChip(for suggestion: QuickSuggestion) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: suggestion.icon)
+                .font(.subheadline.weight(.semibold))
+            Text(suggestion.title)
+                .font(.subheadline.weight(.medium))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(colors: [suggestion.color.opacity(0.22), suggestion.color.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .clipShape(Capsule())
+        )
+        .foregroundStyle(suggestion.color.opacity(0.85))
+    }
+
+    private func registerRecentSearch(from result: NearbyTargetsViewModel.LocationSearchResult) {
+        let entry = RecentQuery(primary: result.title, secondary: result.subtitle)
+        if let existingIndex = recentQueries.firstIndex(where: { $0.matches(entry) }) {
+            recentQueries.remove(at: existingIndex)
+        }
+        recentQueries.insert(entry, at: 0)
+        if recentQueries.count > 6 {
+            recentQueries = Array(recentQueries.prefix(6))
+        }
+    }
+
+    private var quickSuggestionItems: [QuickSuggestion] {
+        [
+            QuickSuggestion(icon: "cup.and.saucer.fill", title: "Coffee", query: "coffee", color: .orange),
+            QuickSuggestion(icon: "fuelpump.fill", title: "Gas", query: "gas station", color: .red),
+            QuickSuggestion(icon: "cart.fill", title: "Groceries", query: "grocery store", color: .green),
+            QuickSuggestion(icon: "house.fill", title: "Apartments", query: "apartment", color: .indigo),
+            QuickSuggestion(icon: "building.2.fill", title: "Offices", query: "office", color: .blue)
+        ]
+    }
+
+    private struct RecentQuery: Identifiable, Equatable {
+        let id = UUID()
+        let primary: String
+        let secondary: String
+
+        func matches(_ other: RecentQuery) -> Bool {
+            primary.caseInsensitiveCompare(other.primary) == .orderedSame &&
+            secondary.caseInsensitiveCompare(other.secondary) == .orderedSame
+        }
+    }
+
+    private struct QuickSuggestion: Identifiable {
+        let id = UUID()
+        let icon: String
+        let title: String
+        let query: String
+        let color: Color
     }
     @ViewBuilder func actionSheet(for item: NearbyTargetsViewModel.NearbyItem) -> some View {
         let status = viewModel.reservationStatus(for: item.id)
