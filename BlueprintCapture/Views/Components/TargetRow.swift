@@ -8,57 +8,6 @@ struct TargetRow: View {
 
     var body: some View {
         let isReserved = reservationSecondsRemaining != nil
-        let cardBackground: LinearGradient = {
-            if isReserved {
-                if reservedByMe {
-                    return LinearGradient(
-                        colors: [
-                            BlueprintTheme.primary.opacity(0.3),
-                            BlueprintTheme.accentAqua.opacity(0.22)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                } else {
-                    return LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.96),
-                            Color.white.opacity(0.88)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                }
-            } else {
-                return LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.98),
-                        BlueprintTheme.primary.opacity(0.16)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        }()
-
-        let borderGradient: LinearGradient = {
-            if isReserved && reservedByMe {
-                return LinearGradient(
-                    colors: [Color.white.opacity(0.45), Color.white.opacity(0.2)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            } else {
-                return LinearGradient(
-                    colors: [BlueprintTheme.primary.opacity(0.25), BlueprintTheme.accentAqua.opacity(0.2)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            }
-        }()
-        let primaryTextColor: Color = isReserved && reservedByMe ? .white : .primary
-        let secondaryTextColor: Color = isReserved && reservedByMe ? Color.white.opacity(0.8) : .secondary
-        let chevronColor: Color = isReserved && reservedByMe ? Color.white.opacity(0.7) : Color.secondary
         ZStack(alignment: .topLeading) {
             HStack(spacing: 12) {
                 thumbnail
@@ -66,7 +15,7 @@ struct TargetRow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.white.opacity(0.35), lineWidth: 0.8)
+                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
                     )
                     .overlay(alignment: .bottomLeading) {
                         if let seconds = reservationSecondsRemaining {
@@ -81,7 +30,7 @@ struct TargetRow: View {
                         Text(item.target.displayName)
                             .font(.headline)
                             .lineLimit(1)
-                            .foregroundStyle(primaryTextColor)
+                            .foregroundStyle(.primary)
                             .layoutPriority(1)
 
                         if reservationSecondsRemaining != nil {
@@ -93,7 +42,7 @@ struct TargetRow: View {
 
                     Text(item.target.address ?? "Address pending…")
                         .font(.subheadline)
-                        .foregroundStyle(secondaryTextColor)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
 
                     HStack(spacing: 8) {
@@ -109,17 +58,17 @@ struct TargetRow: View {
                 .overlay(alignment: .topTrailing) {
                     // Float payout badge above content so the name can use full width
                     payoutBadge()
-                        .padding(.top, -6)
-                        .padding(.trailing, -24)
+                        .padding(.top, -2)
+                        .padding(.trailing, -20)
                         .allowsHitTesting(false)
                 }
 
                 Image(systemName: "chevron.right")
                     .font(.footnote)
-                    .foregroundStyle(chevronColor)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 14)
-            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
 
             if isReserved {
                 // Corner ribbon accent for reserved state
@@ -138,43 +87,39 @@ struct TargetRow: View {
                         Text("Held")
                     }
                     .font(.caption2).fontWeight(.semibold)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .background(
-                        Capsule().fill(
-                            LinearGradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.16)], startPoint: .leading, endPoint: .trailing)
-                        )
-                    )
-                    .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-                    .foregroundStyle(Color.white.opacity(0.82))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(Color(.systemFill)))
+                    .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
+                    .foregroundStyle(.secondary)
                     .offset(x: -4, y: -4)
                 }
             }
         }
         .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(cardBackground)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(isReserved ? (reservedByMe ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground)) : Color(.systemBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(borderGradient, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.black.opacity(0.06), lineWidth: 1)
         )
         .overlay(
             Group {
                 if isReserved && reservedByMe {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.4)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.2)
                 }
             }
         )
         .overlay(alignment: .leading) {
             if isOnSite && !isReserved {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(BlueprintTheme.successGreen)
-                    .frame(width: 5)
-                    .opacity(0.95)
+                    .frame(width: 4)
+                    .opacity(0.9)
             }
         }
-        .shadow(color: BlueprintTheme.primary.opacity(0.22), radius: 18, x: 0, y: 10)
+        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
         .accessibilityLabel(item.accessibilityLabel)
     }
 
@@ -202,14 +147,10 @@ struct TargetRow: View {
                         .lineLimit(1)
                 }
                 .font(.caption)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(
-                    Capsule().fill(
-                        LinearGradient(colors: [BlueprintTheme.successGreen, BlueprintTheme.successGreenDeep], startPoint: .leading, endPoint: .trailing)
-                    )
-                )
-                .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
-                .foregroundStyle(Color.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.12)))
+                .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+                .foregroundStyle(BlueprintTheme.successGreen)
                 .fixedSize(horizontal: true, vertical: false)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
@@ -222,14 +163,10 @@ struct TargetRow: View {
                         .lineLimit(1)
                 }
                 .font(.caption).fontWeight(.semibold)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(
-                    Capsule().fill(
-                        LinearGradient(colors: [BlueprintTheme.primary.opacity(0.6), BlueprintTheme.accentAqua.opacity(0.6)], startPoint: .leading, endPoint: .trailing)
-                    )
-                )
-                .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-                .foregroundStyle(Color.white)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Capsule().fill(Color(.systemFill)))
+                .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: true, vertical: false)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
@@ -251,14 +188,10 @@ struct TargetRow: View {
             }
         }
         .font(.caption).fontWeight(.semibold)
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(
-            Capsule().fill(
-                LinearGradient(colors: [BlueprintTheme.primary, BlueprintTheme.accentAqua], startPoint: .leading, endPoint: .trailing)
-            )
-        )
-        .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
-        .foregroundStyle(Color.white)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
+        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.45), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.primary)
         .accessibilityLabel("Estimated scan time \(timeText)")
         .accessibilityHint("Approximate time required to complete this capture")
         .fixedSize(horizontal: true, vertical: false)
@@ -274,14 +207,16 @@ struct TargetRow: View {
                 .lineLimit(1)
         }
         .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 10).padding(.vertical, 6)
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        // Opaque base so overlapping the title never shows through
         .background(
-            Capsule().fill(
-                LinearGradient(colors: [BlueprintTheme.successGreen, BlueprintTheme.payoutTeal], startPoint: .leading, endPoint: .trailing)
-            )
+            ZStack {
+                Capsule().fill(Color(.systemBackground))
+                Capsule().fill(BlueprintTheme.successGreen.opacity(0.18))
+            }
         )
-        .overlay(Capsule().stroke(Color.white.opacity(0.2), lineWidth: 1))
-        .foregroundStyle(Color.white)
+        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.payoutGradient)
         .fixedSize(horizontal: true, vertical: false)
         .lineLimit(1)
         .minimumScaleFactor(0.95)
@@ -298,22 +233,22 @@ struct TargetRow: View {
                 .monospacedDigit()
         }
         .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 8).padding(.vertical, 4)
+        .padding(.horizontal, 7).padding(.vertical, 3)
         .background(
             Group {
                 if isMine {
-                    Capsule().fill(LinearGradient(colors: [BlueprintTheme.primary, BlueprintTheme.brandTeal], startPoint: .leading, endPoint: .trailing))
+                    Capsule().fill(BlueprintTheme.reservedGradient)
                 } else {
-                    Capsule().fill(Color.white.opacity(0.22))
+                    Capsule().fill(Color(.systemFill))
                 }
             }
         )
         .overlay(
             Group {
-                if !isMine { Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1) }
+                if !isMine { Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1) }
             }
         )
-        .foregroundStyle(isMine ? Color.white : Color.white.opacity(0.85))
+        .foregroundStyle(isMine ? .white : .secondary)
     }
 
     private func onsitePill() -> some View {
@@ -322,21 +257,17 @@ struct TargetRow: View {
             Text("Nearby")
         }
         .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 9).padding(.vertical, 5)
-        .background(
-            Capsule().fill(
-                LinearGradient(colors: [BlueprintTheme.successGreen, BlueprintTheme.successGreenDeep], startPoint: .leading, endPoint: .trailing)
-            )
-        )
-        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
-        .foregroundStyle(Color.white)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.18)))
+        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
+        .foregroundStyle(BlueprintTheme.successGreen)
     }
 
     private var placeholder: some View {
         ZStack {
-            LinearGradient(colors: [BlueprintTheme.primary.opacity(0.2), BlueprintTheme.brandTeal.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color.gray.opacity(0.1)
             Image(systemName: "photo")
-                .foregroundStyle(Color.white.opacity(0.6))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -365,5 +296,4 @@ struct TargetRow: View {
         return formatter.string(from: number) ?? "\(value)"
     }
 }
-
 

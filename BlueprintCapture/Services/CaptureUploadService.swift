@@ -121,56 +121,73 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
         #if canImport(FirebaseStorage)
         let storage = Storage.storage()
-        let path = makeStoragePath(for: record.request)
-        let ref = storage.reference(withPath: path)
+        var isDir: ObjCBool = false
+        _ = FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDir)
 
-        let metadata = StorageMetadata()
-        metadata.contentType = "application/zip"
-        var custom: [String: String] = [:]
-        custom["jobId"] = record.request.metadata.jobId
-        custom["creatorId"] = record.request.metadata.creatorId
-        custom["capturedAt"] = ISO8601DateFormatter().string(from: record.request.metadata.capturedAt)
-        if let t = record.request.metadata.targetId { custom["targetId"] = t }
-        if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
-        metadata.customMetadata = custom
+        if isDir.boolValue {
+            // Upload directory contents recursively
+            let basePath = makeBaseDirectoryPath(for: record.request)
+            let ok = await uploadDirectory(
+                storage: storage,
+                localDirectory: packageURL,
+                remoteBasePath: basePath,
+                id: id,
+                request: record.request
+            )
+            if !ok { return }
+        } else {
+            // Upload single file (zip)
+            let path = makeStoragePath(for: record.request)
+            let ref = storage.reference(withPath: path)
 
-        let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
+            let metadata = StorageMetadata()
+            metadata.contentType = contentType(for: packageURL)
+            var custom: [String: String] = [:]
+            custom["jobId"] = record.request.metadata.jobId
+            custom["creatorId"] = record.request.metadata.creatorId
+            custom["capturedAt"] = ISO8601DateFormatter().string(from: record.request.metadata.capturedAt)
+            if let t = record.request.metadata.targetId { custom["targetId"] = t }
+            if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
+            metadata.customMetadata = custom
 
-        // Observe progress
-        let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-            guard let self else { return }
-            let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
-            self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
-        }
+            let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
 
-        // Await completion
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let successHandle = uploadTask.observe(.success) { [weak self] _ in
-                guard let self else { continuation.resume(); return }
-                self.queue.async {
-                    guard var latestRecord = self.uploads[id] else { continuation.resume(); return }
-                    latestRecord.request.metadata.uploadedAt = Date()
-                    latestRecord.task = nil
-                    self.uploads[id] = latestRecord
-                    self.subject.send(.progress(id: id, progress: 1.0))
-                    self.subject.send(.completed(latestRecord.request))
-                }
-                continuation.resume()
+            // Observe progress
+            let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+                guard let self else { return }
+                let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
+                self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
             }
 
-            let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
-                guard let self else { continuation.resume(); return }
-                self.queue.async {
-                    guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
-                    failingRecord.task = nil
-                    self.uploads[id] = failingRecord
-                    self.subject.send(.failed(failingRecord.request, .uploadFailed))
+            // Await completion
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let successHandle = uploadTask.observe(.success) { [weak self] _ in
+                    guard let self else { continuation.resume(); return }
+                    self.queue.async {
+                        guard var latestRecord = self.uploads[id] else { continuation.resume(); return }
+                        latestRecord.request.metadata.uploadedAt = Date()
+                        latestRecord.task = nil
+                        self.uploads[id] = latestRecord
+                        self.subject.send(.progress(id: id, progress: 1.0))
+                        self.subject.send(.completed(latestRecord.request))
+                    }
+                    continuation.resume()
                 }
-                continuation.resume()
-            }
 
-            // Keep observers alive until continuation resumes
-            _ = (progressHandle, successHandle, failureHandle)
+                let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
+                    guard let self else { continuation.resume(); return }
+                    self.queue.async {
+                        guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
+                        failingRecord.task = nil
+                        self.uploads[id] = failingRecord
+                        self.subject.send(.failed(failingRecord.request, .uploadFailed))
+                    }
+                    continuation.resume()
+                }
+
+                // Keep observers alive until continuation resumes
+                _ = (progressHandle, successHandle, failureHandle)
+            }
         }
         #else
         // Fallback: simulate progress if FirebaseStorage is unavailable (e.g., in previews)
@@ -193,6 +210,108 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     #if canImport(FirebaseStorage)
+    // Upload all files under a directory, preserving relative paths beneath remoteBasePath
+    private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, request: CaptureUploadRequest) async -> Bool {
+        // Gather files
+        guard let enumerator = FileManager.default.enumerator(at: localDirectory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            self.queue.async {
+                guard var failingRecord = self.uploads[id] else { return }
+                failingRecord.task = nil
+                self.uploads[id] = failingRecord
+                self.subject.send(.failed(failingRecord.request, .uploadFailed))
+            }
+            return false
+        }
+
+        var files: [URL] = []
+        var totalBytes: Int64 = 0
+        for case let url as URL in enumerator {
+            var isRegular: ObjCBool = false
+            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isRegular), !isRegular.boolValue {
+                files.append(url)
+                if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                    totalBytes += Int64(size)
+                }
+            }
+        }
+        guard !files.isEmpty, totalBytes > 0 else {
+            self.queue.async {
+                guard var failingRecord = self.uploads[id] else { return }
+                failingRecord.task = nil
+                self.uploads[id] = failingRecord
+                self.subject.send(.failed(failingRecord.request, .uploadFailed))
+            }
+            return false
+        }
+
+        var uploadedBytes: Int64 = 0
+        for file in files {
+            if Task.isCancelled { return false }
+            let relPath = file.path.replacingOccurrences(of: localDirectory.path + "/", with: "")
+            let remotePath = remoteBasePath + relPath
+            let ref = storage.reference(withPath: remotePath)
+            let md = StorageMetadata()
+            md.contentType = contentType(for: file)
+            // propagate custom metadata for each file
+            var custom: [String: String] = [:]
+            custom["jobId"] = request.metadata.jobId
+            custom["creatorId"] = request.metadata.creatorId
+            custom["capturedAt"] = ISO8601DateFormatter().string(from: request.metadata.capturedAt)
+            if let t = request.metadata.targetId { custom["targetId"] = t }
+            if let r = request.metadata.reservationId { custom["reservationId"] = r }
+            md.customMetadata = custom
+
+            let uploadTask = ref.putFile(from: file, metadata: md)
+
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+                    guard let self else { return }
+                    let completed = snapshot.progress?.completedUnitCount ?? 0
+                    let fraction = Double(uploadedBytes + completed) / Double(max(1, totalBytes))
+                    self.subject.send(.progress(id: id, progress: min(max(fraction, 0.0), 0.999)))
+                }
+                let successHandle = uploadTask.observe(.success) { _ in
+                    let completed = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
+                    uploadedBytes += completed
+                    continuation.resume()
+                }
+                let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
+                    guard let self else { continuation.resume(); return }
+                    self.queue.async {
+                        guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
+                        failingRecord.task = nil
+                        self.uploads[id] = failingRecord
+                        self.subject.send(.failed(failingRecord.request, .uploadFailed))
+                    }
+                    continuation.resume()
+                }
+                _ = (progressHandle, successHandle, failureHandle)
+            }
+        }
+
+        self.queue.async {
+            guard var latestRecord = self.uploads[id] else { return }
+            latestRecord.request.metadata.uploadedAt = Date()
+            latestRecord.task = nil
+            self.uploads[id] = latestRecord
+            self.subject.send(.progress(id: id, progress: 1.0))
+            self.subject.send(.completed(latestRecord.request))
+        }
+        return true
+    }
+
+    private func contentType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "zip": return "application/zip"
+        case "mov": return "video/quicktime"
+        case "mp4": return "video/mp4"
+        case "json", "jsonl": return "application/json"
+        case "bin": return "application/octet-stream"
+        case "obj": return "text/plain"
+        default: return "application/octet-stream"
+        }
+    }
+
     private func makeStoragePath(for request: CaptureUploadRequest) -> String {
         let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
         let formatter = ISO8601DateFormatter()
@@ -200,6 +319,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
         let basename = request.packageURL.lastPathComponent
         return "targets/\(placeId)/\(ts)/\(basename)"
+    }
+
+    private func makeBaseDirectoryPath(for request: CaptureUploadRequest) -> String {
+        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
+        // Ensure trailing slash to append relative file paths directly
+        return "targets/\(placeId)/\(ts)/"
     }
     #endif
 }

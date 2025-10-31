@@ -6,6 +6,7 @@ struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
     @State private var didAutoStart = false
     @State private var isEnding = false
+    @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
 
@@ -151,6 +152,11 @@ struct CaptureSessionView: View {
             print("ℹ️ [Capture] No active recording when ending session")
         }
         viewModel.captureManager.stopSession()
+        // Dismiss the capture view (works for fullScreenCover) and also reset state for stack-based flows
+        DispatchQueue.main.async {
+            self.viewModel.step = .confirmLocation
+            self.dismiss()
+        }
     }
 }
 

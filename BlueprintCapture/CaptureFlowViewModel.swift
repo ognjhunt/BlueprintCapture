@@ -39,13 +39,16 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var hasRequestedPermissions = false
     private let onboardingKey = "com.blueprint.isOnboarded"
     private let uploadService: CaptureUploadServiceProtocol
+    private let targetStateService: TargetStateServiceProtocol
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var searchDebounceTask: Task<Void, Never>?
     private var currentSearchQuery: String = ""
 
-    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
+    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+         targetStateService: TargetStateServiceProtocol = TargetStateService()) {
         self.uploadService = uploadService
+        self.targetStateService = targetStateService
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
@@ -378,6 +381,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             status.metadata = request.metadata
             status.state = .completed
             uploadStatusMap[request.metadata.id] = status
+            // Mark target as completed in Firestore so it no longer appears in Nearby
+            if let targetId = request.metadata.targetId, !targetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Task { [weak self] in
+                    guard let self else { return }
+                    do { try await self.targetStateService.complete(targetId: targetId) }
+                    catch { print("⚠️ Failed to mark target completed for \(targetId): \(error.localizedDescription)") }
+                }
+            }
         case .failed(let request, let error):
             guard var status = uploadStatusMap[request.metadata.id] else { break }
             status.metadata = request.metadata

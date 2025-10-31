@@ -20,55 +20,58 @@ struct NearbyWalkthroughOverlay: View {
     private let totalPages = 7
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            TabView(selection: $pageIndex) {
-                highlightTargetsPage
-                    .tag(0)
+        GeometryReader { geo in
+            ZStack(alignment: .topTrailing) {
+                TabView(selection: $pageIndex) {
+                    highlightTargetsPage
+                        .tag(0)
 
-                filtersPage
-                    .tag(1)
+                    filtersPage
+                        .tag(1)
 
-                searchPage
-                    .tag(2)
+                    searchPage
+                        .tag(2)
 
-                reservePage
-                    .tag(3)
+                    reservePage
+                        .tag(3)
 
-                checkInPage
-                    .tag(4)
+                    checkInPage
+                        .tag(4)
 
-                mappingTipsPage
-                    .tag(5)
+                    mappingTipsPage
+                        .tag(5)
 
-                payoutPage
-                    .tag(6)
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-
-            Button(pageIndex == totalPages - 1 ? "Done" : "Skip") {
-                finish()
-            }
-            .font(.caption.weight(.semibold))
-            .padding(.horizontal, 18)
-            .padding(.vertical, 10)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.white.opacity(0.18))
-            )
-            .padding(.top, 40)
-            .padding(.trailing, 24)
-
-            // Custom page indicator – centered near the bottom to hint scrollability
-            VStack { Spacer() }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .bottom) {
-                    pageIndicator
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.bottom, 96)
+                    payoutPage
+                        .tag(6)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+
+                Button(pageIndex == totalPages - 1 ? "Done" : "Skip") {
+                    finish()
+                }
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.18))
+                )
+                // Place below the status bar + nav bar area so touches are not intercepted
+                .padding(.top, geo.safeAreaInsets.top + 52)
+                .padding(.trailing, 24)
+
+                // Custom page indicator – centered near the bottom to hint scrollability
+                VStack { Spacer() }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottom) {
+                        pageIndicator
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.bottom, 96)
+                    }
+            }
+            .ignoresSafeArea()
+            .animation(.easeInOut(duration: 0.25), value: pageIndex)
         }
-        .ignoresSafeArea()
-        .animation(.easeInOut(duration: 0.25), value: pageIndex)
     }
 
     private func finish() {

@@ -39,17 +39,15 @@ struct NearbyTargetsView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .top) {
-                backgroundLayer
-
-                VStack(spacing: 12) {
+            ZStack {
+                VStack(spacing: 8) {
                     currentAddressChip()
                         .padding(.horizontal)
-                        .padding(.top, 12)
+                        .padding(.top, 4)
                         .onTapGesture { showAddressSheet = true }
                     FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
                         .padding(.horizontal)
-                        .padding(.top, 4)
+                        .padding(.top, 0)
                         .background(
                             GeometryReader { proxy in
                                 Color.clear.preference(key: FilterBarFrameKey.self, value: proxy.frame(in: .global))
@@ -87,12 +85,13 @@ struct NearbyTargetsView: View {
             .navigationTitle("Nearby Targets")
             .navigationBarTitleDisplayMode(.inline)
             .fullScreenCover(isPresented: $navigateToCapture) {
-                CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id, reservationId: nil)
+                CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id ?? selectedItem?.id, reservationId: nil)
             }
         }
         // Transparent nav bar to let hero gradient show through
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.light, for: .navigationBar)
+        .blueprintScreenBackground()
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .sheet(isPresented: $showAddressSheet) { addressSearchSheet }
@@ -146,9 +145,7 @@ struct NearbyTargetsView: View {
     @ViewBuilder private var content: some View {
         switch viewModel.state {
         case .idle, .loading:
-            ProgressView()
-                .tint(BlueprintTheme.accentAqua)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
         case .error(let message):
             VStack(spacing: 12) {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -188,9 +185,7 @@ struct NearbyTargetsView: View {
                                 showActions = true
                             }
                         } header: {
-                            Text("Your reservation")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(Color.white.opacity(0.75))
+                            Text("Your reservation").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
 
@@ -234,7 +229,6 @@ struct NearbyTargetsView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                 .listRowBackground(Color.clear)
                 .background(Color.clear)
-                .padding(.top, 4)
                 .refreshable {
                     await viewModel.refresh()
                     lastRefreshedAt = Date()
@@ -264,50 +258,6 @@ private extension NearbyTargetsView {
         static var defaultValue: CGRect = .zero
         static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
     }
-
-    private var backgroundLayer: some View {
-        ZStack(alignment: .top) {
-            Color(.systemGroupedBackground)
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                LinearGradient(
-                    colors: [
-                        BlueprintTheme.primaryDeep.opacity(0.95),
-                        BlueprintTheme.primary.opacity(0.85),
-                        BlueprintTheme.brandTeal.opacity(0.55)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .overlay(
-                    ZStack {
-                        Circle()
-                            .fill(BlueprintTheme.brandTeal.opacity(0.25))
-                            .frame(width: 420, height: 420)
-                            .blur(radius: 120)
-                            .offset(x: -140, y: -160)
-
-                        Circle()
-                            .fill(BlueprintTheme.accentAqua.opacity(0.2))
-                            .frame(width: 360, height: 360)
-                            .blur(radius: 120)
-                            .offset(x: 140, y: -120)
-
-                        Circle()
-                            .fill(Color.white.opacity(0.12))
-                            .frame(width: 520, height: 520)
-                            .blur(radius: 160)
-                            .offset(x: 20, y: 180)
-                    }
-                )
-                .frame(height: 320)
-                .ignoresSafeArea()
-
-                Spacer()
-            }
-        }
-    }
     @ViewBuilder
     func currentAddressChip() -> some View {
         if let address = viewModel.currentAddress {
@@ -318,11 +268,10 @@ private extension NearbyTargetsView {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "mappin.and.ellipse")
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(BlueprintTheme.brandTeal, BlueprintTheme.accentAqua)
+                            .foregroundStyle(BlueprintTheme.brandTeal)
                         Text(address)
                             .font(.callout)
-                            .foregroundStyle(Color.primary.opacity(0.92))
+                            .foregroundStyle(.primary)
                             .lineLimit(2)
                         if viewModel.isUsingCustomSearchCenter {
                             Text("(custom)")
@@ -334,41 +283,23 @@ private extension NearbyTargetsView {
                             Image(systemName: "magnifyingglass")
                             Text("Change")
                         }
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule().fill(
-                                LinearGradient(colors: [BlueprintTheme.brandTeal, BlueprintTheme.accentAqua], startPoint: .leading, endPoint: .trailing)
-                            )
-                        )
-                        .foregroundStyle(Color.white)
+                        .font(.caption)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
+                        .foregroundStyle(BlueprintTheme.primary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.97), Color.white.opacity(0.88)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.ultraThinMaterial)
                     )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [BlueprintTheme.brandTeal.opacity(0.35), BlueprintTheme.primary.opacity(0.3)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
                     )
-                    .shadow(color: BlueprintTheme.primary.opacity(0.18), radius: 22, x: 0, y: 12)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Current area: \(address)")
@@ -387,68 +318,33 @@ private extension NearbyTargetsView {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.95), Color.white.opacity(0.86)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(
-                            LinearGradient(
-                                colors: [BlueprintTheme.accentAqua.opacity(0.32), BlueprintTheme.primary.opacity(0.26)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
                 )
-                .shadow(color: BlueprintTheme.primary.opacity(0.16), radius: 20, x: 0, y: 10)
                 Spacer(minLength: 0)
             }
         }
     }
 
     private func metaBar() -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Label("\(viewModel.items.count) results", systemImage: "list.bullet")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(0.9))
+                .font(.footnote).foregroundStyle(.secondary)
             if let ts = lastRefreshedAt {
                 Text("• Updated \(relativeTime(from: ts))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.white.opacity(0.72))
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             Spacer()
             Button {
                 Task { await viewModel.refresh(); lastRefreshedAt = Date() }
             } label: {
-                Image(systemName: "arrow.clockwise.circle.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color.white.opacity(0.92))
+                Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(BlueprintTheme.brandTeal)
             }.buttonStyle(.plain)
         }
-        .padding(.vertical, 12)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [BlueprintTheme.primary.opacity(0.55), BlueprintTheme.brandTeal.opacity(0.55)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.18), lineWidth: 1)
-        )
-        .shadow(color: BlueprintTheme.primary.opacity(0.28), radius: 24, x: 0, y: 14)
     }
 
     private func relativeTime(from date: Date) -> String {
@@ -858,7 +754,7 @@ private extension NearbyTargetsView {
                     .buttonStyle(BlueprintPrimaryButtonStyle())
                 }
 
-                if viewModel.isOnSite(item.target) {
+                if viewModel.isOnSite(item.target) || AppConfig.allowOffsiteCheckIn() {
                     Button {
                         // If someone else reserved it, inform instead of attempting check-in
                         if isReservedHere && !isReservedByMe, let until = reservedUntilTime {
@@ -871,6 +767,8 @@ private extension NearbyTargetsView {
                                 do {
                                     try await viewModel.checkIn(item.target)
                                     await MainActor.run {
+                                        // Ensure targetId flows into the capture sheet even if not previously reserved
+                                        reservedItem = item
                                         captureFlow.step = .readyToCapture
                                         captureFlow.captureManager.configureSession()
                                         captureFlow.captureManager.startSession()

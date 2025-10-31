@@ -78,6 +78,21 @@ enum AppConfig {
         }
         return 35.0
     }
+
+    // MARK: - Testing Overrides
+    static func allowOffsiteCheckIn() -> Bool {
+        #if DEBUG
+        return true
+        #else
+        if let plist = secretsPlist() {
+            if let flag = plist["ALLOW_OFFSITE_CHECKIN"] as? Bool { return flag }
+            if let str = plist["ALLOW_OFFSITE_CHECKIN"] as? String {
+                return (str as NSString).boolValue
+            }
+        }
+        return false
+        #endif
+    }
 }
 
 extension Notification.Name {

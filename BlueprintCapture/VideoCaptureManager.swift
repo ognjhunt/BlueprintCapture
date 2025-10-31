@@ -202,8 +202,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     func stopSession() {
         guard session.isRunning else { print("ℹ️ [Capture] stopSession ignored — not running"); return }
         print("🛑 [Capture] stopRunning() …")
-        session.stopRunning()
-        print("🛑 [Capture] session stopped (isRunning=\(session.isRunning))")
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.session.stopRunning()
+            print("🛑 [Capture] session stopped (isRunning=\(self.session.isRunning))")
+        }
     }
 
     func startRecording() {
@@ -274,7 +276,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private func makeRecordingArtifacts(baseName: String, includeARKit: Bool) throws -> RecordingArtifacts {
         let tempDir = FileManager.default.temporaryDirectory
         let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
+        #if canImport(ZIPFoundation)
         let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
+        #else
+        // Fallback: use the directory itself as the upload package when ZIP is unavailable
+        let packageURL = recordingDir
+        #endif
         let videoURL = recordingDir.appendingPathComponent("\(baseName).mov")
         let motionURL = recordingDir.appendingPathComponent("\(baseName)-motion.jsonl")
         let manifestURL = recordingDir.appendingPathComponent("\(baseName)-manifest.json")
@@ -354,6 +361,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             return
         }
         guard !isARRunning else { print("ℹ️ [AR] startSession ignored — already running"); return }
+        // If the camera is already owned by our AVCaptureSession/movie output,
+        // skip starting AR to avoid camera ownership conflicts that stop recording.
+        if session.isRunning || movieOutput.isRecording {
+            print("⚠️ [AR] Skipping AR start — camera session is active")
+            return
+        }
 
         let configuration = ARWorldTrackingConfiguration()
         configuration.environmentTexturing = .automatic
@@ -863,19 +876,19 @@ private extension VideoCaptureManager {
     }
 
     func packageArtifacts(_ artifacts: RecordingArtifacts) throws {
+        #if canImport(ZIPFoundation)
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: artifacts.packageURL.path) {
             try fileManager.removeItem(at: artifacts.packageURL)
         }
-
-        #if canImport(ZIPFoundation)
         try fileManager.zipItem(
             at: artifacts.directoryURL,
             to: artifacts.packageURL,
             shouldKeepParent: true
         )
         #else
-        throw CaptureError.archiveUnavailable
+        // No-op: we will upload the directory contents recursively
+        return
         #endif
     }
 
