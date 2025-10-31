@@ -353,95 +353,26 @@ private extension NearbyTargetsView {
 
     private var addressSearchSheet: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search another address", text: $addressQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: addressQuery) { _, newVal in
-                            Task { await viewModel.searchAddresses(query: newVal) }
-                        }
+            LocationSearchSheetView(
+                query: $addressQuery,
+                results: viewModel.addressSearchResults,
+                isSearching: viewModel.isSearchingAddress,
+                usesGooglePlacesBranding: AppConfig.placesAPIKey() != nil,
+                isUsingCustomSearchCenter: viewModel.isUsingCustomSearchCenter,
+                onQueryChange: { newValue in
+                    Task { await viewModel.searchAddresses(query: newValue) }
+                },
+                onSelectResult: { result in
+                    viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
+                    addressQuery = ""
+                    showAddressSheet = false
+                },
+                onUseCurrentLocation: {
+                    viewModel.clearCustomSearchCenter()
+                    addressQuery = ""
+                    showAddressSheet = false
                 }
-                .padding(.horizontal)
-
-                if viewModel.isSearchingAddress {
-                    ProgressView("Searching…")
-                        .padding(.top, 8)
-                }
-
-                if !viewModel.addressSearchResults.isEmpty {
-                    List(viewModel.addressSearchResults) { result in
-                        Button {
-                            viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
-                            addressQuery = ""
-                            showAddressSheet = false
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: result.isEstablishment ? "building.2.fill" : "mappin.circle.fill")
-                                    .foregroundStyle(result.isEstablishment ? BlueprintTheme.brandTeal : .secondary)
-                                    .font(.title3)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(result.title)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .listStyle(.plain)
-                } else if addressQuery.count >= 3 && !viewModel.isSearchingAddress {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("No results found")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text("Try a different search term")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else if addressQuery.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.5))
-                        VStack(spacing: 6) {
-                            Text("Search for a location")
-                                .font(.headline)
-                            Text("Enter a store name or street address")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                }
-
-                if viewModel.isUsingCustomSearchCenter {
-                    Button {
-                        viewModel.clearCustomSearchCenter()
-                        addressQuery = ""
-                        showAddressSheet = false
-                    } label: {
-                        Label("Use my current location", systemImage: "location.fill")
-                    }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
-                    .padding(.horizontal)
-                }
-            }
+            )
             .navigationTitle("Search location")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
