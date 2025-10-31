@@ -3,6 +3,9 @@ import Combine
 #if canImport(FirebaseStorage)
 import FirebaseStorage
 #endif
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
 
 struct CaptureUploadMetadata: Identifiable, Equatable {
     let id: UUID
@@ -261,7 +264,30 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             if let r = request.metadata.reservationId { custom["reservationId"] = r }
             md.customMetadata = custom
 
-            let uploadTask = ref.putFile(from: file, metadata: md)
+            // If manifest.json, patch scene_id and video_uri before uploading
+            let uploadSourceURL: URL
+            if relPath == "manifest.json" {
+                let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("manifest-\(UUID().uuidString).json")
+                do {
+                    let data = try Data(contentsOf: file)
+                    var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+                    let sceneId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? request.metadata.jobId
+                    let bucket = (FirebaseApp.app()?.options.storageBucket).map { "gs://\($0)" } ?? ""
+                    json["scene_id"] = sceneId
+                    if !bucket.isEmpty {
+                        json["video_uri"] = bucket + "/" + remoteBasePath + "walkthrough.mov"
+                    }
+                    let patched = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes])
+                    try patched.write(to: tempURL, options: .atomic)
+                    uploadSourceURL = tempURL
+                } catch {
+                    uploadSourceURL = file
+                }
+            } else {
+                uploadSourceURL = file
+            }
+
+            let uploadTask = ref.putFile(from: uploadSourceURL, metadata: md)
 
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
@@ -322,12 +348,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func makeBaseDirectoryPath(for request: CaptureUploadRequest) -> String {
-        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
-        // Ensure trailing slash to append relative file paths directly
-        return "targets/\(placeId)/\(ts)/"
+        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? request.metadata.jobId
+        // Required layout: targets/<scene_id>/raw/
+        return "targets/\(placeId)/raw/"
     }
     #endif
 }

@@ -5,6 +5,9 @@ import Combine
 import CoreMotion
 import CoreMedia
 import Metal
+import UniformTypeIdentifiers
+import UIKit
+import ImageIO
 #if canImport(ZIPFoundation)
 import ZIPFoundation
 #endif
@@ -24,6 +27,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             let depthDirectoryURL: URL?
             let confidenceDirectoryURL: URL?
             let meshDirectoryURL: URL?
+            let posesLogURL: URL
+            let intrinsicsURL: URL
         }
 
         let baseFilename: String
@@ -103,6 +108,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var currentArtifacts: RecordingArtifacts?
     private var motionLogFileHandle: FileHandle?
     private var arFrameLogFileHandle: FileHandle?
+    private var arPoseLogFileHandle: FileHandle?
+    private var arIntrinsicsWritten: Bool = false
     private var currentCameraIntrinsics: CaptureManifest.CameraIntrinsics?
     private var currentExposureSettings: CaptureManifest.ExposureSettings?
     private var exposureSamples: [CaptureManifest.ExposureSample] = []
@@ -282,9 +289,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         // Fallback: use the directory itself as the upload package when ZIP is unavailable
         let packageURL = recordingDir
         #endif
-        let videoURL = recordingDir.appendingPathComponent("\(baseName).mov")
-        let motionURL = recordingDir.appendingPathComponent("\(baseName)-motion.jsonl")
-        let manifestURL = recordingDir.appendingPathComponent("\(baseName)-manifest.json")
+        let videoURL = recordingDir.appendingPathComponent("walkthrough.mov")
+        let motionURL = recordingDir.appendingPathComponent("motion.jsonl")
+        let manifestURL = recordingDir.appendingPathComponent("manifest.json")
 
         let fileManager = FileManager.default
         if fileManager.fileExists(atPath: recordingDir.path) {
@@ -315,6 +322,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let confidence = root.appendingPathComponent("confidence", isDirectory: true)
         let mesh = root.appendingPathComponent("meshes", isDirectory: true)
         let frameLog = root.appendingPathComponent("frames.jsonl")
+        let posesLog = root.appendingPathComponent("poses.jsonl")
+        let intrinsics = root.appendingPathComponent("intrinsics.json")
 
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
@@ -322,12 +331,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             try fileManager.createDirectory(at: confidence, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: mesh, withIntermediateDirectories: true)
             fileManager.createFile(atPath: frameLog.path, contents: nil)
+            fileManager.createFile(atPath: posesLog.path, contents: nil)
+            fileManager.createFile(atPath: intrinsics.path, contents: nil)
             return RecordingArtifacts.ARKitArtifacts(
                 rootDirectoryURL: root,
                 frameLogURL: frameLog,
                 depthDirectoryURL: depth,
                 confidenceDirectoryURL: confidence,
-                meshDirectoryURL: mesh
+                meshDirectoryURL: mesh,
+                posesLogURL: posesLog,
+                intrinsicsURL: intrinsics
             )
         } catch {
             print("Failed to set up ARKit capture directories: \(error)")
@@ -338,6 +351,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private func prepareARKitLoggingIfNeeded(for artifacts: RecordingArtifacts) {
         guard let arKit = artifacts.arKit else {
             arFrameLogFileHandle = nil
+            arPoseLogFileHandle = nil
+            arIntrinsicsWritten = false
             return
         }
 
@@ -346,9 +361,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 FileManager.default.createFile(atPath: arKit.frameLogURL.path, contents: nil)
             }
             arFrameLogFileHandle = try FileHandle(forWritingTo: arKit.frameLogURL)
+            if !FileManager.default.fileExists(atPath: arKit.posesLogURL.path) {
+                FileManager.default.createFile(atPath: arKit.posesLogURL.path, contents: nil)
+            }
+            arPoseLogFileHandle = try FileHandle(forWritingTo: arKit.posesLogURL)
+            arIntrinsicsWritten = false
         } catch {
             print("Failed to open ARKit frame log: \(error)")
             arFrameLogFileHandle = nil
+            arPoseLogFileHandle = nil
+            arIntrinsicsWritten = false
             currentARKitArtifacts = nil
         }
     }
@@ -398,6 +420,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 }
             }
             arFrameLogFileHandle = nil
+            if let handle = arPoseLogFileHandle {
+                do {
+                    try handle.close()
+                } catch {
+                    print("Failed to close ARKit pose log: \(error)")
+                }
+            }
+            arPoseLogFileHandle = nil
+            arIntrinsicsWritten = false
         }
         isARRunning = false
     }
@@ -467,6 +498,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         guard let handle = arFrameLogFileHandle else { return }
 
         let frameIndex = arFrameCount
+        let frameId = String(format: "%06d", frameIndex + 1)
         let cameraTransform = matrixToArray(frame.camera.transform)
         let intrinsics = matrixToArray(frame.camera.intrinsics)
         let resolution = [Int(frame.camera.imageResolution.width), Int(frame.camera.imageResolution.height)]
@@ -476,10 +508,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         var confidenceFile: String?
 
         if let depth = frame.sceneDepth, let depthDirectory = arKit.depthDirectoryURL {
-            let filename = String(format: "scene-depth-%05d.bin", frameIndex)
+            let filename = "\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
-                try writeFloatPixelBuffer(depth.depthMap, to: fileURL)
+                try writeDepthPNG(depth.depthMap, to: fileURL)
                 sceneDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
             } catch {
                 print("Failed to persist scene depth map: \(error)")
@@ -487,10 +519,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
 
         if let smoothedDepth = frame.smoothedSceneDepth, let depthDirectory = arKit.depthDirectoryURL {
-            let filename = String(format: "smoothed-depth-%05d.bin", frameIndex)
+            let filename = "smoothed-\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
-                try writeFloatPixelBuffer(smoothedDepth.depthMap, to: fileURL)
+                try writeDepthPNG(smoothedDepth.depthMap, to: fileURL)
                 smoothedDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
             } catch {
                 print("Failed to persist smoothed depth map: \(error)")
@@ -499,10 +531,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         if let confidenceMap = frame.smoothedSceneDepth?.confidenceMap ?? frame.sceneDepth?.confidenceMap,
            let confidenceDirectory = arKit.confidenceDirectoryURL {
-            let filename = String(format: "confidence-%05d.bin", frameIndex)
+            let filename = "\(frameId).png"
             let fileURL = confidenceDirectory.appendingPathComponent(filename)
             do {
-                try writeUInt8PixelBuffer(confidenceMap, to: fileURL)
+                try writeConfidencePNG(confidenceMap, to: fileURL)
                 confidenceFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
             } catch {
                 print("Failed to persist confidence map: \(error)")
@@ -529,6 +561,46 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             }
         } catch {
             print("Failed to encode ARKit frame log entry: \(error)")
+        }
+
+        // Also append to poses.jsonl with required schema
+        if let poseHandle = arPoseLogFileHandle {
+            let tDeviceSec = frame.timestamp
+            let m = frame.camera.transform
+            let T: [[Double]] = [
+                [Double(m.columns.0.x), Double(m.columns.0.y), Double(m.columns.0.z), Double(m.columns.0.w)],
+                [Double(m.columns.1.x), Double(m.columns.1.y), Double(m.columns.1.z), Double(m.columns.1.w)],
+                [Double(m.columns.2.x), Double(m.columns.2.y), Double(m.columns.2.z), Double(m.columns.2.w)],
+                [Double(m.columns.3.x), Double(m.columns.3.y), Double(m.columns.3.z), Double(m.columns.3.w)]
+            ]
+            struct PoseRow: Codable { let t_device_sec: Double; let frame_id: String; let T_world_camera: [[Double]] }
+            let row = PoseRow(t_device_sec: tDeviceSec, frame_id: frameId, T_world_camera: T)
+            do {
+                let json = try JSONEncoder().encode(row)
+                poseHandle.write(json)
+                if let nl = "\n".data(using: .utf8) { poseHandle.write(nl) }
+            } catch {
+                print("Failed to write poses.jsonl row: \(error)")
+            }
+        }
+
+        // Write intrinsics.json once per clip
+        if !arIntrinsicsWritten {
+            let fx = Double(frame.camera.intrinsics.columns.0.x)
+            let fy = Double(frame.camera.intrinsics.columns.1.y)
+            let cx = Double(frame.camera.intrinsics.columns.2.x)
+            let cy = Double(frame.camera.intrinsics.columns.2.y)
+            let width = Int(frame.camera.imageResolution.width)
+            let height = Int(frame.camera.imageResolution.height)
+            let intrinsicsDict: [String: Any] = [
+                "fx": fx, "fy": fy, "cx": cx, "cy": cy,
+                "width": width, "height": height
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: intrinsicsDict, options: [.prettyPrinted]) {
+                do { try data.write(to: arKit.intrinsicsURL, options: .atomic); arIntrinsicsWritten = true } catch {
+                    print("Failed to write intrinsics.json: \(error)")
+                }
+            }
         }
 
         arFrameCount += 1
@@ -699,32 +771,33 @@ extension VideoCaptureManager: ARSessionDelegate {
 private extension VideoCaptureManager {
     func persistManifest(duration: Double?, synchronous: Bool = false) {
         guard let artifacts = currentArtifacts else { return }
-        let intrinsics = currentCameraIntrinsics ?? CaptureManifest.CameraIntrinsics(
-            resolutionWidth: 0,
-            resolutionHeight: 0,
-            intrinsicMatrix: nil,
-            fieldOfView: nil,
-            lensAperture: nil,
-            minimumFocusDistance: nil
-        )
-        let exposureSettings = currentExposureSettings ?? CaptureManifest.ExposureSettings(mode: "unknown", pointOfInterest: nil, whiteBalanceMode: "unknown")
-        let samples = exposureSamples
-
-        let encoder = manifestEncoder
+        let intr = currentCameraIntrinsics
+        let width = intr?.resolutionWidth ?? 0
+        let height = intr?.resolutionHeight ?? 0
+        let fps: Int = {
+            if let d = videoDevice?.activeVideoMinFrameDuration, d.isNumeric { return Int(round(1.0 / d.seconds)) }
+            return 30
+        }()
+        let deviceModel = UIDevice.current.model
+        let osVersion = UIDevice.current.systemVersion
+        let hasLiDAR = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+        let epochMs = Int64(artifacts.startedAt.timeIntervalSince1970 * 1000.0)
         let writeBlock = {
-            let manifest = CaptureManifest(
-                videoFile: artifacts.videoURL.lastPathComponent,
-                motionLogFile: artifacts.motionLogURL.lastPathComponent,
-                manifestFile: artifacts.manifestURL.lastPathComponent,
-                recordedAt: artifacts.startedAt,
-                durationSeconds: duration,
-                cameraIntrinsics: intrinsics,
-                exposureSettings: exposureSettings,
-                exposureSamples: samples,
-                arKit: self.makeARKitManifest(for: artifacts)
-            )
+            let dict: [String: Any] = [
+                "scene_id": "",
+                "video_uri": "",
+                "device_model": deviceModel,
+                "os_version": osVersion,
+                "fps_source": fps,
+                "width": width,
+                "height": height,
+                "capture_start_epoch_ms": epochMs,
+                "has_lidar": hasLiDAR,
+                "scale_hint_m_per_unit": hasLiDAR ? 1.0 : 1.0,
+                "intended_space_type": "home"
+            ]
             do {
-                let data = try encoder.encode(manifest)
+                let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes])
                 try data.write(to: artifacts.manifestURL, options: .atomic)
             } catch {
                 print("Failed to write manifest: \(error)")
@@ -873,6 +946,81 @@ private extension VideoCaptureManager {
 
         let data = Data(values)
         try data.write(to: url, options: .atomic)
+    }
+
+    func writeDepthPNG(_ pixelBuffer: CVPixelBuffer, to url: URL) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { throw CaptureError.pixelBufferEncodingFailed }
+
+        // Convert Float32 meters to UInt16 millimeters (clamped)
+        var out = [UInt16](repeating: 0, count: width * height)
+        let rowFloats = bytesPerRow / MemoryLayout<Float32>.size
+        let src = base.assumingMemoryBound(to: Float32.self)
+        for y in 0..<height {
+            let srcRow = src.advanced(by: y * rowFloats)
+            let dstRow = UnsafeMutablePointer(mutating: out).advanced(by: y * width)
+            for x in 0..<width {
+                let m = srcRow[x]
+                let mm = m.isFinite && m > 0 ? min(max(Int(m * 1000.0), 0), 65535) : 0
+                dstRow[x] = UInt16(mm)
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        guard let ctx = CGContext(
+            data: &out,
+            width: width,
+            height: height,
+            bitsPerComponent: 16,
+            bytesPerRow: width * MemoryLayout<UInt16>.size,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ), let image = ctx.makeImage() else {
+            throw CaptureError.pixelBufferEncodingFailed
+        }
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, image, nil)
+        if !CGImageDestinationFinalize(dest) { throw CaptureError.pixelBufferEncodingFailed }
+    }
+
+    func writeConfidencePNG(_ pixelBuffer: CVPixelBuffer, to url: URL) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { throw CaptureError.pixelBufferEncodingFailed }
+
+        var out = [UInt8](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let srcRow = base.advanced(by: y * bytesPerRow).assumingMemoryBound(to: UInt8.self)
+            let dstRow = UnsafeMutablePointer(mutating: out).advanced(by: y * width)
+            for x in 0..<width {
+                dstRow[x] = srcRow[x] // values {0,1,2}
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        guard let ctx = CGContext(
+            data: &out,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * MemoryLayout<UInt8>.size,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ), let image = ctx.makeImage() else {
+            throw CaptureError.pixelBufferEncodingFailed
+        }
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, image, nil)
+        if !CGImageDestinationFinalize(dest) { throw CaptureError.pixelBufferEncodingFailed }
     }
 
     func packageArtifacts(_ artifacts: RecordingArtifacts) throws {
