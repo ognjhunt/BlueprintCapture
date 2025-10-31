@@ -5,6 +5,7 @@ struct TargetRow: View {
     let reservationSecondsRemaining: Int?
     let isOnSite: Bool
     let reservedByMe: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let isReserved = reservationSecondsRemaining != nil
@@ -15,7 +16,17 @@ struct TargetRow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.5 : 0.25),
+                                        BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.45 : 0.18)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
                     .overlay(alignment: .bottomLeading) {
                         if let seconds = reservationSecondsRemaining {
@@ -67,8 +78,8 @@ struct TargetRow: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 10)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
 
             if isReserved {
                 // Corner ribbon accent for reserved state
@@ -88,38 +99,47 @@ struct TargetRow: View {
                     }
                     .font(.caption2).fontWeight(.semibold)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(Color(.systemFill)))
-                    .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
-                    .foregroundStyle(.secondary)
+                    .background(
+                        Capsule().fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(colorScheme == .dark ? 0.15 : 0.65),
+                                    BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.28 : 0.18)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                    )
+                    .overlay(
+                        Capsule().stroke(
+                            LinearGradient(
+                                colors: [
+                                    BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.4 : 0.2),
+                                    BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.35 : 0.18)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: 1
+                        )
+                    )
+                    .foregroundStyle(Color.white.opacity(0.9))
                     .offset(x: -4, y: -4)
                 }
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isReserved ? (reservedByMe ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground)) : Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
-        )
-        .overlay(
-            Group {
-                if isReserved && reservedByMe {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.2)
-                }
-            }
-        )
+        .background(cardBackground(isReserved: isReserved, reservedByMe: reservedByMe))
+        .overlay(cardBorder(isReserved: isReserved, reservedByMe: reservedByMe))
         .overlay(alignment: .leading) {
             if isOnSite && !isReserved {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(BlueprintTheme.successGreen)
                     .frame(width: 4)
                     .opacity(0.9)
             }
         }
-        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
+        .shadow(color: BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.38 : 0.12), radius: 22, x: 0, y: 14)
         .accessibilityLabel(item.accessibilityLabel)
     }
 
@@ -164,9 +184,32 @@ struct TargetRow: View {
                 }
                 .font(.caption).fontWeight(.semibold)
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(Color(.systemFill)))
-                .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
-                .foregroundStyle(.secondary)
+                .background(
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: [
+                                BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.5 : 0.18),
+                                BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.45 : 0.24)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                )
+                .overlay(
+                    Capsule().stroke(
+                        LinearGradient(
+                            colors: [
+                                BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.6 : 0.3),
+                                BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.55 : 0.35)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1
+                    )
+                )
+                .foregroundStyle(Color.white.opacity(0.95))
                 .fixedSize(horizontal: true, vertical: false)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
@@ -189,9 +232,32 @@ struct TargetRow: View {
         }
         .font(.caption).fontWeight(.semibold)
         .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
-        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.45), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.primary)
+        .background(
+            Capsule().fill(
+                LinearGradient(
+                    colors: [
+                        BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.5 : 0.2),
+                        BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.55 : 0.28)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+        )
+        .overlay(
+            Capsule().stroke(
+                LinearGradient(
+                    colors: [
+                        BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.6 : 0.35),
+                        BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.65 : 0.4)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                lineWidth: 1
+            )
+        )
+        .foregroundStyle(Color.white.opacity(0.95))
         .accessibilityLabel("Estimated scan time \(timeText)")
         .accessibilityHint("Approximate time required to complete this capture")
         .fixedSize(horizontal: true, vertical: false)
@@ -210,13 +276,31 @@ struct TargetRow: View {
         .padding(.horizontal, 8).padding(.vertical, 5)
         // Opaque base so overlapping the title never shows through
         .background(
-            ZStack {
-                Capsule().fill(Color(.systemBackground))
-                Capsule().fill(BlueprintTheme.successGreen.opacity(0.18))
-            }
+            Capsule().fill(
+                LinearGradient(
+                    colors: [
+                        BlueprintTheme.successGreen.opacity(colorScheme == .dark ? 0.55 : 0.28),
+                        BlueprintTheme.payoutTeal.opacity(colorScheme == .dark ? 0.55 : 0.32)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
         )
-        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.payoutGradient)
+        .overlay(
+            Capsule().stroke(
+                LinearGradient(
+                    colors: [
+                        BlueprintTheme.successGreen.opacity(colorScheme == .dark ? 0.7 : 0.45),
+                        BlueprintTheme.payoutTeal.opacity(colorScheme == .dark ? 0.65 : 0.5)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                ),
+                lineWidth: 1
+            )
+        )
+        .foregroundStyle(Color.white.opacity(0.96))
         .fixedSize(horizontal: true, vertical: false)
         .lineLimit(1)
         .minimumScaleFactor(0.95)
@@ -294,6 +378,64 @@ struct TargetRow: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         return formatter.string(from: number) ?? "\(value)"
+    }
+
+    private func cardBackground(isReserved: Bool, reservedByMe: Bool) -> some View {
+        let colors: [Color]
+        if reservedByMe {
+            colors = [
+                BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.42 : 0.22),
+                BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.46 : 0.28)
+            ]
+        } else if isReserved {
+            colors = [
+                Color(.systemBackground).opacity(colorScheme == .dark ? 0.25 : 0.86),
+                Color(.systemBackground).opacity(colorScheme == .dark ? 0.2 : 0.78)
+            ]
+        } else {
+            colors = [
+                Color(.systemBackground).opacity(colorScheme == .dark ? 0.32 : 0.96),
+                BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.24 : 0.12)
+            ]
+        }
+        return RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+    }
+
+    private func cardBorder(isReserved: Bool, reservedByMe: Bool) -> some View {
+        let gradient: LinearGradient
+        let width: CGFloat
+        if reservedByMe {
+            gradient = LinearGradient(
+                colors: [BlueprintTheme.brandTeal, BlueprintTheme.primary],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            width = 1.4
+        } else if isReserved {
+            gradient = LinearGradient(
+                colors: [
+                    Color.white.opacity(colorScheme == .dark ? 0.35 : 0.2),
+                    Color.white.opacity(colorScheme == .dark ? 0.18 : 0.12)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            width = 1
+        } else {
+            gradient = LinearGradient(
+                colors: [
+                    BlueprintTheme.primary.opacity(colorScheme == .dark ? 0.45 : 0.18),
+                    BlueprintTheme.brandTeal.opacity(colorScheme == .dark ? 0.35 : 0.2)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            width = 1
+        }
+
+        return RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .stroke(gradient, lineWidth: width)
     }
 }
 
