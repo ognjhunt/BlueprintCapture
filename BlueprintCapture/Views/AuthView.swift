@@ -14,6 +14,10 @@ struct AuthView: View {
         NavigationStack {
             GeometryReader { geometry in
                 ZStack {
+                    // Compute responsive horizontal paddings so content never clips
+                    let pagePadding: CGFloat = max(12, min(20, geometry.size.width * 0.05))
+                    let cardPadding: CGFloat = max(12, min(24, geometry.size.width * 0.04))
+                    let availableContentWidth: CGFloat = geometry.size.width - 2 * (pagePadding + cardPadding)
                     // Premium gradient background using Blueprint theme
                     LinearGradient(
                         colors: [
@@ -57,16 +61,23 @@ struct AuthView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.top, 20)
                             .padding(.bottom, 24)
-                            .padding(.horizontal, 24)
+                            .padding(.horizontal, pagePadding)
 
                         // Main Content Card
                         VStack(spacing: 20) {
                             // Google Sign-In Button
                             #if canImport(GoogleSignInSwift)
-                            GoogleSignInButton(viewModel: .init(scheme: .light, style: .wide, state: .normal)) {
+                            GoogleSignInButton(
+                                viewModel: .init(
+                                    scheme: .light,
+                                    style: availableContentWidth >= 312 ? .wide : .standard,
+                                    state: .normal
+                                )
+                            ) {
                                 Task { await viewModel.signInWithGoogle() }
                             }
                             .frame(height: 52)
+                            .frame(maxWidth: .infinity)
                             #else
                             Button {
                                 Task { await viewModel.signInWithGoogle() }
@@ -152,7 +163,8 @@ struct AuthView: View {
                             .disabled(!viewModel.canSubmit)
                             .opacity(viewModel.canSubmit ? 1.0 : 0.6)
                         }
-                        .padding(24)
+                        .padding(.vertical, 24)
+                        .padding(.horizontal, cardPadding)
                         .background(
                             RoundedRectangle(cornerRadius: 24, style: .continuous)
                                 .fill(.ultraThinMaterial)
@@ -171,7 +183,7 @@ struct AuthView: View {
                                         )
                                 )
                         )
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, pagePadding)
 
                         // Footer
                         VStack(spacing: 12) {
@@ -191,7 +203,7 @@ struct AuthView: View {
                         .foregroundStyle(Color.white.opacity(0.80))
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 24)
-                        .padding(.horizontal, 24)
+                        .padding(.horizontal, pagePadding)
                     }
                     .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? 0 : 20)
                 }
