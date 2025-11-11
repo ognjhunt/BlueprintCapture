@@ -763,7 +763,7 @@ extension NearbyTargetsViewModel {
                 lat: loc.coordinate.latitude,
                 lng: loc.coordinate.longitude,
                 radiusMeters: radiusMeters,
-                limit: 2,
+                limit: max(limit, 5),
                 types: includedTypes
             )
             if !nearbyPlaces.isEmpty {
