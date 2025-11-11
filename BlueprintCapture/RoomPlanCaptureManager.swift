@@ -249,8 +249,38 @@ struct RoomPlanOverlayView: UIViewRepresentable {
     let manager: RoomPlanCaptureManaging
 
     func makeUIView(context: Context) -> UIView {
-        manager.makeCaptureView() ?? UIView(frame: .zero)
+        let container = UIView()
+        container.backgroundColor = .clear
+        container.isUserInteractionEnabled = false
+
+        if let captureView = manager.makeCaptureView() {
+            attachCaptureView(captureView, to: container)
+        }
+
+        return container
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {
+        guard let captureView = manager.makeCaptureView() else { return }
+
+        // SwiftUI may recreate the container view when the layout changes. Make sure the
+        // RoomPlan capture view is embedded and pinned to fill the container each time.
+        if captureView.superview !== uiView {
+            captureView.removeFromSuperview()
+            attachCaptureView(captureView, to: uiView)
+        }
+    }
+
+    private func attachCaptureView(_ captureView: UIView, to container: UIView) {
+        captureView.translatesAutoresizingMaskIntoConstraints = false
+        captureView.backgroundColor = .clear
+        container.addSubview(captureView)
+
+        NSLayoutConstraint.activate([
+            captureView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            captureView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            captureView.topAnchor.constraint(equalTo: container.topAnchor),
+            captureView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
+    }
 }
