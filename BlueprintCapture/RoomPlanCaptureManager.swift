@@ -64,7 +64,7 @@ import ZIPFoundation
 #endif
 
 @available(iOS 16.0, *)
-final class RoomPlanCaptureManager: NSObject, ObservableObject, RoomPlanCaptureManaging {
+final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureCoding {
     private var captureView: RoomCaptureView?
     private var finalResult: CapturedRoom?
     private var exportCompletion: ((Result<RoomPlanCaptureExport, Error>) -> Void)?
@@ -72,6 +72,22 @@ final class RoomPlanCaptureManager: NSObject, ObservableObject, RoomPlanCaptureM
     private var latestError: Error?
     private var isRunning = false
     private let exportQueue = DispatchQueue(label: "com.blueprint.roomplan.export", qos: .userInitiated)
+
+    // NSSecureCoding
+        static var supportsSecureCoding: Bool { true }
+
+        required convenience init?(coder: NSCoder) {
+            self.init() // no persisted state to restore
+        }
+
+        func encode(with coder: NSCoder) {
+            // no persisted state to encode
+        }
+    
+    // Add this initializer
+    override init() {
+        super.init()
+    }
 
     var isSupported: Bool {
         RoomCaptureSession.isSupported
@@ -87,9 +103,7 @@ final class RoomPlanCaptureManager: NSObject, ObservableObject, RoomPlanCaptureM
         finalResult = nil
         latestError = nil
 
-        var configuration = RoomCaptureSession.Configuration()
-        configuration.captureMode = .parametric
-        configuration.isAutoScanEnabled = true
+        let configuration = RoomCaptureSession.Configuration()
 
         view.captureSession.delegate = self
         view.delegate = self
