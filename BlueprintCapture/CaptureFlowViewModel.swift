@@ -34,7 +34,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let placesDetails: PlacesDetailsServiceProtocol = PlacesDetailsService()
     private var placesSessionToken: String?
     private let motionManager = CMMotionActivityManager()
-    let captureManager = VideoCaptureManager()
+    let roomPlanManager: RoomPlanCaptureManaging
+    let captureManager: VideoCaptureManager
 
     private var hasRequestedPermissions = false
     private let onboardingKey = "com.blueprint.isOnboarded"
@@ -46,9 +47,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var currentSearchQuery: String = ""
 
     init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
-         targetStateService: TargetStateServiceProtocol = TargetStateService()) {
+         targetStateService: TargetStateServiceProtocol = TargetStateService(),
+         roomPlanManager: RoomPlanCaptureManaging = RoomPlanCaptureManagerFactory.makeManager()) {
         self.uploadService = uploadService
         self.targetStateService = targetStateService
+        self.roomPlanManager = roomPlanManager
+        self.captureManager = VideoCaptureManager(roomPlanManager: roomPlanManager)
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized

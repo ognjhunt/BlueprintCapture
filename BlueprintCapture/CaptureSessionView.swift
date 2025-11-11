@@ -16,6 +16,12 @@ struct CaptureSessionView: View {
             CameraPreview(session: viewModel.captureManager.session)
                 .ignoresSafeArea()
 
+            if viewModel.roomPlanManager.isSupported {
+                RoomPlanOverlayView(manager: viewModel.roomPlanManager)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+
             VStack(spacing: 12) {
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
@@ -85,12 +91,19 @@ struct CaptureSessionView: View {
         .onAppear {
             autoStartRecordingIfNeeded()
         }
+        .onDisappear {
+            viewModel.roomPlanManager.cancelCapture()
+        }
     }
 
     private func autoStartRecordingIfNeeded() {
         guard !didAutoStart else { return }
         didAutoStart = true
         print("🎬 [Capture] View appeared — auto start flow")
+        if viewModel.roomPlanManager.isSupported {
+            print("🏠 [RoomPlan] Starting RoomPlan capture")
+            viewModel.roomPlanManager.startCapture()
+        }
         // Ensure the session is configured and running, then start recording automatically
         if !viewModel.captureManager.session.isRunning {
             print("🎥 [Capture] Starting AVCaptureSession…")
@@ -107,6 +120,11 @@ struct CaptureSessionView: View {
         guard !viewModel.captureManager.captureState.isRecording else { return }
         print("🔄 [Capture] Retry Recording tapped")
         didAutoStart = true
+
+        if viewModel.roomPlanManager.isSupported {
+            print("🏠 [RoomPlan] Restarting RoomPlan capture")
+            viewModel.roomPlanManager.startCapture()
+        }
 
         let manager = viewModel.captureManager
         manager.configureSession()
