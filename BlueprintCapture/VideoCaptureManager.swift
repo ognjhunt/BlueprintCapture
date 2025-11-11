@@ -37,6 +37,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let motionLogURL: URL
         let manifestURL: URL
         let arKit: ARKitArtifacts?
+        var roomPlan: RoomPlanCaptureArtifacts?
         let packageURL: URL
         let startedAt: Date
 
@@ -44,6 +45,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             var items: [Any] = [packageURL, videoURL, motionLogURL, manifestURL]
             if let arKit {
                 items.append(arKit.frameLogURL)
+            }
+            if let roomPlan {
+                items.append(roomPlan.parametricUSDZURL)
+                if let archive = roomPlan.parametricArchiveURL {
+                    items.append(archive)
+                }
+                items.append(roomPlan.capturedRoomURL)
+                items.append(roomPlan.capturedRoomDataURL)
             }
             return items
         }
@@ -121,10 +130,20 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var shouldSkipARKitOnNextRecording: Bool = false
     private let supportsARCapture: Bool = VideoCaptureManager.evaluateARCaptureSupport()
     private let supportsMeshReconstruction: Bool = VideoCaptureManager.evaluateMeshSupport()
+    private var roomPlanCoordinator: RoomPlanCaptureCoordinator?
+    private var roomPlanCaptureActive: Bool = false
+    private var roomPlanArtifacts: RoomPlanCaptureArtifacts?
+    private var roomPlanCaptureError: Error?
+    private var videoRecordingDidFinish: Bool = false
+    private var recordedDurationSeconds: Double?
+    private var packagingDispatched: Bool = false
 
     override init() {
         super.init()
         arSession.delegate = self
+        if RoomPlanCaptureCoordinator.isSupported {
+            roomPlanCoordinator = RoomPlanCaptureCoordinator()
+        }
     }
 
     private static func evaluateARCaptureSupport() -> Bool {
@@ -239,6 +258,29 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         currentExposureSettings = videoDevice.map(makeExposureSettings)
         persistManifest(duration: nil)
 
+        roomPlanArtifacts = nil
+        roomPlanCaptureError = nil
+        recordedDurationSeconds = nil
+        videoRecordingDidFinish = false
+        packagingDispatched = false
+
+        if let coordinator = roomPlanCoordinator {
+            do {
+                roomPlanCaptureActive = try coordinator.startCapture(in: artifacts.directoryURL)
+                if roomPlanCaptureActive {
+                    print("🏠 [RoomPlan] Started RoomPlan capture")
+                } else {
+                    print("ℹ️ [RoomPlan] RoomPlan capture not available on this device")
+                }
+            } catch {
+                roomPlanCaptureActive = false
+                roomPlanCaptureError = error
+                print("❌ [RoomPlan] Failed to start capture: \(error.localizedDescription)")
+            }
+        } else {
+            roomPlanCaptureActive = false
+        }
+
         prepareMotionLog(for: artifacts)
         guard motionLogFileHandle != nil else {
             currentArtifacts = nil
@@ -264,6 +306,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         stopMotionUpdates()
         stopExposureLogging()
         stopARSession()
+        if roomPlanCaptureActive, let coordinator = roomPlanCoordinator {
+            coordinator.stopCapture { [weak self] result in
+                DispatchQueue.main.async {
+                    self?.handleRoomPlanCompletion(result)
+                }
+            }
+        } else {
+            roomPlanCaptureActive = false
+            finalizeRecordingIfReady()
+        }
         print("⏹️ [Capture] stopRecording requested")
     }
 
@@ -308,6 +360,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             motionLogURL: motionURL,
             manifestURL: manifestURL,
             arKit: arKitArtifacts,
+            roomPlan: nil,
             packageURL: packageURL,
             startedAt: Date()
         )
@@ -677,6 +730,16 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
         stopMotionUpdates()
         stopExposureLogging()
         stopARSession()
+        if roomPlanCaptureActive, let coordinator = roomPlanCoordinator {
+            coordinator.stopCapture { [weak self] result in
+                DispatchQueue.main.async {
+                    self?.handleRoomPlanCompletion(result)
+                }
+            }
+        } else {
+            roomPlanCaptureActive = false
+            finalizeRecordingIfReady()
+        }
         if let error {
             let nsError = error as NSError
             let avError = (error as? AVError) ?? AVError(_nsError: nsError)
@@ -692,6 +755,12 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
             print("❌ [Capture] Recording failed: \(error.localizedDescription)")
             latestUploadPayload = nil
             captureState = .error(friendlyMessage)
+            roomPlanCoordinator?.cancelCapture()
+            roomPlanCaptureActive = false
+            roomPlanArtifacts = nil
+            packagingDispatched = false
+            videoRecordingDidFinish = false
+            clearCaptureContext()
         } else {
             let durationSeconds: Double?
             if output.recordedDuration.isNumeric {
@@ -699,42 +768,9 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
             } else {
                 durationSeconds = nil
             }
-
-            persistManifest(duration: durationSeconds, synchronous: true)
-
-            guard let artifacts = currentArtifacts else {
-                latestUploadPayload = nil
-                captureState = .error("Capture artifacts were unavailable.")
-                return
-            }
-
-            print("📦 [Capture] Packaging artifacts …")
-            let artifactsToPackage = artifacts
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try self.packageArtifacts(artifactsToPackage)
-                    DispatchQueue.main.async {
-                        self.latestUploadPayload = artifactsToPackage.uploadPayload
-                        self.captureState = .finished(artifactsToPackage)
-                        print("✅ [Capture] Packaging complete → \(artifactsToPackage.packageURL.lastPathComponent)")
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.latestUploadPayload = nil
-                        self.captureState = .error(error.localizedDescription)
-                        print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
-        currentArtifacts = nil
-        currentARKitArtifacts = nil
-        currentCameraIntrinsics = nil
-        currentExposureSettings = nil
-        exposureSamples = []
-        arDataQueue.async { [weak self] in
-            self?.arFrameCount = 0
-            self?.exportedMeshAnchors.removeAll()
+            recordedDurationSeconds = durationSeconds
+            videoRecordingDidFinish = true
+            finalizeRecordingIfReady()
         }
     }
 }
@@ -769,35 +805,114 @@ extension VideoCaptureManager: ARSessionDelegate {
 }
 
 private extension VideoCaptureManager {
+    func handleRoomPlanCompletion(_ result: Result<RoomPlanCaptureArtifacts, Error>) {
+        roomPlanCaptureActive = false
+        switch result {
+        case .success(let artifacts):
+            roomPlanArtifacts = artifacts
+            currentArtifacts?.roomPlan = artifacts
+            print("✅ [RoomPlan] Export complete → \(artifacts.parametricUSDZURL.lastPathComponent)")
+        case .failure(let error):
+            roomPlanCaptureError = error
+            print("❌ [RoomPlan] RoomPlan capture failed: \(error.localizedDescription)")
+        }
+        finalizeRecordingIfReady()
+    }
+
+    func finalizeRecordingIfReady() {
+        guard videoRecordingDidFinish else { return }
+        guard !roomPlanCaptureActive else { return }
+        guard !packagingDispatched else { return }
+        guard var artifacts = currentArtifacts else {
+            latestUploadPayload = nil
+            captureState = .error("Capture artifacts were unavailable.")
+            clearCaptureContext()
+            return
+        }
+
+        if let roomPlanArtifacts {
+            artifacts.roomPlan = roomPlanArtifacts
+        }
+
+        if let error = roomPlanCaptureError {
+            print("⚠️ [RoomPlan] Proceeding without RoomPlan export due to error: \(error.localizedDescription)")
+        }
+
+        currentArtifacts = artifacts
+        packagingDispatched = true
+
+        persistManifest(duration: recordedDurationSeconds, synchronous: true)
+
+        let artifactsToPackage = artifacts
+        print("📦 [Capture] Packaging artifacts …")
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try self.packageArtifacts(artifactsToPackage)
+                DispatchQueue.main.async {
+                    self.latestUploadPayload = artifactsToPackage.uploadPayload
+                    self.captureState = .finished(artifactsToPackage)
+                    print("✅ [Capture] Packaging complete → \(artifactsToPackage.packageURL.lastPathComponent)")
+                    self.clearCaptureContext()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.latestUploadPayload = nil
+                    self.captureState = .error(error.localizedDescription)
+                    print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
+                    self.clearCaptureContext()
+                }
+            }
+        }
+    }
+
+    func clearCaptureContext() {
+        currentArtifacts = nil
+        currentARKitArtifacts = nil
+        currentCameraIntrinsics = nil
+        currentExposureSettings = nil
+        exposureSamples = []
+        recordedDurationSeconds = nil
+        videoRecordingDidFinish = false
+        packagingDispatched = false
+        roomPlanArtifacts = nil
+        roomPlanCaptureError = nil
+        roomPlanCaptureActive = false
+        arDataQueue.async { [weak self] in
+            self?.arFrameCount = 0
+            self?.exportedMeshAnchors.removeAll()
+        }
+    }
+
     func persistManifest(duration: Double?, synchronous: Bool = false) {
         guard let artifacts = currentArtifacts else { return }
-        let intr = currentCameraIntrinsics
-        let width = intr?.resolutionWidth ?? 0
-        let height = intr?.resolutionHeight ?? 0
-        let fps: Int = {
-            if let d = videoDevice?.activeVideoMinFrameDuration, d.isNumeric { return Int(round(1.0 / d.seconds)) }
-            return 30
-        }()
-        let deviceModel = UIDevice.current.model
-        let osVersion = UIDevice.current.systemVersion
-        let hasLiDAR = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
-        let epochMs = Int64(artifacts.startedAt.timeIntervalSince1970 * 1000.0)
+        let intrinsics = currentCameraIntrinsics
+            ?? videoDevice.map(makeCameraIntrinsics)
+            ?? CaptureManifest.CameraIntrinsics(
+                resolutionWidth: 0,
+                resolutionHeight: 0,
+                intrinsicMatrix: nil,
+                fieldOfView: nil,
+                lensAperture: nil,
+                minimumFocusDistance: nil
+            )
+        let exposureSettings = currentExposureSettings
+            ?? CaptureManifest.ExposureSettings(mode: "unknown", pointOfInterest: nil, whiteBalanceMode: "unknown")
+        let manifest = CaptureManifest(
+            videoFile: relativePath(for: artifacts.videoURL, relativeTo: artifacts.directoryURL),
+            motionLogFile: relativePath(for: artifacts.motionLogURL, relativeTo: artifacts.directoryURL),
+            manifestFile: relativePath(for: artifacts.manifestURL, relativeTo: artifacts.directoryURL),
+            recordedAt: artifacts.startedAt,
+            durationSeconds: duration,
+            cameraIntrinsics: intrinsics,
+            exposureSettings: exposureSettings,
+            exposureSamples: exposureSamples,
+            arKit: makeARKitManifest(for: artifacts),
+            roomPlan: makeRoomPlanManifest(for: artifacts)
+        )
+
         let writeBlock = {
-            let dict: [String: Any] = [
-                "scene_id": "",
-                "video_uri": "",
-                "device_model": deviceModel,
-                "os_version": osVersion,
-                "fps_source": fps,
-                "width": width,
-                "height": height,
-                "capture_start_epoch_ms": epochMs,
-                "has_lidar": hasLiDAR,
-                "scale_hint_m_per_unit": hasLiDAR ? 1.0 : 1.0,
-                "intended_space_type": "home"
-            ]
             do {
-                let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes])
+                let data = try self.manifestEncoder.encode(manifest)
                 try data.write(to: artifacts.manifestURL, options: .atomic)
             } catch {
                 print("Failed to write manifest: \(error)")
@@ -877,6 +992,23 @@ private extension VideoCaptureManager {
             confidenceDirectory: arKit.confidenceDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
             meshDirectory: arKit.meshDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
             frameCount: frameCount
+        )
+    }
+
+    func makeRoomPlanManifest(for artifacts: RecordingArtifacts) -> CaptureManifest.RoomPlanArtifacts? {
+        guard let roomPlan = artifacts.roomPlan else { return nil }
+        let directory = relativePath(for: roomPlan.rootDirectoryURL, relativeTo: artifacts.directoryURL)
+        let roomFile = relativePath(for: roomPlan.capturedRoomURL, relativeTo: artifacts.directoryURL)
+        let roomDataFile = relativePath(for: roomPlan.capturedRoomDataURL, relativeTo: artifacts.directoryURL)
+        let parametricFile = relativePath(for: roomPlan.parametricUSDZURL, relativeTo: artifacts.directoryURL)
+        let archiveFile = roomPlan.parametricArchiveURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) }
+
+        return CaptureManifest.RoomPlanArtifacts(
+            directory: directory,
+            capturedRoomFile: roomFile,
+            capturedRoomDataFile: roomDataFile,
+            parametricUSDZFile: parametricFile,
+            parametricArchiveFile: archiveFile
         )
     }
 
@@ -1206,6 +1338,16 @@ extension VideoCaptureManager {
             let meshDirectory: String?
             let frameCount: Int
         }
+
+        struct RoomPlanArtifacts: Codable, Equatable {
+            let directory: String
+            let capturedRoomFile: String
+            let capturedRoomDataFile: String
+            let parametricUSDZFile: String
+            let parametricArchiveFile: String?
+        }
+
+        let roomPlan: RoomPlanArtifacts?
     }
 }
 
