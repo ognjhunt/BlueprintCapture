@@ -13,6 +13,9 @@ import ReplayKit
 import ZIPFoundation
 #endif
 
+// Fallback for ReplayKit screen-recorder error domain not exposed in Swift
+private let _RPScreenRecorderDomain = "com.apple.ReplayKit.RPScreenRecorder"
+
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
         case idle
@@ -365,8 +368,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             return
         }
 
-        let orientation = currentInterfaceOrientation()
-        let outputSize = screenRecordingOutputSize(for: orientation)
+        let orientation = captureState.currentInterfaceOrientation()
+        let outputSize = captureState.screenRecordingOutputSize(for: orientation)
+
         do {
             screenRecordingWriter = try ScreenRecordingWriter(
                 destinationURL: artifacts.videoURL,
@@ -463,14 +467,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             if let error {
                 let nsError = error as NSError
                 var friendlyMessage = nsError.localizedDescription
-                if let avError = (error as? AVError) ?? AVError(_nsError: nsError), avError.code == .deviceAlreadyUsedByAnotherSession {
+                let avError = (error as? AVError) ?? AVError(_nsError: nsError)
+                if avError.code == .deviceAlreadyUsedByAnotherSession {
                     self.shouldSkipARKitOnNextRecording = true
                     self.currentARKitArtifacts = nil
                     friendlyMessage = "Recording stopped because the camera was busy. AR capture will be disabled on the next attempt."
                     print("⚠️ [Capture] Camera ownership conflict detected; AR startup will be skipped on the next recording.")
-                } else if nsError.domain == RPScreenRecorderErrorDomain {
+                } else if nsError.domain == RPRecordingErrorDomain || nsError.domain == _RPScreenRecorderDomain {
                     friendlyMessage = "Screen recording failed: \(nsError.localizedDescription)"
                 }
+
                 print("❌ [Capture] Recording failed: \(nsError.localizedDescription)")
                 self.latestUploadPayload = nil
                 self.captureState = .error(friendlyMessage)

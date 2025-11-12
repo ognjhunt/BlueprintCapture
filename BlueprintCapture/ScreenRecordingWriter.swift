@@ -25,14 +25,8 @@ final class ScreenRecordingWriter {
 
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         videoInput.expectsMediaDataInRealTime = true
-        videoInput.transform = transform(for: orientation)
-
-        if assetWriter.canAdd(videoInput) {
-            assetWriter.add(videoInput)
-        } else {
-            throw NSError(domain: "ScreenRecordingWriter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to add video input to writer."])
-        }
-
+        
+        // Initialize audioInput first
         if includeAudio {
             let audioSettings: [String: Any] = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -40,16 +34,25 @@ final class ScreenRecordingWriter {
                 AVSampleRateKey: 44_100,
                 AVEncoderBitRateKey: 192_000
             ]
-            let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-            audioInput.expectsMediaDataInRealTime = true
-            if assetWriter.canAdd(audioInput) {
-                assetWriter.add(audioInput)
-                self.audioInput = audioInput
+            let audioInputInstance = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            audioInputInstance.expectsMediaDataInRealTime = true
+            if assetWriter.canAdd(audioInputInstance) {
+                assetWriter.add(audioInputInstance)
+                self.audioInput = audioInputInstance
             } else {
                 throw NSError(domain: "ScreenRecordingWriter", code: -2, userInfo: [NSLocalizedDescriptionKey: "Unable to add audio input to writer."])
             }
         } else {
             audioInput = nil
+        }
+        
+        // Now we can use self to call transform
+        videoInput.transform = transform(for: orientation)
+
+        if assetWriter.canAdd(videoInput) {
+            assetWriter.add(videoInput)
+        } else {
+            throw NSError(domain: "ScreenRecordingWriter", code: -1, userInfo: [NSLocalizedDescriptionKey: "Unable to add video input to writer."])
         }
     }
 
