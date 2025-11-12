@@ -158,7 +158,25 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         arSession.delegate = self
     }
 
+    private func disableScreenRecorderDueToError(reason: String) {
+        guard !screenRecorderPermanentlyDisabled else { return }
+        screenRecorderPermanentlyDisabled = true
+        shouldSkipARKitOnNextRecording = true
+        currentARKitArtifacts = nil
+        print("⚠️ [Capture] Disabling screen recorder path — \(reason). Falling back to AVCaptureSession without RoomPlan.")
+        DispatchQueue.main.async {
+            if self.roomPlanCaptureEnabled {
+                self.roomPlanCaptureEnabled = false
+            }
+            self.roomPlanManager?.cancelCapture()
+        }
+    }
+
+    @Published private(set) var roomPlanCaptureEnabled: Bool = true
+    private var screenRecorderPermanentlyDisabled = false
+
     private var shouldUseScreenRecorder: Bool {
+        guard roomPlanCaptureEnabled, !screenRecorderPermanentlyDisabled else { return false }
         if let manager = roomPlanManager {
             return manager.isSupported
         }
@@ -322,7 +340,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
         print("⏹️ [Capture] stopRecording begin")
-        if let roomPlanManager, let artifacts = currentArtifacts, roomPlanManager.isSupported {
+        if let roomPlanManager, let artifacts = currentArtifacts, roomPlanManager.isSupported, roomPlanCaptureEnabled {
             pendingRoomPlanError = nil
             roomPlanDispatchGroup.enter()
             print("⏳ [RoomPlan] stopAndExport started; waiting for completion")
@@ -365,6 +383,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         guard screenRecorder.isAvailable else {
             let message = "Screen recording is not available on this device."
             print("❌ [Capture] \(message)")
+            disableScreenRecorderDueToError(reason: "screen recorder unavailable")
             DispatchQueue.main.async {
                 self.latestUploadPayload = nil
                 self.captureState = .error(message)
@@ -386,6 +405,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         } catch {
             let message = "Unable to start screen recording: \(error.localizedDescription)"
             print("❌ [Capture] \(message)")
+            disableScreenRecorderDueToError(reason: "failed to create screen recorder writer")
             DispatchQueue.main.async {
                 self.latestUploadPayload = nil
                 self.captureState = .error(message)
@@ -410,6 +430,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard let self else { return }
             if let error {
                 print("❌ [Capture] Failed to start screen capture: \(error.localizedDescription)")
+                self.disableScreenRecorderDueToError(reason: "startCapture failed with error")
                 self.handleScreenRecorderFailure(error)
             } else {
                 DispatchQueue.main.async {
@@ -459,6 +480,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard let self else { return }
             guard self.awaitingScreenRecorderCompletion else { return }
             print("⚠️ [Capture] Screen recorder stop timed out — forcing completion")
+            self.disableScreenRecorderDueToError(reason: "screen recorder stop timed out")
             self.awaitingScreenRecorderCompletion = false
             self.screenRecorderStopTimeoutWorkItem = nil
             let writer = self.screenRecordingWriter
@@ -489,6 +511,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         screenRecorderStopTimeoutWorkItem = nil
         awaitingScreenRecorderCompletion = false
         screenRecordingStopDate = nil
+        disableScreenRecorderDueToError(reason: "screen recorder failure: \(error.localizedDescription)")
         if screenRecorder.isRecording {
             screenRecorder.stopCapture { _ in }
         }
@@ -528,6 +551,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                     print("⚠️ [Capture] Camera ownership conflict detected; AR startup will be skipped on the next recording.")
                 } else if nsError.domain == RPRecordingErrorDomain || nsError.domain == _RPScreenRecorderDomain {
                     friendlyMessage = "Screen recording failed: \(nsError.localizedDescription)"
+                    self.disableScreenRecorderDueToError(reason: "ReplayKit error domain = \(nsError.domain), code = \(nsError.code)")
                 }
 
                 print("❌ [Capture] Recording failed: \(nsError.localizedDescription)")
