@@ -429,27 +429,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         scheduleScreenRecorderStopTimeout()
         screenRecorder.stopCapture { [weak self] error in
             guard let self else { return }
-            self.screenRecorderStopTimeoutWorkItem?.cancel()
-            self.screenRecorderStopTimeoutWorkItem = nil
             guard self.awaitingScreenRecorderCompletion else { return }
             self.awaitingScreenRecorderCompletion = false
-            let writer = self.screenRecordingWriter
-            self.screenRecordingWriter = nil
             let duration = self.screenRecordingStartDate.map { stopDate.timeIntervalSince($0) }
             self.screenRecordingStartDate = nil
             self.screenRecordingStopDate = nil
-            if let writer {
-                writer.finish { result in
-                    switch result {
-                    case .success:
-                        self.handleRecordingCompletion(error: error, durationSeconds: duration)
-                    case .failure(let writerError):
-                        self.handleRecordingCompletion(error: writerError, durationSeconds: duration)
-                    }
-                }
-            } else {
-                self.handleRecordingCompletion(error: error, durationSeconds: duration)
-            }
+            self.finalizeScreenRecording(duration: duration, captureError: error)
         }
     }
 
@@ -460,28 +445,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard self.awaitingScreenRecorderCompletion else { return }
             print("⚠️ [Capture] Screen recorder stop timed out — forcing completion")
             self.awaitingScreenRecorderCompletion = false
-            self.screenRecorderStopTimeoutWorkItem = nil
-            let writer = self.screenRecordingWriter
-            self.screenRecordingWriter = nil
             let stopDate = self.screenRecordingStopDate ?? Date()
             self.screenRecordingStopDate = nil
             let duration = self.screenRecordingStartDate.map { stopDate.timeIntervalSince($0) }
             self.screenRecordingStartDate = nil
-            if let writer {
-                writer.finish { result in
-                    switch result {
-                    case .success:
-                        self.handleRecordingCompletion(error: nil, durationSeconds: duration)
-                    case .failure(let writerError):
-                        self.handleRecordingCompletion(error: writerError, durationSeconds: duration)
-                    }
-                }
-            } else {
-                self.handleRecordingCompletion(error: nil, durationSeconds: duration)
-            }
+            self.finalizeScreenRecording(duration: duration, captureError: nil)
         }
         screenRecorderStopTimeoutWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: workItem)
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 8, execute: workItem)
     }
 
     private func handleScreenRecorderFailure(_ error: Error) {
@@ -502,6 +473,31 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             self.latestUploadPayload = nil
             self.captureState = .error(error.localizedDescription)
             self.cleanupAfterRecording()
+        }
+    }
+
+    private func finalizeScreenRecording(duration: Double?, captureError: Error?) {
+        let writer = screenRecordingWriter
+        screenRecordingWriter = nil
+        screenRecorderStopTimeoutWorkItem?.cancel()
+        screenRecorderStopTimeoutWorkItem = nil
+        let complete: (Error?) -> Void = { [weak self] finalError in
+            guard let self else { return }
+            self.handleRecordingCompletion(error: finalError ?? captureError, durationSeconds: duration)
+        }
+
+        guard let writer else {
+            complete(nil)
+            return
+        }
+
+        writer.finish { result in
+            switch result {
+            case .success:
+                complete(nil)
+            case .failure(let writerError):
+                complete(writerError)
+            }
         }
     }
 
