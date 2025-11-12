@@ -218,6 +218,7 @@ final class TargetStateService: TargetStateServiceProtocol {
         let snapshot = try await doc.getDocument()
         if let data = snapshot.data(), let state = toState(data) {
             if state.status == .in_progress && (state.checkedInBy == userId) {
+                print("✅ [TargetState] Completing target=\(targetId) for user=\(userId)")
                 try await doc.setData([
                     "status": TargetState.Status.completed.rawValue,
                     "completedAt": FieldValue.serverTimestamp(),
@@ -226,6 +227,7 @@ final class TargetStateService: TargetStateServiceProtocol {
                 return
             }
         }
+        print("⚠️ [TargetState] Cannot complete target=\(targetId); state mismatch or ownership issue")
         throw NSError(domain: "TargetStateService", code: 403, userInfo: [NSLocalizedDescriptionKey: "Cannot complete"])
     }
 

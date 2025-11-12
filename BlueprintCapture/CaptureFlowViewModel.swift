@@ -340,6 +340,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
+        print("📦 [CaptureFlowViewModel] handleRecordingFinished targetId=\(targetId ?? "nil") reservationId=\(reservationId ?? "nil") package=\(artifacts.packageURL.lastPathComponent)")
         let jobId = reservationId ?? targetId ?? UUID().uuidString
         let metadata = CaptureUploadMetadata(
             id: UUID(),
@@ -351,6 +352,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             uploadedAt: nil
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
+        print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id)")
         uploadService.enqueue(request)
     }
 
@@ -375,12 +377,15 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private func handleUpload(_ event: CaptureUploadService.Event) {
         switch event {
         case .queued(let request):
+            print("📤 [Upload] queued id=\(request.metadata.id) targetId=\(request.metadata.targetId ?? "nil")")
             uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
         case .progress(let id, let progress):
+            print("📤 [Upload] progress id=\(id) progress=\(String(format: "%.2f", progress))")
             guard var status = uploadStatusMap[id] else { break }
             status.state = .uploading(progress: progress)
             uploadStatusMap[id] = status
         case .completed(let request):
+            print("📤 [Upload] completed id=\(request.metadata.id)")
             guard var status = uploadStatusMap[request.metadata.id] else { break }
             status.metadata = request.metadata
             status.state = .completed
@@ -394,6 +399,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 }
             }
         case .failed(let request, let error):
+            print("📤 [Upload] failed id=\(request.metadata.id) error=\(error.localizedDescription)")
             guard var status = uploadStatusMap[request.metadata.id] else { break }
             status.metadata = request.metadata
             status.state = .failed(message: error.localizedDescription)

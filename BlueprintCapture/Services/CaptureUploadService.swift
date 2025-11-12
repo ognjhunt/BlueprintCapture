@@ -111,8 +111,10 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private func performUpload(for id: UUID) async {
         guard let record = queue.sync(execute: { uploads[id] }) else { return }
         let packageURL = record.request.packageURL
+        print("🚀 [UploadService] performUpload start id=\(id) url=\(packageURL.path)")
 
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
+            print("❌ [UploadService] package missing at path=\(packageURL.path)")
             queue.async {
                 guard var failingRecord = self.uploads[id] else { return }
                 failingRecord.task = nil
@@ -130,6 +132,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         if isDir.boolValue {
             // Upload directory contents recursively
             let basePath = makeBaseDirectoryPath(for: record.request)
+            print("📁 [UploadService] Uploading directory → basePath=\(basePath)")
             let ok = await uploadDirectory(
                 storage: storage,
                 localDirectory: packageURL,
@@ -138,10 +141,12 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 request: record.request
             )
             if !ok { return }
+            print("✅ [UploadService] Directory upload completed id=\(id)")
         } else {
             // Upload single file (zip)
             let path = makeStoragePath(for: record.request)
             let ref = storage.reference(withPath: path)
+            print("📦 [UploadService] Uploading file → path=\(path)")
 
             let metadata = StorageMetadata()
             metadata.contentType = contentType(for: packageURL)
@@ -173,6 +178,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                         self.uploads[id] = latestRecord
                         self.subject.send(.progress(id: id, progress: 1.0))
                         self.subject.send(.completed(latestRecord.request))
+                        print("✅ [UploadService] Upload finished id=\(id)")
                     }
                     continuation.resume()
                 }
@@ -184,6 +190,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                         failingRecord.task = nil
                         self.uploads[id] = failingRecord
                         self.subject.send(.failed(failingRecord.request, .uploadFailed))
+                        print("❌ [UploadService] Upload failed id=\(id)")
                     }
                     continuation.resume()
                 }
@@ -195,6 +202,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         #else
         // Fallback: simulate progress if FirebaseStorage is unavailable (e.g., in previews)
         let steps = 12
+        print("🧪 [UploadService] Simulating upload progress id=\(id)")
         for step in 1...steps {
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
@@ -215,8 +223,10 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     #if canImport(FirebaseStorage)
     // Upload all files under a directory, preserving relative paths beneath remoteBasePath
     private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, request: CaptureUploadRequest) async -> Bool {
+        print("📁 [UploadService] Preparing directory upload at \(localDirectory.path)")
         // Gather files
         guard let enumerator = FileManager.default.enumerator(at: localDirectory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            print("❌ [UploadService] Failed to enumerate directory at \(localDirectory.path)")
             self.queue.async {
                 guard var failingRecord = self.uploads[id] else { return }
                 failingRecord.task = nil
@@ -238,6 +248,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             }
         }
         guard !files.isEmpty, totalBytes > 0 else {
+            print("❌ [UploadService] No files found to upload under \(localDirectory.path)")
             self.queue.async {
                 guard var failingRecord = self.uploads[id] else { return }
                 failingRecord.task = nil
@@ -248,6 +259,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         var uploadedBytes: Int64 = 0
+        print("📁 [UploadService] Uploading \(files.count) files (\(totalBytes) bytes) to basePath=\(remoteBasePath)")
         for file in files {
             if Task.isCancelled { return false }
             let relPath = file.path.replacingOccurrences(of: localDirectory.path + "/", with: "")
