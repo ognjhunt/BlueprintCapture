@@ -147,6 +147,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var screenRecordingWriter: ScreenRecordingWriter?
     private var usingScreenRecorder = false
     private var screenRecordingStartDate: Date?
+    private var screenRecordingStopDate: Date?
+    private var screenRecorderStopTimeoutWorkItem: DispatchWorkItem?
+    private var awaitingScreenRecorderCompletion = false
     private var lastCaptureUsedScreenRecorder = false
 
     init(roomPlanManager: RoomPlanCaptureManaging? = nil) {
@@ -419,12 +422,20 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private func stopScreenRecording() {
         let stopDate = Date()
+        screenRecordingStopDate = stopDate
+        awaitingScreenRecorderCompletion = true
+        scheduleScreenRecorderStopTimeout()
         screenRecorder.stopCapture { [weak self] error in
             guard let self else { return }
+            self.screenRecorderStopTimeoutWorkItem?.cancel()
+            self.screenRecorderStopTimeoutWorkItem = nil
+            guard self.awaitingScreenRecorderCompletion else { return }
+            self.awaitingScreenRecorderCompletion = false
             let writer = self.screenRecordingWriter
             self.screenRecordingWriter = nil
             let duration = self.screenRecordingStartDate.map { stopDate.timeIntervalSince($0) }
             self.screenRecordingStartDate = nil
+            self.screenRecordingStopDate = nil
             if let writer {
                 writer.finish { result in
                     switch result {
@@ -440,7 +451,42 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
+    private func scheduleScreenRecorderStopTimeout() {
+        screenRecorderStopTimeoutWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.awaitingScreenRecorderCompletion else { return }
+            print("⚠️ [Capture] Screen recorder stop timed out — forcing completion")
+            self.awaitingScreenRecorderCompletion = false
+            self.screenRecorderStopTimeoutWorkItem = nil
+            let writer = self.screenRecordingWriter
+            self.screenRecordingWriter = nil
+            let stopDate = self.screenRecordingStopDate ?? Date()
+            self.screenRecordingStopDate = nil
+            let duration = self.screenRecordingStartDate.map { stopDate.timeIntervalSince($0) }
+            self.screenRecordingStartDate = nil
+            if let writer {
+                writer.finish { result in
+                    switch result {
+                    case .success:
+                        self.handleRecordingCompletion(error: nil, durationSeconds: duration)
+                    case .failure(let writerError):
+                        self.handleRecordingCompletion(error: writerError, durationSeconds: duration)
+                    }
+                }
+            } else {
+                self.handleRecordingCompletion(error: nil, durationSeconds: duration)
+            }
+        }
+        screenRecorderStopTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: workItem)
+    }
+
     private func handleScreenRecorderFailure(_ error: Error) {
+        screenRecorderStopTimeoutWorkItem?.cancel()
+        screenRecorderStopTimeoutWorkItem = nil
+        awaitingScreenRecorderCompletion = false
+        screenRecordingStopDate = nil
         if screenRecorder.isRecording {
             screenRecorder.stopCapture { _ in }
         }
@@ -458,6 +504,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func handleRecordingCompletion(error: Error?, durationSeconds: Double?) {
+        screenRecorderStopTimeoutWorkItem?.cancel()
+        screenRecorderStopTimeoutWorkItem = nil
+        awaitingScreenRecorderCompletion = false
+        screenRecordingStopDate = nil
         stopMotionUpdates()
         stopExposureLogging()
         stopARSession()
@@ -984,6 +1034,10 @@ private extension VideoCaptureManager {
         pendingRoomPlanError = nil
         screenRecordingWriter = nil
         screenRecordingStartDate = nil
+        screenRecordingStopDate = nil
+        screenRecorderStopTimeoutWorkItem?.cancel()
+        screenRecorderStopTimeoutWorkItem = nil
+        awaitingScreenRecorderCompletion = false
         usingScreenRecorder = false
         lastCaptureUsedScreenRecorder = false
         arDataQueue.async { [weak self] in
