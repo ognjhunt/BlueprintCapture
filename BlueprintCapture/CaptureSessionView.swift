@@ -9,6 +9,7 @@ struct CaptureSessionView: View {
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
+    @State private var shouldDismissOnCompletion = false
 
     var body: some View {
         ZStack {
@@ -77,11 +78,26 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
                 isEnding = false
+                if shouldDismissOnCompletion {
+                    shouldDismissOnCompletion = false
+                    viewModel.step = .confirmLocation
+                    dismiss()
+                }
             case .idle:
                 isEnding = false
+                if shouldDismissOnCompletion {
+                    shouldDismissOnCompletion = false
+                    viewModel.step = .confirmLocation
+                    dismiss()
+                }
             case .error:
                 isEnding = false
                 didAutoStart = false
+                if shouldDismissOnCompletion {
+                    shouldDismissOnCompletion = false
+                    viewModel.step = .confirmLocation
+                    dismiss()
+                }
             default:
                 break
             }
@@ -163,16 +179,15 @@ struct CaptureSessionView: View {
         print("🛑 [Capture] End Session tapped — stopping recording & session")
         // Stop recording (if active) and the camera session
         if viewModel.captureManager.captureState.isRecording {
+            shouldDismissOnCompletion = true
             viewModel.captureManager.stopRecording()
         } else {
             print("ℹ️ [Capture] No active recording when ending session")
+            shouldDismissOnCompletion = false
+            viewModel.step = .confirmLocation
+            dismiss()
         }
         viewModel.captureManager.stopSession()
-        // Dismiss the capture view (works for fullScreenCover) and also reset state for stack-based flows
-        DispatchQueue.main.async {
-            self.viewModel.step = .confirmLocation
-            self.dismiss()
-        }
     }
 }
 
