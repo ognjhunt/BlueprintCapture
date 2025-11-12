@@ -75,6 +75,16 @@ struct CaptureSessionView: View {
         }
         .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
+            case .idle:
+                print("📥 [CaptureSessionView] captureState → idle")
+            case .recording(_):
+                print("📥 [CaptureSessionView] captureState → recording")
+            case .finished(_):
+                print("📥 [CaptureSessionView] captureState → finished")
+            case .error(let message):
+                print("📥 [CaptureSessionView] captureState → error (\(message))")
+            }
+            switch state {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
                 isEnding = false

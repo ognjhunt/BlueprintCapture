@@ -325,10 +325,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         if let roomPlanManager, let artifacts = currentArtifacts, roomPlanManager.isSupported {
             pendingRoomPlanError = nil
             roomPlanDispatchGroup.enter()
+            print("⏳ [RoomPlan] stopAndExport started; waiting for completion")
             print("🏠 [RoomPlan] Stopping RoomPlan capture for export")
             roomPlanManager.stopAndExport(to: artifacts.directoryURL) { [weak self] result in
                 guard let self else { return }
                 DispatchQueue.main.async {
+                    print("⏱️ [RoomPlan] stopAndExport completion received")
                     defer { self.roomPlanDispatchGroup.leave() }
                     switch result {
                     case .success(let export):
@@ -504,6 +506,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func handleRecordingCompletion(error: Error?, durationSeconds: Double?) {
+        print("🔚 [Capture] handleRecordingCompletion(error=\(error?.localizedDescription ?? "nil"), duration=\(durationSeconds.map { String(format: "%.2f", $0) } ?? "nil"))")
         screenRecorderStopTimeoutWorkItem?.cancel()
         screenRecorderStopTimeoutWorkItem = nil
         awaitingScreenRecorderCompletion = false
@@ -545,9 +548,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
             print("📦 [Capture] Packaging artifacts …")
             DispatchQueue.global(qos: .userInitiated).async {
+                print("⏳ [Capture] Waiting for RoomPlan export to finish before packaging")
                 self.roomPlanDispatchGroup.wait()
+                print("✅ [Capture] RoomPlan export dispatch group cleared")
                 var artifactsToPackage: RecordingArtifacts?
                 DispatchQueue.main.sync {
+                    print("📦 [Capture] Capturing currentArtifacts for packaging")
                     artifactsToPackage = self.currentArtifacts
                 }
                 guard let artifactsToPackage else {
@@ -1026,6 +1032,7 @@ extension VideoCaptureManager: ARSessionDelegate {
 
 private extension VideoCaptureManager {
     func cleanupAfterRecording() {
+        print("🧹 [Capture] cleanupAfterRecording")
         currentArtifacts = nil
         currentARKitArtifacts = nil
         currentCameraIntrinsics = nil
