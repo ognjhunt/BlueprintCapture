@@ -4,6 +4,7 @@ import UIKit
 
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
+    @ObservedObject private var captureManager: VideoCaptureManager
     @State private var didAutoStart = false
     @State private var isEnding = false
     @Environment(\.dismiss) private var dismiss
@@ -11,17 +12,46 @@ struct CaptureSessionView: View {
     let reservationId: String?
     @State private var shouldDismissOnCompletion = false
 
+    init(viewModel: CaptureFlowViewModel, targetId: String?, reservationId: String?) {
+        self.viewModel = viewModel
+        self._captureManager = ObservedObject(initialValue: viewModel.captureManager)
+        self.targetId = targetId
+        self.reservationId = reservationId
+    }
+
     var body: some View {
         ZStack {
-            if viewModel.roomPlanManager.isSupported {
+            if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
                 RoomPlanOverlayView(manager: viewModel.roomPlanManager)
                     .ignoresSafeArea()
             } else {
-                CameraPreview(session: viewModel.captureManager.session)
+                CameraPreview(session: captureManager.session)
                     .ignoresSafeArea()
             }
 
             VStack(spacing: 12) {
+                if viewModel.roomPlanManager.isSupported && !captureManager.roomPlanCaptureEnabled {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.yellow)
+                            .imageScale(.large)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("RoomPlan temporarily unavailable")
+                                .font(.footnote.weight(.semibold))
+                            Text("ReplayKit failed to finish the previous capture. The app is using a fallback recorder without RoomPlan data.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.yellow.opacity(0.15))
+                    )
+                    .padding(.horizontal)
+                }
+
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
                     uploadStatusList
@@ -31,7 +61,7 @@ struct CaptureSessionView: View {
                 Spacer()
 
                 // Error banner + retry control when recording fails
-                if case .error(let reason) = viewModel.captureManager.captureState {
+                if case .error(let reason) = captureManager.captureState {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Recording failed", systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote.weight(.semibold))
@@ -47,7 +77,7 @@ struct CaptureSessionView: View {
                             Label("Retry Recording", systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(BlueprintPrimaryButtonStyle())
-                        .disabled(viewModel.captureManager.captureState.isRecording)
+                        .disabled(captureManager.captureState.isRecording)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
@@ -73,7 +103,7 @@ struct CaptureSessionView: View {
                 .padding(.bottom)
             }
         }
-        .onReceive(viewModel.captureManager.$captureState) { state in
+        .onReceive(captureManager.$captureState) { state in
             switch state {
             case .idle:
                 print("📥 [CaptureSessionView] captureState → idle")
@@ -124,42 +154,41 @@ struct CaptureSessionView: View {
         guard !didAutoStart else { return }
         didAutoStart = true
         print("🎬 [Capture] View appeared — auto start flow")
-        if viewModel.roomPlanManager.isSupported {
+        if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
             print("🏠 [RoomPlan] Starting RoomPlan capture")
             viewModel.roomPlanManager.startCapture()
         }
         // Ensure the session is configured and running, then start recording automatically
-        if !viewModel.captureManager.session.isRunning {
+        if !captureManager.session.isRunning {
             print("🎥 [Capture] Starting AVCaptureSession…")
-            viewModel.captureManager.configureSession()
-            viewModel.captureManager.startSession()
+            captureManager.configureSession()
+            captureManager.startSession()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             print("⏺️ [Capture] Auto-start recording…")
-            viewModel.captureManager.startRecording()
+            captureManager.startRecording()
         }
     }
 
     private func retryRecording() {
-        guard !viewModel.captureManager.captureState.isRecording else { return }
+        guard !captureManager.captureState.isRecording else { return }
         print("🔄 [Capture] Retry Recording tapped")
         didAutoStart = true
 
-        if viewModel.roomPlanManager.isSupported {
+        if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
             print("🏠 [RoomPlan] Restarting RoomPlan capture")
             viewModel.roomPlanManager.startCapture()
         }
 
-        let manager = viewModel.captureManager
-        manager.configureSession()
+        captureManager.configureSession()
 
-        if !manager.session.isRunning {
-            manager.startSession()
+        if !captureManager.session.isRunning {
+            captureManager.startSession()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                manager.startRecording()
+                captureManager.startRecording()
             }
         } else {
-            manager.startRecording()
+            captureManager.startRecording()
         }
     }
 
@@ -188,16 +217,16 @@ struct CaptureSessionView: View {
         isEnding = true
         print("🛑 [Capture] End Session tapped — stopping recording & session")
         // Stop recording (if active) and the camera session
-        if viewModel.captureManager.captureState.isRecording {
+        if captureManager.captureState.isRecording {
             shouldDismissOnCompletion = true
-            viewModel.captureManager.stopRecording()
+            captureManager.stopRecording()
         } else {
             print("ℹ️ [Capture] No active recording when ending session")
             shouldDismissOnCompletion = false
             viewModel.step = .confirmLocation
             dismiss()
         }
-        viewModel.captureManager.stopSession()
+        captureManager.stopSession()
     }
 }
 
