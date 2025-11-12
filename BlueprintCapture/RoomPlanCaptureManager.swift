@@ -248,9 +248,46 @@ extension RoomPlanCaptureManager: RoomCaptureViewDelegate, RoomCaptureSessionDel
 struct RoomPlanOverlayView: UIViewRepresentable {
     let manager: RoomPlanCaptureManaging
 
-    func makeUIView(context: Context) -> UIView {
-        manager.makeCaptureView() ?? UIView(frame: .zero)
+    func makeCoordinator() -> Coordinator {
+        Coordinator(manager: manager)
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func makeUIView(context: Context) -> PassthroughView {
+        let container = PassthroughView()
+        container.backgroundColor = .clear
+        if let captureView = manager.makeCaptureView() {
+            context.coordinator.embedCaptureView(captureView, in: container)
+        }
+        return container
+    }
+
+    func updateUIView(_ uiView: PassthroughView, context: Context) {
+        guard let captureView = manager.makeCaptureView() else { return }
+        context.coordinator.embedCaptureView(captureView, in: uiView)
+    }
+
+    final class Coordinator {
+        init(manager: RoomPlanCaptureManaging) {}
+
+        func embedCaptureView(_ captureView: UIView, in container: UIView) {
+            guard captureView.superview !== container else { return }
+
+            captureView.removeFromSuperview()
+            captureView.translatesAutoresizingMaskIntoConstraints = false
+            captureView.isUserInteractionEnabled = false
+            container.addSubview(captureView)
+            NSLayoutConstraint.activate([
+                captureView.topAnchor.constraint(equalTo: container.topAnchor),
+                captureView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                captureView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                captureView.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+            ])
+        }
+    }
+}
+
+final class PassthroughView: UIView {
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        false
+    }
 }

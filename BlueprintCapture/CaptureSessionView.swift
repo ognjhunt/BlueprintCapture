@@ -12,14 +12,12 @@ struct CaptureSessionView: View {
 
     var body: some View {
         ZStack {
-            // Full-screen camera preview
-            CameraPreview(session: viewModel.captureManager.session)
-                .ignoresSafeArea()
-
             if viewModel.roomPlanManager.isSupported {
                 RoomPlanOverlayView(manager: viewModel.roomPlanManager)
                     .ignoresSafeArea()
-                    .allowsHitTesting(false)
+            } else {
+                CameraPreview(session: viewModel.captureManager.session)
+                    .ignoresSafeArea()
             }
 
             VStack(spacing: 12) {
