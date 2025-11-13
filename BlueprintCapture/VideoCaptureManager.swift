@@ -1233,14 +1233,21 @@ private final class ARSessionVideoRecorder {
     }
 
     func append(_ frame: ARFrame) {
+        let pixelBuffer = frame.capturedImage
+        let timestampSeconds = frame.timestamp
+        let resolution = frame.camera.imageResolution
+
+        CVPixelBufferRetain(pixelBuffer)
+
         queue.async {
+            defer { CVPixelBufferRelease(pixelBuffer) }
             guard !self.isFinishing else { return }
             do {
                 if self.assetWriter.status == .failed {
                     throw self.assetWriter.error ?? RecorderError.writerFailed
                 }
-                try self.prepareIfNeeded(for: frame)
-                try self.appendFrame(frame)
+                try self.prepareIfNeeded(resolution: resolution)
+                try self.appendFrame(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds)
             } catch {
                 self.isFinishing = true
                 self.assetWriter.cancelWriting()
@@ -1288,9 +1295,8 @@ private final class ARSessionVideoRecorder {
         }
     }
 
-    private func prepareIfNeeded(for frame: ARFrame) throws {
+    private func prepareIfNeeded(resolution: CGSize) throws {
         guard videoInput == nil, adaptor == nil else { return }
-        let resolution = frame.camera.imageResolution
         let width = Int(resolution.width)
         let height = Int(resolution.height)
         let outputSettings: [String: Any] = [
@@ -1321,21 +1327,24 @@ private final class ARSessionVideoRecorder {
         videoInput = input
     }
 
-    private func appendFrame(_ frame: ARFrame) throws {
+    private func appendFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: TimeInterval) throws {
         guard let input = videoInput, let adaptor = adaptor else { return }
 
-        let timestamp = CMTime(seconds: frame.timestamp, preferredTimescale: 600)
+        let timestamp = CMTime(seconds: timestampSeconds, preferredTimescale: 600)
         if startTime == nil {
             startTime = timestamp
             guard assetWriter.startWriting() else { throw assetWriter.error ?? RecorderError.writerFailed }
             assetWriter.startSession(atSourceTime: timestamp)
         }
 
-        lastTime = timestamp
-        recordedFrameCount += 1
-
         guard input.isReadyForMoreMediaData else { return }
-        adaptor.append(frame.capturedImage, withPresentationTime: timestamp)
+
+        if adaptor.append(pixelBuffer, withPresentationTime: timestamp) {
+            lastTime = timestamp
+            recordedFrameCount += 1
+        } else {
+            throw RecorderError.writerFailed
+        }
     }
 
     private func transform(for orientation: UIInterfaceOrientation) -> CGAffineTransform {
