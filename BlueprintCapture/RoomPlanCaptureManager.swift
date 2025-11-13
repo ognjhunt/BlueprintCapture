@@ -72,6 +72,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
     private var latestError: Error?
     private var isRunning = false
     private let exportQueue = DispatchQueue(label: "com.blueprint.roomplan.export", qos: .userInitiated)
+    private var exportTimeoutWorkItem: DispatchWorkItem?
 
     // NSSecureCoding
         static var supportsSecureCoding: Bool { true }
@@ -125,6 +126,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
             isRunning = false
         }
 
+        scheduleExportTimeout()
         attemptExportIfReady()
     }
 
@@ -133,6 +135,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
         exportDestination = nil
         finalResult = nil
         latestError = nil
+        cancelExportTimeout()
         if isRunning {
             captureView?.captureSession.stop()
         }
@@ -156,6 +159,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
         guard let completion = exportCompletion else { return }
 
         if let error = latestError {
+            cancelExportTimeout()
             exportCompletion = nil
             exportDestination = nil
             DispatchQueue.main.async {
@@ -168,6 +172,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
             return
         }
 
+        cancelExportTimeout()
         exportCompletion = nil
         exportDestination = nil
 
@@ -184,6 +189,31 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
                 }
             }
         }
+    }
+
+    private func scheduleExportTimeout() {
+        cancelExportTimeout()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard let completion = self.exportCompletion else { return }
+
+            self.exportCompletion = nil
+            self.exportDestination = nil
+            let timeoutError = RoomPlanCaptureError.exportFailed("RoomPlan capture did not finish processing in time.")
+            print("⚠️ [RoomPlan] Export timed out waiting for final result")
+            DispatchQueue.main.async {
+                completion(.failure(timeoutError))
+            }
+        }
+
+        exportTimeoutWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: workItem)
+    }
+
+    private func cancelExportTimeout() {
+        exportTimeoutWorkItem?.cancel()
+        exportTimeoutWorkItem = nil
     }
 
     private func export(room: CapturedRoom, to directory: URL) throws -> RoomPlanCaptureExport {
