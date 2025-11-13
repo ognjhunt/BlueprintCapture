@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ARKit)
+import ARKit
+#endif
 
 struct RoomPlanCaptureExport: Equatable {
     let directoryURL: URL
@@ -31,6 +34,10 @@ protocol RoomPlanCaptureManaging: AnyObject {
     func startCapture()
     func stopAndExport(to directory: URL, completion: @escaping (Result<RoomPlanCaptureExport, Error>) -> Void)
     func cancelCapture()
+#if canImport(ARKit)
+    @available(iOS 17.0, *)
+    func configureSharedARSession(_ session: ARSession)
+#endif
 }
 
 enum RoomPlanCaptureManagerFactory {
@@ -72,6 +79,10 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
     private var latestError: Error?
     private var isRunning = false
     private let exportQueue = DispatchQueue(label: "com.blueprint.roomplan.export", qos: .userInitiated)
+#if canImport(ARKit)
+    @available(iOS 17.0, *)
+    private var sharedARSession: ARSession?
+#endif
 
     // NSSecureCoding
         static var supportsSecureCoding: Bool { true }
@@ -141,6 +152,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
 
     private func ensureCaptureView() -> RoomCaptureView? {
         if let view = captureView {
+            applySharedSessionIfNeeded(to: view)
             return view
         }
         guard isSupported else { return nil }
@@ -149,8 +161,30 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
         view.captureSession.delegate = self
         view.delegate = self
         captureView = view
+        applySharedSessionIfNeeded(to: view)
         return view
     }
+
+    private func applySharedSessionIfNeeded(to view: RoomCaptureView) {
+#if canImport(ARKit)
+        if #available(iOS 17.0, *), let session = sharedARSession {
+            if view.captureSession.arSession !== session {
+                view.captureSession.arSession = session
+            }
+        }
+#endif
+    }
+
+#if canImport(ARKit)
+    @available(iOS 17.0, *)
+    func configureSharedARSession(_ session: ARSession) {
+        sharedARSession = session
+        guard let view = ensureCaptureView() else { return }
+        // ReplayKit fallbacks do not supply ARKit poses, so alignment is only possible
+        // when RoomPlan shares this live ARSession with the video/pose capture pipeline.
+        applySharedSessionIfNeeded(to: view)
+    }
+#endif
 
     private func attemptExportIfReady() {
         guard let completion = exportCompletion else { return }
