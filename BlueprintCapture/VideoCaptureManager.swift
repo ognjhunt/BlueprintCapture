@@ -151,11 +151,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var screenRecorderStopTimeoutWorkItem: DispatchWorkItem?
     private var awaitingScreenRecorderCompletion = false
     private var lastCaptureUsedScreenRecorder = false
+    private var lastCaptureUsedSharedSession = false
+    private var isRecordingWithSharedARSession = false
+    private var arVideoWriter: AVAssetWriter?
+    private var arVideoWriterInput: AVAssetWriterInput?
+    private var arPixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var arRecordingStartTime: CMTime?
+    private var arRecordingLastTime: CMTime?
+    private var arRecordingOrientation: UIInterfaceOrientation = .portrait
+    private var arFrameIntervalTotal: Double = 0
+    private var arFrameIntervalCount: Int = 0
 
     init(roomPlanManager: RoomPlanCaptureManaging? = nil) {
         self.roomPlanManager = roomPlanManager
         super.init()
         arSession.delegate = self
+        if #available(iOS 17.0, *) {
+            roomPlanManager?.attachSharedSession(arSession)
+        }
     }
 
     private func disableScreenRecorderDueToError(reason: String) {
@@ -177,10 +190,22 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private var shouldUseScreenRecorder: Bool {
         guard roomPlanCaptureEnabled, !screenRecorderPermanentlyDisabled else { return false }
-        if let manager = roomPlanManager {
-            return manager.isSupported
+        guard let manager = roomPlanManager, manager.isSupported else { return false }
+        if #available(iOS 17.0, *) {
+            return false
+        }
+        return true
+    }
+
+    private var shouldUseSharedSessionRecording: Bool {
+        if #available(iOS 17.0, *), roomPlanCaptureEnabled, roomPlanManager?.isSupported == true, supportsARCapture {
+            return true
         }
         return false
+    }
+
+    var usesAVFoundationCameraPipeline: Bool {
+        return !shouldUseScreenRecorder && !shouldUseSharedSessionRecording
     }
 
     private static func evaluateARCaptureSupport() -> Bool {
@@ -219,8 +244,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func configureSession() {
-        guard !shouldUseScreenRecorder else {
-            print("⚙️ [Capture] configureSession skipped — using screen recorder")
+        guard usesAVFoundationCameraPipeline else {
+            if shouldUseScreenRecorder {
+                print("⚙️ [Capture] configureSession skipped — using screen recorder")
+            } else {
+                print("⚙️ [Capture] configureSession skipped — using shared ARSession pipeline")
+            }
             return
         }
         guard session.inputs.isEmpty else { print("⚙️ [Capture] configureSession: inputs already configured (inputs=\(session.inputs.count))"); return }
@@ -258,7 +287,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func startSession() {
-        guard !shouldUseScreenRecorder else { print("ℹ️ [Capture] startSession skipped — using screen recorder"); return }
+        guard usesAVFoundationCameraPipeline else {
+            if shouldUseScreenRecorder {
+                print("ℹ️ [Capture] startSession skipped — using screen recorder")
+            } else {
+                print("ℹ️ [Capture] startSession skipped — using shared ARSession pipeline")
+            }
+            return
+        }
         guard !session.isRunning else { print("ℹ️ [Capture] startSession ignored — already running"); return }
         DispatchQueue.global(qos: .userInitiated).async {
             print("🎥 [Capture] startRunning() …")
@@ -268,7 +304,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func stopSession() {
-        guard !shouldUseScreenRecorder else { print("ℹ️ [Capture] stopSession skipped — using screen recorder"); return }
+        guard usesAVFoundationCameraPipeline else {
+            if shouldUseScreenRecorder {
+                print("ℹ️ [Capture] stopSession skipped — using screen recorder")
+            } else {
+                print("ℹ️ [Capture] stopSession skipped — using shared ARSession pipeline")
+            }
+            return
+        }
         guard session.isRunning else { print("ℹ️ [Capture] stopSession ignored — not running"); return }
         print("🛑 [Capture] stopRunning() …")
         DispatchQueue.global(qos: .userInitiated).async {
@@ -280,12 +323,20 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     func startRecording() {
         if shouldUseScreenRecorder {
             guard !usingScreenRecorder else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
+        } else if shouldUseSharedSessionRecording {
+            guard !isRecordingWithSharedARSession else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
         } else {
             guard !movieOutput.isRecording else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
         }
         print("⏺️ [Capture] startRecording begin")
         let baseName = "walkthrough-\(UUID().uuidString)"
-        let includeARKit = !shouldSkipARKitOnNextRecording && !shouldUseScreenRecorder
+        let includeARKit: Bool = {
+            if shouldUseSharedSessionRecording {
+                shouldSkipARKitOnNextRecording = false
+                return true
+            }
+            return !shouldSkipARKitOnNextRecording && !shouldUseScreenRecorder
+        }()
         let artifacts: RecordingArtifacts
         do {
             artifacts = try makeRecordingArtifacts(baseName: baseName, includeARKit: includeARKit)
@@ -304,6 +355,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         if shouldUseScreenRecorder {
             currentCameraIntrinsics = makeScreenIntrinsics()
             currentExposureSettings = nil
+        } else if shouldUseSharedSessionRecording {
+            currentCameraIntrinsics = nil
+            currentExposureSettings = makeARSessionExposureSettings()
         } else {
             currentCameraIntrinsics = videoDevice.map(makeCameraIntrinsics)
             currentExposureSettings = videoDevice.map(makeExposureSettings)
@@ -320,9 +374,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         startExposureLogging()
         shouldSkipARKitOnNextRecording = false
         lastCaptureUsedScreenRecorder = shouldUseScreenRecorder
+        lastCaptureUsedSharedSession = shouldUseSharedSessionRecording
 
         if shouldUseScreenRecorder {
             startScreenRecording(for: artifacts)
+        } else if shouldUseSharedSessionRecording {
+            startSharedSessionRecording(for: artifacts)
         } else {
             movieOutput.startRecording(to: artifacts.videoURL, recordingDelegate: self)
             if !includeARKit && supportsARCapture {
@@ -336,6 +393,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     func stopRecording() {
         if shouldUseScreenRecorder {
             guard usingScreenRecorder else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
+        } else if shouldUseSharedSessionRecording {
+            guard isRecordingWithSharedARSession else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         } else {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
@@ -373,10 +432,59 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         if shouldUseScreenRecorder {
             stopScreenRecording()
+        } else if shouldUseSharedSessionRecording {
+            stopSharedSessionRecording()
         } else {
             movieOutput.stopRecording()
         }
         print("⏹️ [Capture] stopRecording requested")
+    }
+
+    private func startSharedSessionRecording(for artifacts: RecordingArtifacts) {
+        isRecordingWithSharedARSession = true
+        arVideoWriter = nil
+        arVideoWriterInput = nil
+        arPixelBufferAdaptor = nil
+        arRecordingStartTime = nil
+        arRecordingLastTime = nil
+        arFrameIntervalTotal = 0
+        arFrameIntervalCount = 0
+        arRecordingOrientation = captureState.currentInterfaceOrientation()
+        captureState = .recording(artifacts)
+        print("⏺️ [Capture] ARSession recording started → file=\(artifacts.videoURL.lastPathComponent)")
+    }
+
+    private func stopSharedSessionRecording() {
+        let sharedRecordingActive = isRecordingWithSharedARSession
+        isRecordingWithSharedARSession = false
+        guard sharedRecordingActive else { return }
+        arDataQueue.async { [weak self] in
+            guard let self else { return }
+            let duration: Double? = {
+                if let start = self.arRecordingStartTime, let end = self.arRecordingLastTime {
+                    let seconds = CMTimeGetSeconds(end) - CMTimeGetSeconds(start)
+                    return seconds.isFinite && seconds >= 0 ? seconds : nil
+                }
+                return nil
+            }()
+            let writer = self.arVideoWriter
+            let input = self.arVideoWriterInput
+            input?.markAsFinished()
+            self.arVideoWriter = nil
+            self.arVideoWriterInput = nil
+            self.arPixelBufferAdaptor = nil
+            if let writer {
+                writer.finishWriting {
+                    DispatchQueue.main.async {
+                        self.handleRecordingCompletion(error: writer.error, durationSeconds: duration)
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    self.handleRecordingCompletion(error: nil, durationSeconds: duration)
+                }
+            }
+        }
     }
 
     private func startScreenRecording(for artifacts: RecordingArtifacts) {
@@ -947,6 +1055,91 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         arFrameCount += 1
     }
 
+    private func recordSharedSessionFrame(_ frame: ARFrame) {
+        guard isRecordingWithSharedARSession, let artifacts = currentArtifacts else { return }
+        do {
+            try ensureSharedSessionWriter(for: frame, artifacts: artifacts)
+        } catch {
+            print("❌ [Capture] Failed to prepare ARSession writer: \(error.localizedDescription)")
+            isRecordingWithSharedARSession = false
+            DispatchQueue.main.async {
+                self.handleRecordingCompletion(error: error, durationSeconds: self.estimatedSharedSessionDuration())
+            }
+            return
+        }
+
+        guard let writer = arVideoWriter, let input = arVideoWriterInput, let adaptor = arPixelBufferAdaptor else { return }
+        if writer.status == .failed {
+            let writerError = writer.error ?? CaptureError.videoWriterSetupFailed("Asset writer failed")
+            print("❌ [Capture] Asset writer failed: \(writerError.localizedDescription)")
+            isRecordingWithSharedARSession = false
+            DispatchQueue.main.async {
+                self.handleRecordingCompletion(error: writerError, durationSeconds: self.estimatedSharedSessionDuration())
+            }
+            return
+        }
+
+        let frameTime = CMTime(seconds: frame.timestamp, preferredTimescale: 600)
+        if arRecordingStartTime == nil {
+            arRecordingStartTime = frameTime
+            arRecordingLastTime = frameTime
+            writer.startWriting()
+            writer.startSession(atSourceTime: frameTime)
+        } else if let last = arRecordingLastTime {
+            let delta = frame.timestamp - CMTimeGetSeconds(last)
+            if delta.isFinite && delta > 0 {
+                arFrameIntervalTotal += delta
+                arFrameIntervalCount += 1
+            }
+            arRecordingLastTime = frameTime
+        }
+
+        guard input.isReadyForMoreMediaData else { return }
+        let pixelBuffer = frame.capturedImage
+        if !adaptor.append(pixelBuffer, withPresentationTime: frameTime) {
+            let writerError = writer.error ?? CaptureError.videoWriterSetupFailed("Failed to append frame")
+            print("❌ [Capture] Failed to append AR frame: \(writerError.localizedDescription)")
+            isRecordingWithSharedARSession = false
+            DispatchQueue.main.async {
+                self.handleRecordingCompletion(error: writerError, durationSeconds: self.estimatedSharedSessionDuration())
+            }
+        }
+    }
+
+    private func ensureSharedSessionWriter(for frame: ARFrame, artifacts: RecordingArtifacts) throws {
+        guard arVideoWriter == nil else { return }
+
+        let resolution = frame.camera.imageResolution
+        let width = Int(resolution.width)
+        let height = Int(resolution.height)
+
+        let writer = try AVAssetWriter(outputURL: artifacts.videoURL, fileType: .mov)
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height
+        ]
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        input.expectsMediaDataInRealTime = true
+        input.transform = transform(for: arRecordingOrientation)
+        guard writer.canAdd(input) else {
+            throw CaptureError.videoWriterSetupFailed("Unable to add video input to writer")
+        }
+        writer.add(input)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange)
+            ]
+        )
+        arVideoWriter = writer
+        arVideoWriterInput = input
+        arPixelBufferAdaptor = adaptor
+        currentCameraIntrinsics = makeCameraIntrinsics(from: frame.camera)
+        currentExposureSettings = makeARSessionExposureSettings()
+        persistManifest(duration: nil)
+    }
+
     private func exportMeshAnchors(_ anchors: [ARAnchor]) {
         guard let meshDirectory = currentArtifacts?.arKit?.meshDirectoryURL else { return }
 
@@ -961,6 +1154,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func startExposureLogging() {
+        guard videoDevice != nil else { return }
         captureExposureSample()
         exposureTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.captureExposureSample()
@@ -995,6 +1189,7 @@ extension VideoCaptureManager {
         case missingCamera
         case archiveUnavailable
         case pixelBufferEncodingFailed
+        case videoWriterSetupFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -1004,6 +1199,8 @@ extension VideoCaptureManager {
                 return "This device cannot create capture archives."
             case .pixelBufferEncodingFailed:
                 return "Unable to persist depth or confidence data."
+            case .videoWriterSetupFailed(let message):
+                return message
             }
         }
     }
@@ -1028,7 +1225,9 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
 extension VideoCaptureManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         arDataQueue.async { [weak self] in
-            self?.writeARFrame(frame)
+            guard let self else { return }
+            self.writeARFrame(frame)
+            self.recordSharedSessionFrame(frame)
         }
     }
 
@@ -1048,6 +1247,10 @@ extension VideoCaptureManager: ARSessionDelegate {
         print("❌ [AR] session failed: \(error.localizedDescription)")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            if self.isRecordingWithSharedARSession {
+                self.isRecordingWithSharedARSession = false
+                self.handleRecordingCompletion(error: error, durationSeconds: self.estimatedSharedSessionDuration())
+            }
             self.currentARKitArtifacts = nil
             self.stopARSession()
         }
@@ -1071,9 +1274,19 @@ private extension VideoCaptureManager {
         awaitingScreenRecorderCompletion = false
         usingScreenRecorder = false
         lastCaptureUsedScreenRecorder = false
+        lastCaptureUsedSharedSession = false
+        isRecordingWithSharedARSession = false
         arDataQueue.async { [weak self] in
-            self?.arFrameCount = 0
-            self?.exportedMeshAnchors.removeAll()
+            guard let self else { return }
+            self.arFrameCount = 0
+            self.exportedMeshAnchors.removeAll()
+            self.arVideoWriter = nil
+            self.arVideoWriterInput = nil
+            self.arPixelBufferAdaptor = nil
+            self.arRecordingStartTime = nil
+            self.arRecordingLastTime = nil
+            self.arFrameIntervalTotal = 0
+            self.arFrameIntervalCount = 0
         }
     }
 
@@ -1085,6 +1298,9 @@ private extension VideoCaptureManager {
         let fps: Int = {
             if lastCaptureUsedScreenRecorder {
                 return UIScreen.main.maximumFramesPerSecond
+            }
+            if lastCaptureUsedSharedSession, let arRate = estimatedSharedSessionFrameRate() {
+                return max(arRate, 1)
             }
             if let d = videoDevice?.activeVideoMinFrameDuration, d.isNumeric { return Int(round(1.0 / d.seconds)) }
             return 30
@@ -1120,6 +1336,34 @@ private extension VideoCaptureManager {
         } else {
             manifestQueue.async(execute: writeBlock)
         }
+    }
+
+    private func transform(for orientation: UIInterfaceOrientation) -> CGAffineTransform {
+        switch orientation {
+        case .portrait:
+            return CGAffineTransform(rotationAngle: .pi / 2)
+        case .portraitUpsideDown:
+            return CGAffineTransform(rotationAngle: -.pi / 2)
+        case .landscapeLeft:
+            return CGAffineTransform(rotationAngle: .pi)
+        case .landscapeRight, .unknown:
+            return .identity
+        @unknown default:
+            return .identity
+        }
+    }
+
+    func makeCameraIntrinsics(from camera: ARCamera) -> CaptureManifest.CameraIntrinsics {
+        let resolution = camera.imageResolution
+        let intrinsics = matrixToArray(camera.intrinsics).map { Double($0) }
+        return CaptureManifest.CameraIntrinsics(
+            resolutionWidth: Int(resolution.width),
+            resolutionHeight: Int(resolution.height),
+            intrinsicMatrix: intrinsics,
+            fieldOfView: camera.fieldOfView,
+            lensAperture: nil,
+            minimumFocusDistance: nil
+        )
     }
 
     func makeCameraIntrinsics(from device: AVCaptureDevice) -> CaptureManifest.CameraIntrinsics {
@@ -1158,6 +1402,14 @@ private extension VideoCaptureManager {
         )
     }
 
+    func makeARSessionExposureSettings() -> CaptureManifest.ExposureSettings {
+        CaptureManifest.ExposureSettings(
+            mode: "arSession",
+            pointOfInterest: nil,
+            whiteBalanceMode: "automatic"
+        )
+    }
+
     func makeExposureSettings(from device: AVCaptureDevice) -> CaptureManifest.ExposureSettings {
         let mode: String
         switch device.exposureMode {
@@ -1188,6 +1440,30 @@ private extension VideoCaptureManager {
             pointOfInterest: pointOfInterest,
             whiteBalanceMode: whiteBalanceMode
         )
+    }
+
+    private func estimatedSharedSessionDuration() -> Double? {
+        var duration: Double?
+        arDataQueue.sync {
+            if let start = arRecordingStartTime, let end = arRecordingLastTime {
+                let seconds = CMTimeGetSeconds(end) - CMTimeGetSeconds(start)
+                if seconds.isFinite, seconds >= 0 {
+                    duration = seconds
+                }
+            }
+        }
+        return duration
+    }
+
+    private func estimatedSharedSessionFrameRate() -> Int? {
+        var rate: Int?
+        arDataQueue.sync {
+            guard arFrameIntervalCount > 0 else { return }
+            let average = arFrameIntervalTotal / Double(arFrameIntervalCount)
+            guard average.isFinite, average > 0 else { return }
+            rate = Int(round(1.0 / average))
+        }
+        return rate
     }
 
     func makeARKitManifest(for artifacts: RecordingArtifacts) -> CaptureManifest.ARKitArtifacts? {

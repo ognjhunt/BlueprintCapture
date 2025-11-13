@@ -159,10 +159,12 @@ struct CaptureSessionView: View {
             viewModel.roomPlanManager.startCapture()
         }
         // Ensure the session is configured and running, then start recording automatically
-        if !captureManager.session.isRunning {
-            print("🎥 [Capture] Starting AVCaptureSession…")
-            captureManager.configureSession()
-            captureManager.startSession()
+        if captureManager.usesAVFoundationCameraPipeline {
+            if !captureManager.session.isRunning {
+                print("🎥 [Capture] Starting AVCaptureSession…")
+                captureManager.configureSession()
+                captureManager.startSession()
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             print("⏺️ [Capture] Auto-start recording…")
@@ -180,16 +182,19 @@ struct CaptureSessionView: View {
             viewModel.roomPlanManager.startCapture()
         }
 
-        captureManager.configureSession()
+        if captureManager.usesAVFoundationCameraPipeline {
+            captureManager.configureSession()
 
-        if !captureManager.session.isRunning {
-            captureManager.startSession()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                captureManager.startRecording()
+            if !captureManager.session.isRunning {
+                captureManager.startSession()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    captureManager.startRecording()
+                }
+                return
             }
-        } else {
-            captureManager.startRecording()
         }
+
+        captureManager.startRecording()
     }
 
     private var uploadStatusList: some View {

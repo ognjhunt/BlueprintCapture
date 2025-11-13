@@ -1,5 +1,8 @@
 import Foundation
 import SwiftUI
+#if canImport(ARKit)
+import ARKit
+#endif
 
 struct RoomPlanCaptureExport: Equatable {
     let directoryURL: URL
@@ -31,6 +34,9 @@ protocol RoomPlanCaptureManaging: AnyObject {
     func startCapture()
     func stopAndExport(to directory: URL, completion: @escaping (Result<RoomPlanCaptureExport, Error>) -> Void)
     func cancelCapture()
+#if canImport(ARKit)
+    func attachSharedSession(_ session: ARSession?)
+#endif
 }
 
 enum RoomPlanCaptureManagerFactory {
@@ -55,6 +61,9 @@ final class RoomPlanCaptureUnavailableManager: NSObject, RoomPlanCaptureManaging
         completion(.failure(RoomPlanCaptureError.unsupported))
     }
     func cancelCapture() {}
+#if canImport(ARKit)
+    func attachSharedSession(_ session: ARSession?) {}
+#endif
 }
 
 #if canImport(RoomPlan)
@@ -72,6 +81,8 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
     private var latestError: Error?
     private var isRunning = false
     private let exportQueue = DispatchQueue(label: "com.blueprint.roomplan.export", qos: .userInitiated)
+    @available(iOS 17.0, *)
+    private weak var sharedARSession: ARSession?
 
     // NSSecureCoding
         static var supportsSecureCoding: Bool { true }
@@ -87,6 +98,15 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
     // Add this initializer
     override init() {
         super.init()
+    }
+
+    func attachSharedSession(_ session: ARSession?) {
+        if #available(iOS 17.0, *) {
+            sharedARSession = session
+            if let captureSession = captureView?.captureSession, let session {
+                captureSession.arSession = session
+            }
+        }
     }
 
     var isSupported: Bool {
@@ -107,6 +127,9 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
 
         view.captureSession.delegate = self
         view.delegate = self
+        if #available(iOS 17.0, *), let session = sharedARSession {
+            view.captureSession.arSession = session
+        }
         view.captureSession.run(configuration: configuration)
         isRunning = true
     }
@@ -148,6 +171,9 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
         view.translatesAutoresizingMaskIntoConstraints = false
         view.captureSession.delegate = self
         view.delegate = self
+        if #available(iOS 17.0, *), let session = sharedARSession {
+            view.captureSession.arSession = session
+        }
         captureView = view
         return view
     }
