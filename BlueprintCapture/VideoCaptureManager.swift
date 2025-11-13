@@ -151,11 +151,21 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var screenRecorderStopTimeoutWorkItem: DispatchWorkItem?
     private var awaitingScreenRecorderCompletion = false
     private var lastCaptureUsedScreenRecorder = false
+    private var usingCustomARSessionRecorder = false
+    private var awaitingFirstARVideoFrame = false
+    private var arSessionRecorder: AnyObject?
 
     init(roomPlanManager: RoomPlanCaptureManaging? = nil) {
         self.roomPlanManager = roomPlanManager
         super.init()
         arSession.delegate = self
+        if #available(iOS 17.0, *), let manager = roomPlanManager {
+            manager.configureSharedARSession(arSession)
+        }
+    }
+
+    var needsAVCaptureSession: Bool {
+        !shouldUseScreenRecorder && !canUseARSessionRecorder
     }
 
     private func disableScreenRecorderDueToError(reason: String) {
@@ -177,8 +187,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private var shouldUseScreenRecorder: Bool {
         guard roomPlanCaptureEnabled, !screenRecorderPermanentlyDisabled else { return false }
+        if canUseARSessionRecorder { return false }
         if let manager = roomPlanManager {
             return manager.isSupported
+        }
+        return false
+    }
+
+    private var canUseARSessionRecorder: Bool {
+        if #available(iOS 17.0, *), roomPlanCaptureEnabled, roomPlanManager?.isSupported == true {
+            return supportsARCapture
         }
         return false
     }
@@ -219,8 +237,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func configureSession() {
-        guard !shouldUseScreenRecorder else {
+        if shouldUseScreenRecorder {
             print("⚙️ [Capture] configureSession skipped — using screen recorder")
+            return
+        }
+        if canUseARSessionRecorder {
+            print("⚙️ [Capture] configureSession skipped — using shared ARSession recorder")
             return
         }
         guard session.inputs.isEmpty else { print("⚙️ [Capture] configureSession: inputs already configured (inputs=\(session.inputs.count))"); return }
@@ -258,7 +280,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func startSession() {
-        guard !shouldUseScreenRecorder else { print("ℹ️ [Capture] startSession skipped — using screen recorder"); return }
+        if shouldUseScreenRecorder {
+            print("ℹ️ [Capture] startSession skipped — using screen recorder")
+            return
+        }
+        if canUseARSessionRecorder {
+            print("ℹ️ [Capture] startSession skipped — using shared ARSession recorder")
+            return
+        }
         guard !session.isRunning else { print("ℹ️ [Capture] startSession ignored — already running"); return }
         DispatchQueue.global(qos: .userInitiated).async {
             print("🎥 [Capture] startRunning() …")
@@ -268,7 +297,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     func stopSession() {
-        guard !shouldUseScreenRecorder else { print("ℹ️ [Capture] stopSession skipped — using screen recorder"); return }
+        if shouldUseScreenRecorder {
+            print("ℹ️ [Capture] stopSession skipped — using screen recorder")
+            return
+        }
+        if canUseARSessionRecorder {
+            print("ℹ️ [Capture] stopSession skipped — using shared ARSession recorder")
+            return
+        }
         guard session.isRunning else { print("ℹ️ [Capture] stopSession ignored — not running"); return }
         print("🛑 [Capture] stopRunning() …")
         DispatchQueue.global(qos: .userInitiated).async {
@@ -304,9 +340,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         if shouldUseScreenRecorder {
             currentCameraIntrinsics = makeScreenIntrinsics()
             currentExposureSettings = nil
+            awaitingFirstARVideoFrame = false
+        } else if canUseARSessionRecorder {
+            currentCameraIntrinsics = nil
+            currentExposureSettings = makeARSessionExposureSettings()
+            awaitingFirstARVideoFrame = true
         } else {
             currentCameraIntrinsics = videoDevice.map(makeCameraIntrinsics)
             currentExposureSettings = videoDevice.map(makeExposureSettings)
+            awaitingFirstARVideoFrame = false
         }
         persistManifest(duration: nil)
 
@@ -317,12 +359,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         prepareARKitLoggingIfNeeded(for: artifacts)
         startMotionUpdates()
-        startExposureLogging()
+        if !canUseARSessionRecorder {
+            startExposureLogging()
+        }
         shouldSkipARKitOnNextRecording = false
         lastCaptureUsedScreenRecorder = shouldUseScreenRecorder
 
         if shouldUseScreenRecorder {
             startScreenRecording(for: artifacts)
+        } else if canUseARSessionRecorder {
+            startSharedARSessionRecording(for: artifacts)
         } else {
             movieOutput.startRecording(to: artifacts.videoURL, recordingDelegate: self)
             if !includeARKit && supportsARCapture {
@@ -373,6 +419,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         if shouldUseScreenRecorder {
             stopScreenRecording()
+        } else if usingCustomARSessionRecorder {
+            finishSharedARSessionRecording()
         } else {
             movieOutput.stopRecording()
         }
@@ -472,6 +520,84 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 self.handleRecordingCompletion(error: error, durationSeconds: duration)
             }
         }
+    }
+
+    private func startSharedARSessionRecording(for artifacts: RecordingArtifacts) {
+        guard #available(iOS 17.0, *) else {
+            let message = "RoomPlan video capture requires iOS 17 or newer."
+            print("❌ [Capture] \(message)")
+            roomPlanManager?.cancelCapture()
+            stopMotionUpdates()
+            stopExposureLogging()
+            stopARSession()
+            currentArtifacts = nil
+            captureState = .error(message)
+            cleanupAfterRecording()
+            return
+        }
+
+        do {
+            let orientation = captureState.currentInterfaceOrientation()
+            let recorder = try ARSessionVideoRecorder(
+                destinationURL: artifacts.videoURL,
+                orientation: orientation
+            ) { [weak self] error in
+                self?.handleARSessionRecorderError(error)
+            }
+            arSessionRecorder = recorder
+            usingCustomARSessionRecorder = true
+            captureState = .recording(artifacts)
+            print("⏺️ [Capture] startRecording started via shared ARSession → file=\(artifacts.videoURL.lastPathComponent)")
+        } catch {
+            print("❌ [Capture] Failed to start shared ARSession recorder: \(error.localizedDescription)")
+            roomPlanManager?.cancelCapture()
+            stopMotionUpdates()
+            stopExposureLogging()
+            stopARSession()
+            currentArtifacts = nil
+            usingCustomARSessionRecorder = false
+            awaitingFirstARVideoFrame = false
+            latestUploadPayload = nil
+            captureState = .error("Failed to start recording: \(error.localizedDescription)")
+            cleanupAfterRecording()
+        }
+    }
+
+    private func finishSharedARSessionRecording() {
+        awaitingFirstARVideoFrame = false
+        guard #available(iOS 17.0, *), let recorder = arSessionRecorder as? ARSessionVideoRecorder else {
+            usingCustomARSessionRecorder = false
+            arSessionRecorder = nil
+            handleRecordingCompletion(error: nil, durationSeconds: nil)
+            return
+        }
+
+        usingCustomARSessionRecorder = false
+        recorder.finishRecording { [weak self] result in
+            guard let self else { return }
+            self.arSessionRecorder = nil
+            switch result {
+            case .success(let duration):
+                self.handleRecordingCompletion(error: nil, durationSeconds: duration)
+            case .failure(let error):
+                self.handleRecordingCompletion(error: error, durationSeconds: nil)
+            }
+        }
+    }
+
+    private func handleARSessionRecorderError(_ error: Error) {
+        print("❌ [Capture] Shared ARSession recorder error: \(error.localizedDescription)")
+        arSessionRecorder = nil
+        usingCustomARSessionRecorder = false
+        awaitingFirstARVideoFrame = false
+        roomPlanManager?.cancelCapture()
+        handleRecordingCompletion(error: error, durationSeconds: nil)
+    }
+
+    private func appendFrameToARRecorder(_ frame: ARFrame) {
+        guard usingCustomARSessionRecorder else { return }
+        guard #available(iOS 17.0, *), let recorder = arSessionRecorder as? ARSessionVideoRecorder else { return }
+        recorder.append(frame)
     }
 
     private func scheduleScreenRecorderStopTimeout() {
@@ -717,6 +843,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func startARSessionIfAvailable() {
+        if usingCustomARSessionRecorder {
+            print("ℹ️ [AR] startSession skipped — shared ARSession in use")
+            return
+        }
         guard supportsARCapture, currentARKitArtifacts != nil else {
             if currentARKitArtifacts != nil {
                 print("ℹ️ [AR] Capture artifacts prepared but AR session disabled")
@@ -1027,6 +1157,14 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
 
 extension VideoCaptureManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        if usingCustomARSessionRecorder {
+            if awaitingFirstARVideoFrame {
+                awaitingFirstARVideoFrame = false
+                currentCameraIntrinsics = makeCameraIntrinsics(from: frame)
+                persistManifest(duration: nil)
+            }
+            appendFrameToARRecorder(frame)
+        }
         arDataQueue.async { [weak self] in
             self?.writeARFrame(frame)
         }
@@ -1054,6 +1192,166 @@ extension VideoCaptureManager: ARSessionDelegate {
     }
 }
 
+@available(iOS 17.0, *)
+private final class ARSessionVideoRecorder {
+    private enum RecorderError: LocalizedError {
+        case unableToAddInput
+        case writerFailed
+        case noFramesRecorded
+
+        var errorDescription: String? {
+            switch self {
+            case .unableToAddInput:
+                return "Unable to add video input to the asset writer."
+            case .writerFailed:
+                return "The video writer failed to start."
+            case .noFramesRecorded:
+                return "No AR frames were captured during recording."
+            }
+        }
+    }
+
+    private let queue = DispatchQueue(label: "com.blueprint.capture.arvideo")
+    private let assetWriter: AVAssetWriter
+    private var videoInput: AVAssetWriterInput?
+    private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private let orientation: UIInterfaceOrientation
+    private let errorHandler: (Error) -> Void
+    private var startTime: CMTime?
+    private var lastTime: CMTime?
+    private var recordedFrameCount = 0
+    private var isFinishing = false
+
+    init(destinationURL: URL, orientation: UIInterfaceOrientation, errorHandler: @escaping (Error) -> Void) throws {
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        assetWriter = try AVAssetWriter(outputURL: destinationURL, fileType: .mov)
+        assetWriter.shouldOptimizeForNetworkUse = true
+        self.orientation = orientation
+        self.errorHandler = errorHandler
+    }
+
+    func append(_ frame: ARFrame) {
+        queue.async {
+            guard !self.isFinishing else { return }
+            do {
+                if self.assetWriter.status == .failed {
+                    throw self.assetWriter.error ?? RecorderError.writerFailed
+                }
+                try self.prepareIfNeeded(for: frame)
+                try self.appendFrame(frame)
+            } catch {
+                self.isFinishing = true
+                self.assetWriter.cancelWriting()
+                DispatchQueue.main.async {
+                    self.errorHandler(error)
+                }
+            }
+        }
+    }
+
+    func finishRecording(completion: @escaping (Result<Double?, Error>) -> Void) {
+        queue.async {
+            guard !self.isFinishing else { return }
+            self.isFinishing = true
+
+            if self.assetWriter.status == .failed {
+                let error = self.assetWriter.error ?? RecorderError.writerFailed
+                DispatchQueue.main.async { completion(.failure(error)) }
+                return
+            }
+
+            guard self.recordedFrameCount > 0 else {
+                self.assetWriter.cancelWriting()
+                DispatchQueue.main.async { completion(.failure(RecorderError.noFramesRecorded)) }
+                return
+            }
+
+            self.videoInput?.markAsFinished()
+            self.assetWriter.finishWriting {
+                let writerError = self.assetWriter.error
+                let duration: Double?
+                if let start = self.startTime, let end = self.lastTime {
+                    duration = CMTimeSubtract(end, start).seconds
+                } else {
+                    duration = nil
+                }
+                DispatchQueue.main.async {
+                    if let writerError {
+                        completion(.failure(writerError))
+                    } else {
+                        completion(.success(duration))
+                    }
+                }
+            }
+        }
+    }
+
+    private func prepareIfNeeded(for frame: ARFrame) throws {
+        guard videoInput == nil, adaptor == nil else { return }
+        let resolution = frame.camera.imageResolution
+        let width = Int(resolution.width)
+        let height = Int(resolution.height)
+        let outputSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: width * height * 8,
+                AVVideoAllowFrameReorderingKey: false,
+                AVVideoExpectedSourceFrameRateKey: 30
+            ]
+        ]
+
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: outputSettings)
+        input.expectsMediaDataInRealTime = true
+        input.transform = transform(for: orientation)
+        guard assetWriter.canAdd(input) else { throw RecorderError.unableToAddInput }
+        assetWriter.add(input)
+
+        adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: input,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange),
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height
+            ]
+        )
+        videoInput = input
+    }
+
+    private func appendFrame(_ frame: ARFrame) throws {
+        guard let input = videoInput, let adaptor = adaptor else { return }
+
+        let timestamp = CMTime(seconds: frame.timestamp, preferredTimescale: 600)
+        if startTime == nil {
+            startTime = timestamp
+            guard assetWriter.startWriting() else { throw assetWriter.error ?? RecorderError.writerFailed }
+            assetWriter.startSession(atSourceTime: timestamp)
+        }
+
+        lastTime = timestamp
+        recordedFrameCount += 1
+
+        guard input.isReadyForMoreMediaData else { return }
+        adaptor.append(frame.capturedImage, withPresentationTime: timestamp)
+    }
+
+    private func transform(for orientation: UIInterfaceOrientation) -> CGAffineTransform {
+        switch orientation {
+        case .portrait:
+            return CGAffineTransform(rotationAngle: .pi / 2)
+        case .portraitUpsideDown:
+            return CGAffineTransform(rotationAngle: -.pi / 2)
+        case .landscapeLeft:
+            return CGAffineTransform(rotationAngle: .pi)
+        default:
+            return .identity
+        }
+    }
+}
+
 private extension VideoCaptureManager {
     func cleanupAfterRecording() {
         print("🧹 [Capture] cleanupAfterRecording")
@@ -1071,6 +1369,9 @@ private extension VideoCaptureManager {
         awaitingScreenRecorderCompletion = false
         usingScreenRecorder = false
         lastCaptureUsedScreenRecorder = false
+        usingCustomARSessionRecorder = false
+        awaitingFirstARVideoFrame = false
+        arSessionRecorder = nil
         arDataQueue.async { [weak self] in
             self?.arFrameCount = 0
             self?.exportedMeshAnchors.removeAll()
@@ -1146,6 +1447,25 @@ private extension VideoCaptureManager {
         )
     }
 
+    func makeCameraIntrinsics(from frame: ARFrame) -> CaptureManifest.CameraIntrinsics {
+        let intrinsics = frame.camera.intrinsics
+        let matrix: [Double] = [
+            Double(intrinsics.columns.0.x), Double(intrinsics.columns.0.y), Double(intrinsics.columns.0.z),
+            Double(intrinsics.columns.1.x), Double(intrinsics.columns.1.y), Double(intrinsics.columns.1.z),
+            Double(intrinsics.columns.2.x), Double(intrinsics.columns.2.y), Double(intrinsics.columns.2.z)
+        ]
+
+        let resolution = frame.camera.imageResolution
+        return CaptureManifest.CameraIntrinsics(
+            resolutionWidth: Int(resolution.width),
+            resolutionHeight: Int(resolution.height),
+            intrinsicMatrix: matrix,
+            fieldOfView: nil,
+            lensAperture: nil,
+            minimumFocusDistance: nil
+        )
+    }
+
     func makeScreenIntrinsics() -> CaptureManifest.CameraIntrinsics {
         let bounds = UIScreen.main.nativeBounds
         return CaptureManifest.CameraIntrinsics(
@@ -1187,6 +1507,14 @@ private extension VideoCaptureManager {
             mode: mode,
             pointOfInterest: pointOfInterest,
             whiteBalanceMode: whiteBalanceMode
+        )
+    }
+
+    func makeARSessionExposureSettings() -> CaptureManifest.ExposureSettings {
+        CaptureManifest.ExposureSettings(
+            mode: "arSession",
+            pointOfInterest: nil,
+            whiteBalanceMode: "automatic"
         )
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import ARKit
 
 struct RoomPlanCaptureExport: Equatable {
     let directoryURL: URL
@@ -31,6 +32,7 @@ protocol RoomPlanCaptureManaging: AnyObject {
     func startCapture()
     func stopAndExport(to directory: URL, completion: @escaping (Result<RoomPlanCaptureExport, Error>) -> Void)
     func cancelCapture()
+    func configureSharedARSession(_ arSession: ARSession)
 }
 
 enum RoomPlanCaptureManagerFactory {
@@ -55,6 +57,7 @@ final class RoomPlanCaptureUnavailableManager: NSObject, RoomPlanCaptureManaging
         completion(.failure(RoomPlanCaptureError.unsupported))
     }
     func cancelCapture() {}
+    func configureSharedARSession(_ arSession: ARSession) {}
 }
 
 #if canImport(RoomPlan)
@@ -72,6 +75,7 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
     private var latestError: Error?
     private var isRunning = false
     private let exportQueue = DispatchQueue(label: "com.blueprint.roomplan.export", qos: .userInitiated)
+    private var sharedARSession: ARSession?
 
     // NSSecureCoding
         static var supportsSecureCoding: Bool { true }
@@ -91,6 +95,13 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
 
     var isSupported: Bool {
         RoomCaptureSession.isSupported
+    }
+
+    func configureSharedARSession(_ arSession: ARSession) {
+        sharedARSession = arSession
+        if #available(iOS 17.0, *), let captureSession = captureView?.captureSession {
+            captureSession.arSession = arSession
+        }
     }
 
     func makeCaptureView() -> UIView? {
@@ -148,6 +159,9 @@ final class RoomPlanCaptureManager: NSObject, RoomPlanCaptureManaging, NSSecureC
         view.translatesAutoresizingMaskIntoConstraints = false
         view.captureSession.delegate = self
         view.delegate = self
+        if #available(iOS 17.0, *), let arSession = sharedARSession {
+            view.captureSession.arSession = arSession
+        }
         captureView = view
         return view
     }

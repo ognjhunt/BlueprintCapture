@@ -159,7 +159,7 @@ struct CaptureSessionView: View {
             viewModel.roomPlanManager.startCapture()
         }
         // Ensure the session is configured and running, then start recording automatically
-        if !captureManager.session.isRunning {
+        if captureManager.needsAVCaptureSession && !captureManager.session.isRunning {
             print("🎥 [Capture] Starting AVCaptureSession…")
             captureManager.configureSession()
             captureManager.startSession()
@@ -180,11 +180,17 @@ struct CaptureSessionView: View {
             viewModel.roomPlanManager.startCapture()
         }
 
-        captureManager.configureSession()
+        if captureManager.needsAVCaptureSession {
+            captureManager.configureSession()
+        }
 
-        if !captureManager.session.isRunning {
-            captureManager.startSession()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        if captureManager.needsAVCaptureSession {
+            if !captureManager.session.isRunning {
+                captureManager.startSession()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    captureManager.startRecording()
+                }
+            } else {
                 captureManager.startRecording()
             }
         } else {
@@ -226,7 +232,9 @@ struct CaptureSessionView: View {
             viewModel.step = .confirmLocation
             dismiss()
         }
-        captureManager.stopSession()
+        if captureManager.needsAVCaptureSession {
+            captureManager.stopSession()
+        }
     }
 }
 
