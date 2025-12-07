@@ -333,7 +333,7 @@ final class ObjectPointCloudReconstruction {
             let column2 = SIMD3<Double>(diff.x * diff.z, diff.y * diff.z, diff.z * diff.z)
             covariance += simd_double3x3(columns: (column0, column1, column2))
         }
-        covariance /= Double(points.count)
+        covariance = covariance * (1.0 / Double(points.count))
 
         let decomposition = eigenvectors(for: covariance)
         let eigenVectors: [SIMD3<Float>]
