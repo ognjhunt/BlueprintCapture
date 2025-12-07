@@ -1,5 +1,5 @@
 {
-  "originHash" : "267e646ca8c3183d3361b0d0d6325334f14e71fa61b59cd636e1038a155bcaf2",
+  "originHash" : "1f38311bb1d7eefbd40ee2774021fb1e78a051051ad4e85f7df4b0ce7b46d832",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -143,6 +143,15 @@
       "state" : {
         "revision" : "a0bc79961d7be727d258d33d5a6b2f1023270ba1",
         "version" : "1.22.5"
+      }
+    },
+    {
+      "identity" : "meta-wearables-dat-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/facebook/meta-wearables-dat-ios",
+      "state" : {
+        "revision" : "8a9b83d02e14fbcd18b12e5fef0a971f98fefb93",
+        "version" : "0.2.1"
       }
     },
     {
