@@ -98,7 +98,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     @Published private(set) var discoveredDevices: [DiscoveredDevice] = []
     @Published private(set) var currentFrame: UIImage?
     @Published private(set) var streamingInfo: StreamingInfo?
+    @Published private(set) var isConnectedToMockDevice: Bool = false
     @Published var useMockDevice: Bool = true // Default to mock for testing
+    @Published var mockVideoURL: URL?
 
     // MARK: - Private Properties
 
@@ -268,12 +270,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 // Simulate connection delay
                 try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
 
-                // Create mock camera session
-                let mockSession = try mockKit.createMockCameraSession()
+                // Create mock camera session and attach any configured mock video
+                let mockSession = try mockKit.createMockCameraSession(mockVideoURL: self.mockVideoURL)
 
                 await MainActor.run {
                     self.cameraSession = mockSession
                     self.connectionState = .connected(deviceName: device.name)
+                    self.isConnectedToMockDevice = true
                     print("✅ [GlassesCapture] Connected to mock device: \(device.name)")
                 }
             } catch {
@@ -302,6 +305,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 await MainActor.run {
                     self.cameraSession = session
                     self.connectionState = .connected(deviceName: device.name)
+                    self.isConnectedToMockDevice = false
                     print("✅ [GlassesCapture] Connected to device: \(device.name)")
                 }
             } catch {
@@ -319,8 +323,19 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         cameraSession = nil
         currentDevice = nil
+        isConnectedToMockDevice = false
         connectionState = .disconnected
         print("🔌 [GlassesCapture] Disconnected")
+    }
+
+    // MARK: - Mock Video Source
+
+    func updateMockVideoURL(_ url: URL) {
+        mockVideoURL = url
+
+        if cameraSession?.isMockSession == true {
+            cameraSession?.setMockVideoURL(url)
+        }
     }
 
     // MARK: - Video Capture
@@ -775,8 +790,12 @@ class MWMockDeviceKit {
         // MockDeviceKit initialization
     }
 
-    func createMockCameraSession() throws -> MWCameraSession {
-        return MWCameraSession(isMock: true)
+    func createMockCameraSession(mockVideoURL: URL? = nil) throws -> MWCameraSession {
+        let session = MWCameraSession(isMock: true)
+        if let mockVideoURL {
+            session.setMockVideoURL(mockVideoURL)
+        }
+        return session
     }
 }
 
@@ -818,6 +837,11 @@ class MWCameraSession {
     private var isStreaming = false
     private var frameHandler: ((MWCameraFrame) -> Void)?
     private var frameTimer: Timer?
+    private var mockVideoURL: URL?
+    private var mockPlaybackWorkItem: DispatchWorkItem?
+    private let streamingQueue = DispatchQueue(label: "com.blueprint.glasses.mockstream")
+    private var lastStreamConfig: MWCameraStreamConfig?
+    private var lastHandler: ((MWCameraFrame) -> Void)?
 
     init(isMock: Bool) {
         self.isMock = isMock
@@ -827,48 +851,124 @@ class MWCameraSession {
         guard !isStreaming else { return }
         isStreaming = true
         frameHandler = handler
+        lastHandler = handler
+        lastStreamConfig = config
 
         if isMock {
-            // Start generating mock frames at configured frame rate
-            let interval = 1.0 / Double(config.frameRate)
-            await MainActor.run {
-                self.frameTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                    guard let self, self.isStreaming else { return }
-                    let frame = MWCameraFrame(width: 1280, height: 720, timestamp: Date())
-                    self.frameHandler?(frame)
-                }
-            }
+            startMockStreaming(with: config, handler: handler)
         }
         // Real SDK would connect to actual glasses camera stream
     }
 
     func pauseStreaming() {
         frameTimer?.invalidate()
+        mockPlaybackWorkItem?.cancel()
         isStreaming = false
     }
 
     func resumeStreaming() {
-        guard !isStreaming, let handler = frameHandler else { return }
+        guard !isStreaming, let handler = lastHandler, let config = lastStreamConfig else { return }
         isStreaming = true
 
         if isMock {
-            frameTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { [weak self] _ in
-                guard let self, self.isStreaming else { return }
-                let frame = MWCameraFrame(width: 1280, height: 720, timestamp: Date())
-                self.frameHandler?(frame)
-            }
+            startMockStreaming(with: config, handler: handler)
         }
     }
 
     func stopStreaming() {
         frameTimer?.invalidate()
         frameTimer = nil
+        mockPlaybackWorkItem?.cancel()
+        mockPlaybackWorkItem = nil
         isStreaming = false
         frameHandler = nil
+        lastStreamConfig = nil
+        lastHandler = nil
     }
 
     func capturePhoto() async throws -> MWCameraPhoto {
         return MWCameraPhoto()
+    }
+
+    func setMockVideoURL(_ url: URL) {
+        mockVideoURL = url
+    }
+
+    var isMockSession: Bool { isMock }
+
+    // MARK: - Mock Streaming Helpers
+
+    private func startMockStreaming(with config: MWCameraStreamConfig, handler: @escaping (MWCameraFrame) -> Void) {
+        if let mockVideoURL {
+            startMockVideoPlayback(url: mockVideoURL, config: config, handler: handler)
+        } else {
+            startMockGradientTimer(frameRate: config.frameRate, handler: handler)
+        }
+    }
+
+    private func startMockGradientTimer(frameRate: Int, handler: @escaping (MWCameraFrame) -> Void) {
+        let interval = 1.0 / Double(frameRate)
+        frameTimer?.invalidate()
+
+        Task { @MainActor in
+            self.frameTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+                guard let self, self.isStreaming else { return }
+                let frame = MWCameraFrame(width: 1280, height: 720, timestamp: Date())
+                handler(frame)
+            }
+        }
+    }
+
+    private func startMockVideoPlayback(url: URL, config: MWCameraStreamConfig, handler: @escaping (MWCameraFrame) -> Void) {
+        mockPlaybackWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+
+            while self.isStreaming {
+                let asset = AVAsset(url: url)
+                guard let track = asset.tracks(withMediaType: .video).first else { break }
+
+                do {
+                    let reader = try AVAssetReader(asset: asset)
+                    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+                        kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+                    ])
+                    if reader.canAdd(output) {
+                        reader.add(output)
+                    }
+
+                    guard reader.startReading() else { break }
+
+                    let frameDuration = 1.0 / Double(config.frameRate)
+
+                    while self.isStreaming, reader.status == .reading {
+                        if let sampleBuffer = output.copyNextSampleBuffer(),
+                           let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+                            autoreleasepool {
+                                let frame = MWCameraFrame(pixelBuffer: buffer, timestamp: Date())
+                                handler(frame)
+                            }
+
+                            Thread.sleep(forTimeInterval: frameDuration)
+                        } else {
+                            break
+                        }
+                    }
+
+                    reader.cancelReading()
+
+                    if !self.isStreaming { break }
+                    // Loop the mock video for continuous streaming
+                } catch {
+                    print("⚠️ [MockCameraSession] Failed to read mock video: \(error)")
+                    break
+                }
+            }
+        }
+
+        mockPlaybackWorkItem = workItem
+        streamingQueue.async(execute: workItem)
     }
 }
 
@@ -878,13 +978,29 @@ struct MWCameraFrame {
     let height: Int
     let timestamp: Date
 
-    init(width: Int = 1280, height: Int = 720, timestamp: Date = Date()) {
+    private static let ciContext = CIContext()
+    let pixelBuffer: CVPixelBuffer?
+
+    init(width: Int = 1280, height: Int = 720, timestamp: Date = Date(), pixelBuffer: CVPixelBuffer? = nil) {
         self.width = width
         self.height = height
+        self.timestamp = timestamp
+        self.pixelBuffer = pixelBuffer
+    }
+
+    init(pixelBuffer: CVPixelBuffer, timestamp: Date = Date()) {
+        self.pixelBuffer = pixelBuffer
+        self.width = CVPixelBufferGetWidth(pixelBuffer)
+        self.height = CVPixelBufferGetHeight(pixelBuffer)
         self.timestamp = timestamp
     }
 
     func toUIImage() -> UIImage? {
+        if let pixelBuffer,
+           let cgImage = MWCameraFrame.ciContext.createCGImage(CIImage(cvPixelBuffer: pixelBuffer), from: CIImage(cvPixelBuffer: pixelBuffer).extent) {
+            return UIImage(cgImage: cgImage)
+        }
+
         // Generate a mock frame with gradient and timestamp
         let size = CGSize(width: width, height: height)
         let renderer = UIGraphicsImageRenderer(size: size)
@@ -949,6 +1065,10 @@ struct MWCameraFrame {
     }
 
     func toPixelBuffer() -> CVPixelBuffer? {
+        if let pixelBuffer {
+            return pixelBuffer
+        }
+
         guard let image = toUIImage(), let cgImage = image.cgImage else { return nil }
 
         var pixelBuffer: CVPixelBuffer?
