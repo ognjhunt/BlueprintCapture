@@ -206,13 +206,13 @@ struct BlueprintGlassCard<Content: View>: View {
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .background(
+                .fill(Color.white.opacity(0.08))
+                .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(LinearGradient(colors: [Color.white.opacity(0.25), Color.white.opacity(0.05)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-                        .blendMode(.overlay)
+                        .stroke(LinearGradient(colors: [Color.white.opacity(0.22), Color.white.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
                 )
         )
+        .shadow(color: Color.black.opacity(0.25), radius: 18, x: 0, y: 12)
     }
 }
 
