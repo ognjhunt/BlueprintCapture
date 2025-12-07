@@ -41,6 +41,25 @@
     <string>Motion data provides pose tracking for metric scale alignment.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Your location anchors the capture to the correct address.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Bluetooth is required to connect to your Meta smart glasses for video capture.</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>Bluetooth is required to connect to your Meta smart glasses for video capture.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Local network access is used to discover and connect to your Meta smart glasses.</string>
+    <key>MWDAT</key>
+    <dict>
+        <key>Analytics</key>
+        <dict>
+            <key>OptOut</key>
+            <false/>
+        </dict>
+        <key>MockDevice</key>
+        <dict>
+            <key>Enabled</key>
+            <true/>
+        </dict>
+    </dict>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

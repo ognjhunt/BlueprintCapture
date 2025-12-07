@@ -75,7 +75,8 @@ private struct WelcomeIntroView: View {
 
             TabView {
                 ValueCard(icon: "mappin.and.ellipse", title: "Discover nearby spaces", subtitle: "Find high-value indoor locations near you ready to capture for detailed 3D scans.")
-                ValueCard(icon: "camera.viewfinder", title: "Capture with your phone", subtitle: "Record a guided walkthrough using your iPhone or AI glasses—we handle the rest.")
+                ValueCard(icon: "eyeglasses", title: "Capture hands-free", subtitle: "Connect your Meta Ray-Ban glasses for immersive 720p video capture. Walk naturally while recording.")
+                ValueCard(icon: "camera.viewfinder", title: "Or use your phone", subtitle: "Record walkthroughs using your iPhone camera with ARKit depth sensing and RoomPlan.")
                 ValueCard(icon: "dollarsign.circle.fill", title: "Earn while you map", subtitle: "Get paid for each scan after processing. Fast payouts via Stripe.")
             }
             .tabViewStyle(.page)
