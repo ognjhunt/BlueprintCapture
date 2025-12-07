@@ -169,13 +169,14 @@ final class ObjectPointCloudReconstruction {
         if let confidenceMap = depthData.confidenceMap {
             CVPixelBufferLockBaseAddress(confidenceMap, .readOnly)
             defer { CVPixelBufferUnlockBaseAddress(confidenceMap, .readOnly) }
-            confidenceStride = CVPixelBufferGetBytesPerRow(confidenceMap)
-            confidencePointer = CVPixelBufferGetBaseAddress(confidenceMap)?.assumingMemoryBound(to: UInt8.self)
+            confidenceStride = CVPixelBufferGetBytesPerRow(confidenceMap) / MemoryLayout<UInt8>.size
+            if let confidenceBase = CVPixelBufferGetBaseAddress(confidenceMap) {
+                confidencePointer = UnsafePointer(confidenceBase.assumingMemoryBound(to: UInt8.self))
+            }
         }
 
-        let calibration = depthData.cameraCalibrationData
-        let intrinsics = calibration?.intrinsicMatrix ?? frame.camera.intrinsics
-        let referenceDimensions = calibration?.intrinsicMatrixReferenceDimensions ?? CGSize(width: CGFloat(depthWidth), height: CGFloat(depthHeight))
+        let intrinsics = frame.camera.intrinsics
+        let referenceDimensions = CGSize(width: CGFloat(depthWidth), height: CGFloat(depthHeight))
         let scaleX = Float(referenceDimensions.width) / Float(depthWidth)
         let scaleY = Float(referenceDimensions.height) / Float(depthHeight)
         let inverseIntrinsics = simd_inverse(intrinsics)
@@ -324,7 +325,7 @@ final class ObjectPointCloudReconstruction {
             return (axes, SIMD3<Float>(repeating: 0), centroid)
         }
 
-        var covariance = simd_double3x3(repeating: 0)
+        var covariance = simd_double3x3(0)
         for point in points {
             let diff = SIMD3<Double>(Double(point.x - centroid.x), Double(point.y - centroid.y), Double(point.z - centroid.z))
             let column0 = SIMD3<Double>(diff.x * diff.x, diff.y * diff.x, diff.z * diff.x)

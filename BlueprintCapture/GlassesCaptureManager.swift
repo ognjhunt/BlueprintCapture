@@ -706,7 +706,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         // Use ZIPFoundation if available, otherwise skip packaging
         #if canImport(ZIPFoundation)
-        import ZIPFoundation
+      //  import ZIPFoundation
         try? fileManager.zipItem(at: artifacts.directoryURL, to: artifacts.packageURL, shouldKeepParent: true)
         #else
         print("⚠️ [GlassesCapture] ZIPFoundation not available, skipping packaging")
