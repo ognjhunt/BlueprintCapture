@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// Main view for Meta smart glasses video capture.
@@ -6,6 +7,9 @@ struct GlassesCaptureView: View {
     @StateObject private var captureManager = GlassesCaptureManager()
     @State private var showingDeviceSelection = false
     @State private var showingCaptureComplete = false
+    @State private var mockVideoPickerItem: PhotosPickerItem?
+    @State private var mockVideoLoadMessage: String?
+    @State private var mockVideoLoadError: String?
 
     var body: some View {
         NavigationStack {
@@ -18,6 +22,28 @@ struct GlassesCaptureView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .blueprintAppBackground()
+        .onChange(of: mockVideoPickerItem) { newItem in
+            handleMockVideoSelection(newItem)
+        }
+        .alert(
+            "Unable to Load Video",
+            isPresented: Binding(
+                get: { mockVideoLoadError != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        mockVideoLoadError = nil
+                    }
+                }
+            ),
+            actions: {
+                Button("OK", role: .cancel) {
+                    mockVideoLoadError = nil
+                }
+            },
+            message: {
+                Text(mockVideoLoadError ?? "Unknown error")
+            }
+        )
     }
 
     @ViewBuilder
@@ -298,6 +324,10 @@ struct GlassesCaptureView: View {
                 Text("Video will stream at 720p @ 30fps")
                     .font(.caption)
                     .blueprintTertiaryOnDark()
+            }
+
+            if captureManager.isConnectedToMockDevice {
+                mockVideoSelector
             }
 
             Spacer()
@@ -593,6 +623,86 @@ struct GlassesCaptureView: View {
             .buttonStyle(BlueprintPrimaryButtonStyle())
             .padding(.horizontal)
             .padding(.bottom)
+        }
+    }
+
+    private var mockVideoSelector: some View {
+        BlueprintGlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: "play.rectangle.fill")
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                    Text("Mock video source")
+                        .font(.subheadline.weight(.semibold))
+                        .blueprintPrimaryOnDark()
+                }
+
+                Text("Upload a video to stream through MockDeviceKit while keeping the capture UX intact.")
+                    .font(.caption)
+                    .blueprintSecondaryOnDark()
+
+                HStack {
+                    Image(systemName: "film")
+                        .foregroundStyle(.white.opacity(0.7))
+                    Text(captureManager.mockVideoURL?.lastPathComponent ?? "No video selected")
+                        .font(.caption)
+                        .blueprintPrimaryOnDark()
+                        .lineLimit(1)
+                    Spacer()
+                }
+
+                PhotosPicker(
+                    selection: $mockVideoPickerItem,
+                    matching: .videos,
+                    preferredItemEncoding: .automatic
+                ) {
+                    Label("Select Mock Video", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(BlueprintSecondaryButtonStyle())
+
+                if let mockVideoLoadMessage {
+                    Text(mockVideoLoadMessage)
+                        .font(.caption2)
+                        .foregroundStyle(BlueprintTheme.successGreen)
+                }
+            }
+        }
+        .padding(.horizontal)
+    }
+
+    private func handleMockVideoSelection(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+
+        Task {
+            await MainActor.run {
+                mockVideoLoadMessage = nil
+                mockVideoLoadError = nil
+            }
+
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    await MainActor.run {
+                        mockVideoLoadError = "No data was returned from the selected video."
+                    }
+                    return
+                }
+
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("mock-video-\(UUID().uuidString)")
+                    .appendingPathExtension("mov")
+
+                try data.write(to: tempURL, options: .atomic)
+
+                await MainActor.run {
+                    captureManager.updateMockVideoURL(tempURL)
+                    mockVideoLoadMessage = "Loaded \(tempURL.lastPathComponent)"
+                    mockVideoLoadError = nil
+                }
+            } catch {
+                await MainActor.run {
+                    mockVideoLoadError = error.localizedDescription
+                }
+            }
         }
     }
 
