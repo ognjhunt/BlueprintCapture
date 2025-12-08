@@ -34,7 +34,6 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let placesDetails: PlacesDetailsServiceProtocol = PlacesDetailsService()
     private var placesSessionToken: String?
     private let motionManager = CMMotionActivityManager()
-    let roomPlanManager: RoomPlanCaptureManaging
     let captureManager: VideoCaptureManager
 
     private var hasRequestedPermissions = false
@@ -47,12 +46,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var currentSearchQuery: String = ""
 
     init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
-         targetStateService: TargetStateServiceProtocol = TargetStateService(),
-         roomPlanManager: RoomPlanCaptureManaging = RoomPlanCaptureManagerFactory.makeManager()) {
+         targetStateService: TargetStateServiceProtocol = TargetStateService()) {
         self.uploadService = uploadService
         self.targetStateService = targetStateService
-        self.roomPlanManager = roomPlanManager
-        self.captureManager = VideoCaptureManager(roomPlanManager: roomPlanManager)
+        self.captureManager = VideoCaptureManager()
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
