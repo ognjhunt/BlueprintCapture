@@ -13,20 +13,6 @@ import ReplayKit
 import ZIPFoundation
 #endif
 
-// Fallback for ReplayKit screen-recorder error domain not exposed in Swift
-private let _RPScreenRecorderDomain = "com.apple.ReplayKit.RPScreenRecorder"
-
-@available(iOS 17.0, *)
-extension RoomPlanCaptureManaging {
-    /// Default implementation: do nothing.
-    ///
-    /// Concrete implementations (e.g. RoomPlanCaptureManager) can override
-    /// this to wire the shared ARSession into their RoomCaptureSession.
-    func configureSharedARSession(_ session: ARSession) {
-        // No-op by default
-    }
-}
-
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
         case idle
@@ -48,13 +34,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             let objectIndexURL: URL?
         }
 
-        struct RoomPlanArtifacts: Equatable {
-            let directoryURL: URL
-            let usdzURL: URL
-            let jsonURL: URL
-            let archiveURL: URL?
-        }
-
         let baseFilename: String
         let directoryURL: URL
         let videoURL: URL
@@ -63,7 +42,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let arKit: ARKitArtifacts?
         let packageURL: URL
         let startedAt: Date
-        var roomPlan: RoomPlanArtifacts? = nil
 
         var shareItems: [Any] {
             var items: [Any] = [packageURL, videoURL, motionLogURL, manifestURL]
@@ -72,13 +50,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 if let indexURL = arKit.objectIndexURL,
                    FileManager.default.fileExists(atPath: indexURL.path) {
                     items.append(indexURL)
-                }
-            }
-            if let roomPlan {
-                if let archiveURL = roomPlan.archiveURL {
-                    items.append(archiveURL)
-                } else {
-                    items.append(roomPlan.usdzURL)
                 }
             }
             return items
@@ -133,9 +104,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     let session = AVCaptureSession()
     private let arSession = ARSession()
-    private let roomPlanManager: RoomPlanCaptureManaging?
-    private let roomPlanDispatchGroup = DispatchGroup()
-    private var pendingRoomPlanError: Error?
 
     private let movieOutput = AVCaptureMovieFileOutput()
     private let motionManager = CMMotionManager()
@@ -199,13 +167,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var awaitingFirstARVideoFrame = false
     private var arSessionRecorder: AnyObject?
 
-    init(roomPlanManager: RoomPlanCaptureManaging? = nil) {
-        self.roomPlanManager = roomPlanManager
+    init() {
         super.init()
         arSession.delegate = self
-        if #available(iOS 17.0, *), let manager = roomPlanManager {
-            manager.configureSharedARSession(arSession)
-        }
     }
 
 
@@ -218,33 +182,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         screenRecorderPermanentlyDisabled = true
         shouldSkipARKitOnNextRecording = true
         currentARKitArtifacts = nil
-        print("⚠️ [Capture] Disabling screen recorder path — \(reason). Falling back to AVCaptureSession without RoomPlan.")
-        DispatchQueue.main.async {
-            if self.roomPlanCaptureEnabled {
-                self.roomPlanCaptureEnabled = false
-            }
-            self.roomPlanManager?.cancelCapture()
-        }
+        print("⚠️ [Capture] Disabling screen recorder path — \(reason). Falling back to AVCaptureSession.")
     }
 
-    @Published private(set) var roomPlanCaptureEnabled: Bool = true
     private var screenRecorderPermanentlyDisabled = false
 
-    private var shouldUseScreenRecorder: Bool {
-        guard roomPlanCaptureEnabled, !screenRecorderPermanentlyDisabled else { return false }
-        if canUseARSessionRecorder { return false }
-        if let manager = roomPlanManager {
-            return manager.isSupported
-        }
-        return false
-    }
+    private var shouldUseScreenRecorder: Bool { false }
 
-    private var canUseARSessionRecorder: Bool {
-        if #available(iOS 17.0, *), roomPlanCaptureEnabled, roomPlanManager?.isSupported == true {
-            return supportsARCapture
-        }
-        return false
-    }
+    private var canUseARSessionRecorder: Bool { false }
 
     private static func evaluateARCaptureSupport() -> Bool {
 #if targetEnvironment(simulator)
@@ -431,37 +376,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
         print("⏹️ [Capture] stopRecording begin")
-        if let roomPlanManager, let artifacts = currentArtifacts, roomPlanManager.isSupported, roomPlanCaptureEnabled {
-            pendingRoomPlanError = nil
-            roomPlanDispatchGroup.enter()
-            print("⏳ [RoomPlan] stopAndExport started; waiting for completion")
-            print("🏠 [RoomPlan] Stopping RoomPlan capture for export")
-            roomPlanManager.stopAndExport(to: artifacts.directoryURL) { [weak self] result in
-                guard let self else { return }
-                DispatchQueue.main.async {
-                    print("⏱️ [RoomPlan] stopAndExport completion received")
-                    defer { self.roomPlanDispatchGroup.leave() }
-                    switch result {
-                    case .success(let export):
-                        print("✅ [RoomPlan] Exported parametric capture → \(export.usdzURL.lastPathComponent)")
-                        if var updatedArtifacts = self.currentArtifacts {
-                            updatedArtifacts.roomPlan = RecordingArtifacts.RoomPlanArtifacts(
-                                directoryURL: export.directoryURL,
-                                usdzURL: export.usdzURL,
-                                jsonURL: export.jsonURL,
-                                archiveURL: export.archiveURL
-                            )
-                            self.currentArtifacts = updatedArtifacts
-                        }
-                    case .failure(let error):
-                        self.pendingRoomPlanError = error
-                        print("⚠️ [RoomPlan] Export failed: \(error.localizedDescription)")
-                    }
-                }
-            }
-        } else {
-            pendingRoomPlanError = nil
-        }
         if shouldUseScreenRecorder {
             stopScreenRecording()
         } else if usingCustomARSessionRecorder {
@@ -593,9 +507,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private func startSharedARSessionRecording(for artifacts: RecordingArtifacts) {
         guard #available(iOS 17.0, *) else {
-            let message = "RoomPlan video capture requires iOS 17 or newer."
+            let message = "AR session video capture requires iOS 17 or newer."
             print("❌ [Capture] \(message)")
-            roomPlanManager?.cancelCapture()
             stopMotionUpdates()
             stopExposureLogging()
             stopARSession()
@@ -619,7 +532,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             print("⏺️ [Capture] startRecording started via shared ARSession → file=\(artifacts.videoURL.lastPathComponent)")
         } catch {
             print("❌ [Capture] Failed to start shared ARSession recorder: \(error.localizedDescription)")
-            roomPlanManager?.cancelCapture()
             stopMotionUpdates()
             stopExposureLogging()
             stopARSession()
@@ -659,7 +571,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         arSessionRecorder = nil
         usingCustomARSessionRecorder = false
         awaitingFirstARVideoFrame = false
-        roomPlanManager?.cancelCapture()
         handleRecordingCompletion(error: error, durationSeconds: nil)
     }
 
@@ -767,9 +678,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
             print("📦 [Capture] Packaging artifacts …")
             DispatchQueue.global(qos: .userInitiated).async {
-                print("⏳ [Capture] Waiting for RoomPlan export to finish before packaging")
-                self.roomPlanDispatchGroup.wait()
-                print("✅ [Capture] RoomPlan export dispatch group cleared")
                 var artifactsToPackage: RecordingArtifacts?
                 DispatchQueue.main.sync {
                     print("📦 [Capture] Capturing currentArtifacts for packaging")
@@ -1468,7 +1376,6 @@ private extension VideoCaptureManager {
         currentCameraIntrinsics = nil
         currentExposureSettings = nil
         exposureSamples = []
-        pendingRoomPlanError = nil
         screenRecordingWriter = nil
         screenRecordingStartDate = nil
         screenRecordingStopDate = nil

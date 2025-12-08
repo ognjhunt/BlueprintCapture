@@ -21,36 +21,10 @@ struct CaptureSessionView: View {
 
     var body: some View {
         ZStack {
-            if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
-                RoomPlanOverlayView(manager: viewModel.roomPlanManager)
-                    .ignoresSafeArea()
-            } else {
-                CameraPreview(session: captureManager.session)
-                    .ignoresSafeArea()
-            }
+            CameraPreview(session: captureManager.session)
+                .ignoresSafeArea()
 
             VStack(spacing: 12) {
-                if viewModel.roomPlanManager.isSupported && !captureManager.roomPlanCaptureEnabled {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.yellow)
-                            .imageScale(.large)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("RoomPlan temporarily unavailable")
-                                .font(.footnote.weight(.semibold))
-                            Text("ReplayKit failed to finish the previous capture. The app is using a fallback recorder without RoomPlan data.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.yellow.opacity(0.15))
-                    )
-                    .padding(.horizontal)
-                }
 
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
@@ -145,19 +119,12 @@ struct CaptureSessionView: View {
         .onAppear {
             autoStartRecordingIfNeeded()
         }
-        .onDisappear {
-            viewModel.roomPlanManager.cancelCapture()
-        }
     }
 
     private func autoStartRecordingIfNeeded() {
         guard !didAutoStart else { return }
         didAutoStart = true
         print("🎬 [Capture] View appeared — auto start flow")
-        if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
-            print("🏠 [RoomPlan] Starting RoomPlan capture")
-            viewModel.roomPlanManager.startCapture()
-        }
         // Ensure the session is configured and running, then start recording automatically
         if !captureManager.session.isRunning {
             print("🎥 [Capture] Starting AVCaptureSession…")
@@ -174,12 +141,6 @@ struct CaptureSessionView: View {
         guard !captureManager.captureState.isRecording else { return }
         print("🔄 [Capture] Retry Recording tapped")
         didAutoStart = true
-
-        if viewModel.roomPlanManager.isSupported && captureManager.roomPlanCaptureEnabled {
-            print("🏠 [RoomPlan] Restarting RoomPlan capture")
-            viewModel.roomPlanManager.startCapture()
-        }
-
         captureManager.configureSession()
 
         if !captureManager.session.isRunning {
