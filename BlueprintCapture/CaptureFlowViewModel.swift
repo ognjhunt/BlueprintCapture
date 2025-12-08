@@ -349,7 +349,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             jobId: jobId,
             creatorId: profile.id.uuidString,
             capturedAt: Date(),
-            uploadedAt: nil
+            uploadedAt: nil,
+            captureSource: .iphoneVideo
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id)")
