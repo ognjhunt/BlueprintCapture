@@ -655,7 +655,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                     self.currentARKitArtifacts = nil
                     friendlyMessage = "Recording stopped because the camera was busy. AR capture will be disabled on the next attempt."
                     print("⚠️ [Capture] Camera ownership conflict detected; AR startup will be skipped on the next recording.")
-                } else if nsError.domain == RPRecordingErrorDomain || nsError.domain == _RPScreenRecorderDomain {
+                } else if nsError.domain == RPRecordingErrorDomain || nsError.domain == RPScreenRecorderErrorDomain {
                     friendlyMessage = "Screen recording failed: \(nsError.localizedDescription)"
                     self.disableScreenRecorderDueToError(reason: "ReplayKit error domain = \(nsError.domain), code = \(nsError.code)")
                 }
