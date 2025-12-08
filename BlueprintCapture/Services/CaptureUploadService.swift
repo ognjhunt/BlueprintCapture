@@ -8,6 +8,11 @@ import FirebaseCore
 #endif
 
 struct CaptureUploadMetadata: Identifiable, Equatable {
+    enum CaptureSource: String, Codable {
+        case iphoneVideo
+        case metaGlasses
+    }
+
     let id: UUID
     let targetId: String?
     let reservationId: String?
@@ -15,6 +20,7 @@ struct CaptureUploadMetadata: Identifiable, Equatable {
     let creatorId: String
     let capturedAt: Date
     var uploadedAt: Date?
+    let captureSource: CaptureSource
 }
 
 struct CaptureUploadRequest: Equatable {
@@ -67,6 +73,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private let queue = DispatchQueue(label: "com.blueprint.captureUploadService")
     private var uploads: [UUID: UploadRecord] = [:]
     private let subject = PassthroughSubject<Event, Never>()
+    private let storageBucketURL = "gs://blueprint-8c1ca.appspot.com"
 
     func enqueue(_ request: CaptureUploadRequest) {
         queue.async {
@@ -125,7 +132,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         #if canImport(FirebaseStorage)
-        let storage = Storage.storage()
+        let storage = Storage.storage(url: storageBucketURL)
         var isDir: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDir)
 
@@ -154,6 +161,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             custom["jobId"] = record.request.metadata.jobId
             custom["creatorId"] = record.request.metadata.creatorId
             custom["capturedAt"] = ISO8601DateFormatter().string(from: record.request.metadata.capturedAt)
+            custom["captureSource"] = record.request.metadata.captureSource.rawValue
             if let t = record.request.metadata.targetId { custom["targetId"] = t }
             if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
             metadata.customMetadata = custom
@@ -272,6 +280,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             custom["jobId"] = request.metadata.jobId
             custom["creatorId"] = request.metadata.creatorId
             custom["capturedAt"] = ISO8601DateFormatter().string(from: request.metadata.capturedAt)
+            custom["captureSource"] = request.metadata.captureSource.rawValue
             if let t = request.metadata.targetId { custom["targetId"] = t }
             if let r = request.metadata.reservationId { custom["reservationId"] = r }
             md.customMetadata = custom
@@ -283,8 +292,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 do {
                     let data = try Data(contentsOf: file)
                     var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-                    let sceneId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? request.metadata.jobId
-                    let bucket = (FirebaseApp.app()?.options.storageBucket).map { "gs://\($0)" } ?? ""
+                    let sceneId = sceneIdentifier(for: request)
+                    let bucket = storageBucketURL
                     json["scene_id"] = sceneId
                     if !bucket.isEmpty {
                         json["video_uri"] = bucket + "/" + remoteBasePath + "walkthrough.mov"
@@ -351,18 +360,36 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func makeStoragePath(for request: CaptureUploadRequest) -> String {
-        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "unknown"
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
         let basename = request.packageURL.lastPathComponent
-        return "targets/\(placeId)/\(ts)/\(basename)"
+        return sceneBasePath(for: request) + basename
     }
 
     private func makeBaseDirectoryPath(for request: CaptureUploadRequest) -> String {
-        let placeId = (request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? request.metadata.jobId
-        // Required layout: targets/<scene_id>/raw/
-        return "targets/\(placeId)/raw/"
+        return sceneBasePath(for: request) + "raw/"
+    }
+
+    private func sceneIdentifier(for request: CaptureUploadRequest) -> String {
+        if let trimmed = request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            return trimmed
+        }
+        if let reservation = request.metadata.reservationId?.trimmingCharacters(in: .whitespacesAndNewlines), !reservation.isEmpty {
+            return reservation
+        }
+        return request.metadata.jobId
+    }
+
+    private func sceneBasePath(for request: CaptureUploadRequest) -> String {
+        let sceneId = sceneIdentifier(for: request)
+        let source = request.metadata.captureSource == .metaGlasses ? "glasses" : "iphone"
+        let folder = uploadFolderComponent(for: request)
+        return "scenes/\(sceneId)/\(source)/\(folder)/"
+    }
+
+    private func uploadFolderComponent(for request: CaptureUploadRequest) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
+        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
+        return "\(ts)-\(request.metadata.id.uuidString)"
     }
     #endif
 }

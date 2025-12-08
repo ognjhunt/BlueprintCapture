@@ -1,15 +1,19 @@
+import Combine
 import PhotosUI
 import SwiftUI
+import UIKit
 
 /// Main view for Meta smart glasses video capture.
 /// Handles device connection, capture session, and upload.
 struct GlassesCaptureView: View {
     @StateObject private var captureManager = GlassesCaptureManager()
+    @StateObject private var uploadViewModel = GlassesUploadViewModel()
     @State private var showingDeviceSelection = false
     @State private var showingCaptureComplete = false
     @State private var mockVideoPickerItem: PhotosPickerItem?
     @State private var mockVideoLoadMessage: String?
     @State private var mockVideoLoadError: String?
+    @State private var locationId: String = ""
 
     var body: some View {
         NavigationStack {
@@ -539,14 +543,57 @@ struct GlassesCaptureView: View {
 
             // Action buttons
             VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Location / Place ID")
+                        .font(.subheadline.weight(.semibold))
+                        .blueprintPrimaryOnDark()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextField("e.g. Google Place ID", text: $locationId)
+                        .textInputAutocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .padding()
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.white.opacity(0.1))
+                        )
+                }
+                .padding()
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.white.opacity(0.04))
+                )
+
+                if case .uploading(let progress) = uploadViewModel.state {
+                    VStack(spacing: 8) {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                        Text("Uploading... \(Int(progress * 100))%")
+                            .font(.footnote)
+                            .blueprintSecondaryOnDark()
+                    }
+                } else if case .completed = uploadViewModel.state {
+                    Label("Upload complete", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(BlueprintTheme.successGreen)
+                } else if case .failed(let message) = uploadViewModel.state {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(BlueprintTheme.errorRed)
+                        .multilineTextAlignment(.center)
+                }
+
                 Button {
-                    // TODO: Trigger upload
+                    uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
                 } label: {
                     Label("Upload to Pipeline", systemImage: "icloud.and.arrow.up")
                 }
                 .buttonStyle(BlueprintPrimaryButtonStyle())
+                .disabled(uploadViewModel.isUploading)
 
                 Button {
+                    uploadViewModel.reset()
                     captureManager.reset()
                 } label: {
                     Text("Start New Capture")
@@ -723,6 +770,79 @@ struct GlassesCaptureView: View {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return formatter.string(fromByteCount: size)
+    }
+}
+
+final class GlassesUploadViewModel: ObservableObject {
+    enum UploadState: Equatable {
+        case idle
+        case uploading(Double)
+        case completed
+        case failed(String)
+    }
+
+    @Published var state: UploadState = .idle
+
+    private let uploadService: CaptureUploadServiceProtocol
+    private var cancellables = Set<AnyCancellable>()
+    private var activeUploadId: UUID?
+
+    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
+        self.uploadService = uploadService
+
+        uploadService.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                self?.handle(event)
+            }
+            .store(in: &cancellables)
+    }
+
+    var isUploading: Bool {
+        if case .uploading = state { return true }
+        return false
+    }
+
+    func upload(artifacts: GlassesCaptureManager.CaptureArtifacts, locationId: String) {
+        let trimmed = locationId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let targetId = trimmed.isEmpty ? nil : trimmed
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: targetId,
+            reservationId: nil,
+            jobId: targetId ?? UUID().uuidString,
+            creatorId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown_device",
+            capturedAt: artifacts.startedAt,
+            uploadedAt: nil,
+            captureSource: .metaGlasses
+        )
+
+        activeUploadId = metadata.id
+        state = .uploading(0)
+        let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
+        uploadService.enqueue(request)
+    }
+
+    func reset() {
+        state = .idle
+        activeUploadId = nil
+    }
+
+    private func handle(_ event: CaptureUploadService.Event) {
+        switch event {
+        case .queued(let request):
+            guard request.metadata.id == activeUploadId else { return }
+            state = .uploading(0)
+        case .progress(let id, let progress):
+            guard id == activeUploadId else { return }
+            state = .uploading(progress)
+        case .completed(let request):
+            guard request.metadata.id == activeUploadId else { return }
+            state = .completed
+        case .failed(let request, let error):
+            guard request.metadata.id == activeUploadId else { return }
+            state = .failed(error.errorDescription ?? "Upload failed")
+        }
     }
 }
 
