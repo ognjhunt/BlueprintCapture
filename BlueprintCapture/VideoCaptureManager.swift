@@ -167,7 +167,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var awaitingFirstARVideoFrame = false
     private var arSessionRecorder: AnyObject?
 
-    init() {
+    override init() {
         super.init()
         arSession.delegate = self
     }
