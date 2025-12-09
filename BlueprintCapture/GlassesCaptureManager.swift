@@ -395,7 +395,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
         let framesDir = recordingDir.appendingPathComponent("frames", isDirectory: true)
         let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
-        let videoURL = recordingDir.appendingPathComponent("capture.mov")
+        let videoURL = recordingDir.appendingPathComponent("walkthrough.mov")
         let motionURL = recordingDir.appendingPathComponent("motion.jsonl")
         let manifestURL = recordingDir.appendingPathComponent("manifest.json")
 
@@ -688,25 +688,33 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func writeManifest(artifacts: CaptureArtifacts) async {
+        // GPU Pipeline-compatible manifest schema
+        // Required fields: scene_id, device_model, os_version, fps_source, width, height, capture_start_epoch_ms, has_lidar
         let manifest: [String: Any] = [
-            "scene_id": "",
-            "video_uri": artifacts.videoURL.lastPathComponent,
-            "device_type": "meta_glasses",
-            "capture_mode": "video_stream",
-            "fps_source": 30,
+            // Required fields for pipeline trigger
+            "scene_id": "",  // Will be patched by upload service with targetId/reservationId
+            "video_uri": "", // Will be patched by upload service with full GCS path
+            "device_model": "Meta Ray-Ban Smart Glasses",
+            "os_version": UIDevice.current.systemVersion,
+            "fps_source": 30.0,  // Pipeline expects float
             "width": 1280,
             "height": 720,
             "capture_start_epoch_ms": Int64(artifacts.startedAt.timeIntervalSince1970 * 1000),
+            "has_lidar": false,  // Glasses don't have LiDAR
+
+            // Optional fields that enhance processing
+            "scale_hint_m_per_unit": 1.0,
+            "intended_space_type": "indoor",
+
+            // Additional metadata (not required by pipeline but useful)
+            "capture_source": "glasses",
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),
             "duration_seconds": artifacts.durationSeconds,
             "frame_count": artifacts.frameCount,
-            "has_motion_data": FileManager.default.fileExists(atPath: artifacts.motionLogURL.path),
-            "scale_hint_m_per_unit": 1.0,
-            "intended_space_type": "indoor",
-            "pipeline_compatible": true
+            "has_motion_data": FileManager.default.fileExists(atPath: artifacts.motionLogURL.path)
         ]
 
-        if let data = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted]) {
+        if let data = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes]) {
             try? data.write(to: artifacts.manifestURL, options: .atomic)
         }
     }
