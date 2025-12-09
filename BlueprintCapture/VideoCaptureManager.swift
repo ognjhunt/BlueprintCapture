@@ -1039,18 +1039,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             print("Failed to encode ARKit frame log entry: \(error)")
         }
 
-        // Also append to poses.jsonl with required schema
+        // Also append to poses.jsonl with GPU pipeline-compatible schema
+        // Pipeline expects: {"frameIndex": 0, "timestamp": 0.0, "transform": [[r00,r01,r02,tx],[r10,r11,r12,ty],[r20,r21,r22,tz],[0,0,0,1]]}
+        // Transform is a 4x4 camera-to-world matrix in row-major format
         if let poseHandle = arPoseLogFileHandle {
-            let tDeviceSec = frame.timestamp
             let m = frame.camera.transform
-            let T: [[Double]] = [
-                [Double(m.columns.0.x), Double(m.columns.0.y), Double(m.columns.0.z), Double(m.columns.0.w)],
-                [Double(m.columns.1.x), Double(m.columns.1.y), Double(m.columns.1.z), Double(m.columns.1.w)],
-                [Double(m.columns.2.x), Double(m.columns.2.y), Double(m.columns.2.z), Double(m.columns.2.w)],
-                [Double(m.columns.3.x), Double(m.columns.3.y), Double(m.columns.3.z), Double(m.columns.3.w)]
+            // Convert from SIMD column-major to row-major format for pipeline compatibility
+            // Row 0: [m00, m01, m02, tx] = [columns.0.x, columns.1.x, columns.2.x, columns.3.x]
+            // Row 1: [m10, m11, m12, ty] = [columns.0.y, columns.1.y, columns.2.y, columns.3.y]
+            // Row 2: [m20, m21, m22, tz] = [columns.0.z, columns.1.z, columns.2.z, columns.3.z]
+            // Row 3: [m30, m31, m32, 1]  = [columns.0.w, columns.1.w, columns.2.w, columns.3.w]
+            let transform: [[Double]] = [
+                [Double(m.columns.0.x), Double(m.columns.1.x), Double(m.columns.2.x), Double(m.columns.3.x)],
+                [Double(m.columns.0.y), Double(m.columns.1.y), Double(m.columns.2.y), Double(m.columns.3.y)],
+                [Double(m.columns.0.z), Double(m.columns.1.z), Double(m.columns.2.z), Double(m.columns.3.z)],
+                [Double(m.columns.0.w), Double(m.columns.1.w), Double(m.columns.2.w), Double(m.columns.3.w)]
             ]
-            struct PoseRow: Codable { let t_device_sec: Double; let frame_id: String; let T_world_camera: [[Double]] }
-            let row = PoseRow(t_device_sec: tDeviceSec, frame_id: frameId, T_world_camera: T)
+            struct PoseRow: Codable { let frameIndex: Int; let timestamp: Double; let transform: [[Double]] }
+            let row = PoseRow(frameIndex: frameIndex, timestamp: frame.timestamp, transform: transform)
             do {
                 let json = try JSONEncoder().encode(row)
                 poseHandle.write(json)
@@ -1398,21 +1404,37 @@ private extension VideoCaptureManager {
         let intr = currentCameraIntrinsics
         let width = intr?.resolutionWidth ?? 0
         let height = intr?.resolutionHeight ?? 0
-        let fps: Int = {
+        // Pipeline expects fps_source as a float
+        let fps: Double = {
             if lastCaptureUsedScreenRecorder {
-                return UIScreen.main.maximumFramesPerSecond
+                return Double(UIScreen.main.maximumFramesPerSecond)
             }
-            if let d = videoDevice?.activeVideoMinFrameDuration, d.isNumeric { return Int(round(1.0 / d.seconds)) }
-            return 30
+            if let d = videoDevice?.activeVideoMinFrameDuration, d.isNumeric { return round(1.0 / d.seconds) }
+            return 30.0
         }()
         let deviceModel = UIDevice.current.model
         let osVersion = UIDevice.current.systemVersion
         let hasLiDAR = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
         let epochMs = Int64(artifacts.startedAt.timeIntervalSince1970 * 1000.0)
+        let captureStartTime = artifacts.startedAt
+
+        // Convert exposure samples to pipeline-compatible format
+        // Pipeline expects: {"iso": 100, "exposure_duration": 0.008, "timestamp": 0.0}
+        let pipelineExposureSamples: [[String: Any]] = self.exposureSamples.map { sample in
+            // Convert timestamp to seconds from capture start
+            let timestampSeconds = sample.timestamp.timeIntervalSince(captureStartTime)
+            return [
+                "iso": Double(sample.iso),
+                "exposure_duration": sample.exposureDurationSeconds,
+                "timestamp": timestampSeconds
+            ]
+        }
+
         let writeBlock = {
             var dict: [String: Any] = [
-                "scene_id": "",
-                "video_uri": "",
+                // Required fields for GPU pipeline trigger
+                "scene_id": "",  // Will be patched by upload service
+                "video_uri": "", // Will be patched by upload service
                 "device_model": deviceModel,
                 "os_version": osVersion,
                 "fps_source": fps,
@@ -1420,9 +1442,17 @@ private extension VideoCaptureManager {
                 "height": height,
                 "capture_start_epoch_ms": epochMs,
                 "has_lidar": hasLiDAR,
-                "scale_hint_m_per_unit": hasLiDAR ? 1.0 : 1.0,
+                // Optional fields that enhance processing
+                "scale_hint_m_per_unit": 1.0,
                 "intended_space_type": "home"
             ]
+
+            // Add exposure samples if available (optional but recommended)
+            if !pipelineExposureSamples.isEmpty {
+                dict["exposure_samples"] = pipelineExposureSamples
+            }
+
+            // Add object point cloud references if available
             if #available(iOS 16.0, *),
                let summary = self.objectReconstructionSummary,
                let arKitArtifacts = artifacts.arKit,
