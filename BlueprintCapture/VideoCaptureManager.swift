@@ -189,7 +189,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     private var shouldUseScreenRecorder: Bool { false }
 
-    private var canUseARSessionRecorder: Bool { false }
+    /// Use ARSession-based video recording on iOS 17+ devices that support ARKit.
+    /// This allows ARKit to own the camera for recording video while also capturing
+    /// poses, depth, and intrinsics - which are critical for the downstream GPU pipeline.
+    /// When enabled, the pipeline can skip expensive SLAM/SfM processing since it has
+    /// metric-accurate ARKit poses.
+    private var canUseARSessionRecorder: Bool {
+        guard #available(iOS 17.0, *) else { return false }
+        return supportsARCapture
+    }
 
     private static func evaluateARCaptureSupport() -> Bool {
 #if targetEnvironment(simulator)
@@ -727,12 +735,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private func makeRecordingArtifacts(baseName: String, includeARKit: Bool) throws -> RecordingArtifacts {
         let tempDir = FileManager.default.temporaryDirectory
         let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
-        #if canImport(ZIPFoundation)
-        let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
-        #else
-        // Fallback: use the directory itself as the upload package when ZIP is unavailable
+        // Always use directory upload (not ZIP) to ensure manifest.json gets patched
+        // with scene_id and video_uri by CaptureUploadService during upload.
+        // ZIP uploads skip manifest patching which breaks downstream pipeline.
         let packageURL = recordingDir
-        #endif
         let videoURL = recordingDir.appendingPathComponent("walkthrough.mov")
         let motionURL = recordingDir.appendingPathComponent("motion.jsonl")
         let manifestURL = recordingDir.appendingPathComponent("manifest.json")

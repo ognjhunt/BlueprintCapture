@@ -394,7 +394,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let tempDir = FileManager.default.temporaryDirectory
         let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
         let framesDir = recordingDir.appendingPathComponent("frames", isDirectory: true)
-        let packageURL = recordingDir.deletingLastPathComponent().appendingPathComponent("\(baseName).zip")
+        // Always use directory upload (not ZIP) to ensure manifest.json gets patched
+        // with scene_id and video_uri by CaptureUploadService during upload.
+        // ZIP uploads skip manifest patching which breaks downstream pipeline.
+        let packageURL = recordingDir
         let videoURL = recordingDir.appendingPathComponent("walkthrough.mov")
         let motionURL = recordingDir.appendingPathComponent("motion.jsonl")
         let manifestURL = recordingDir.appendingPathComponent("manifest.json")
@@ -471,6 +474,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func setupMotionLogging(artifacts: CaptureArtifacts) {
+        // ⚠️ IMPORTANT: This motion data comes from the PHONE's IMU (CMMotionManager), NOT from
+        // the Meta glasses camera. The glasses camera is mounted on the user's head, while the
+        // phone may be in the user's pocket or hand.
+        //
+        // DO NOT use this motion data as camera motion for 3D reconstruction!
+        //
+        // When real Meta DAT SDK integration is available, this should be replaced with
+        // glasses-specific IMU data from the MWDAT SDK if available. Until then, the downstream
+        // pipeline should treat glasses captures as "video-only" and run SLAM for pose estimation.
+        //
+        // This phone IMU data is logged for diagnostic/debugging purposes only.
         do {
             if FileManager.default.fileExists(atPath: artifacts.motionLogURL.path) {
                 try FileManager.default.removeItem(at: artifacts.motionLogURL)
@@ -478,7 +492,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             FileManager.default.createFile(atPath: artifacts.motionLogURL.path, contents: nil)
             motionLogFileHandle = try FileHandle(forWritingTo: artifacts.motionLogURL)
 
-            // Start motion updates
+            // Start motion updates from PHONE IMU (not glasses)
             if motionManager.isDeviceMotionAvailable {
                 motionManager.deviceMotionUpdateInterval = 1.0 / 60.0
                 motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, _ in
@@ -487,7 +501,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 }
             }
 
-            print("✅ [GlassesCapture] Motion logging started")
+            print("✅ [GlassesCapture] Motion logging started (phone IMU, not glasses IMU)")
         } catch {
             print("⚠️ [GlassesCapture] Failed to setup motion logging: \(error)")
         }
@@ -692,8 +706,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         // Required fields: scene_id, device_model, os_version, fps_source, width, height, capture_start_epoch_ms, has_lidar
         let manifest: [String: Any] = [
             // Required fields for pipeline trigger
-            "scene_id": "",  // Will be patched by upload service with targetId/reservationId
-            "video_uri": "", // Will be patched by upload service with full GCS path
+            // These are patched by CaptureUploadService during directory upload with actual values
+            "scene_id": "",  // Patched with targetId/reservationId during upload
+            "video_uri": "", // Patched with full GCS gs://... path during upload
             "device_model": "Meta Ray-Ban Smart Glasses",
             "os_version": UIDevice.current.systemVersion,
             "fps_source": 30.0,  // Pipeline expects float
@@ -720,20 +735,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func packageArtifacts(_ artifacts: CaptureArtifacts) async {
-        // Package as ZIP for upload
-        let fileManager = FileManager.default
-
-        if fileManager.fileExists(atPath: artifacts.packageURL.path) {
-            try? fileManager.removeItem(at: artifacts.packageURL)
-        }
-
-        // Use ZIPFoundation if available, otherwise skip packaging
-        #if canImport(ZIPFoundation)
-      //  import ZIPFoundation
-        try? fileManager.zipItem(at: artifacts.directoryURL, to: artifacts.packageURL, shouldKeepParent: true)
-        #else
-        print("⚠️ [GlassesCapture] ZIPFoundation not available, skipping packaging")
-        #endif
+        // Directory upload is used (packageURL == directoryURL) to ensure manifest patching works.
+        // ZIP packaging is no longer needed since CaptureUploadService patches manifest during
+        // directory uploads, but not for ZIP uploads.
+        // This function is kept as a no-op for future use if needed.
+        print("✅ [GlassesCapture] Artifacts ready for directory upload (manifest will be patched during upload)")
     }
 
     // MARK: - Photo Capture (for scale anchors)

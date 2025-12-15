@@ -3,7 +3,7 @@ import * as logger from "firebase-functions/logger";
 import { Storage } from "@google-cloud/storage";
 import { tmpdir } from "os";
 import { join, dirname, basename } from "path";
-import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync, createWriteStream } from "fs";
+import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync, createWriteStream, } from "fs";
 import { spawn } from "child_process";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
@@ -19,12 +19,110 @@ async function runCommand(cmd, args, opts = {}) {
         const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], ...opts });
         let stdout = "";
         let stderr = "";
-        child.stdout.on("data", d => (stdout += d.toString()));
-        child.stderr.on("data", d => (stderr += d.toString()));
+        child.stdout.on("data", (d) => (stdout += d.toString()));
+        child.stderr.on("data", (d) => (stderr += d.toString()));
         child.on("error", reject);
-        child.on("close", code => resolve({ stdout, stderr, code }));
+        child.on("close", (code) => resolve({ stdout, stderr, code }));
     });
 }
+function parsePoseRows(content) {
+    const rows = [];
+    const lines = content.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line)
+            continue;
+        try {
+            const parsed = JSON.parse(line);
+            rows.push(parsed);
+        }
+        catch (error) {
+            logger.warn("Failed to parse ARKit pose row", { lineNumber: i + 1, error });
+        }
+    }
+    return rows;
+}
+async function loadArkitPoses(bucket, rawPrefix, tmpDir) {
+    const posesObjectName = `${rawPrefix}/arkit/poses.jsonl`;
+    const posesFile = bucket.file(posesObjectName);
+    let exists = false;
+    try {
+        [exists] = await posesFile.exists();
+    }
+    catch (error) {
+        logger.error("Failed to check existence of ARKit poses", { posesObjectName, error });
+        return { byFrameId: new Map(), byTime: [] };
+    }
+    if (!exists) {
+        logger.info("No ARKit pose log found", { posesObjectName });
+        return { byFrameId: new Map(), byTime: [] };
+    }
+    const localPosesPath = join(tmpDir, `arkit-poses-${Date.now()}.jsonl`);
+    try {
+        await posesFile.download({ destination: localPosesPath });
+    }
+    catch (error) {
+        logger.error("Failed to download ARKit pose log", { posesObjectName, error });
+        return { byFrameId: new Map(), byTime: [] };
+    }
+    let content;
+    try {
+        content = readFileSync(localPosesPath, { encoding: "utf8" });
+    }
+    catch (error) {
+        logger.error("Failed to read downloaded ARKit pose log", { posesObjectName, error });
+        return { byFrameId: new Map(), byTime: [] };
+    }
+    const rows = parsePoseRows(content);
+    const byFrameId = new Map();
+    const byTime = [];
+    for (const row of rows) {
+        if (typeof row.frame_id === "string") {
+            byFrameId.set(row.frame_id, row);
+        }
+        if (typeof row.t_device_sec === "number") {
+            byTime.push(row);
+        }
+    }
+    byTime.sort((a, b) => (a.t_device_sec ?? 0) - (b.t_device_sec ?? 0));
+    logger.info("Loaded ARKit pose entries", { posesObjectName, count: rows.length });
+    return { byFrameId, byTime };
+}
+function findClosestPoseByTime(poses, targetTime) {
+    if (!poses.length)
+        return undefined;
+    let low = 0;
+    let high = poses.length - 1;
+    while (low < high) {
+        const mid = Math.floor((low + high) / 2);
+        const midTime = poses[mid].t_device_sec ?? Number.NEGATIVE_INFINITY;
+        if (midTime < targetTime) {
+            low = mid + 1;
+        }
+        else {
+            high = mid;
+        }
+    }
+    let best = poses[low];
+    const bestTime = best.t_device_sec;
+    const bestDiff = bestTime !== undefined ? Math.abs(bestTime - targetTime) : Number.POSITIVE_INFINITY;
+    const prev = low > 0 ? poses[low - 1] : undefined;
+    if (prev && prev.t_device_sec !== undefined) {
+        const prevDiff = Math.abs(prev.t_device_sec - targetTime);
+        if (prevDiff <= bestDiff) {
+            best = prev;
+        }
+    }
+    return best;
+}
+/**
+ * extractFrames
+ * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader format)
+ *   OR: targets/<scene>/raw/walkthrough.mov (legacy format)
+ * - Output: <same_prefix>/frames/*.jpg + index.jsonl
+ * - FPS: 5
+ * - Includes best-matching ARKit pose per frame when available.
+ */
 export const extractFrames = onObjectFinalized({
     region: "us-central1",
     memory: "2GiB",
@@ -34,8 +132,13 @@ export const extractFrames = onObjectFinalized({
     const bucketName = event.bucket;
     const objectName = event.data?.name || "";
     const contentType = event.data?.contentType || "";
-    if (!objectName.endsWith("/raw/walkthrough.mov") || !objectName.startsWith("targets/")) {
-        logger.info("Skipping object (not a walkthrough.mov under targets/*/raw/)", {
+    // Handle both path formats:
+    // - scenes/<scene_id>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader)
+    // - targets/<scene_id>/raw/walkthrough.mov (legacy)
+    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/walkthrough.mov");
+    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/walkthrough.mov");
+    if (!isScenesPath && !isTargetsPath) {
+        logger.info("Skipping object (not a walkthrough.mov under scenes/*/.../raw/ or targets/*/raw/)", {
             objectName,
             contentType,
         });
@@ -48,8 +151,14 @@ export const extractFrames = onObjectFinalized({
     mkdirSync(framesDir, { recursive: true });
     const bucket = storage.bucket(bucketName);
     const file = bucket.file(objectName);
+    const rawPrefix = dirname(objectName); // targets/<scene>/raw
+    // Load ARKit poses (if present)
+    const poseIndex = await loadArkitPoses(bucket, rawPrefix, tmp);
+    // Download video
     await file.download({ destination: localVideo });
     logger.info("Downloaded video to temp", { localVideo });
+    // Extract frames using ffmpeg fps=5 and scale longest side to 512 with Lanczos
+    // Also include showinfo after fps so pts_time corresponds to output frames
     const outputPattern = join(framesDir, "%06d.jpg");
     const ffmpegArgs = [
         "-hide_banner",
@@ -59,7 +168,7 @@ export const extractFrames = onObjectFinalized({
         "-i",
         localVideo,
         "-vf",
-        "fps=10,scale=512:-2:flags=lanczos,showinfo",
+        "fps=5,scale=512:-2:flags=lanczos,showinfo",
         "-qscale:v",
         "2",
         "-start_number",
@@ -76,6 +185,7 @@ export const extractFrames = onObjectFinalized({
         logger.error("ffmpeg failed", { code, stderr: stderr.slice(-4000) });
         throw new Error(`ffmpeg failed with code ${code}`);
     }
+    // Parse pts_time values from showinfo lines
     const timeRegex = /showinfo.*pts_time:([0-9]+\.?[0-9]*)/g;
     const ptsTimes = [];
     for (const line of stderr.split(/\r?\n/)) {
@@ -87,19 +197,66 @@ export const extractFrames = onObjectFinalized({
                 ptsTimes.push(t);
         }
     }
+    // Build index.jsonl mapping frame_id -> t_video_sec (+ ARKit pose match)
     const sortedFiles = readdirSync(framesDir)
-        .filter(f => f.toLowerCase().endsWith(".jpg"))
+        .filter((f) => f.toLowerCase().endsWith(".jpg"))
         .sort();
     const indexLines = [];
+    const posesByFrameId = poseIndex.byFrameId;
+    const posesByTime = poseIndex.byTime;
     for (let i = 0; i < sortedFiles.length; i++) {
         const frameId = zeroPad(i + 1, 6);
-        const t = i < ptsTimes.length ? ptsTimes[i] : i / 10.0;
-        indexLines.push(JSON.stringify({ frame_id: frameId, t_video_sec: Number(t.toFixed(6)) }));
+        const t = i < ptsTimes.length ? ptsTimes[i] : i / 5.0;
+        const tVideoSec = Number(t.toFixed(6));
+        const entry = {
+            frame_id: frameId,
+            t_video_sec: tVideoSec,
+        };
+        let poseMatchType;
+        let pose = posesByFrameId.get(frameId);
+        if (pose) {
+            poseMatchType = "frame_id";
+        }
+        else if (posesByTime.length > 0) {
+            pose = findClosestPoseByTime(posesByTime, tVideoSec);
+            if (pose) {
+                poseMatchType = "time";
+            }
+        }
+        if (pose) {
+            const arkitPose = {};
+            const poseFrameId = typeof pose.frame_id === "string" ? pose.frameId : pose.frame_id;
+            if (typeof pose.frame_id === "string") {
+                arkitPose.pose_frame_id = pose.frame_id;
+                if (pose.frame_id !== frameId) {
+                    arkitPose.frame_id_mismatch = true;
+                }
+            }
+            if (Array.isArray(pose.T_world_camera)) {
+                arkitPose.T_world_camera = pose.T_world_camera;
+            }
+            if (typeof pose.t_device_sec === "number" && Number.isFinite(pose.t_device_sec)) {
+                const tDevice = Number(pose.t_device_sec.toFixed(6));
+                arkitPose.t_device_sec = tDevice;
+                const delta = Math.abs(tDevice - tVideoSec);
+                arkitPose.delta_sec = Number(delta.toFixed(6));
+            }
+            if (poseMatchType) {
+                arkitPose.match_type = poseMatchType;
+            }
+            if (Object.keys(arkitPose).length > 0) {
+                entry.arkit_pose = arkitPose;
+            }
+        }
+        indexLines.push(JSON.stringify(entry));
     }
     const indexPath = join(framesDir, "index.jsonl");
     writeFileSync(indexPath, indexLines.join("\n"), { encoding: "utf8" });
-    const scenePrefix = dirname(dirname(objectName));
-    const framesPrefix = `${scenePrefix}/frames`;
+    // Upload all frames and index.jsonl to frames/ prefix next to raw/
+    // Input: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov -> Output: scenes/<scene>/<source>/<capture_id>/frames/<files>
+    // Input: targets/<scene>/raw/walkthrough.mov -> Output: targets/<scene>/frames/<files>
+    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
+    const framesPrefix = `${capturePrefix}/frames`;
     const uploads = [];
     for (const fname of readdirSync(framesDir)) {
         const localPath = join(framesDir, fname);
@@ -117,6 +274,7 @@ export const extractFrames = onObjectFinalized({
     await Promise.all(uploads);
     logger.info("Uploaded frames and index", { framesPrefix, count: sortedFiles.length });
 });
+/* ---------- RoomPlan cleaning helpers ---------- */
 function addDirToZip(zip, rootDir, currentDir) {
     const entries = readdirSync(currentDir);
     for (const name of entries) {
@@ -149,7 +307,7 @@ function findFileRecursive(rootDir, targetFileName) {
     return null;
 }
 function removeObjectGrpFromUsd(usdContent) {
-    const lines = usdContent.split('\n');
+    const lines = usdContent.split("\n");
     const output = [];
     let insideObjectGrp = false;
     let braceDepth = 0;
@@ -166,14 +324,14 @@ function removeObjectGrpFromUsd(usdContent) {
             }
             continue;
         }
-        if (trimmed.startsWith('def ') && trimmed.includes('"Object_grp"')) {
+        if (trimmed.startsWith("def ") && trimmed.includes('"Object_grp"')) {
             insideObjectGrp = true;
             const openBraces = (line.match(/{/g) || []).length;
             const closeBraces = (line.match(/}/g) || []).length;
             braceDepth = openBraces - closeBraces;
             continue;
         }
-        if (trimmed.startsWith('over ') && trimmed.includes('"Object_grp"')) {
+        if (trimmed.startsWith("over ") && trimmed.includes('"Object_grp"')) {
             insideObjectGrp = true;
             const openBraces = (line.match(/{/g) || []).length;
             const closeBraces = (line.match(/}/g) || []).length;
@@ -182,7 +340,7 @@ function removeObjectGrpFromUsd(usdContent) {
         }
         output.push(line);
     }
-    return output.join('\n');
+    return output.join("\n");
 }
 function getAllFilesInDir(dir, fileList = []) {
     const files = readdirSync(dir);
@@ -201,21 +359,21 @@ function getAllFilesInDir(dir, fileList = []) {
 async function createUncompressedUsdz(sourceDir, outputPath) {
     return new Promise((resolve, reject) => {
         const output = createWriteStream(outputPath);
-        const archive = archiver('zip', {
+        const archive = archiver("zip", {
             store: true,
-            zlib: { level: 0 }
+            zlib: { level: 0 },
         });
-        output.on('close', () => {
+        output.on("close", () => {
             logger.info(`Created USDZ with ${archive.pointer()} bytes`);
             resolve();
         });
-        archive.on('error', (err) => {
+        archive.on("error", (err) => {
             reject(err);
         });
         archive.pipe(output);
         const allFiles = getAllFilesInDir(sourceDir);
-        const usdFiles = allFiles.filter(f => f.endsWith('.usdc') || f.endsWith('.usda'));
-        const otherFiles = allFiles.filter(f => !f.endsWith('.usdc') && !f.endsWith('.usda'));
+        const usdFiles = allFiles.filter((f) => f.endsWith(".usdc") || f.endsWith(".usda"));
+        const otherFiles = allFiles.filter((f) => !f.endsWith(".usdc") && !f.endsWith(".usda"));
         if (usdFiles.length > 0) {
             const firstFile = usdFiles[0];
             const relativePath = firstFile.substring(sourceDir.length + 1);
@@ -237,11 +395,11 @@ async function processUsdzToRemoveObjects(usdzPath, outputPath) {
     const allFiles = getAllFilesInDir(extractDir);
     for (const filePath of allFiles) {
         const fileName = basename(filePath);
-        if (fileName.endsWith('.usda') || fileName.endsWith('.usd')) {
+        if (fileName.endsWith(".usda") || fileName.endsWith(".usd")) {
             try {
-                const content = readFileSync(filePath, 'utf8');
+                const content = readFileSync(filePath, "utf8");
                 const modified = removeObjectGrpFromUsd(content);
-                writeFileSync(filePath, modified, 'utf8');
+                writeFileSync(filePath, modified, "utf8");
                 logger.info(`Modified USD file: ${fileName}`);
             }
             catch (err) {
@@ -252,6 +410,14 @@ async function processUsdzToRemoveObjects(usdzPath, outputPath) {
     await createUncompressedUsdz(extractDir, outputPath);
     logger.info(`Created modified USDZ: ${outputPath}`);
 }
+/**
+ * cleanRoomplan
+ * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader format)
+ *   OR: targets/<scene>/raw/roomplan.zip (legacy format)
+ * - Looks for RoomPlanParametric.usdz inside the zip
+ * - Writes RoomPlanArchitectureOnly.usdz with Object_grp removed
+ * - Re-zips and uploads to <same_prefix>/processed/roomplan.zip
+ */
 export const cleanRoomplan = onObjectFinalized({
     region: "us-central1",
     memory: "2GiB",
@@ -261,9 +427,16 @@ export const cleanRoomplan = onObjectFinalized({
     const bucketName = event.bucket;
     const objectName = event.data?.name || "";
     const contentType = event.data?.contentType || "";
-    if (!objectName.startsWith("targets/") ||
-        !objectName.endsWith("/raw/roomplan.zip")) {
-        logger.info("Skipping object (not a roomplan.zip under targets/*/raw/)", { objectName, contentType });
+    // Handle both path formats:
+    // - scenes/<scene_id>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader)
+    // - targets/<scene_id>/raw/roomplan.zip (legacy)
+    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/roomplan.zip");
+    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/roomplan.zip");
+    if (!isScenesPath && !isTargetsPath) {
+        logger.info("Skipping object (not a roomplan.zip under scenes/*/.../raw/ or targets/*/raw/)", {
+            objectName,
+            contentType,
+        });
         return;
     }
     logger.info("Starting RoomPlan cleanup", { bucketName, objectName });
@@ -293,8 +466,11 @@ export const cleanRoomplan = onObjectFinalized({
     const newZip = new AdmZip();
     addDirToZip(newZip, extractDir, extractDir);
     newZip.writeZip(processedZipPath);
-    const scenePrefix = dirname(dirname(objectName));
-    const processedObjectName = `${scenePrefix}/processed/roomplan.zip`;
+    // Output to processed/ folder next to raw/
+    // scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip -> scenes/<scene>/<source>/<capture_id>/processed/roomplan.zip
+    // targets/<scene>/raw/roomplan.zip -> targets/<scene>/processed/roomplan.zip
+    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
+    const processedObjectName = `${capturePrefix}/processed/roomplan.zip`;
     await bucket.upload(processedZipPath, {
         destination: processedObjectName,
         metadata: { contentType: "application/zip" },
