@@ -152,8 +152,9 @@ function findClosestPoseByTime(poses: PoseRow[], targetTime: number): PoseRow | 
 
 /**
  * extractFrames
- * - Trigger: targets/<scene>/raw/walkthrough.mov
- * - Output: targets/<scene>/frames/*.jpg + index.jsonl
+ * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader format)
+ *   OR: targets/<scene>/raw/walkthrough.mov (legacy format)
+ * - Output: <same_prefix>/frames/*.jpg + index.jsonl
  * - FPS: 5
  * - Includes best-matching ARKit pose per frame when available.
  */
@@ -169,9 +170,14 @@ export const extractFrames = onObjectFinalized(
     const objectName = event.data?.name || "";
     const contentType = event.data?.contentType || "";
 
-    // Only handle: targets/<scene_id>/raw/walkthrough.mov
-    if (!objectName.endsWith("/raw/walkthrough.mov") || !objectName.startsWith("targets/")) {
-      logger.info("Skipping object (not a walkthrough.mov under targets/*/raw/)", {
+    // Handle both path formats:
+    // - scenes/<scene_id>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader)
+    // - targets/<scene_id>/raw/walkthrough.mov (legacy)
+    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/walkthrough.mov");
+    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/walkthrough.mov");
+
+    if (!isScenesPath && !isTargetsPath) {
+      logger.info("Skipping object (not a walkthrough.mov under scenes/*/.../raw/ or targets/*/raw/)", {
         objectName,
         contentType,
       });
@@ -306,9 +312,10 @@ export const extractFrames = onObjectFinalized(
     writeFileSync(indexPath, indexLines.join("\n"), { encoding: "utf8" });
 
     // Upload all frames and index.jsonl to frames/ prefix next to raw/
+    // Input: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov -> Output: scenes/<scene>/<source>/<capture_id>/frames/<files>
     // Input: targets/<scene>/raw/walkthrough.mov -> Output: targets/<scene>/frames/<files>
-    const scenePrefix = dirname(dirname(objectName)); // targets/<scene>
-    const framesPrefix = `${scenePrefix}/frames`;
+    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
+    const framesPrefix = `${capturePrefix}/frames`;
     const uploads: Promise<any>[] = [];
     for (const fname of readdirSync(framesDir)) {
       const localPath = join(framesDir, fname);
@@ -491,10 +498,11 @@ async function processUsdzToRemoveObjects(
 
 /**
  * cleanRoomplan
- * - Trigger: targets/<scene>/raw/roomplan.zip
+ * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader format)
+ *   OR: targets/<scene>/raw/roomplan.zip (legacy format)
  * - Looks for RoomPlanParametric.usdz inside the zip
  * - Writes RoomPlanArchitectureOnly.usdz with Object_grp removed
- * - Re-zips and uploads to targets/<scene>/processed/roomplan.zip
+ * - Re-zips and uploads to <same_prefix>/processed/roomplan.zip
  */
 export const cleanRoomplan = onObjectFinalized(
   {
@@ -508,8 +516,14 @@ export const cleanRoomplan = onObjectFinalized(
     const objectName = event.data?.name || "";
     const contentType = event.data?.contentType || "";
 
-    if (!objectName.startsWith("targets/") || !objectName.endsWith("/raw/roomplan.zip")) {
-      logger.info("Skipping object (not a roomplan.zip under targets/*/raw/)", {
+    // Handle both path formats:
+    // - scenes/<scene_id>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader)
+    // - targets/<scene_id>/raw/roomplan.zip (legacy)
+    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/roomplan.zip");
+    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/roomplan.zip");
+
+    if (!isScenesPath && !isTargetsPath) {
+      logger.info("Skipping object (not a roomplan.zip under scenes/*/.../raw/ or targets/*/raw/)", {
         objectName,
         contentType,
       });
@@ -551,8 +565,11 @@ export const cleanRoomplan = onObjectFinalized(
     addDirToZip(newZip, extractDir, extractDir);
     newZip.writeZip(processedZipPath);
 
-    const scenePrefix = dirname(dirname(objectName)); // targets/<scene>
-    const processedObjectName = `${scenePrefix}/processed/roomplan.zip`;
+    // Output to processed/ folder next to raw/
+    // scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip -> scenes/<scene>/<source>/<capture_id>/processed/roomplan.zip
+    // targets/<scene>/raw/roomplan.zip -> targets/<scene>/processed/roomplan.zip
+    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
+    const processedObjectName = `${capturePrefix}/processed/roomplan.zip`;
 
     await bucket.upload(processedZipPath, {
       destination: processedObjectName,

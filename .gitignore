@@ -60,3 +60,13 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Sensitive files - DO NOT COMMIT
+# Use Secrets.example.plist as a template
+BlueprintCapture/Support/Secrets.plist
+Secrets.plist
+*.pem
+*.p12
+.env
+.env.*
+!.env.example
