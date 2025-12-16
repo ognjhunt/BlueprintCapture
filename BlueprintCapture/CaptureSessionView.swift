@@ -12,6 +12,9 @@ struct CaptureSessionView: View {
     let reservationId: String?
     @State private var shouldDismissOnCompletion = false
 
+    // Venue permission for this capture (would be set when user selects a location)
+    @State private var venuePermission: VenuePermission? = .demo
+
     init(viewModel: CaptureFlowViewModel, targetId: String?, reservationId: String?) {
         self.viewModel = viewModel
         self._captureManager = ObservedObject(initialValue: viewModel.captureManager)
@@ -25,6 +28,13 @@ struct CaptureSessionView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 12) {
+                // Top bar with permission badge
+                HStack {
+                    Spacer()
+                    VenuePermissionBadge(permission: venuePermission)
+                }
+                .padding(.horizontal)
+                .padding(.top, 8)
 
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {

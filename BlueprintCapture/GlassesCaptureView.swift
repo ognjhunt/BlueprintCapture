@@ -15,6 +15,9 @@ struct GlassesCaptureView: View {
     @State private var mockVideoLoadError: String?
     @State private var locationId: String = ""
 
+    // Venue permission for this capture (would be set when user selects a location)
+    @State private var venuePermission: VenuePermission? = .demo
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -395,23 +398,29 @@ struct GlassesCaptureView: View {
                     .resizable()
                     .aspectRatio(16/9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        // Recording indicator
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 12, height: 12)
-                            Text("REC")
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.white)
+                    .overlay(alignment: .top) {
+                        HStack {
+                            // Recording indicator (top-left)
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 12, height: 12)
+                                Text("REC")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.6))
+                            .clipShape(Capsule())
+
+                            Spacer()
+
+                            // Permission badge (top-right) - tap to show authorization
+                            VenuePermissionBadge(permission: venuePermission)
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.6))
-                        .clipShape(Capsule())
-                        .padding(12),
-                        alignment: .topLeading
-                    )
+                        .padding(12)
+                    }
                     .padding(.horizontal)
             } else {
                 RoundedRectangle(cornerRadius: 16)
