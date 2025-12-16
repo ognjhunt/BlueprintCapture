@@ -18,6 +18,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     @Published var selectedRadius: RadiusMi = .one { didSet { Task { await refresh() } } }
     @Published var selectedLimit: Limit = .top10 { didSet { Task { await refresh() } } }
     @Published var selectedSort: SortOption = .highestPayout { didSet { applySort() } }
+    @Published var policyFilter: RecordingPolicyFilter = .excludeRestricted { didSet { Task { await refresh() } } }
 
     // Outputs
     @Published private(set) var state: State = .idle
@@ -34,8 +35,19 @@ final class NearbyTargetsViewModel: ObservableObject {
         let estimatedPayoutUsd: Int
         let streetImageURL: URL?
         let hasStreetView: Bool
+        let recordingPolicy: RecordingPolicyResult
         var accessibilityLabel: String {
             "\(target.displayName), SKU \(target.sku.rawValue), payout $\(estimatedPayoutUsd), distance \(String(format: "%.1f", distanceMiles)) miles"
+        }
+
+        static func == (lhs: NearbyItem, rhs: NearbyItem) -> Bool {
+            lhs.id == rhs.id &&
+            lhs.target == rhs.target &&
+            lhs.distanceMiles == rhs.distanceMiles &&
+            lhs.estimatedPayoutUsd == rhs.estimatedPayoutUsd &&
+            lhs.streetImageURL == rhs.streetImageURL &&
+            lhs.hasStreetView == rhs.hasStreetView &&
+            lhs.recordingPolicy.risk == rhs.recordingPolicy.risk
         }
     }
 
@@ -61,6 +73,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let placesDetailsService: PlacesDetailsServiceProtocol
     private let placesAutocomplete: PlacesAutocompleteServiceProtocol
     private let notifications: NotificationServiceProtocol
+    private let recordingPolicyService: RecordingPolicyService
 
     // Data
     private var pricing: [SKU: SkuPricing] = defaultPricing
@@ -86,7 +99,8 @@ final class NearbyTargetsViewModel: ObservableObject {
          // discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(), // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
          placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
-         notifications: NotificationServiceProtocol = NotificationService()) {
+         notifications: NotificationServiceProtocol = NotificationService(),
+         recordingPolicyService: RecordingPolicyService = .shared) {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
@@ -98,6 +112,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.placesDetailsService = placesDetailsService
         self.placesAutocomplete = placesAutocomplete
         self.notifications = notifications
+        self.recordingPolicyService = recordingPolicyService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -351,9 +366,23 @@ final class NearbyTargetsViewModel: ObservableObject {
             let origin = CLLocation(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
             let currentPricing = pricing
             let streetService = self.streetService
-            let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double).self) { group in
+            let policyService = self.recordingPolicyService
+            let currentPolicyFilter = self.policyFilter
+            let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double)?.self) { group in
                 for t in targets {
                     group.addTask { @MainActor [weak self] in
+                        // Evaluate recording policy first (fast, local check)
+                        let policy = policyService.evaluatePolicy(
+                            name: t.displayName,
+                            types: t.policyTypes,
+                            placeId: t.id
+                        )
+
+                        // Apply policy filter early to skip unnecessary work
+                        if let maxRisk = currentPolicyFilter.maxRisk, policy.risk > maxRisk {
+                            return nil // Filtered out by policy
+                        }
+
                         let distanceMeters = origin.distance(from: CLLocation(latitude: t.lat, longitude: t.lng))
                         let miles = distanceMeters / 1609.34
                         let payout = estimatedPayout(for: t, pricing: currentPricing)
@@ -368,17 +397,28 @@ final class NearbyTargetsViewModel: ObservableObject {
                             url = hasSV ? service.imageURL(lat: t.lat, lng: t.lng, size: CGSize(width: 600, height: 400)) : nil
                             self?.streetViewCache[cacheKey] = (hasSV, url)
                         }
-                        // Hybrid score: payout × demand × proximity × coverage
+                        // Hybrid score: payout × demand × proximity × coverage × policy safety
                         let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
                         let coverage = hasSV ? 1.0 : 0.7
-                        let score = Double(payout) * demand * proximity * coverage
-                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV)
+                        // Boost score for safer venues (safe=1.0, unknown=0.9, caution=0.7, restricted=0.3)
+                        let safetyMultiplier: Double = {
+                            switch policy.risk {
+                            case .safe: return 1.0
+                            case .unknown: return 0.9
+                            case .caution: return 0.7
+                            case .restricted: return 0.3
+                            }
+                        }()
+                        let score = Double(payout) * demand * proximity * coverage * safetyMultiplier
+                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
                         return (item, score)
                     }
                 }
                 var arr: [(NearbyItem, Double)] = []
-                for try await tuple in group { arr.append(tuple) }
+                for try await tuple in group {
+                    if let tuple = tuple { arr.append(tuple) }
+                }
                 // Pre-rank by hybrid score before presenting
                 arr.sort { $0.1 > $1.1 }
                 // Return just items
@@ -460,10 +500,24 @@ final class NearbyTargetsViewModel: ObservableObject {
         let origin = currentSearchLocation() ?? CLLocation(latitude: userLocation?.coordinate.latitude ?? 0, longitude: userLocation?.coordinate.longitude ?? 0)
         let currentPricing = pricing
         let streetService = self.streetService
+        let policyService = self.recordingPolicyService
+        let currentPolicyFilter = self.policyFilter
         do {
-            let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double).self) { group in
+            let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double)?.self) { group in
                 for t in targets {
                     group.addTask { @MainActor [weak self] in
+                        // Evaluate recording policy
+                        let policy = policyService.evaluatePolicy(
+                            name: t.displayName,
+                            types: t.policyTypes,
+                            placeId: t.id
+                        )
+
+                        // Apply policy filter
+                        if let maxRisk = currentPolicyFilter.maxRisk, policy.risk > maxRisk {
+                            return nil
+                        }
+
                         let distanceMeters = origin.distance(from: CLLocation(latitude: t.lat, longitude: t.lng))
                         let miles = distanceMeters / 1609.34
                         let payout = estimatedPayout(for: t, pricing: currentPricing)
@@ -482,12 +536,14 @@ final class NearbyTargetsViewModel: ObservableObject {
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
                         let coverage = hasSV ? 1.0 : 0.7
                         let score = Double(payout) * demand * proximity * coverage
-                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV)
+                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
                         return (item, score)
                     }
                 }
                 var arr: [(NearbyItem, Double)] = []
-                for try await tuple in group { arr.append(tuple) }
+                for try await tuple in group {
+                    if let tuple = tuple { arr.append(tuple) }
+                }
                 arr.sort { $0.1 > $1.1 }
                 return arr.map { $0.0 }
             }
@@ -560,7 +616,14 @@ final class NearbyTargetsViewModel: ObservableObject {
             streetViewCache[cacheKey] = (hasSV, url)
         }
 
-        return NearbyItem(id: targetId, target: target, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV)
+        // Evaluate recording policy
+        let policy = recordingPolicyService.evaluatePolicy(
+            name: displayName ?? "Unknown",
+            types: types,
+            placeId: targetId
+        )
+
+        return NearbyItem(id: targetId, target: target, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
     }
 
     /// Estimates driving minutes using MapKit; returns nil if unable to compute quickly

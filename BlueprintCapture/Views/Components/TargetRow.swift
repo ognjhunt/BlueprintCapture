@@ -26,8 +26,8 @@ struct TargetRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                // Distance and status
-                HStack(spacing: 12) {
+                // Distance, status, and policy
+                HStack(spacing: 8) {
                     if isOnSite {
                         Label("Here", systemImage: "location.fill")
                             .font(.caption.weight(.medium))
@@ -43,6 +43,9 @@ struct TargetRow: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(BlueprintTheme.brandTeal)
                     }
+
+                    // Recording policy indicator
+                    policyBadge
                 }
             }
 
@@ -103,5 +106,26 @@ struct TargetRow: View {
         let mins = totalSeconds / 60
         let secs = totalSeconds % 60
         return String(format: "%d:%02d", mins, secs)
+    }
+
+    @ViewBuilder private var policyBadge: some View {
+        let risk = item.recordingPolicy.risk
+        switch risk {
+        case .safe:
+            Label("Safe", systemImage: "checkmark.shield.fill")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.green)
+        case .unknown:
+            // Don't show badge for unknown - it's neutral
+            EmptyView()
+        case .caution:
+            Label("Verify", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.orange)
+        case .restricted:
+            Label("Restricted", systemImage: "nosign")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.red)
+        }
     }
 }

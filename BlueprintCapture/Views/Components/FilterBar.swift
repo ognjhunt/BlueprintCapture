@@ -4,6 +4,7 @@ struct FilterBar: View {
     @Binding var radius: NearbyTargetsViewModel.RadiusMi
     @Binding var limit: NearbyTargetsViewModel.Limit
     @Binding var sort: NearbyTargetsViewModel.SortOption
+    @Binding var policyFilter: RecordingPolicyFilter
 
     var body: some View {
         BlueprintGlassCard {
@@ -34,7 +35,42 @@ struct FilterBar: View {
                 }
                 .pickerStyle(.segmented)
                 .tint(BlueprintTheme.brandTeal)
+
+                // Recording Policy Filter
+                HStack(spacing: 8) {
+                    Text("Capture Safety:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    policyFilterChip(.all, label: "All")
+                    policyFilterChip(.excludeRestricted, label: "Hide Restricted")
+                    policyFilterChip(.safeOnly, label: "Safe Only")
+                }
             }
+        }
+    }
+
+    private func policyFilterChip(_ value: RecordingPolicyFilter, label: String) -> some View {
+        Button(action: { policyFilter = value }) {
+            Text(label)
+                .font(.caption2).fontWeight(.semibold)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(
+                    Capsule().fill(policyFilter == value ? policyColor(for: value).opacity(0.15) : Color(.systemFill))
+                )
+                .overlay(
+                    Capsule().stroke(policyFilter == value ? policyColor(for: value).opacity(0.5) : Color(.separator).opacity(0.35), lineWidth: 1)
+                )
+                .foregroundStyle(policyFilter == value ? policyColor(for: value) : Color.primary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func policyColor(for filter: RecordingPolicyFilter) -> Color {
+        switch filter {
+        case .all: return .secondary
+        case .excludeRestricted: return .orange
+        case .safeOnly: return .green
         }
     }
 
