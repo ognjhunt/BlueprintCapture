@@ -48,76 +48,60 @@ private struct WelcomeIntroView: View {
     let onContinue: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Start mapping with Blueprint")
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-                Text("Earn $50/hr mapping spaces")
-                    .font(.system(size: 28, weight: .heavy))
-                    .blueprintGradientText()
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 8)
+        VStack(spacing: 32) {
+            Spacer()
 
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    BlueprintPill("Scans < 30 min", icon: "timer")
-                    BlueprintPill("iPhone or glasses", icon: "camera")
-                }
-                HStack(spacing: 8) {
-                    BlueprintPill("Playbooks included", icon: "book")
-                    BlueprintPill("Earn in 5 mins", icon: "bolt.fill")
-                }
+            // Hero
+            VStack(spacing: 20) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: 72))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                Text("Earn money\nmapping spaces")
+                    .font(.system(size: 32, weight: .bold))
+                    .multilineTextAlignment(.center)
+
+                Text("Capture 3D scans of local businesses and get paid for each approved scan.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
 
-            TabView {
-                ValueCard(icon: "mappin.and.ellipse", title: "Discover nearby spaces", subtitle: "Find high-value indoor locations near you ready to capture for detailed 3D scans.")
-                ValueCard(icon: "eyeglasses", title: "Capture hands-free", subtitle: "Connect your Meta Ray-Ban glasses for immersive 720p video capture. Walk naturally while recording.")
-                    ValueCard(icon: "camera.viewfinder", title: "Or use your phone", subtitle: "Record walkthroughs using your iPhone camera with ARKit depth sensing.")
-                ValueCard(icon: "dollarsign.circle.fill", title: "Earn while you map", subtitle: "Get paid for each scan after processing. Fast payouts via Stripe.")
+            Spacer()
+
+            // Features
+            VStack(spacing: 16) {
+                featureRow(icon: "clock", text: "Scans take 15-30 minutes")
+                featureRow(icon: "dollarsign.circle", text: "Earn $20-50 per scan")
+                featureRow(icon: "iphone", text: "Use your iPhone or smart glasses")
             }
-            .tabViewStyle(.page)
-            .frame(height: 280)
+            .padding(.horizontal, 32)
 
-            Spacer(minLength: 16)
+            Spacer()
 
-            Button(action: onContinue) { Text("Get started — earn in 5 mins") }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-                .padding(.horizontal)
+            Button(action: onContinue) {
+                Text("Get Started")
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding()
     }
-}
 
-private struct ValueCard: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(spacing: 18) {
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 56))
-                .foregroundStyle(BlueprintTheme.primary)
-            Text(title)
-                .font(.headline)
-            Text(subtitle)
-                .font(.subheadline)
+                .font(.body)
+                .foregroundStyle(BlueprintTheme.brandTeal)
+                .frame(width: 24)
+
+            Text(text)
+                .font(.body)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(BlueprintTheme.surface)
-                .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
-        )
-        .padding(.horizontal)
     }
 }
 
@@ -135,59 +119,48 @@ private struct PermissionsEnableView: View {
     @State private var isRequesting = false
     @State private var showingPermissionAlert = false
 
-    @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     private let notificationService = NotificationService()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Enable capture sensors")
-                        .font(.title2).fontWeight(.bold)
-                        .blueprintGradientText()
-                    Text("We use your camera, microphone and motion sensors to build metrically-accurate walkthroughs.")
-                        .font(.callout)
-                        .blueprintSecondaryOnDark()
-                }
+        VStack(spacing: 24) {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
 
-                BlueprintGlassCard {
-                    PermissionsRow(title: "Camera", description: "Records the visual walkthrough", granted: cameraGranted)
-                    Divider()
-                    PermissionsRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: microphoneGranted)
-                    Divider()
-                    PermissionsRow(title: "Location", description: "Pins your captures to the correct address", granted: locationGranted)
-                }
+                Text("Enable Permissions")
+                    .font(.title2.weight(.bold))
 
-                BlueprintGlassCard {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: notificationsGranted ? "checkmark.seal.fill" : "bell.badge.fill")
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(notificationsGranted ? BlueprintTheme.successGreen : BlueprintTheme.primary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Notifications (recommended)").font(.headline).blueprintPrimaryOnDark()
-                            Text("Get reminders when you're near a job.")
-                                .font(.subheadline).blueprintSecondaryOnDark()
-                            Button(action: requestNotifications) { Text(notificationsGranted ? "Enabled" : "Enable notifications") }
-                                .buttonStyle(BlueprintSecondaryButtonStyle())
-                                .disabled(notificationsGranted)
-                        }
-                        Spacer()
-                    }
-                }
-
-                Button(action: enableAll) {
-                    HStack {
-                        if isRequesting { ProgressView().tint(.white) }
-                        Text(grantedAll ? "Continue" : "Enable & continue")
-                    }
-                }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-                .disabled(isRequesting)
-                .padding(.bottom, 8)
+                Text("We need access to capture scans and find nearby opportunities.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
-            .padding(.horizontal)
-            .padding(.top, -15)
+            .padding(.top, 32)
+
+            VStack(spacing: 12) {
+                permissionRow(title: "Camera", icon: "camera.fill", granted: cameraGranted)
+                permissionRow(title: "Microphone", icon: "mic.fill", granted: microphoneGranted)
+                permissionRow(title: "Location", icon: "location.fill", granted: locationGranted)
+                permissionRow(title: "Notifications", icon: "bell.fill", granted: notificationsGranted)
+            }
+            .padding(.horizontal, 24)
+
+            Spacer()
+
+            Button(action: enableAll) {
+                if isRequesting {
+                    ProgressView().tint(.white)
+                } else {
+                    Text("Enable All")
+                }
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .disabled(isRequesting)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
         .task { refreshNotificationStatus() }
         .onChange(of: scenePhase) { phase in
@@ -196,19 +169,40 @@ private struct PermissionsEnableView: View {
                 refreshNotificationStatus()
             }
         }
-        .alert("Permissions required", isPresented: $showingPermissionAlert) {
+        .alert("Permissions Required", isPresented: $showingPermissionAlert) {
             Button("Open Settings") {
-                guard
-                    let settingsURL = URL(string: UIApplication.openSettingsURLString),
-                    UIApplication.shared.canOpenURL(settingsURL)
-                else { return }
-
-                UIApplication.shared.open(settingsURL, options: [:], completionHandler: nil)
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Continue Anyway") { onContinue() }
         } message: {
-            Text("Blueprint needs access to your camera and location to continue. Please enable these permissions in Settings to proceed.")
+            Text("Camera and location are required for scanning. Enable them in Settings to continue.")
         }
+    }
+
+    private func permissionRow(title: String, icon: String, granted: Bool) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(granted ? BlueprintTheme.successGreen : .secondary)
+                .frame(width: 24)
+
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.primary)
+
+            Spacer()
+
+            Image(systemName: granted ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(granted ? BlueprintTheme.successGreen : .secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 
     private var grantedAll: Bool { cameraGranted && microphoneGranted && locationGranted }
@@ -224,6 +218,7 @@ private struct PermissionsEnableView: View {
             await requestCamera()
             await requestMicrophone()
             await requestLocation()
+            await requestNotifications()
             await MainActor.run {
                 isRequesting = false
                 if requiredPermissionsGranted {
@@ -246,7 +241,6 @@ private struct PermissionsEnableView: View {
         let granted = await AVCaptureDevice.requestAccess(for: .video)
         await MainActor.run { self.cameraGranted = granted }
         UserDeviceService.setPermission("camera", granted: granted)
-        AppSessionService.shared.log("permission.camera", metadata: ["granted": granted])
     }
 
     private func requestMicrophone() async {
@@ -257,34 +251,24 @@ private struct PermissionsEnableView: View {
         }
         await MainActor.run { self.microphoneGranted = granted }
         UserDeviceService.setPermission("microphone", granted: granted)
-        AppSessionService.shared.log("permission.microphone", metadata: ["granted": granted])
     }
 
     private func requestLocation() async {
         let granted = await LocationPermissionRequester.requestWhenInUse()
         await MainActor.run { self.locationGranted = granted }
         UserDeviceService.setPermission("location", granted: granted)
-        AppSessionService.shared.log("permission.location", metadata: ["granted": granted])
-        // Kick off discovery prefetch as soon as we have permission and a coordinate
         if granted {
             if let coord = await OneShotLocationFetcher.fetch() {
                 let prefetcher = NearbyDiscoveryPrefetcher()
                 prefetcher.runOnceIfPossible(userLocation: coord, radiusMeters: 1609, limit: 25)
-                AppSessionService.shared.log("prefetch.nearby", metadata: ["lat": coord.latitude, "lng": coord.longitude])
             }
         }
     }
 
-    private func requestNotifications() {
-        Task {
-            await notificationService.requestAuthorizationIfNeeded();
-            refreshNotificationStatus()
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
-                let granted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-                UserDeviceService.setPermission("notifications", granted: granted)
-                AppSessionService.shared.log("permission.notifications", metadata: ["granted": granted])
-            }
-        }
+    private func requestNotifications() async {
+        await notificationService.requestAuthorizationIfNeeded()
+        await MainActor.run { refreshNotificationStatus() }
+        UserDeviceService.setPermission("notifications", granted: notificationsGranted)
     }
 
     private func refreshNotificationStatus() {
@@ -296,92 +280,70 @@ private struct PermissionsEnableView: View {
     }
 }
 
-private struct PermissionsRow: View {
-    let title: String
-    let description: String
-    let granted: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(granted ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .blueprintPrimaryOnDark()
-                Text(description)
-                    .font(.subheadline)
-                    .blueprintSecondaryOnDark()
-            }
-            Spacer()
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(granted ? 0.10 : 0.03))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(granted ? 0.14 : 0.06), lineWidth: 1)
-        )
-    }
-}
-
 // MARK: - Step 3: Payouts connection (optional for first run)
 private struct PayoutsPromptView: View {
     let onConnect: () -> Void
     let onSkip: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("How payouts work")
-                    .font(.title2).fontWeight(.bold)
-                    .blueprintGradientText()
-                Text("Connect a bank account now or later. You can start scanning immediately.")
-                    .font(.callout).blueprintSecondaryOnDark()
-            }
+        VStack(spacing: 32) {
+            Spacer()
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 12) {
-                    Image(systemName: "calendar").foregroundStyle(BlueprintTheme.primary)
-                    Text("Default: Weekly payouts for Mon–Sun, deposited Wed–Thu")
-                        .font(.subheadline)
-                        .blueprintPrimaryOnDark()
-                }
-                HStack(spacing: 12) {
-                    Image(systemName: "creditcard.fill").foregroundStyle(BlueprintTheme.accentAqua)
-                    Text("After each capture: Auto-deposit to Blueprint Card (no fee)")
-                        .font(.subheadline)
-                        .blueprintPrimaryOnDark()
-                }
-                HStack(spacing: 12) {
-                    Image(systemName: "bolt.fill").foregroundStyle(BlueprintTheme.warningOrange)
-                    Text("Instant Pay: Same-day cash out to your debit (fee applies)")
-                        .font(.subheadline)
-                        .blueprintPrimaryOnDark()
-                }
+            VStack(spacing: 20) {
+                Image(systemName: "creditcard.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                Text("Get Paid")
+                    .font(.title2.weight(.bold))
+
+                Text("Connect your bank account to receive payouts for completed scans.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
             }
-            .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.white.opacity(0.16))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
-            )
 
             Spacer()
 
-            Button(action: onConnect) { HStack { Image(systemName: "link"); Text("Connect bank account") } }
+            VStack(spacing: 16) {
+                featureRow(icon: "calendar", text: "Weekly payouts every Wednesday")
+                featureRow(icon: "bolt.fill", text: "Instant transfers available")
+                featureRow(icon: "lock.shield", text: "Secure via Stripe")
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            VStack(spacing: 12) {
+                Button(action: onConnect) {
+                    Text("Connect Bank Account")
+                }
                 .buttonStyle(BlueprintPrimaryButtonStyle())
-            Button(action: onSkip) { Text("Do this later") }
+
+                Button(action: onSkip) {
+                    Text("Skip for Now")
+                }
                 .buttonStyle(BlueprintSecondaryButtonStyle())
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding()
+    }
+
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(BlueprintTheme.brandTeal)
+                .frame(width: 24)
+
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
     }
 }
 
@@ -390,28 +352,33 @@ private struct CompletionView: View {
     let onFinish: () -> Void
 
     var body: some View {
-        VStack(spacing: 28) {
-            VStack(spacing: 12) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 60))
+        VStack(spacing: 32) {
+            Spacer()
+
+            VStack(spacing: 20) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 72))
                     .foregroundStyle(BlueprintTheme.successGreen)
-                Text("You’re ready to scan")
-                    .font(.title2).fontWeight(.bold)
-                    .blueprintGradientText()
-                Text("You can find locations near you or start a new walkthrough now.")
-                    .font(.subheadline).blueprintSecondaryOnDark()
+
+                Text("You're All Set!")
+                    .font(.title.weight(.bold))
+
+                Text("Find opportunities near you and start earning.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
             }
-            .padding(.top, 32)
 
             Spacer()
 
-            Button(action: onFinish) { Text("Start scanning") }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-                .padding(.horizontal)
+            Button(action: onFinish) {
+                Text("Start Earning")
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding()
     }
 }
 

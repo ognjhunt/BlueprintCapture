@@ -1,56 +1,28 @@
 import Combine
-import PhotosUI
 import SwiftUI
 import UIKit
 
 /// Main view for Meta smart glasses video capture.
-/// Handles device connection, capture session, and upload.
 struct GlassesCaptureView: View {
     @StateObject private var captureManager = GlassesCaptureManager()
     @StateObject private var uploadViewModel = GlassesUploadViewModel()
-    @State private var showingDeviceSelection = false
-    @State private var showingCaptureComplete = false
-    @State private var mockVideoPickerItem: PhotosPickerItem?
-    @State private var mockVideoLoadMessage: String?
-    @State private var mockVideoLoadError: String?
     @State private var locationId: String = ""
-
-    // Venue permission for this capture (would be set when user selects a location)
-    @State private var venuePermission: VenuePermission? = .demo
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             ZStack {
                 content
             }
-            .navigationTitle("Glasses Capture")
+            .navigationTitle("Meta Glasses")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
         }
         .blueprintAppBackground()
-        .onChange(of: mockVideoPickerItem) { newItem in
-            handleMockVideoSelection(newItem)
-        }
-        .alert(
-            "Unable to Load Video",
-            isPresented: Binding(
-                get: { mockVideoLoadError != nil },
-                set: { isPresented in
-                    if !isPresented {
-                        mockVideoLoadError = nil
-                    }
-                }
-            ),
-            actions: {
-                Button("OK", role: .cancel) {
-                    mockVideoLoadError = nil
-                }
-            },
-            message: {
-                Text(mockVideoLoadError ?? "Unknown error")
-            }
-        )
     }
 
     @ViewBuilder
@@ -76,72 +48,62 @@ struct GlassesCaptureView: View {
     // MARK: - Disconnected State
 
     private var disconnectedView: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 32) {
             Spacer()
 
-            // Hero illustration
-            VStack(spacing: 16) {
+            // Hero
+            VStack(spacing: 20) {
                 Image(systemName: "eyeglasses")
-                    .font(.system(size: 80))
+                    .font(.system(size: 72))
                     .foregroundStyle(BlueprintTheme.brandTeal)
 
                 Text("Connect Your Glasses")
                     .font(.title2.weight(.bold))
-                    .blueprintGradientText()
 
-                Text("Pair your Meta Ray-Ban or Oakley glasses to capture immersive walkthroughs for 3D reconstruction.")
-                    .font(.subheadline)
-                    .blueprintSecondaryOnDark()
+                Text("Pair your Meta Ray-Ban glasses to capture hands-free.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, 40)
             }
 
             Spacer()
 
-            // Features list
-            BlueprintGlassCard {
-                FeatureRow(icon: "video.fill", title: "720p @ 30fps", description: "High quality video streaming via Bluetooth")
-                Divider().opacity(0.3)
-                FeatureRow(icon: "infinity", title: "Unlimited Duration", description: "Capture as long as you need")
-                Divider().opacity(0.3)
-                FeatureRow(icon: "iphone.and.arrow.forward", title: "Hands-Free", description: "Walk naturally while capturing")
+            // Features
+            VStack(spacing: 16) {
+                featureItem(icon: "video.fill", text: "720p video capture")
+                featureItem(icon: "figure.walk", text: "Walk naturally while recording")
+                featureItem(icon: "icloud.and.arrow.up", text: "Auto-upload when done")
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 32)
 
             Spacer()
-
-            // Mock device toggle for testing
-            VStack(spacing: 12) {
-                Toggle(isOn: $captureManager.useMockDevice) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "wrench.and.screwdriver")
-                            .foregroundStyle(BlueprintTheme.warningOrange)
-                        Text("Use Mock Device (Testing)")
-                            .font(.subheadline)
-                            .blueprintPrimaryOnDark()
-                    }
-                }
-                .toggleStyle(SwitchToggleStyle(tint: BlueprintTheme.brandTeal))
-                .padding(.horizontal, 24)
-
-                if captureManager.useMockDevice {
-                    Text("MockDeviceKit enabled - simulates glasses for testing")
-                        .font(.caption)
-                        .blueprintTertiaryOnDark()
-                }
-            }
 
             // Scan button
             Button {
                 captureManager.startScanning()
             } label: {
-                Label("Scan for Glasses", systemImage: "antenna.radiowaves.left.and.right")
+                Text("Scan for Glasses")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
-            .padding(.horizontal)
-            .padding(.bottom)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding(.top)
+    }
+
+    private func featureItem(icon: String, text: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(BlueprintTheme.brandTeal)
+                .frame(width: 24)
+
+            Text(text)
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
     }
 
     // MARK: - Scanning State
@@ -312,59 +274,43 @@ struct GlassesCaptureView: View {
             Spacer()
 
             // Preview placeholder
-            VStack(spacing: 16) {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.black.opacity(0.3))
-                    .aspectRatio(16/9, contentMode: .fit)
-                    .overlay(
-                        VStack(spacing: 8) {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.white.opacity(0.5))
-                            Text("Ready to capture")
-                                .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                    )
-                    .padding(.horizontal)
-
-                Text("Video will stream at 720p @ 30fps")
-                    .font(.caption)
-                    .blueprintTertiaryOnDark()
-            }
-
-            if captureManager.isConnectedToMockDevice {
-                mockVideoSelector
-            }
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.black.opacity(0.3))
+                .aspectRatio(16/9, contentMode: .fit)
+                .overlay(
+                    VStack(spacing: 12) {
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 40))
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text("Ready to capture")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                )
+                .padding(.horizontal, 24)
 
             Spacer()
 
-            // Capture instructions
-            BlueprintGlassCard {
-                HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: "lightbulb.fill")
-                        .foregroundStyle(BlueprintTheme.warningOrange)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Capture Tips")
-                            .font(.subheadline.weight(.semibold))
-                            .blueprintPrimaryOnDark()
-                        Text("Walk slowly and steadily. Cover all angles of the space. Include a scale reference (like a door or ruler) in your walkthrough.")
-                            .font(.caption)
-                            .blueprintSecondaryOnDark()
-                    }
-                }
+            // Tips
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Walk slowly and cover all angles", systemImage: "figure.walk")
+                Label("Include doorways for scale reference", systemImage: "door.left.hand.open")
             }
-            .padding(.horizontal)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 32)
 
-            // Start capture button
+            Spacer()
+
+            // Start button
             Button {
                 captureManager.startCapture()
             } label: {
-                Label("Start Capture", systemImage: "record.circle")
+                Text("Start Recording")
             }
             .buttonStyle(BlueprintSuccessButtonStyle())
-            .padding(.horizontal)
-            .padding(.bottom)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
     }
 
@@ -391,85 +337,57 @@ struct GlassesCaptureView: View {
     // MARK: - Streaming State
 
     private func streamingView(info: GlassesCaptureManager.StreamingInfo) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 20) {
             // Live preview
             if let frame = captureManager.currentFrame {
                 Image(uiImage: frame)
                     .resizable()
                     .aspectRatio(16/9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(alignment: .top) {
-                        HStack {
-                            // Recording indicator (top-left)
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 12, height: 12)
-                                Text("REC")
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.6))
-                            .clipShape(Capsule())
-
-                            Spacer()
-
-                            // Permission badge (top-right) - tap to show authorization
-                            VenuePermissionBadge(permission: venuePermission)
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 10, height: 10)
+                            Text("REC")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.6))
+                        .clipShape(Capsule())
                         .padding(12)
                     }
-                    .padding(.horizontal)
+                    .padding(.horizontal, 24)
             } else {
                 RoundedRectangle(cornerRadius: 16)
                     .fill(Color.black.opacity(0.3))
                     .aspectRatio(16/9, contentMode: .fit)
                     .overlay(ProgressView().tint(.white))
-                    .padding(.horizontal)
+                    .padding(.horizontal, 24)
             }
 
-            // Stats bar
-            HStack(spacing: 24) {
-                StatItem(icon: "timer", value: formatDuration(info.durationSeconds), label: "Duration")
-                StatItem(icon: "film", value: "\(info.frameCount)", label: "Frames")
-                StatItem(icon: "speedometer", value: String(format: "%.1f", info.fps), label: "FPS")
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.black.opacity(0.3))
-            )
-            .padding(.horizontal)
+            // Duration display
+            Text(formatDuration(info.durationSeconds))
+                .font(.system(size: 48, weight: .light, design: .monospaced))
+                .foregroundStyle(.primary)
 
             Spacer()
 
-            // Controls
-            HStack(spacing: 20) {
-                Button {
-                    captureManager.pauseCapture()
-                } label: {
-                    Image(systemName: "pause.fill")
-                        .font(.title)
-                        .foregroundStyle(.white)
-                        .frame(width: 60, height: 60)
-                        .background(Circle().fill(BlueprintTheme.warningOrange))
-                }
-
-                Button {
-                    captureManager.stopCapture()
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .font(.title)
-                        .foregroundStyle(.white)
-                        .frame(width: 80, height: 80)
-                        .background(Circle().fill(Color.red))
-                }
+            // Stop button
+            Button {
+                captureManager.stopCapture()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .font(.title)
+                    .foregroundStyle(.white)
+                    .frame(width: 80, height: 80)
+                    .background(Circle().fill(Color.red))
             }
-            .padding(.bottom)
+            .padding(.bottom, 32)
         }
-        .padding(.top)
+        .padding(.top, 16)
     }
 
     // MARK: - Paused State
@@ -523,94 +441,76 @@ struct GlassesCaptureView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            // Success icon
+            // Success
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 60))
+                    .font(.system(size: 64))
                     .foregroundStyle(BlueprintTheme.successGreen)
 
-                Text("Capture Complete!")
+                Text("Capture Complete")
                     .font(.title2.weight(.bold))
-                    .blueprintGradientText()
-            }
 
-            // Summary card
-            BlueprintGlassCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    SummaryRow(label: "Duration", value: formatDuration(artifacts.durationSeconds))
-                    Divider().opacity(0.3)
-                    SummaryRow(label: "Frames", value: "\(artifacts.frameCount)")
-                    Divider().opacity(0.3)
-                    SummaryRow(label: "Resolution", value: "1280 x 720")
-                    Divider().opacity(0.3)
-                    SummaryRow(label: "File Size", value: fileSize(for: artifacts.videoURL))
-                }
+                Text("\(formatDuration(artifacts.durationSeconds)) recorded")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal)
 
             Spacer()
 
-            // Action buttons
-            VStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Location / Place ID")
-                        .font(.subheadline.weight(.semibold))
-                        .blueprintPrimaryOnDark()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    TextField("e.g. Google Place ID", text: $locationId)
-                        .textInputAutocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color.white.opacity(0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(Color.white.opacity(0.1))
-                        )
-                }
-                .padding()
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color.white.opacity(0.04))
-                )
-
+            // Upload status
+            VStack(spacing: 16) {
                 if case .uploading(let progress) = uploadViewModel.state {
                     VStack(spacing: 8) {
                         ProgressView(value: progress)
                             .progressViewStyle(.linear)
+                            .tint(BlueprintTheme.brandTeal)
                         Text("Uploading... \(Int(progress * 100))%")
-                            .font(.footnote)
-                            .blueprintSecondaryOnDark()
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
+                    .padding(.horizontal, 32)
                 } else if case .completed = uploadViewModel.state {
                     Label("Upload complete", systemImage: "checkmark.circle.fill")
+                        .font(.headline)
                         .foregroundStyle(BlueprintTheme.successGreen)
                 } else if case .failed(let message) = uploadViewModel.state {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(BlueprintTheme.errorRed)
-                        .multilineTextAlignment(.center)
+                    VStack(spacing: 8) {
+                        Label("Upload failed", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(BlueprintTheme.errorRed)
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
-                Button {
-                    uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
-                } label: {
-                    Label("Upload to Pipeline", systemImage: "icloud.and.arrow.up")
+                if case .completed = uploadViewModel.state {
+                    Button {
+                        uploadViewModel.reset()
+                        captureManager.reset()
+                    } label: {
+                        Text("Done")
+                    }
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+                    .padding(.horizontal, 24)
+                } else if case .failed = uploadViewModel.state {
+                    Button {
+                        uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
+                    } label: {
+                        Text("Retry Upload")
+                    }
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+                    .padding(.horizontal, 24)
+                } else if case .idle = uploadViewModel.state {
+                    Button {
+                        uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
+                    } label: {
+                        Text("Upload")
+                    }
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+                    .padding(.horizontal, 24)
                 }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-                .disabled(uploadViewModel.isUploading)
-
-                Button {
-                    uploadViewModel.reset()
-                    captureManager.reset()
-                } label: {
-                    Text("Start New Capture")
-                }
-                .buttonStyle(BlueprintSecondaryButtonStyle())
             }
-            .padding(.horizontal)
-            .padding(.bottom)
+            .padding(.bottom, 32)
         }
     }
 
@@ -660,13 +560,12 @@ struct GlassesCaptureView: View {
 
                 Text("Capture Error")
                     .font(.headline)
-                    .blueprintPrimaryOnDark()
 
                 Text(message)
                     .font(.subheadline)
-                    .blueprintSecondaryOnDark()
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 32)
             }
 
             Spacer()
@@ -674,95 +573,15 @@ struct GlassesCaptureView: View {
             Button {
                 captureManager.startCapture()
             } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
+                Text("Try Again")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
-            .padding(.horizontal)
-            .padding(.bottom)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
     }
 
-    private var mockVideoSelector: some View {
-        BlueprintGlassCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
-                    Image(systemName: "play.rectangle.fill")
-                        .foregroundStyle(BlueprintTheme.brandTeal)
-                    Text("Mock video source")
-                        .font(.subheadline.weight(.semibold))
-                        .blueprintPrimaryOnDark()
-                }
-
-                Text("Upload a video to stream through MockDeviceKit while keeping the capture UX intact.")
-                    .font(.caption)
-                    .blueprintSecondaryOnDark()
-
-                HStack {
-                    Image(systemName: "film")
-                        .foregroundStyle(.white.opacity(0.7))
-                    Text(captureManager.mockVideoURL?.lastPathComponent ?? "No video selected")
-                        .font(.caption)
-                        .blueprintPrimaryOnDark()
-                        .lineLimit(1)
-                    Spacer()
-                }
-
-                PhotosPicker(
-                    selection: $mockVideoPickerItem,
-                    matching: .videos,
-                    preferredItemEncoding: .automatic
-                ) {
-                    Label("Select Mock Video", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(BlueprintSecondaryButtonStyle())
-
-                if let mockVideoLoadMessage {
-                    Text(mockVideoLoadMessage)
-                        .font(.caption2)
-                        .foregroundStyle(BlueprintTheme.successGreen)
-                }
-            }
-        }
-        .padding(.horizontal)
-    }
-
-    private func handleMockVideoSelection(_ item: PhotosPickerItem?) {
-        guard let item else { return }
-
-        Task {
-            await MainActor.run {
-                mockVideoLoadMessage = nil
-                mockVideoLoadError = nil
-            }
-
-            do {
-                guard let data = try await item.loadTransferable(type: Data.self) else {
-                    await MainActor.run {
-                        mockVideoLoadError = "No data was returned from the selected video."
-                    }
-                    return
-                }
-
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("mock-video-\(UUID().uuidString)")
-                    .appendingPathExtension("mov")
-
-                try data.write(to: tempURL, options: .atomic)
-
-                await MainActor.run {
-                    captureManager.updateMockVideoURL(tempURL)
-                    mockVideoLoadMessage = "Loaded \(tempURL.lastPathComponent)"
-                    mockVideoLoadError = nil
-                }
-            } catch {
-                await MainActor.run {
-                    mockVideoLoadError = error.localizedDescription
-                }
-            }
-        }
-    }
-
-    // MARK: - Helper Views
+    // MARK: - Helpers
 
     private func formatDuration(_ seconds: Double) -> String {
         let mins = Int(seconds) / 60
@@ -857,32 +676,6 @@ final class GlassesUploadViewModel: ObservableObject {
 
 // MARK: - Supporting Views
 
-private struct FeatureRow: View {
-    let icon: String
-    let title: String
-    let description: String
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundStyle(BlueprintTheme.brandTeal)
-                .frame(width: 30)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .blueprintPrimaryOnDark()
-                Text(description)
-                    .font(.caption)
-                    .blueprintSecondaryOnDark()
-            }
-
-            Spacer()
-        }
-    }
-}
-
 private struct DeviceRow: View {
     let device: GlassesCaptureManager.DiscoveredDevice
     let onConnect: () -> Void
@@ -890,78 +683,37 @@ private struct DeviceRow: View {
     var body: some View {
         Button(action: onConnect) {
             HStack(spacing: 14) {
-                Image(systemName: device.isMock ? "wrench.and.screwdriver" : "eyeglasses")
+                Image(systemName: "eyeglasses")
                     .font(.title3)
-                    .foregroundStyle(device.isMock ? BlueprintTheme.warningOrange : BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.brandTeal)
                     .frame(width: 40, height: 40)
                     .background(
                         Circle()
-                            .fill((device.isMock ? BlueprintTheme.warningOrange : BlueprintTheme.brandTeal).opacity(0.15))
+                            .fill(BlueprintTheme.brandTeal.opacity(0.15))
                     )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(device.name)
-                        .font(.subheadline.weight(.semibold))
-                        .blueprintPrimaryOnDark()
-                    Text(device.isMock ? "Mock Device" : "Ready to connect")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Text("Tap to connect")
                         .font(.caption)
-                        .blueprintSecondaryOnDark()
+                        .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .foregroundStyle(.white.opacity(0.5))
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
-            )
-        }
-    }
-}
-
-private struct StatItem: View {
-    let icon: String
-    let value: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
                     .font(.caption)
-                Text(value)
-                    .font(.headline.monospacedDigit())
+                    .foregroundStyle(.tertiary)
             }
-            .blueprintPrimaryOnDark()
-
-            Text(label)
-                .font(.caption2)
-                .blueprintTertiaryOnDark()
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
         }
-    }
-}
-
-private struct SummaryRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .blueprintSecondaryOnDark()
-            Spacer()
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .blueprintPrimaryOnDark()
-        }
+        .buttonStyle(.plain)
     }
 }
 
