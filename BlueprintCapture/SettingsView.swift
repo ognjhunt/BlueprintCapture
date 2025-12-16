@@ -5,402 +5,29 @@ struct SettingsView: View {
     @State private var showingStripeOnboarding = false
     @State private var showingEditProfile = false
     @State private var showingAuth = false
+    @State private var showingGlassesCapture = false
 
-    private var recentCaptures: [CaptureHistoryEntry] {
-        Array(
-            viewModel.captureHistory
-                .sorted { $0.capturedAt > $1.capturedAt }
-                .prefix(5)
-        )
-    }
-
-    private var upcomingPayouts: [PayoutLedgerEntry] {
-        Array(
-            viewModel.payoutLedger
-                .filter { $0.isUpcoming }
-                .sorted { $0.scheduledFor < $1.scheduledFor }
-                .prefix(4)
-        )
-    }
-    
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
-                    // Profile Section
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 50))
-                                    .foregroundStyle(BlueprintTheme.brandTeal)
+                VStack(spacing: 20) {
+                    // Profile & Earnings Card
+                    profileEarningsCard
 
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(viewModel.profile.fullName)
-                                        .font(.title2)
-                                        .fontWeight(.bold)
+                    // Bank Account Card
+                    bankAccountCard
 
-                                    Text(viewModel.profile.email)
-                                        .font(.subheadline)
-                                        .blueprintSecondaryOnDark()
-                                }
+                    // Quick Actions
+                    quickActionsCard
 
-                                Spacer()
-                            }
-                        }
-                    }
-
-                    // Capture Activity
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "video.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(BlueprintTheme.accentAqua)
-
-                                Text("Recent Captures")
-                                    .font(.headline)
-
-                                Spacer()
-                            }
-
-                            Divider()
-
-                            if recentCaptures.isEmpty {
-                                Text("No captures yet. Your completed scans will appear here with their review status.")
-                                    .font(.subheadline)
-                                    .blueprintSecondaryOnDark()
-                            } else {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    ForEach(Array(recentCaptures.enumerated()), id: \.element.id) { index, entry in
-                                        CaptureHistoryRow(entry: entry)
-                                        if index < recentCaptures.count - 1 {
-                                            Divider()
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if let qcStatus = viewModel.qcStatus {
-                        BlueprintGlassCard {
-                            VStack(alignment: .leading, spacing: 16) {
-                                HStack {
-                                    Image(systemName: "checkmark.seal.fill")
-                                        .font(.title2)
-                                        .foregroundStyle(BlueprintTheme.successGreen)
-
-                                    Text("Quality Control")
-                                        .font(.headline)
-
-                                    Spacer()
-                                }
-
-                                Divider()
-
-                                QCStatusSummary(status: qcStatus)
-                            }
-                        }
-                    }
-
-                    // Earnings Section
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "dollarsign.circle.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(BlueprintTheme.successGreen)
-                                
-                                Text("Earnings")
-                                    .font(.headline)
-                                
-                                Spacer()
-                            }
-                            
-                            Divider()
-                            
-                            VStack(spacing: 12) {
-                                HStack {
-                                    Text("Total Earned")
-                                        .blueprintSecondaryOnDark()
-                                    Spacer()
-                                    Text(viewModel.totalEarnings, format: .currency(code: "USD"))
-                                        .font(.headline)
-                                        .foregroundStyle(BlueprintTheme.successGreen)
-                                }
-                                
-                                HStack {
-                                    Text("Pending Payout")
-                                        .blueprintSecondaryOnDark()
-                                    Spacer()
-                                    Text(viewModel.pendingPayout, format: .currency(code: "USD"))
-                                        .font(.headline)
-                                }
-                                
-                                HStack {
-                                    Text("Scans Completed")
-                                        .blueprintSecondaryOnDark()
-                                    Spacer()
-                                    Text("\(viewModel.scansCompleted)")
-                                        .font(.headline)
-                                }
-                            }
-                        }
-                    }
-
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "calendar.badge.clock")
-                                    .font(.title2)
-                                    .foregroundStyle(BlueprintTheme.primary)
-
-                                Text("Upcoming Payouts")
-                                    .font(.headline)
-
-                                Spacer()
-                            }
-
-                            Divider()
-
-                            if upcomingPayouts.isEmpty {
-                                Text("No transfers scheduled. Once QC approves your captures you'll see payout dates here.")
-                                    .font(.subheadline)
-                                    .blueprintSecondaryOnDark()
-                            } else {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    ForEach(Array(upcomingPayouts.enumerated()), id: \.element.id) { index, entry in
-                                        UpcomingPayoutRow(entry: entry)
-                                        if index < upcomingPayouts.count - 1 {
-                                            Divider()
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Billing Info Section
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "creditcard.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(BlueprintTheme.primary)
-
-                                Text("Billing Information")
-                                    .font(.headline)
-
-                                Spacer()
-                            }
-
-                            Divider()
-
-                            VStack(alignment: .leading, spacing: 16) {
-                                if let billingInfo = viewModel.billingInfo {
-                                    VStack(spacing: 16) {
-                                        HStack(spacing: 12) {
-                                            Image(systemName: "building.columns.fill")
-                                                .font(.title3)
-                                                .foregroundStyle(BlueprintTheme.accentAqua)
-
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text("Connected Bank Account")
-                                                    .font(.subheadline)
-                                                    .blueprintSecondaryOnDark()
-
-                                                Text("\(billingInfo.bankName) ••••\(billingInfo.lastFour)")
-                                                    .font(.body)
-                                                    .fontWeight(.medium)
-                                            }
-
-                                            Spacer()
-
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(BlueprintTheme.successGreen)
-                                        }
-                                        .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(BlueprintTheme.surfaceElevated)
-                                        )
-
-                                        HStack(spacing: 12) {
-                                            Button {
-                                                showingStripeOnboarding = true
-                                            } label: {
-                                                Text("Change Bank Account")
-                                            }
-                                            .buttonStyle(BlueprintSecondaryButtonStyle())
-
-                                            Button {
-                                                Task {
-                                                    await viewModel.disconnectBankAccount()
-                                                }
-                                            } label: {
-                                                Text("Disconnect")
-                                            }
-                                            .buttonStyle(BlueprintSecondaryButtonStyle())
-                                        }
-
-                                        Divider()
-
-                                        VStack(alignment: .leading, spacing: 8) {
-                                            Text("Payouts")
-                                                .font(.subheadline)
-                                                .blueprintSecondaryOnDark()
-                                            Button {
-                                                showingStripeOnboarding = true
-                                            } label: {
-                                                HStack { Image(systemName: "banknote.fill"); Text("Manage Payouts & Onboarding") }
-                                            }
-                                            .buttonStyle(BlueprintSecondaryButtonStyle())
-                                            Text("Default weekly deposits; after-each-capture via card; Instant Pay available.")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                } else {
-                                    VStack(spacing: 16) {
-                                        HStack {
-                                            Image(systemName: "exclamationmark.triangle.fill")
-                                                .foregroundStyle(BlueprintTheme.warningOrange)
-
-                                            Text("No bank account connected")
-                                                .blueprintSecondaryOnDark()
-
-                                            Spacer()
-                                        }
-                                        .padding()
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(BlueprintTheme.warningOrange.opacity(0.1))
-                                        )
-
-                                        Button {
-                                            showingStripeOnboarding = true
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "plus.circle.fill")
-                                                Text("Connect Bank Account")
-                                            }
-                                        }
-                                        .buttonStyle(BlueprintPrimaryButtonStyle())
-
-                                        Button {
-                                            showingStripeOnboarding = true
-                                        } label: {
-                                            HStack {
-                                                Image(systemName: "banknote.fill")
-                                                Text("Payouts & Onboarding")
-                                            }
-                                        }
-                                        .buttonStyle(BlueprintSecondaryButtonStyle())
-                                    }
-                                }
-
-                                if let stripeState = viewModel.stripeAccountState {
-                                    Divider()
-                                    StripeAccountStatusSummary(state: stripeState)
-                                }
-                            }
-
-                            HStack {
-                                Spacer()
-                                Text("Powered by")
-                                    .font(.caption2)
-                                    .blueprintSecondaryOnDark()
-                                Text("Stripe")
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(Color(red: 0.38, green: 0.42, blue: 0.98))
-                                Spacer()
-                            }
-                            .padding(.top, 8)
-                        }
-                    }
-                    
                     // Account Settings
-                    BlueprintGlassCard {
-                        VStack(alignment: .leading, spacing: 16) {
-                            HStack {
-                                Image(systemName: "gear")
-                                    .font(.title2)
-                                    .foregroundStyle(.secondary)
-                                
-                                Text("Account")
-                                    .font(.headline)
-                                
-                                Spacer()
-                            }
-                            
-                            Divider()
-                            
-                            if viewModel.isAuthenticated {
-                                Button {
-                                    viewModel.startEditingProfile()
-                                    showingEditProfile = true
-                                } label: {
-                                    HStack {
-                                        Text("Edit Profile")
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .foregroundStyle(.white)
-                            }
-                            
-                            Divider()
-                            
-                            Button {
-                                // Privacy settings action
-                            } label: {
-                                HStack {
-                                    Text("Privacy & Security")
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .foregroundStyle(.white)
-                            
-                            Divider()
-
-                            if viewModel.isAuthenticated {
-                                Button {
-                                    Task { await viewModel.signOut() }
-                                } label: {
-                                    HStack {
-                                        Text("Sign Out")
-                                        Spacer()
-                                    }
-                                }
-                                .foregroundStyle(BlueprintTheme.errorRed)
-                            } else {
-                                Button {
-                                    showingAuth = true
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "person.crop.circle.badge.plus")
-                                        Text("Sign up / Log in")
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .foregroundStyle(.white)
-                            }
-                        }
-                    }
+                    accountCard
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
-            .navigationTitle("Settings")
+            .navigationTitle("Account")
+            .navigationBarTitleDisplayMode(.large)
             .blueprintAppBackground()
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -414,297 +41,267 @@ struct SettingsView: View {
         .sheet(isPresented: $showingAuth) {
             AuthView()
         }
-        .overlay {
-            if viewModel.isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.black.opacity(0.1))
-            }
+        .sheet(isPresented: $showingGlassesCapture) {
+            GlassesCaptureView()
         }
         .task {
             await viewModel.loadUserData()
         }
     }
-}
 
-#Preview {
-    SettingsView()
-}
+    // MARK: - Profile & Earnings
 
-// MARK: - Subviews
+    private var profileEarningsCard: some View {
+        VStack(spacing: 16) {
+            // Profile header
+            HStack(spacing: 14) {
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
 
-private struct CaptureHistoryRow: View {
-    let entry: CaptureHistoryEntry
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.profile.fullName.isEmpty ? "Welcome" : viewModel.profile.fullName)
+                        .font(.title3.weight(.semibold))
 
-    private var timestampFormat: Date.FormatStyle {
-        .dateTime.month(.abbreviated).day().year().hour(.twoDigits(amPM: .abbreviated)).minute()
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            if let url = entry.thumbnailURL {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.gray.opacity(0.15))
-                        .overlay { ProgressView().controlSize(.small) }
-                }
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(entry.targetAddress)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .lineLimit(2)
-
-                Text(entry.capturedAt.formatted(timestampFormat))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let payout = entry.estimatedPayout {
-                    (Text("Est. payout ") + Text(payout, format: .currency(code: "USD")))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            CaptureStatusBadge(status: entry.status)
-        }
-    }
-}
-
-private struct CaptureStatusBadge: View {
-    let status: CaptureStatus
-
-    var body: some View {
-        Label {
-            Text(status.displayTitle)
-        } icon: {
-            Image(systemName: status.iconName)
-        }
-        .font(.caption.bold())
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(status.tintColor.opacity(0.12)))
-        .foregroundStyle(status.tintColor)
-    }
-}
-
-private struct QCStatusSummary: View {
-    let status: QualityControlStatus
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                MetricPill(title: "Pending", value: "\(status.pendingCount)", color: BlueprintTheme.primary)
-                MetricPill(title: "Needs Fix", value: "\(status.needsFixCount)", color: BlueprintTheme.warningOrange)
-                MetricPill(title: "Approved", value: "\(status.approvedCount)", color: BlueprintTheme.successGreen)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Avg review time \(status.averageTurnaroundHours, format: .number.precision(.fractionLength(1))) hrs")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Approval rate \(status.approvalRate, format: .percent.precision(.fractionLength(1)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Updated \(status.lastUpdated, format: .relative(presentation: .numeric))")
-                    .font(.caption2)
-                    .foregroundStyle(Color.secondary.opacity(0.7))
-            }
-        }
-    }
-}
-
-private struct MetricPill: View {
-    let title: String
-    let value: String
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text(value)
-                .font(.headline)
-                .foregroundStyle(color)
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(color.opacity(0.08))
-        )
-    }
-}
-
-private struct UpcomingPayoutRow: View {
-    let entry: PayoutLedgerEntry
-
-    private var dateFormat: Date.FormatStyle {
-        .dateTime.month(.abbreviated).day().year()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.scheduledFor.formatted(dateFormat))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-
-                    Text(entry.amount, format: .currency(code: "USD"))
-                        .font(.headline)
-                        .foregroundStyle(BlueprintTheme.successGreen)
-
-                    if let description = entry.description, !description.isEmpty {
-                        Text(description)
-                            .font(.caption)
+                    if !viewModel.profile.email.isEmpty {
+                        Text(viewModel.profile.email)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Spacer()
 
-                PayoutStatusBadge(status: entry.status)
-            }
-        }
-    }
-}
-
-private struct PayoutStatusBadge: View {
-    let status: PayoutLedgerStatus
-
-    var body: some View {
-        Label {
-            Text(status.displayTitle)
-        } icon: {
-            Image(systemName: status.iconName)
-        }
-        .font(.caption.bold())
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(status.tintColor.opacity(0.12)))
-        .foregroundStyle(status.tintColor)
-    }
-}
-
-private struct StripeAccountStatusSummary: View {
-    let state: StripeAccountState
-
-    private var nextPayoutDateStyle: Date.FormatStyle {
-        .dateTime.month(.abbreviated).day().year()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label {
-                Text(state.isReadyForTransfers ? "Stripe account active" : "Complete onboarding")
-                    .fontWeight(.semibold)
-            } icon: {
-                Image(systemName: state.isReadyForTransfers ? "checkmark.shield.fill" : "exclamationmark.triangle fill")
-            }
-            .foregroundStyle(state.isReadyForTransfers ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
-
-            Label {
-                Text("Payout cadence: Weekly (Mon–Sun, paid Wed–Thu)")
-            } icon: {
-                Image(systemName: "calendar")
-            }
-            .foregroundStyle(.secondary)
-
-            if let next = state.nextPayout {
-                Label {
-                    (Text("Next payout \(next.estimatedArrival.formatted(nextPayoutDateStyle)) · ") + Text(next.amount, format: .currency(code: "USD")))
-                } icon: {
-                    Image(systemName: "calendar.badge.clock")
+                if viewModel.isAuthenticated {
+                    Button {
+                        viewModel.startEditingProfile()
+                        showingEditProfile = true
+                    } label: {
+                        Image(systemName: "pencil.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+            }
+
+            Divider()
+
+            // Earnings summary
+            HStack(spacing: 0) {
+                earningsStat(
+                    value: viewModel.totalEarnings,
+                    label: "Total Earned",
+                    color: BlueprintTheme.successGreen
+                )
+
+                Divider()
+                    .frame(height: 40)
+
+                earningsStat(
+                    value: viewModel.pendingPayout,
+                    label: "Pending",
+                    color: BlueprintTheme.primary
+                )
+
+                Divider()
+                    .frame(height: 40)
+
+                VStack(spacing: 4) {
+                    Text("\(viewModel.scansCompleted)")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.primary)
+                    Text("Scans")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private func earningsStat(value: Decimal, label: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value, format: .currency(code: "USD"))
+                .font(.title2.weight(.bold))
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption)
                 .foregroundStyle(.secondary)
-            }
+        }
+        .frame(maxWidth: .infinity)
+    }
 
-            Label {
-                Text(state.instantPayoutEligible ? "Instant Pay available" : "Instant Pay locked")
-            } icon: {
-                Image(systemName: "bolt.fill")
-            }
-            .foregroundStyle(state.instantPayoutEligible ? BlueprintTheme.accentAqua : .secondary)
+    // MARK: - Bank Account
 
-            if let requirements = state.requirementsDue, !requirements.isEmpty {
-                Text("Pending: \(requirements.joined(separator: ", "))")
-                    .font(.caption)
-                    .foregroundStyle(BlueprintTheme.warningOrange)
+    private var bankAccountCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Payouts", systemImage: "creditcard.fill")
+                .font(.headline)
+
+            if let billingInfo = viewModel.billingInfo {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(BlueprintTheme.successGreen)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(billingInfo.bankName) ••••\(billingInfo.lastFour)")
+                            .font(.subheadline.weight(.medium))
+                        Text("Weekly payouts enabled")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Change") {
+                        showingStripeOnboarding = true
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(BlueprintTheme.primary)
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(BlueprintTheme.successGreen.opacity(0.1))
+                )
+            } else {
+                VStack(spacing: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundStyle(BlueprintTheme.warningOrange)
+                        Text("Connect a bank account to receive payouts")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+
+                    Button {
+                        showingStripeOnboarding = true
+                    } label: {
+                        Text("Connect Bank Account")
+                    }
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+                }
             }
         }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    // MARK: - Quick Actions
+
+    private var quickActionsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Capture Modes", systemImage: "camera.fill")
+                .font(.headline)
+
+            Button {
+                showingGlassesCapture = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "eyeglasses")
+                        .font(.title2)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .frame(width: 40)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Meta Glasses")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text("Hands-free capture with smart glasses")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(14)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(.tertiarySystemBackground))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    // MARK: - Account Settings
+
+    private var accountCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if viewModel.isAuthenticated {
+                settingsRow(icon: "person.crop.circle", title: "Edit Profile") {
+                    viewModel.startEditingProfile()
+                    showingEditProfile = true
+                }
+
+                Divider().padding(.leading, 52)
+
+                settingsRow(icon: "lock.shield", title: "Privacy & Security") {
+                    // Future: Privacy settings
+                }
+
+                Divider().padding(.leading, 52)
+
+                settingsRow(icon: "arrow.right.square", title: "Sign Out", isDestructive: true) {
+                    Task { await viewModel.signOut() }
+                }
+            } else {
+                settingsRow(icon: "person.crop.circle.badge.plus", title: "Sign Up / Log In") {
+                    showingAuth = true
+                }
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private func settingsRow(icon: String, title: String, isDestructive: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.body)
+                    .frame(width: 24)
+                    .foregroundStyle(isDestructive ? BlueprintTheme.errorRed : .secondary)
+
+                Text(title)
+                    .font(.body)
+                    .foregroundStyle(isDestructive ? BlueprintTheme.errorRed : .primary)
+
+                Spacer()
+
+                if !isDestructive {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
     }
 }
 
-// MARK: - Style Extensions
-
-private extension CaptureStatus {
-    var displayTitle: String {
-        switch self {
-        case .processing: return "Processing"
-        case .qc: return "QC Review"
-        case .approved: return "Approved"
-        case .needsFix: return "Needs Fix"
-        }
-    }
-
-    var iconName: String {
-        switch self {
-        case .processing: return "clock.arrow.2.circlepath"
-        case .qc: return "checkmark.magnifyingglass"
-        case .approved: return "checkmark.seal.fill"
-        case .needsFix: return "wrench.and.screwdriver"
-        }
-    }
-
-    var tintColor: Color {
-        switch self {
-        case .processing: return BlueprintTheme.accentAqua
-        case .qc: return BlueprintTheme.primary
-        case .approved: return BlueprintTheme.successGreen
-        case .needsFix: return BlueprintTheme.warningOrange
-        }
-    }
+#Preview {
+    SettingsView()
 }
-
-private extension PayoutLedgerStatus {
-    var displayTitle: String {
-        switch self {
-        case .pending: return "Scheduled"
-        case .inTransit: return "In Transit"
-        case .paid: return "Paid"
-        case .failed: return "Failed"
-        }
-    }
-
-    var iconName: String {
-        switch self {
-        case .pending: return "clock"
-        case .inTransit: return "arrow.triangle.2.circlepath"
-        case .paid: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    var tintColor: Color {
-        switch self {
-        case .pending: return BlueprintTheme.primary
-        case .inTransit: return BlueprintTheme.accentAqua
-        case .paid: return BlueprintTheme.successGreen
-        case .failed: return BlueprintTheme.errorRed
-        }
-    }
-}
-

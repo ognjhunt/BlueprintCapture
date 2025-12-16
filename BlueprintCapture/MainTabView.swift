@@ -1,27 +1,21 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @State private var selectedTab = 1
+    @State private var selectedTab = 0
 
     var body: some View {
         TabView(selection: $selectedTab) {
             NearbyTargetsView()
                 .tabItem {
-                    Label("Nearby", systemImage: "mappin.and.ellipse")
+                    Label("Earn", systemImage: "mappin.circle.fill")
                 }
-                .tag(1)
-
-            GlassesCaptureView()
-                .tabItem {
-                    Label("Glasses", systemImage: "eyeglasses")
-                }
-                .tag(2)
+                .tag(0)
 
             SettingsView()
                 .tabItem {
-                    Label("Settings", systemImage: "person.circle.fill")
+                    Label("Account", systemImage: "person.crop.circle")
                 }
-                .tag(3)
+                .tag(1)
         }
         .tint(BlueprintTheme.brandTeal)
         .blueprintAppBackground()

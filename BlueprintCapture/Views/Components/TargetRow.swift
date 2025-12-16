@@ -7,119 +7,67 @@ struct TargetRow: View {
     let reservedByMe: Bool
 
     var body: some View {
-        let isReserved = reservationSecondsRemaining != nil
-        ZStack(alignment: .topLeading) {
-            HStack(spacing: 12) {
-                thumbnail
-                    .frame(width: 96, height: 72)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                    )
-                    .overlay(alignment: .bottomLeading) {
-                        if let seconds = reservationSecondsRemaining {
-                            reservedPill(seconds: seconds, isMine: reservedByMe)
-                                .padding(.leading, 4)
-                                .padding(.bottom, 4)
-                        }
-                    }
+        HStack(spacing: 14) {
+            // Thumbnail
+            thumbnail
+                .frame(width: 72, height: 72)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 8) {
-                        Text(item.target.displayName)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .foregroundStyle(.primary)
-                            .layoutPriority(1)
+            // Content
+            VStack(alignment: .leading, spacing: 6) {
+                // Name
+                Text(item.target.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
 
-                        if reservationSecondsRemaining != nil {
-                            // No inline badge when reserved (top-left ribbon already indicates state)
-                        } else if isOnSite {
-                            onsitePill()
-                        }
-                    }
-
-                    Text(item.target.address ?? "Address pending…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    HStack(spacing: 8) {
-                        distanceView()
-                            .layoutPriority(0)
-
-                        timeBadge()
-                            .layoutPriority(0)
-
-                        Spacer()
-                    }
-                }
-                .overlay(alignment: .topTrailing) {
-                    // Float payout badge above content so the name can use full width
-                    payoutBadge()
-                        .padding(.top, -2)
-                        .padding(.trailing, -20)
-                        .allowsHitTesting(false)
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.footnote)
+                // Address
+                Text(item.target.address ?? "")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                // Distance and status
+                HStack(spacing: 12) {
+                    if isOnSite {
+                        Label("Here", systemImage: "location.fill")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(BlueprintTheme.successGreen)
+                    } else {
+                        Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if let seconds = reservationSecondsRemaining, reservedByMe {
+                        Label(formatCountdown(seconds), systemImage: "clock")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                    }
+                }
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 10)
 
-            if isReserved {
-                // Corner ribbon accent for reserved state
-                if reservedByMe {
-                    Text("Reserved")
-                        .font(.caption2).fontWeight(.semibold)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(
-                            Capsule().fill(BlueprintTheme.reservedGradient)
-                        )
-                        .foregroundStyle(.white)
-                        .offset(x: -4, y: -4)
-                } else {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lock.fill")
-                        Text("Held")
-                    }
-                    .font(.caption2).fontWeight(.semibold)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(Color(.systemFill)))
-                    .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
+            Spacer()
+
+            // Payout
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("$\(item.estimatedPayoutUsd)")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(BlueprintTheme.successGreen)
+
+                Text("Est. payout")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
-                    .offset(x: -4, y: -4)
-                }
             }
         }
+        .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(isReserved ? (reservedByMe ? BlueprintTheme.primary.opacity(0.05) : Color(.systemBackground)) : Color(.systemBackground))
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.black.opacity(0.06), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(reservedByMe ? BlueprintTheme.brandTeal : Color.clear, lineWidth: 2)
         )
-        .overlay(
-            Group {
-                if isReserved && reservedByMe {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(BlueprintTheme.reservedGradient, lineWidth: 1.2)
-                }
-            }
-        )
-        .overlay(alignment: .leading) {
-            if isOnSite && !isReserved {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(BlueprintTheme.successGreen)
-                    .frame(width: 4)
-                    .opacity(0.9)
-            }
-        }
-        .shadow(color: Color.black.opacity(0.05), radius: 10, x: 0, y: 4)
         .accessibilityLabel(item.accessibilityLabel)
     }
 
@@ -127,10 +75,14 @@ struct TargetRow: View {
         if let url = item.streetImageURL, item.hasStreetView {
             AsyncImage(url: url) { phase in
                 switch phase {
-                case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-                case .failure(_): placeholder
-                case .empty: ProgressView()
-                @unknown default: placeholder
+                case .success(let image):
+                    image.resizable().aspectRatio(contentMode: .fill)
+                case .failure(_):
+                    placeholder
+                case .empty:
+                    placeholder.overlay(ProgressView().controlSize(.small))
+                @unknown default:
+                    placeholder
                 }
             }
         } else {
@@ -138,162 +90,18 @@ struct TargetRow: View {
         }
     }
 
-    private func distanceView() -> some View {
-        if isOnSite {
-            return AnyView(
-                HStack(spacing: 4) {
-                    Image(systemName: "location.fill")
-                    Text("Nearby")
-                        .lineLimit(1)
-                }
-                .font(.caption)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.12)))
-                .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
-                .foregroundStyle(BlueprintTheme.successGreen)
-                .fixedSize(horizontal: true, vertical: false)
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-            )
-        } else {
-            return AnyView(
-                HStack(spacing: 4) {
-                    Image(systemName: "location")
-                    Text("\(String(format: "%.1f", item.distanceMiles)) mi")
-                        .lineLimit(1)
-                }
-                .font(.caption).fontWeight(.semibold)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Capsule().fill(Color(.systemFill)))
-                .overlay(Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: true, vertical: false)
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-            )
-        }
-    }
-
-    private func timeBadge() -> some View {
-        let minutes = estimatedScanTimeMinutes(for: item.target)
-        let timeText = formatDuration(minutes)
-        return HStack(spacing: 4) {
-            Image(systemName: "clock")
-            HStack(spacing: 2) {
-                Text("Scan")
-                    .fontWeight(.medium)
-                Text(timeText)
-                    .monospacedDigit()
-                    .lineLimit(1)
-            }
-        }
-        .font(.caption).fontWeight(.semibold)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
-        .overlay(Capsule().stroke(BlueprintTheme.primary.opacity(0.45), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.primary)
-        .accessibilityLabel("Estimated scan time \(timeText)")
-        .accessibilityHint("Approximate time required to complete this capture")
-        .fixedSize(horizontal: true, vertical: false)
-        .lineLimit(1)
-        .minimumScaleFactor(0.9)
-    }
-
-    private func payoutBadge() -> some View {
-        let payoutText = "Est. $\(formatCurrency(item.estimatedPayoutUsd))"
-        return HStack(spacing: 6) {
-            Image(systemName: "dollarsign.circle")
-            Text(payoutText)
-                .lineLimit(1)
-        }
-        .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        // Opaque base so overlapping the title never shows through
-        .background(
-            ZStack {
-                Capsule().fill(Color(.systemBackground))
-                Capsule().fill(BlueprintTheme.successGreen.opacity(0.18))
-            }
-        )
-        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.payoutGradient)
-        .fixedSize(horizontal: true, vertical: false)
-        .lineLimit(1)
-        .minimumScaleFactor(0.95)
-        .accessibilityLabel("Estimated payout \(payoutText)")
-    }
-
-    private func reservedPill(seconds: Int, isMine: Bool) -> some View {
-        let mins = max(0, seconds) / 60
-        let secs = max(0, seconds) % 60
-        let text = String(format: "%02d:%02d", mins, secs)
-        return HStack(spacing: 4) {
-            Image(systemName: "clock.badge.checkmark")
-            Text(text)
-                .monospacedDigit()
-        }
-        .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(
-            Group {
-                if isMine {
-                    Capsule().fill(BlueprintTheme.reservedGradient)
-                } else {
-                    Capsule().fill(Color(.systemFill))
-                }
-            }
-        )
-        .overlay(
-            Group {
-                if !isMine { Capsule().stroke(Color.black.opacity(0.08), lineWidth: 1) }
-            }
-        )
-        .foregroundStyle(isMine ? .white : .secondary)
-    }
-
-    private func onsitePill() -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "figure.walk.circle.fill")
-            Text("Nearby")
-        }
-        .font(.caption2).fontWeight(.bold)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.18)))
-        .overlay(Capsule().stroke(BlueprintTheme.successGreen.opacity(0.45), lineWidth: 1))
-        .foregroundStyle(BlueprintTheme.successGreen)
-    }
-
     private var placeholder: some View {
         ZStack {
-            Color.gray.opacity(0.1)
-            Image(systemName: "photo")
-                .foregroundStyle(.secondary)
+            Color(.tertiarySystemBackground)
+            Image(systemName: "building.2")
+                .font(.title2)
+                .foregroundStyle(.tertiary)
         }
     }
 
-    private func reservationOwnerBadge() -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: reservedByMe ? "person.fill.checkmark" : "lock.fill")
-            Text(reservedByMe ? "Yours" : "Held")
-                .lineLimit(1)
-        }
-        .font(.caption2).fontWeight(.semibold)
-        .padding(.horizontal, 8).padding(.vertical, 4)
-        .background(
-            Capsule().fill(reservedByMe ? BlueprintTheme.successGreen.opacity(0.16) : Color(.systemFill))
-        )
-        .overlay(
-            Capsule().stroke(reservedByMe ? BlueprintTheme.successGreen.opacity(0.45) : Color.black.opacity(0.08), lineWidth: 1)
-        )
-        .foregroundStyle(reservedByMe ? BlueprintTheme.successGreen : .secondary)
-        .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func formatCurrency(_ value: Int) -> String {
-        let number = NSNumber(value: value)
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: number) ?? "\(value)"
+    private func formatCountdown(_ totalSeconds: Int) -> String {
+        let mins = totalSeconds / 60
+        let secs = totalSeconds % 60
+        return String(format: "%d:%02d", mins, secs)
     }
 }
-
