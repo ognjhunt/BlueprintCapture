@@ -337,7 +337,7 @@ private struct LocationSearchResultRow: View {
             .foregroundStyle(result.isEstablishment ? Color.white : BlueprintTheme.brandTeal)
     }
 
-    private var iconGradient: some ShapeStyle {
+    private var iconGradient: LinearGradient {
         if result.isEstablishment {
             return BlueprintTheme.reservedGradient
         }

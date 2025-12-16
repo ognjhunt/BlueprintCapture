@@ -7,6 +7,7 @@ enum BlueprintTheme {
     static let primary = Color(red: 0.12, green: 0.44, blue: 0.98)       // Blueprint Blue
     static let primaryDeep = Color(red: 0.04, green: 0.20, blue: 0.55)   // Deep Navy
     static let brandTeal = Color(red: 0.32, green: 0.93, blue: 0.84)     // Teal accent
+    static let accentAqua = Color(red: 0.40, green: 0.85, blue: 0.90)    // Aqua accent
 
     // MARK: - Semantic Colors
     static let successGreen = Color(red: 0.18, green: 0.68, blue: 0.43)
@@ -17,12 +18,25 @@ enum BlueprintTheme {
     static let bgDark = Color(red: 0.06, green: 0.08, blue: 0.12)
     static let bgDarker = Color(red: 0.03, green: 0.05, blue: 0.09)
     static let surface = Color(.secondarySystemBackground)
+    static let surfaceElevated = Color(.tertiarySystemBackground)
 
     // MARK: - Gradients (used sparingly)
     static let onboardingGradient = LinearGradient(
         colors: [bgDarker, Color(red: 0.05, green: 0.10, blue: 0.18)],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
+    )
+
+    static let heroGradient = LinearGradient(
+        colors: [primary.opacity(0.9), brandTeal.opacity(0.7)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+
+    static let reservedGradient = LinearGradient(
+        colors: [primary, primaryDeep],
+        startPoint: .top,
+        endPoint: .bottom
     )
 }
 
