@@ -174,7 +174,7 @@ struct StripeOnboardingView: View {
                 if isLoading { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.black.opacity(0.1)) }
             }
             .alert("Done", isPresented: $showConfirmation) { Button("OK") { showConfirmation = false } } message: { Text("Action completed successfully.") }
-            .alert("Error", isPresented: .constant(errorMessage != nil)) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "") }
+            .alert("Error", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) { Button("OK") { errorMessage = nil } } message: { Text(errorMessage ?? "") }
             .task {
                 isLoading = true
                 await loadAccountState()
