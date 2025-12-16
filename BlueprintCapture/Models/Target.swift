@@ -39,4 +39,12 @@ extension Target {
     }
 }
 
+// MARK: - Recording Policy Conformance
+
+extension Target: PlaceWithPolicy {
+    var policyName: String { displayName }
+    var policyTypes: [String] { category.map { [$0] } ?? [] }
+    var policyPlaceId: String? { id }
+}
+
 

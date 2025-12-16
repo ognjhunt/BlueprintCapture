@@ -32,6 +32,10 @@ enum AppConfig {
         return nil
     }
 
+    static func perplexityAPIKey() -> String? {
+        secretsPlist()?["PERPLEXITY_API_KEY"] as? String
+    }
+
     // MARK: - Stripe
     static func stripePublishableKey() -> String? {
         secretsPlist()? ["STRIPE_PUBLISHABLE_KEY"] as? String

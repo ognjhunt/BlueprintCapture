@@ -96,39 +96,90 @@ struct NearbyTargetsView: View {
 
     // MARK: - Simple Location Header
     private var locationHeader: some View {
-        Button {
-            showAddressSheet = true
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "location.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+        VStack(spacing: 10) {
+            Button {
+                showAddressSheet = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "location.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
 
-                if let address = viewModel.currentAddress {
-                    Text(address)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                } else {
-                    Text("Detecting location...")
-                        .font(.subheadline)
+                    if let address = viewModel.currentAddress {
+                        Text(address)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Detecting location...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
+            .buttonStyle(.plain)
+
+            // Recording Policy Filter
+            policyFilterBar
+        }
+    }
+
+    private var policyFilterBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shield.checkered")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Show:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(RecordingPolicyFilter.allCases, id: \.rawValue) { filter in
+                policyFilterChip(filter)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func policyFilterChip(_ filter: RecordingPolicyFilter) -> some View {
+        Button {
+            viewModel.policyFilter = filter
+        } label: {
+            Text(filter.shortLabel)
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(viewModel.policyFilter == filter ? policyFilterColor(filter).opacity(0.15) : Color(.systemFill))
+                )
+                .overlay(
+                    Capsule().stroke(viewModel.policyFilter == filter ? policyFilterColor(filter).opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+                .foregroundStyle(viewModel.policyFilter == filter ? policyFilterColor(filter) : .secondary)
         }
         .buttonStyle(.plain)
+    }
+
+    private func policyFilterColor(_ filter: RecordingPolicyFilter) -> Color {
+        switch filter {
+        case .all: return .secondary
+        case .excludeRestricted: return .orange
+        case .safeOnly: return .green
+        }
     }
 
     @ViewBuilder private var content: some View {
