@@ -140,6 +140,11 @@ extension View {
     func blueprintGradientText() -> some View {
         self.foregroundStyle(BlueprintTheme.brandTeal)
     }
+
+    /// Alias for blueprintAppBackground for screen-level backgrounds
+    func blueprintScreenBackground() -> some View {
+        self.blueprintAppBackground()
+    }
 }
 
 struct BlueprintGlassCard<Content: View>: View {
@@ -157,3 +162,6 @@ struct BlueprintGlassCard<Content: View>: View {
         )
     }
 }
+
+/// Alias for BlueprintGlassCard for convenience
+typealias BlueprintCard = BlueprintGlassCard
