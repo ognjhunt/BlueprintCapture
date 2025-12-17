@@ -1,6 +1,8 @@
 import SwiftUI
 import AVFoundation
 import UIKit
+import ARKit
+import RealityKit
 
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
@@ -24,8 +26,14 @@ struct CaptureSessionView: View {
 
     var body: some View {
         ZStack {
-            CameraPreview(session: captureManager.session)
-                .ignoresSafeArea()
+            // Use ARView when ARSession is active, otherwise use AVCaptureSession preview
+            if captureManager.usesARSessionForCapture {
+                ARCameraPreview(session: captureManager.arSession)
+                    .ignoresSafeArea()
+            } else {
+                CameraPreview(session: captureManager.session)
+                    .ignoresSafeArea()
+            }
 
             VStack(spacing: 12) {
                 // Top bar with permission badge
@@ -43,6 +51,13 @@ struct CaptureSessionView: View {
                 }
 
                 Spacer()
+
+                // Capture guidance overlay (when recording)
+                if captureManager.captureState.isRecording {
+                    CaptureGuidanceView()
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                }
 
                 // Error banner + retry control when recording fails
                 if case .error(let reason) = captureManager.captureState {
@@ -232,6 +247,104 @@ private final class PreviewView: UIView {
         layer.videoGravity = .resizeAspectFill
         return layer
     }
+}
+
+// MARK: - ARView Camera Preview
+
+private struct ARCameraPreview: UIViewRepresentable {
+    let session: ARSession
+
+    func makeUIView(context: Context) -> ARView {
+        let arView = ARView(frame: .zero)
+        arView.session = session
+        arView.renderOptions = [.disablePersonOcclusion, .disableDepthOfField, .disableMotionBlur]
+        // Use camera rendering only - no virtual content
+        arView.environment.background = .cameraFeed()
+        return arView
+    }
+
+    func updateUIView(_ uiView: ARView, context: Context) {
+        // Session is managed externally by VideoCaptureManager
+    }
+}
+
+// MARK: - Capture Guidance View
+
+private struct CaptureGuidanceView: View {
+    @State private var currentTipIndex = 0
+    @State private var showTip = true
+
+    private let tips = [
+        CaptureGuidanceTip(icon: "arrow.left.and.right", text: "Move slowly and steadily"),
+        CaptureGuidanceTip(icon: "cube.transparent", text: "Scan corners and edges"),
+        CaptureGuidanceTip(icon: "lightbulb", text: "Ensure good lighting"),
+        CaptureGuidanceTip(icon: "hand.raised", text: "Keep phone upright"),
+        CaptureGuidanceTip(icon: "arrow.triangle.2.circlepath", text: "Overlap scanned areas")
+    ]
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Recording indicator
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.red.opacity(0.5), lineWidth: 2)
+                            .scaleEffect(showTip ? 1.5 : 1.0)
+                            .opacity(showTip ? 0 : 1)
+                    )
+                Text("REC")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.red)
+            }
+
+            Divider()
+                .frame(height: 20)
+
+            // Rotating tips
+            if currentTipIndex < tips.count {
+                let tip = tips[currentTipIndex]
+                HStack(spacing: 8) {
+                    Image(systemName: tip.icon)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                    Text(tip.text)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.9))
+                }
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
+        )
+        .onAppear {
+            startTipRotation()
+        }
+        .animation(.easeInOut(duration: 0.5), value: currentTipIndex)
+        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: showTip)
+    }
+
+    private func startTipRotation() {
+        Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { _ in
+            withAnimation {
+                currentTipIndex = (currentTipIndex + 1) % tips.count
+            }
+        }
+    }
+}
+
+private struct CaptureGuidanceTip {
+    let icon: String
+    let text: String
 }
 
 private extension VideoCaptureManager.CaptureState {
