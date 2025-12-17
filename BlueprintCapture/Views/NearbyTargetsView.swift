@@ -8,7 +8,14 @@ struct NearbyTargetsView: View {
     @State private var showReserveConfirm = false
     @State private var reserveMessage: String?
     @State private var navigateToCapture = false
-    @StateObject private var captureFlow = CaptureFlowViewModel()
+
+    // Use shared CaptureFlowViewModel if provided (from MainTabView), otherwise create local
+    private var sharedCaptureFlow: CaptureFlowViewModel?
+    @StateObject private var localCaptureFlow = CaptureFlowViewModel()
+    private var captureFlow: CaptureFlowViewModel {
+        sharedCaptureFlow ?? localCaptureFlow
+    }
+
     @State private var activeReservation: Reservation?
     @State private var reservedItem: NearbyTargetsViewModel.NearbyItem?
     @State private var showDirectionsPrompt = false
@@ -26,6 +33,12 @@ struct NearbyTargetsView: View {
     @FocusState private var isAddressFieldFocused: Bool
     @State private var showExpiryAlert = false
     @State private var expiryMessage: String?
+
+    // MARK: - Initializers
+
+    init(sharedCaptureFlow: CaptureFlowViewModel? = nil) {
+        self.sharedCaptureFlow = sharedCaptureFlow
+    }
 
     var body: some View {
         NavigationStack {
@@ -517,6 +530,17 @@ private extension NearbyTargetsView {
                                 try await viewModel.checkIn(item.target)
                                 await MainActor.run {
                                     reservedItem = item
+
+                                    // Set target info for upload progress display
+                                    // Create a payout range: base estimate ±30% based on quality
+                                    let basePayout = item.estimatedPayoutUsd
+                                    let minPayout = max(50, Int(Double(basePayout) * 0.7))
+                                    let maxPayout = Int(Double(basePayout) * 1.3)
+                                    captureFlow.currentTargetInfo = (
+                                        name: item.target.displayName,
+                                        estimatedPayoutRange: minPayout...maxPayout
+                                    )
+
                                     captureFlow.step = .readyToCapture
                                     captureFlow.captureManager.configureSession()
                                     captureFlow.captureManager.startSession()

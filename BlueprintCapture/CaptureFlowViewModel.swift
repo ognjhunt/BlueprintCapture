@@ -27,6 +27,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var isSearchingAddress = false
     @Published private(set) var uploadStatuses: [UploadStatus] = []
 
+    /// Stores current target info for the active capture session (set before starting capture)
+    var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
+
     let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
     // Google Places
@@ -350,7 +353,25 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             captureSource: .iphoneVideo
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
-        print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id)")
+
+        // Capture target info before clearing (for upload status display)
+        let targetName = currentTargetInfo?.name
+        let payoutRange = currentTargetInfo?.estimatedPayoutRange
+
+        // Clear current target info after capture
+        currentTargetInfo = nil
+
+        print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id) targetName=\(targetName ?? "nil")")
+        enqueueUploadWithTargetInfo(request, targetName: targetName, payoutRange: payoutRange)
+    }
+
+    private func enqueueUploadWithTargetInfo(_ request: CaptureUploadRequest, targetName: String?, payoutRange: ClosedRange<Int>?) {
+        // Store target info before enqueueing so we can use it when creating UploadStatus
+        let id = request.metadata.id
+        uploadStatusMap[id] = UploadStatus(request: request, targetName: targetName, estimatedPayoutRange: payoutRange)
+        refreshUploadStatuses()
+
+        // Now enqueue the actual upload
         uploadService.enqueue(request)
     }
 
@@ -376,7 +397,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         switch event {
         case .queued(let request):
             print("📤 [Upload] queued id=\(request.metadata.id) targetId=\(request.metadata.targetId ?? "nil")")
-            uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
+            // Only create new status if we don't already have one (we may have pre-created it with target info)
+            if uploadStatusMap[request.metadata.id] == nil {
+                uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
+            }
         case .progress(let id, let progress):
             print("📤 [Upload] progress id=\(id) progress=\(String(format: "%.2f", progress))")
             guard var status = uploadStatusMap[id] else { break }
@@ -446,6 +470,8 @@ extension CaptureFlowViewModel {
         var metadata: CaptureUploadMetadata
         let packageURL: URL
         var state: State
+        var targetName: String?
+        var estimatedPayoutRange: ClosedRange<Int>?
 
         var id: UUID { metadata.id }
 
@@ -456,10 +482,12 @@ extension CaptureFlowViewModel {
             case failed(message: String)
         }
 
-        init(request: CaptureUploadRequest) {
+        init(request: CaptureUploadRequest, targetName: String? = nil, estimatedPayoutRange: ClosedRange<Int>? = nil) {
             self.metadata = request.metadata
             self.packageURL = request.packageURL
             self.state = .queued
+            self.targetName = targetName
+            self.estimatedPayoutRange = estimatedPayoutRange
         }
     }
 }
