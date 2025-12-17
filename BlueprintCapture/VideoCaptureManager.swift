@@ -103,7 +103,13 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
 
     let session = AVCaptureSession()
-    private let arSession = ARSession()
+    let arSession = ARSession()
+
+    /// Returns true when the capture manager will use ARSession for video recording.
+    /// When true, the UI should use ARView instead of AVCaptureVideoPreviewLayer for camera preview.
+    var usesARSessionForCapture: Bool {
+        canUseARSessionRecorder
+    }
 
     private let movieOutput = AVCaptureMovieFileOutput()
     private let motionManager = CMMotionManager()
@@ -380,6 +386,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     func stopRecording() {
         if shouldUseScreenRecorder {
             guard usingScreenRecorder else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
+        } else if usingCustomARSessionRecorder {
+            // ARSessionRecorder path - handled below
         } else {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
@@ -536,6 +544,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             }
             arSessionRecorder = recorder
             usingCustomARSessionRecorder = true
+
+            // Start ARSession to begin receiving frames
+            startARSessionForRecording()
+
             captureState = .recording(artifacts)
             print("⏺️ [Capture] startRecording started via shared ARSession → file=\(artifacts.videoURL.lastPathComponent)")
         } catch {
@@ -873,6 +885,35 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
 
         print("🔵 [AR] run(configuration)")
+        arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        isARRunning = true
+    }
+
+    /// Starts the ARSession specifically for ARSessionVideoRecorder usage.
+    /// This is called when using the shared ARSession recorder path on iOS 17+.
+    private func startARSessionForRecording() {
+        guard supportsARCapture else {
+            print("⚠️ [AR] Device does not support AR capture")
+            return
+        }
+        guard !isARRunning else {
+            print("ℹ️ [AR] startARSessionForRecording ignored — already running")
+            return
+        }
+
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.environmentTexturing = .automatic
+        if supportsMeshReconstruction && ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+            configuration.sceneReconstruction = .mesh
+        }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            configuration.frameSemantics.insert(.sceneDepth)
+        }
+        if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
+            configuration.frameSemantics.insert(.smoothedSceneDepth)
+        }
+
+        print("🔵 [AR] run(configuration) for ARSessionRecorder")
         arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
         isARRunning = true
     }
