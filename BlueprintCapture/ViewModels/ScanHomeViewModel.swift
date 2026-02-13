@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CoreLocation
 
 @MainActor
@@ -137,7 +138,7 @@ extension ScanHomeViewModel {
         let distanceMeters: Double
     }
 
-    static func rankJobsForFeed(jobs: [ScanJob], userLocation: CLLocation, feedRadiusMeters: Double) -> [RankedJob] {
+    nonisolated static func rankJobsForFeed(jobs: [ScanJob], userLocation: CLLocation, feedRadiusMeters: Double) -> [RankedJob] {
         let nearby = jobs
             .filter { $0.active }
             .map { job in RankedJob(job: job, distanceMeters: job.distanceMeters(from: userLocation)) }
@@ -161,7 +162,7 @@ extension ScanHomeViewModel {
         }
     }
 
-    static func filterVisibleItems(rankedJobs: [RankedJob], statesByJobId: [String: TargetState], currentUserId: String) -> [JobItem] {
+    nonisolated static func filterVisibleItems(rankedJobs: [RankedJob], statesByJobId: [String: TargetState], currentUserId: String) -> [JobItem] {
         rankedJobs.compactMap { ranked in
             let job = ranked.job
             let s = statesByJobId[job.id]

@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import FirebaseAuth
 
 @MainActor
@@ -78,4 +79,3 @@ final class WalletViewModel: ObservableObject {
         }
     }
 }
-
