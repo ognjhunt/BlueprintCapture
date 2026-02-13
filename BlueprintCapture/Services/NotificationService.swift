@@ -19,9 +19,22 @@ struct ProximityNotificationTarget {
     }
 }
 
+struct ProximityScanJobTarget {
+    let job: ScanJob
+    let distanceMeters: Double?
+    let isReserved: Bool
+
+    init(job: ScanJob, distanceMeters: Double? = nil, isReserved: Bool = false) {
+        self.job = job
+        self.distanceMeters = distanceMeters
+        self.isReserved = isReserved
+    }
+}
+
 protocol NotificationServiceProtocol: AnyObject {
     func requestAuthorizationIfNeeded() async
     func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int, radiusMeters: CLLocationDistance)
+    func scheduleProximityNotifications(for jobs: [ProximityScanJobTarget], maxRegions: Int)
     func clearProximityNotifications()
     /// Schedules a one-shot local notification at the reservation expiry time.
     func scheduleReservationExpiryNotification(target: Target, at date: Date)
@@ -34,8 +47,8 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     private let authorizationAskedKey = "notifications.authorization.asked"
     private let proximityPrefix = "proximity_"
     private let expiryPrefix = "reservation_expiry_"
-    static let categoryId = "TARGET_PROXIMITY"
-    static let actionCheckIn = "ACTION_CHECK_IN"
+    static let categoryId = "SCAN_JOB_PROXIMITY"
+    static let actionStartScan = "ACTION_START_SCAN"
     static let actionDirections = "ACTION_DIRECTIONS"
     private lazy var currencyFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -67,19 +80,19 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     }
 
     func registerCategories() {
-        let checkIn = UNNotificationAction(
-            identifier: Self.actionCheckIn,
-            title: "Check in",
+        let startScan = UNNotificationAction(
+            identifier: Self.actionStartScan,
+            title: "Start scan",
             options: [.foreground]
         )
         let directions = UNNotificationAction(
             identifier: Self.actionDirections,
-            title: "Get directions",
+            title: "Directions",
             options: [.foreground]
         )
         let category = UNNotificationCategory(
             identifier: Self.categoryId,
-            actions: [checkIn, directions],
+            actions: [startScan, directions],
             intentIdentifiers: [],
             options: []
         )
@@ -120,20 +133,21 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
             let target = entry.target
             let content = UNMutableNotificationContent()
             if entry.isReserved {
-                content.title = "Reserved location nearby"
+                content.title = "Reserved scan job nearby"
             } else {
-                content.title = "You're near a Blueprint location"
+                content.title = "You're near a scan job"
             }
             if let payout = entry.estimatedPayoutUsd,
                let formatted = currencyFormatter.string(from: NSNumber(value: payout)) {
-                content.body = "\(target.displayName) needs scanning. Estimated payout \(formatted)."
+                content.body = "\(target.displayName). Estimated payout \(formatted)."
             } else {
-                content.body = "\(target.displayName) needs scanning. Start mapping to earn now."
+                content.body = "\(target.displayName). Start scanning to earn."
             }
             content.sound = .default
             content.categoryIdentifier = Self.categoryId
             var userInfo: [String: Any] = [
                 "targetId": target.id,
+                "jobId": target.id,
                 "title": target.displayName,
                 "lat": target.lat,
                 "lng": target.lng
@@ -150,6 +164,60 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
 
             let trigger = UNLocationNotificationTrigger(region: region, repeats: false)
             let request = UNNotificationRequest(identifier: proximityPrefix + target.id, content: content, trigger: trigger)
+            center.add(request)
+        }
+    }
+
+    func scheduleProximityNotifications(for jobs: [ProximityScanJobTarget], maxRegions: Int = 10) {
+        clearProximityNotifications()
+        guard !jobs.isEmpty else { return }
+
+        var final: [ProximityScanJobTarget] = []
+        var seen = Set<String>()
+
+        // Preserve the caller's ordering (which is already ranked for the feed),
+        // while still prioritizing reserved jobs first.
+        for entry in jobs where entry.isReserved {
+            guard !seen.contains(entry.job.id) else { continue }
+            final.append(entry)
+            seen.insert(entry.job.id)
+        }
+
+        for entry in jobs where final.count < maxRegions {
+            guard !seen.contains(entry.job.id) else { continue }
+            final.append(entry)
+            seen.insert(entry.job.id)
+        }
+
+        for entry in final {
+            let job = entry.job
+            let content = UNMutableNotificationContent()
+            content.title = entry.isReserved ? "Reserved scan job nearby" : "You're near a scan job"
+
+            if let formatted = currencyFormatter.string(from: NSNumber(value: job.payoutDollars)) {
+                content.body = "\(job.title). Estimated payout \(formatted)."
+            } else {
+                content.body = "\(job.title). Start scanning to earn."
+            }
+
+            content.sound = .default
+            content.categoryIdentifier = Self.categoryId
+            content.userInfo = [
+                "jobId": job.id,
+                "title": job.title,
+                "lat": job.lat,
+                "lng": job.lng,
+                "estimatedPayoutUsd": job.payoutDollars
+            ]
+
+            let centerCoord = CLLocationCoordinate2D(latitude: job.lat, longitude: job.lng)
+            let radius = max(50, CLLocationDistance(job.alertRadiusM))
+            let region = CLCircularRegion(center: centerCoord, radius: radius, identifier: proximityPrefix + job.id)
+            region.notifyOnEntry = true
+            region.notifyOnExit = false
+
+            let trigger = UNLocationNotificationTrigger(region: region, repeats: false)
+            let request = UNNotificationRequest(identifier: proximityPrefix + job.id, content: content, trigger: trigger)
             center.add(request)
         }
     }
@@ -191,5 +259,3 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
         center.removePendingNotificationRequests(withIdentifiers: [expiryPrefix + targetId])
     }
 }
-
-

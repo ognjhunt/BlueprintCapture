@@ -3,12 +3,12 @@ import SwiftUI
 /// A floating overlay that shows upload progress and transitions to processing/completion states.
 /// Designed to be non-intrusive while keeping users informed about their capture status.
 struct UploadProgressOverlayView: View {
-    @ObservedObject var viewModel: CaptureFlowViewModel
+    @ObservedObject var viewModel: UploadQueueViewModel
     @State private var isExpanded = false
     @State private var showProcessingComplete = false
 
     /// The most recent active upload (uploading or just completed)
-    private var activeUpload: CaptureFlowViewModel.UploadStatus? {
+    private var activeUpload: UploadQueueViewModel.UploadStatus? {
         // Prioritize uploads in progress, then recently completed
         viewModel.uploadStatuses.first { status in
             if case .uploading = status.state { return true }
@@ -64,7 +64,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Compact View (Pill)
 
     @ViewBuilder
-    private func compactView(upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func compactView(upload: UploadQueueViewModel.UploadStatus) -> some View {
         Button {
             withAnimation { isExpanded = true }
         } label: {
@@ -116,7 +116,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Expanded View (Card)
 
     @ViewBuilder
-    private func expandedView(upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func expandedView(upload: UploadQueueViewModel.UploadStatus) -> some View {
         VStack(spacing: 0) {
             // Drag handle
             RoundedRectangle(cornerRadius: 2.5)
@@ -189,7 +189,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - State Content
 
     @ViewBuilder
-    private func stateContent(for upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func stateContent(for upload: UploadQueueViewModel.UploadStatus) -> some View {
         switch upload.state {
         case .queued:
             queuedContent()
@@ -273,7 +273,7 @@ struct UploadProgressOverlayView: View {
     }
 
     @ViewBuilder
-    private func completedContent(for upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func completedContent(for upload: UploadQueueViewModel.UploadStatus) -> some View {
         VStack(spacing: 16) {
             // Success animation
             ZStack {
@@ -308,7 +308,7 @@ struct UploadProgressOverlayView: View {
     }
 
     @ViewBuilder
-    private func estimatedEarningsCard(for upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func estimatedEarningsCard(for upload: UploadQueueViewModel.UploadStatus) -> some View {
         let payoutRange = upload.estimatedPayoutRange ?? 50...150
 
         VStack(spacing: 12) {
@@ -386,7 +386,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Action Buttons
 
     @ViewBuilder
-    private func actionButtons(for upload: CaptureFlowViewModel.UploadStatus) -> some View {
+    private func actionButtons(for upload: UploadQueueViewModel.UploadStatus) -> some View {
         switch upload.state {
         case .completed:
             Button {
@@ -448,7 +448,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Helpers
 
     @ViewBuilder
-    private func statusIcon(for state: CaptureFlowViewModel.UploadStatus.State) -> some View {
+    private func statusIcon(for state: UploadQueueViewModel.UploadStatus.State) -> some View {
         switch state {
         case .queued:
             Image(systemName: "clock.fill")
@@ -465,7 +465,7 @@ struct UploadProgressOverlayView: View {
         }
     }
 
-    private func statusTitle(for state: CaptureFlowViewModel.UploadStatus.State) -> String {
+    private func statusTitle(for state: UploadQueueViewModel.UploadStatus.State) -> String {
         switch state {
         case .queued:
             return "Preparing upload..."
@@ -478,7 +478,7 @@ struct UploadProgressOverlayView: View {
         }
     }
 
-    private func headerTitle(for state: CaptureFlowViewModel.UploadStatus.State) -> String {
+    private func headerTitle(for state: UploadQueueViewModel.UploadStatus.State) -> String {
         switch state {
         case .queued:
             return "Preparing Upload"

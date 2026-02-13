@@ -7,6 +7,7 @@ enum MapProvider: String {
 
 enum AppConfig {
     static let mapProvider: MapProvider = .appleSnapshot
+    static let pendingStartScanJobIdKey = "com.blueprint.pendingStartScanJobId"
 
     private static func secretsPlist() -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
@@ -103,5 +104,4 @@ extension Notification.Name {
     static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
     static let AuthStateDidChange = Notification.Name("Blueprint.AuthStateDidChange")
 }
-
 

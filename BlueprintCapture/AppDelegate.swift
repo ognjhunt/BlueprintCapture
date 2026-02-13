@@ -55,16 +55,22 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         switch response.actionIdentifier {
         case NotificationService.actionDirections:
-            if let lat = userInfo["lat"] as? Double,
-               let lng = userInfo["lng"] as? Double,
+            let lat = (userInfo["lat"] as? Double) ?? (userInfo["lat"] as? NSNumber)?.doubleValue
+            let lng = (userInfo["lng"] as? Double) ?? (userInfo["lng"] as? NSNumber)?.doubleValue
+            if let lat,
+               let lng,
                let url = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d") {
                 UIApplication.shared.open(url)
             }
-        case NotificationService.actionCheckIn:
-            NotificationCenter.default.post(name: .blueprintNotificationAction, object: nil, userInfo: [
-                "action": "checkin",
-                "targetId": userInfo["targetId"] as Any
-            ])
+        case NotificationService.actionStartScan:
+            if let jobId = userInfo["jobId"] as? String {
+                // Persist the action for cold-start delivery (NotificationCenter can be missed before views attach).
+                UserDefaults.standard.set(jobId, forKey: AppConfig.pendingStartScanJobIdKey)
+                NotificationCenter.default.post(name: .blueprintNotificationAction, object: nil, userInfo: [
+                    "action": "start_scan",
+                    "jobId": jobId
+                ])
+            }
         default:
             break
         }

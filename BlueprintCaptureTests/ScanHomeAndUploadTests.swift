@@ -1,0 +1,142 @@
+import Foundation
+import CoreLocation
+import Combine
+import Testing
+@testable import BlueprintCapture
+
+struct ScanHomeAndUploadTests {
+
+    @Test func scanHome_filtersJobsByTargetStateOwnershipAndCompletion() async throws {
+        let currentUserId = "user_current"
+
+        let jobA = ScanJob(id: "a", title: "A", address: "A", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let jobB = ScanJob(id: "b", title: "B", address: "B", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let jobC = ScanJob(id: "c", title: "C", address: "C", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let jobD = ScanJob(id: "d", title: "D", address: "D", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let jobE = ScanJob(id: "e", title: "E", address: "E", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+
+        let ranked: [ScanHomeViewModel.RankedJob] = [
+            .init(job: jobA, distanceMeters: 10),
+            .init(job: jobB, distanceMeters: 20),
+            .init(job: jobC, distanceMeters: 30),
+            .init(job: jobD, distanceMeters: 40),
+            .init(job: jobE, distanceMeters: 50)
+        ]
+
+        let states: [String: TargetState] = [
+            "a": TargetState(status: .completed, reservedBy: nil, reservedUntil: nil, checkedInBy: nil, completedAt: Date(), lat: nil, lng: nil, geohash: nil, updatedAt: Date()),
+            "b": TargetState(status: .reserved, reservedBy: "someone_else", reservedUntil: Date().addingTimeInterval(3600), checkedInBy: nil, completedAt: nil, lat: nil, lng: nil, geohash: nil, updatedAt: Date()),
+            "c": TargetState(status: .reserved, reservedBy: currentUserId, reservedUntil: Date().addingTimeInterval(3600), checkedInBy: nil, completedAt: nil, lat: nil, lng: nil, geohash: nil, updatedAt: Date()),
+            "d": TargetState(status: .in_progress, reservedBy: currentUserId, reservedUntil: Date().addingTimeInterval(3600), checkedInBy: currentUserId, completedAt: nil, lat: nil, lng: nil, geohash: nil, updatedAt: Date()),
+            "e": TargetState(status: .reserved, reservedBy: nil, reservedUntil: Date().addingTimeInterval(3600), checkedInBy: nil, completedAt: nil, lat: nil, lng: nil, geohash: nil, updatedAt: Date())
+        ]
+
+        let visible = ScanHomeViewModel.filterVisibleItems(rankedJobs: ranked, statesByJobId: states, currentUserId: currentUserId)
+        let visibleIds = Set(visible.map(\.job.id))
+
+        #expect(!visibleIds.contains("a"))
+        #expect(!visibleIds.contains("b"))
+        #expect(visibleIds.contains("c"))
+        #expect(visibleIds.contains("d"))
+        #expect(!visibleIds.contains("e"))
+    }
+
+    @Test func scanHome_ranksReadyNowFirst() async throws {
+        let user = CLLocation(latitude: 0, longitude: 0)
+        let now = Date()
+
+        let ready = ScanJob(id: "ready", title: "Ready", address: "R", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: now, category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let far = ScanJob(id: "far", title: "Far", address: "F", lat: 0.01, lng: 0.0, payoutCents: 999999, estMinutes: 10, active: true, updatedAt: now, category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 10)
+
+        let ranked = ScanHomeViewModel.rankJobsForFeed(jobs: [far, ready], userLocation: user, feedRadiusMeters: 10 * 1609.34)
+        #expect(ranked.first?.job.id == "ready")
+    }
+
+    @Test @MainActor func uploadQueue_enqueuesGlassesCaptureAndCompletesTargetOnUploadCompletion() async throws {
+        let upload = MockCaptureUploadService()
+        let targets = MockTargetStateService()
+        let store = UploadQueueStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("upload-queue-tests-\(UUID().uuidString).json"))
+
+        let vm = UploadQueueViewModel(uploadService: upload, targetStateService: targets, store: store)
+
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("glasses-artifacts-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+        let artifacts = GlassesCaptureManager.CaptureArtifacts(
+            baseFilename: "test",
+            directoryURL: baseDir,
+            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
+            framesDirectoryURL: baseDir.appendingPathComponent("frames", isDirectory: true),
+            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
+            manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            packageURL: baseDir,
+            startedAt: Date(),
+            endedAt: Date(),
+            frameCount: 10,
+            durationSeconds: 3.0
+        )
+
+        let job = ScanJob(id: "job_123", title: "Job", address: "Addr", lat: 0, lng: 0, payoutCents: 5000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+
+        vm.enqueueGlassesCapture(artifacts: artifacts, job: job)
+        #expect(upload.enqueued.count == 1)
+        #expect(upload.enqueued.first?.metadata.targetId == "job_123")
+        #expect(upload.enqueued.first?.metadata.jobId == "job_123")
+        #expect(upload.enqueued.first?.metadata.captureSource == .metaGlasses)
+
+        // Simulate successful upload completion.
+        if let req = upload.enqueued.first {
+            upload.subject.send(.completed(req))
+        }
+
+        // Wait briefly for the async complete() Task to run.
+        for _ in 0..<20 {
+            if targets.completedTargetIds.contains("job_123") { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        #expect(targets.completedTargetIds.contains("job_123"))
+    }
+}
+
+// MARK: - Mocks
+
+final class MockCaptureUploadService: CaptureUploadServiceProtocol {
+    let subject = PassthroughSubject<CaptureUploadService.Event, Never>()
+    private(set) var enqueued: [CaptureUploadRequest] = []
+
+    var events: AnyPublisher<CaptureUploadService.Event, Never> { subject.eraseToAnyPublisher() }
+
+    func enqueue(_ request: CaptureUploadRequest) {
+        enqueued.append(request)
+        subject.send(.queued(request))
+    }
+
+    func retryUpload(id: UUID) {}
+    func cancelUpload(id: UUID) {}
+}
+
+@MainActor
+final class MockTargetStateService: TargetStateServiceProtocol {
+    private(set) var completedTargetIds: [String] = []
+
+    func batchFetchStates(for targetIds: [String]) async -> [String : TargetState] { [:] }
+
+    func observeState(for targetId: String, onChange: @escaping (TargetState?) -> Void) -> TargetStateObservation {
+        TargetStateObservation {}
+    }
+
+    func reserve(target: Target, for duration: TimeInterval) async throws -> Reservation {
+        Reservation(targetId: target.id, reservedUntil: Date().addingTimeInterval(duration))
+    }
+
+    func cancelReservation(for targetId: String) async {}
+    func checkIn(targetId: String) async throws {}
+
+    func complete(targetId: String) async throws {
+        completedTargetIds.append(targetId)
+    }
+
+    func fetchActiveReservationForCurrentUser() async -> Reservation? { nil }
+}
+

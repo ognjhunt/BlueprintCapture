@@ -7,7 +7,7 @@ import FirebaseStorage
 import FirebaseCore
 #endif
 
-struct CaptureUploadMetadata: Identifiable, Equatable {
+struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo
         case metaGlasses

@@ -99,7 +99,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     @Published private(set) var currentFrame: UIImage?
     @Published private(set) var streamingInfo: StreamingInfo?
     @Published private(set) var isConnectedToMockDevice: Bool = false
-    @Published var useMockDevice: Bool = true // Default to mock for testing
+    @Published var useMockDevice: Bool = {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }()
     @Published var mockVideoURL: URL?
 
     // MARK: - Private Properties
@@ -134,6 +140,14 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }()
 
     private var cancellables = Set<AnyCancellable>()
+
+    // The curated jobId we are currently capturing for (used for local organization only).
+    private var currentJobId: String?
+
+    // Persist last connected device to make reconnect 1-tap.
+    private let lastDeviceIdKey = "com.blueprint.glasses.lastDeviceId"
+    private let lastDeviceNameKey = "com.blueprint.glasses.lastDeviceName"
+    private let lastDeviceIsMockKey = "com.blueprint.glasses.lastDeviceIsMock"
 
     // MARK: - Initialization
 
@@ -277,6 +291,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     self.cameraSession = mockSession
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = true
+                    self.persistLastConnectedDevice(device)
                     print("✅ [GlassesCapture] Connected to mock device: \(device.name)")
                 }
             } catch {
@@ -306,6 +321,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     self.cameraSession = session
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = false
+                    self.persistLastConnectedDevice(device)
                     print("✅ [GlassesCapture] Connected to device: \(device.name)")
                 }
             } catch {
@@ -328,6 +344,29 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         print("🔌 [GlassesCapture] Disconnected")
     }
 
+    // MARK: - Reconnect
+
+    var lastConnectedDevice: DiscoveredDevice? {
+        guard let id = UserDefaults.standard.string(forKey: lastDeviceIdKey),
+              let name = UserDefaults.standard.string(forKey: lastDeviceNameKey) else {
+            return nil
+        }
+        let isMock = UserDefaults.standard.bool(forKey: lastDeviceIsMockKey)
+        return DiscoveredDevice(id: id, name: name, isMock: isMock)
+    }
+
+    func reconnectLastDevice() {
+        guard let device = lastConnectedDevice else { return }
+        // Fast-path reconnect: connect directly if possible.
+        connect(to: device)
+    }
+
+    private func persistLastConnectedDevice(_ device: DiscoveredDevice) {
+        UserDefaults.standard.set(device.id, forKey: lastDeviceIdKey)
+        UserDefaults.standard.set(device.name, forKey: lastDeviceNameKey)
+        UserDefaults.standard.set(device.isMock, forKey: lastDeviceIsMockKey)
+    }
+
     // MARK: - Mock Video Source
 
     func updateMockVideoURL(_ url: URL) {
@@ -339,6 +378,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     // MARK: - Video Capture
+
+    /// Starts a capture for a specific scan job. This does not change upload behavior; it only
+    /// helps keep local artifact directories organized by jobId.
+    func startCapture(jobId: String) {
+        currentJobId = jobId
+        startCapture()
+    }
 
     func startCapture() {
         guard case .connected = connectionState else {
@@ -362,9 +408,6 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
                 // Setup video writer
                 try setupVideoWriter(artifacts: artifacts)
-
-                // Setup motion logging
-                setupMotionLogging(artifacts: artifacts)
 
                 // Start camera stream
                 try await startCameraStream()
@@ -391,8 +434,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     private func prepareArtifacts() throws -> CaptureArtifacts {
         let baseName = "glasses-capture-\(UUID().uuidString)"
-        let tempDir = FileManager.default.temporaryDirectory
-        let recordingDir = tempDir.appendingPathComponent(baseName, isDirectory: true)
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let root = appSupport.appendingPathComponent("BlueprintCapture", isDirectory: true)
+            .appendingPathComponent("Captures", isDirectory: true)
+        let parentDir: URL = {
+            if let jobId = currentJobId, !jobId.isEmpty {
+                return root.appendingPathComponent(jobId, isDirectory: true)
+            }
+            return root
+        }()
+        let recordingDir = parentDir.appendingPathComponent(baseName, isDirectory: true)
         let framesDir = recordingDir.appendingPathComponent("frames", isDirectory: true)
         // Always use directory upload (not ZIP) to ensure manifest.json gets patched
         // with scene_id and video_uri by CaptureUploadService during upload.
@@ -403,6 +455,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let manifestURL = recordingDir.appendingPathComponent("manifest.json")
 
         let fileManager = FileManager.default
+        try fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: recordingDir.path) {
             try fileManager.removeItem(at: recordingDir)
         }
@@ -696,6 +749,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 self.pixelBufferAdaptor = nil
                 self.recordingStartTime = nil
                 self.frameCount = 0
+                self.currentJobId = nil
                 print("✅ [GlassesCapture] Capture finished: \(finalArtifacts.frameCount) frames, \(String(format: "%.1f", finalArtifacts.durationSeconds))s")
             }
         }
@@ -725,8 +779,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             "capture_source": "glasses",
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),
             "duration_seconds": artifacts.durationSeconds,
-            "frame_count": artifacts.frameCount,
-            "has_motion_data": FileManager.default.fileExists(atPath: artifacts.motionLogURL.path)
+            "frame_count": artifacts.frameCount
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes]) {

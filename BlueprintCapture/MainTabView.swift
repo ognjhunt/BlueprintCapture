@@ -2,33 +2,46 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab = 0
-    @StateObject private var captureFlowViewModel = CaptureFlowViewModel()
+    @ObservedObject var glassesManager: GlassesCaptureManager
+    @ObservedObject var uploadQueue: UploadQueueViewModel
+    @ObservedObject var alertsManager: NearbyAlertsManager
 
     var body: some View {
         ZStack {
             TabView(selection: $selectedTab) {
-                NearbyTargetsView(sharedCaptureFlow: captureFlowViewModel)
+                ScanHomeView(
+                    glassesManager: glassesManager,
+                    uploadQueue: uploadQueue,
+                    alertsManager: alertsManager
+                )
                     .tabItem {
-                        Label("Earn", systemImage: "mappin.circle.fill")
+                        Label("Scan", systemImage: "mappin.circle.fill")
                     }
                     .tag(0)
 
-                SettingsView()
+                WalletView(glassesManager: glassesManager)
                     .tabItem {
-                        Label("Account", systemImage: "person.crop.circle")
+                        Label("Wallet", systemImage: "creditcard.fill")
                     }
                     .tag(1)
             }
             .tint(BlueprintTheme.brandTeal)
 
             // Upload progress overlay - appears above tab bar
-            UploadProgressOverlayView(viewModel: captureFlowViewModel)
+            UploadProgressOverlayView(viewModel: uploadQueue)
         }
         .blueprintAppBackground()
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
+            guard
+                let info = note.userInfo as? [String: Any],
+                let action = info["action"] as? String,
+                action == "start_scan"
+            else { return }
+            selectedTab = 0
+        }
     }
 }
 
 #Preview {
-    MainTabView()
+    MainTabView(glassesManager: GlassesCaptureManager(), uploadQueue: UploadQueueViewModel(), alertsManager: NearbyAlertsManager())
 }
-
