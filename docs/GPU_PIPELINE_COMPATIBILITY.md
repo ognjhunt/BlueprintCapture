@@ -49,7 +49,10 @@ Where:
   "width": 1920,                  // Video width in pixels
   "height": 1440,                 // Video height in pixels
   "capture_start_epoch_ms": 1702137045123,  // Unix timestamp in milliseconds
-  "has_lidar": true               // Whether device has LiDAR (false for glasses)
+  "has_lidar": true,              // Whether device has LiDAR (false for glasses)
+  "capture_schema_version": "2.0.0",
+  "capture_source": "iphone|glasses",
+  "capture_tier_hint": "tier1_iphone|tier2_glasses"
 }
 ```
 
@@ -75,16 +78,30 @@ Where:
 
 ### arkit/poses.jsonl
 
-One JSON object per line, containing camera-to-world transform in **row-major** format:
+One JSON object per line, containing camera-to-world transform in **row-major** format.
+The current schema is backward-compatible and includes both legacy and bridge fields:
 
 ```json
-{"frameIndex": 0, "timestamp": 0.0, "transform": [[r00,r01,r02,tx],[r10,r11,r12,ty],[r20,r21,r22,tz],[0,0,0,1]]}
-{"frameIndex": 1, "timestamp": 0.033, "transform": [[...],[...],[...],[...]]}
+{
+  "pose_schema_version": "2.0",
+  "frameIndex": 0,
+  "timestamp": 12345.6789,
+  "transform": [[r00,r01,r02,tx],[r10,r11,r12,ty],[r20,r21,r22,tz],[0,0,0,1]],
+  "frame_id": "000001",
+  "t_device_sec": 0.000000,
+  "T_world_camera": [[r00,r01,r02,tx],[r10,r11,r12,ty],[r20,r21,r22,tz],[0,0,0,1]]
+}
 ```
 
-- `frameIndex` - Integer frame index starting at 0
-- `timestamp` - Float seconds (ARKit device timestamp)
-- `transform` - 4x4 camera-to-world matrix in row-major order
+- Legacy fields:
+  - `frameIndex` - Integer frame index starting at 0
+  - `timestamp` - ARKit device timestamp
+  - `transform` - 4x4 camera-to-world matrix in row-major order
+- Bridge fields:
+  - `pose_schema_version` - Current pose schema version
+  - `frame_id` - Zero-padded frame ID (`000001`, ...)
+  - `t_device_sec` - Seconds from first ARKit frame in the capture
+  - `T_world_camera` - Same transform in bridge canonical field name
 
 ### arkit/intrinsics.json
 
@@ -157,12 +174,22 @@ IMU data at 60Hz:
 
 ## Pipeline Trigger
 
-The Cloud Function `storage_trigger.py` monitors uploads and triggers the pipeline when:
+The Cloud Function in `cloud/extract-frames/src/index.ts` monitors:
 
-1. Both `manifest.json` AND `walkthrough.mov` exist in the upload path
-2. The manifest is converted to internal `SessionManifest` format
-3. A Pub/Sub message is published to `pipeline-trigger`
-4. Cloud Run Job starts processing
+- `scenes/<scene_id>/<source>/<capture_id>/raw/walkthrough.mov`
+- `targets/<scene_id>/raw/walkthrough.mov` (legacy compatibility)
+
+When triggered it performs:
+
+1. Frame extraction to `.../frames/*.jpg` + `.../frames/index.jsonl`
+2. ARKit pose alignment with schema-tolerant parsing (legacy + v2 rows)
+3. Keyframe selection (sharpness proxy in middle third) and upload to:
+   - `scenes/<scene_id>/images/<capture_id>_keyframe.jpg` (scenes mode)
+4. QA + descriptor emission:
+   - `scenes/<scene_id>/captures/<capture_id>/qa_report.json`
+   - `scenes/<scene_id>/captures/<capture_id>/capture_descriptor.json`
+5. Automatic source orchestrator request on QA pass:
+   - `scenes/<scene_id>/prompts/scene_request.json` (`source_mode=image`)
 
 ## Source-Specific Differences
 

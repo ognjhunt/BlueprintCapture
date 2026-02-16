@@ -16,22 +16,20 @@ import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 import AdmZip from "adm-zip";
 import archiver from "archiver";
+import {
+  buildPoseIndex,
+  chooseKeyframeCandidate,
+  evaluateQualityGate,
+  findClosestPoseByTime,
+  parsePoseRows,
+  percentile,
+  type PoseRow,
+  type PoseIndex,
+} from "./bridge.js";
 
 const storage = new Storage();
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
-
-type PoseRow = {
-  frame_id?: string;
-  t_device_sec?: number;
-  T_world_camera?: number[][];
-  [key: string]: unknown;
-};
-
-type PoseIndex = {
-  byFrameId: Map<string, PoseRow>;
-  byTime: PoseRow[];
-};
 
 type PoseMatchType = "frame_id" | "time";
 
@@ -54,22 +52,6 @@ async function runCommand(
     child.on("error", reject);
     child.on("close", (code) => resolve({ stdout, stderr, code }));
   });
-}
-
-function parsePoseRows(content: string): PoseRow[] {
-  const rows: PoseRow[] = [];
-  const lines = content.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      const parsed = JSON.parse(line) as PoseRow;
-      rows.push(parsed);
-    } catch (error) {
-      logger.warn("Failed to parse ARKit pose row", { lineNumber: i + 1, error });
-    }
-  }
-  return rows;
 }
 
 async function loadArkitPoses(
@@ -108,46 +90,168 @@ async function loadArkitPoses(
   }
 
   const rows = parsePoseRows(content);
-  const byFrameId = new Map<string, PoseRow>();
-  const byTime: PoseRow[] = [];
-  for (const row of rows) {
-    if (typeof row.frame_id === "string") {
-      byFrameId.set(row.frame_id, row);
-    }
-    if (typeof row.t_device_sec === "number") {
-      byTime.push(row);
-    }
-  }
-  byTime.sort((a, b) => (a.t_device_sec ?? 0) - (b.t_device_sec ?? 0));
+  const index = buildPoseIndex(rows);
   logger.info("Loaded ARKit pose entries", { posesObjectName, count: rows.length });
-  return { byFrameId, byTime };
+  return index;
 }
 
-function findClosestPoseByTime(poses: PoseRow[], targetTime: number): PoseRow | undefined {
-  if (!poses.length) return undefined;
-  let low = 0;
-  let high = poses.length - 1;
-  while (low < high) {
-    const mid = Math.floor((low + high) / 2);
-    const midTime = poses[mid].t_device_sec ?? Number.NEGATIVE_INFINITY;
-    if (midTime < targetTime) {
-      low = mid + 1;
-    } else {
-      high = mid;
+type CapturePathInfo = {
+  mode: "scenes" | "targets";
+  sceneId: string;
+  captureSourcePath: string;
+  captureId: string;
+  scenePrefix: string;
+  capturePrefix: string;
+  rawPrefix: string;
+  framesPrefix: string;
+  capturesPrefix: string;
+  keyframeObjectName: string;
+  sceneRequestObjectName: string;
+};
+
+function parseCapturePath(objectName: string, generation: string): CapturePathInfo | null {
+  const parts = objectName.split("/");
+  if (parts.length >= 6 && parts[0] === "scenes" && parts[4] === "raw") {
+    const sceneId = parts[1];
+    const captureSourcePath = parts[2];
+    const captureId = parts[3];
+    const scenePrefix = `scenes/${sceneId}`;
+    const capturePrefix = `${scenePrefix}/${captureSourcePath}/${captureId}`;
+    return {
+      mode: "scenes",
+      sceneId,
+      captureSourcePath,
+      captureId,
+      scenePrefix,
+      capturePrefix,
+      rawPrefix: `${capturePrefix}/raw`,
+      framesPrefix: `${capturePrefix}/frames`,
+      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
+      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
+      sceneRequestObjectName: `${scenePrefix}/prompts/scene_request.json`,
+    };
+  }
+  if (parts.length >= 4 && parts[0] === "targets" && parts[2] === "raw") {
+    const sceneId = parts[1];
+    const captureId = `legacy-${generation || Date.now()}`;
+    const scenePrefix = `targets/${sceneId}`;
+    const capturePrefix = `${scenePrefix}`;
+    return {
+      mode: "targets",
+      sceneId,
+      captureSourcePath: "unknown",
+      captureId,
+      scenePrefix,
+      capturePrefix,
+      rawPrefix: `${capturePrefix}/raw`,
+      framesPrefix: `${capturePrefix}/frames`,
+      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
+      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
+      sceneRequestObjectName: `${scenePrefix}/prompts/scene_request.json`,
+    };
+  }
+  return null;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForObjectExists(
+  bucket: StorageBucket,
+  objectName: string,
+  timeoutMs: number,
+  intervalMs: number
+): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    try {
+      const [exists] = await bucket.file(objectName).exists();
+      if (exists) return true;
+    } catch (error) {
+      logger.warn("Failed checking object existence", { objectName, error });
+    }
+    await sleep(intervalMs);
+  }
+  return false;
+}
+
+async function loadJsonObject(
+  bucket: StorageBucket,
+  objectName: string,
+  tmpDir: string
+): Promise<Record<string, unknown> | null> {
+  const localPath = join(tmpDir, `json-${Date.now()}-${basename(objectName)}`);
+  try {
+    await bucket.file(objectName).download({ destination: localPath });
+    const raw = readFileSync(localPath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    return parsed;
+  } catch (error) {
+    logger.warn("Failed to load JSON object", { objectName, error });
+    return null;
+  }
+}
+
+function gsUri(bucketName: string, objectName: string): string {
+  return `gs://${bucketName}/${objectName}`;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+function asString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function validateManifest(manifest: Record<string, unknown> | null): {
+  valid: boolean;
+  missingRequired: string[];
+  warnings: string[];
+} {
+  if (!manifest) {
+    return { valid: false, missingRequired: ["manifest"], warnings: [] };
+  }
+
+  const missingRequired: string[] = [];
+  const warnings: string[] = [];
+  const requiredStringFields = ["scene_id", "video_uri", "device_model", "os_version"];
+  const requiredNumberFields = ["fps_source", "width", "height", "capture_start_epoch_ms"];
+  const requiredBooleanFields = ["has_lidar"];
+
+  for (const field of requiredStringFields) {
+    if (!asString(manifest[field])) {
+      missingRequired.push(field);
     }
   }
-  let best = poses[low];
-  const bestTime = best.t_device_sec;
-  const bestDiff =
-    bestTime !== undefined ? Math.abs(bestTime - targetTime) : Number.POSITIVE_INFINITY;
-  const prev = low > 0 ? poses[low - 1] : undefined;
-  if (prev && prev.t_device_sec !== undefined) {
-    const prevDiff = Math.abs(prev.t_device_sec - targetTime);
-    if (prevDiff <= bestDiff) {
-      best = prev;
+  for (const field of requiredNumberFields) {
+    if (asFiniteNumber(manifest[field]) === undefined) {
+      missingRequired.push(field);
     }
   }
-  return best;
+  for (const field of requiredBooleanFields) {
+    if (typeof manifest[field] !== "boolean") {
+      missingRequired.push(field);
+    }
+  }
+
+  const bridgeFields = ["capture_schema_version", "capture_source", "capture_tier_hint"];
+  for (const field of bridgeFields) {
+    if (!asString(manifest[field])) {
+      warnings.push(`missing_${field}`);
+    }
+  }
+
+  return {
+    valid: missingRequired.length === 0,
+    missingRequired,
+    warnings,
+  };
 }
 
 /**
@@ -169,41 +273,48 @@ export const extractFrames = onObjectFinalized(
     const bucketName = event.bucket;
     const objectName = event.data?.name || "";
     const contentType = event.data?.contentType || "";
+    const objectGeneration =
+      event.data?.generation !== undefined && event.data?.generation !== null
+        ? String(event.data.generation)
+        : "0";
 
-    // Handle both path formats:
-    // - scenes/<scene_id>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader)
-    // - targets/<scene_id>/raw/walkthrough.mov (legacy)
-    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/walkthrough.mov");
-    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/walkthrough.mov");
-
-    if (!isScenesPath && !isTargetsPath) {
-      logger.info("Skipping object (not a walkthrough.mov under scenes/*/.../raw/ or targets/*/raw/)", {
-        objectName,
-        contentType,
-      });
+    if (!objectName.endsWith("/raw/walkthrough.mov")) {
+      logger.info("Skipping object (not a walkthrough.mov upload)", { objectName, contentType });
       return;
     }
 
-    logger.info("Starting frame extraction", { bucketName, objectName });
+    const pathInfo = parseCapturePath(objectName, objectGeneration);
+    if (!pathInfo) {
+      logger.info("Skipping object (unsupported walkthrough.mov path)", { objectName });
+      return;
+    }
 
+    logger.info("Starting frame extraction", {
+      bucketName,
+      objectName,
+      sceneId: pathInfo.sceneId,
+      captureId: pathInfo.captureId,
+      mode: pathInfo.mode,
+    });
+
+    const bucket = storage.bucket(bucketName);
     const tmp = tmpdir();
     const localVideo = join(tmp, `video-${Date.now()}.mov`);
     const framesDir = join(tmp, `frames-${Date.now()}`);
     mkdirSync(framesDir, { recursive: true });
 
-    const bucket = storage.bucket(bucketName);
+    const manifestObjectName = `${pathInfo.rawPrefix}/manifest.json`;
+    const walkthroughExists = await waitForObjectExists(bucket, objectName, 3000, 1000);
+    const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
+    const manifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
+    const manifestValidation = validateManifest(manifest);
+
+    const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
     const file = bucket.file(objectName);
-    const rawPrefix = dirname(objectName); // targets/<scene>/raw
 
-    // Load ARKit poses (if present)
-    const poseIndex = await loadArkitPoses(bucket, rawPrefix, tmp);
-
-    // Download video
     await file.download({ destination: localVideo });
     logger.info("Downloaded video to temp", { localVideo });
 
-    // Extract frames using ffmpeg fps=5 and scale longest side to 512 with Lanczos
-    // Also include showinfo after fps so pts_time corresponds to output frames
     const outputPattern = join(framesDir, "%06d.jpg");
     const ffmpegArgs = [
       "-hide_banner",
@@ -232,7 +343,6 @@ export const extractFrames = onObjectFinalized(
       throw new Error(`ffmpeg failed with code ${code}`);
     }
 
-    // Parse pts_time values from showinfo lines
     const timeRegex = /showinfo.*pts_time:([0-9]+\.?[0-9]*)/g;
     const ptsTimes: number[] = [];
     for (const line of stderr.split(/\r?\n/)) {
@@ -244,14 +354,15 @@ export const extractFrames = onObjectFinalized(
       }
     }
 
-    // Build index.jsonl mapping frame_id -> t_video_sec (+ ARKit pose match)
     const sortedFiles = readdirSync(framesDir)
       .filter((f) => f.toLowerCase().endsWith(".jpg"))
       .sort();
 
-    const indexLines: string[] = [];
+    const indexEntries: Record<string, unknown>[] = [];
     const posesByFrameId = poseIndex.byFrameId;
     const posesByTime = poseIndex.byTime;
+    let matchedPoseCount = 0;
+    const poseDeltaSecValues: number[] = [];
 
     for (let i = 0; i < sortedFiles.length; i++) {
       const frameId = zeroPad(i + 1, 6);
@@ -264,7 +375,7 @@ export const extractFrames = onObjectFinalized(
       };
 
       let poseMatchType: PoseMatchType | undefined;
-      let pose = posesByFrameId.get(frameId);
+      let pose: PoseRow | undefined = posesByFrameId.get(frameId);
       if (pose) {
         poseMatchType = "frame_id";
       } else if (posesByTime.length > 0) {
@@ -275,14 +386,22 @@ export const extractFrames = onObjectFinalized(
       }
 
       if (pose) {
+        matchedPoseCount += 1;
         const arkitPose: Record<string, unknown> = {};
-        const poseFrameId = typeof pose.frame_id === "string" ? pose.frameId : pose.frame_id;
 
         if (typeof pose.frame_id === "string") {
           arkitPose.pose_frame_id = pose.frame_id;
           if (pose.frame_id !== frameId) {
             arkitPose.frame_id_mismatch = true;
           }
+        }
+
+        if (typeof pose.pose_schema_version === "string") {
+          arkitPose.pose_schema_version = pose.pose_schema_version;
+        }
+
+        if (typeof pose.source_schema === "string") {
+          arkitPose.source_schema = pose.source_schema;
         }
 
         if (Array.isArray(pose.T_world_camera)) {
@@ -293,7 +412,9 @@ export const extractFrames = onObjectFinalized(
           const tDevice = Number(pose.t_device_sec.toFixed(6));
           arkitPose.t_device_sec = tDevice;
           const delta = Math.abs(tDevice - tVideoSec);
-          arkitPose.delta_sec = Number(delta.toFixed(6));
+          const roundedDelta = Number(delta.toFixed(6));
+          arkitPose.delta_sec = roundedDelta;
+          poseDeltaSecValues.push(roundedDelta);
         }
 
         if (poseMatchType) {
@@ -305,21 +426,20 @@ export const extractFrames = onObjectFinalized(
         }
       }
 
-      indexLines.push(JSON.stringify(entry));
+      indexEntries.push(entry);
     }
 
     const indexPath = join(framesDir, "index.jsonl");
-    writeFileSync(indexPath, indexLines.join("\n"), { encoding: "utf8" });
+    writeFileSync(
+      indexPath,
+      indexEntries.map((row) => JSON.stringify(row)).join("\n"),
+      { encoding: "utf8" }
+    );
 
-    // Upload all frames and index.jsonl to frames/ prefix next to raw/
-    // Input: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov -> Output: scenes/<scene>/<source>/<capture_id>/frames/<files>
-    // Input: targets/<scene>/raw/walkthrough.mov -> Output: targets/<scene>/frames/<files>
-    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
-    const framesPrefix = `${capturePrefix}/frames`;
-    const uploads: Promise<any>[] = [];
+    const uploads: Promise<unknown>[] = [];
     for (const fname of readdirSync(framesDir)) {
       const localPath = join(framesDir, fname);
-      const dest = `${framesPrefix}/${fname}`;
+      const dest = `${pathInfo.framesPrefix}/${fname}`;
       const ct = fname.endsWith(".jpg")
         ? "image/jpeg"
         : fname.endsWith(".jsonl")
@@ -333,7 +453,192 @@ export const extractFrames = onObjectFinalized(
       );
     }
     await Promise.all(uploads);
-    logger.info("Uploaded frames and index", { framesPrefix, count: sortedFiles.length });
+
+    const keyframeCandidate = chooseKeyframeCandidate(sortedFiles, (fileName) =>
+      statSync(join(framesDir, fileName)).size
+    );
+    let keyframeUri: string | null = null;
+    if (keyframeCandidate) {
+      await bucket.upload(join(framesDir, keyframeCandidate.fileName), {
+        destination: pathInfo.keyframeObjectName,
+        metadata: { contentType: "image/jpeg" },
+      });
+      keyframeUri = gsUri(bucketName, pathInfo.keyframeObjectName);
+    }
+
+    const captureSourceRaw =
+      asString(manifest?.capture_source) ??
+      (pathInfo.captureSourcePath === "iphone" || pathInfo.captureSourcePath === "glasses"
+        ? pathInfo.captureSourcePath
+        : "unknown");
+    const captureSource: "iphone" | "glasses" | "unknown" =
+      captureSourceRaw === "iphone"
+        ? "iphone"
+        : captureSourceRaw === "glasses"
+        ? "glasses"
+        : "unknown";
+    const poseMatchRate =
+      sortedFiles.length > 0 ? Number((matchedPoseCount / sortedFiles.length).toFixed(6)) : 0;
+    const p95PoseDeltaRaw = percentile(poseDeltaSecValues, 95);
+    const p95PoseDeltaSec =
+      p95PoseDeltaRaw === null ? null : Number(p95PoseDeltaRaw.toFixed(6));
+    const qualityGate = evaluateQualityGate({
+      captureSource,
+      manifestPresent: manifestExists,
+      manifestValid: manifestValidation.valid,
+      requiredFiles: {
+        walkthrough: walkthroughExists,
+        manifest: manifestExists,
+      },
+      frameCount: sortedFiles.length,
+      poseMatchRate,
+      p95PoseDeltaSec,
+    });
+
+    const finalReasons = [...qualityGate.reasons];
+    const finalWarnings = [...manifestValidation.warnings, ...qualityGate.warnings];
+    let finalStatus = qualityGate.status;
+    let autoTriggered = false;
+    let triggerError: string | null = null;
+
+    const rawPrefixUri = gsUri(bucketName, pathInfo.rawPrefix);
+    const framesIndexUri = gsUri(bucketName, `${pathInfo.framesPrefix}/index.jsonl`);
+    const descriptorUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/capture_descriptor.json`);
+    const qaReportUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/qa_report.json`);
+
+    const captureDescriptor: Record<string, unknown> = {
+      schema_version: "v1",
+      scene_id: pathInfo.sceneId,
+      capture_id: pathInfo.captureId,
+      capture_source: captureSource,
+      capture_tier: qualityGate.captureTier,
+      raw_prefix_uri: rawPrefixUri,
+      frames_index_uri: framesIndexUri,
+      keyframe_uri: keyframeUri,
+      nurec_mode: qualityGate.nurecMode,
+      swap_focus: ["kitchen", "warehouse"],
+      intended_space_type: asString(manifest?.intended_space_type) ?? "unknown",
+      quality: {
+        pose_match_rate: poseMatchRate,
+        p95_pose_delta_sec: p95PoseDeltaSec,
+        frame_count: sortedFiles.length,
+      },
+      capture_bundle: {
+        arkit_poses_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/poses.jsonl`),
+        arkit_intrinsics_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/intrinsics.json`),
+        arkit_depth_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/depth`),
+        arkit_confidence_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/confidence`),
+      },
+      generated_at: new Date().toISOString(),
+    };
+
+    if (finalStatus === "passed" && pathInfo.mode === "scenes") {
+      if (!keyframeUri) {
+        finalStatus = "blocked";
+        finalReasons.push("missing_keyframe");
+      } else {
+        const sceneRequestPayload = {
+          schema_version: "v1",
+          scene_id: pathInfo.sceneId,
+          source_mode: "image",
+          quality_tier: "standard",
+          image: {
+            gcs_uri: keyframeUri,
+            generation: objectGeneration,
+          },
+          constraints: {
+            capture_bundle: {
+              scene_id: pathInfo.sceneId,
+              capture_id: pathInfo.captureId,
+              capture_source: captureSource,
+              capture_tier: qualityGate.captureTier,
+              nurec_mode: qualityGate.nurecMode,
+              raw_prefix_uri: rawPrefixUri,
+              frames_index_uri: framesIndexUri,
+              keyframe_uri: keyframeUri,
+              descriptor_uri: descriptorUri,
+              qa_report_uri: qaReportUri,
+              swap_focus: ["kitchen", "warehouse"],
+            },
+          },
+          provider_policy: "openai_primary",
+          fallback: {
+            allow_image_fallback: false,
+          },
+        };
+        try {
+          await bucket
+            .file(pathInfo.sceneRequestObjectName)
+            .save(JSON.stringify(sceneRequestPayload, null, 2), {
+              contentType: "application/json",
+            });
+          autoTriggered = true;
+        } catch (error) {
+          finalStatus = "blocked";
+          finalReasons.push("scene_request_write_failed");
+          triggerError = error instanceof Error ? error.message : "unknown_error";
+        }
+      }
+    } else if (pathInfo.mode !== "scenes") {
+      finalWarnings.push("legacy_targets_path_no_source_orchestrator_trigger");
+    }
+
+    const qaReport: Record<string, unknown> = {
+      schema_version: "v1",
+      scene_id: pathInfo.sceneId,
+      capture_id: pathInfo.captureId,
+      capture_source: captureSource,
+      capture_tier_initial:
+        asString(manifest?.capture_tier_hint) ??
+        (captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses"),
+      capture_tier_final: qualityGate.captureTier,
+      nurec_mode: qualityGate.nurecMode,
+      status: finalStatus,
+      required_files: {
+        walkthrough: walkthroughExists,
+        manifest: manifestExists,
+      },
+      manifest_validation: {
+        valid: manifestValidation.valid,
+        missing_required: manifestValidation.missingRequired,
+        warnings: manifestValidation.warnings,
+      },
+      quality: {
+        frame_count: sortedFiles.length,
+        pose_matches: matchedPoseCount,
+        pose_match_rate: poseMatchRate,
+        p95_pose_delta_sec: p95PoseDeltaSec,
+      },
+      reasons: finalReasons,
+      warnings: finalWarnings,
+      auto_triggered: autoTriggered,
+      trigger_error: triggerError,
+      generated_at: new Date().toISOString(),
+    };
+
+    captureDescriptor.qa_status = finalStatus;
+    captureDescriptor.qa_report_uri = qaReportUri;
+    captureDescriptor.auto_triggered = autoTriggered;
+
+    await bucket
+      .file(`${pathInfo.capturesPrefix}/capture_descriptor.json`)
+      .save(JSON.stringify(captureDescriptor, null, 2), {
+        contentType: "application/json",
+      });
+    await bucket
+      .file(`${pathInfo.capturesPrefix}/qa_report.json`)
+      .save(JSON.stringify(qaReport, null, 2), {
+        contentType: "application/json",
+      });
+
+    logger.info("Uploaded frames, descriptor, and QA report", {
+      framesPrefix: pathInfo.framesPrefix,
+      frameCount: sortedFiles.length,
+      captureId: pathInfo.captureId,
+      sceneId: pathInfo.sceneId,
+      qaStatus: finalStatus,
+      autoTriggered,
+    });
   }
 );
 

@@ -770,13 +770,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             "height": 720,
             "capture_start_epoch_ms": Int64(artifacts.startedAt.timeIntervalSince1970 * 1000),
             "has_lidar": false,  // Glasses don't have LiDAR
+            "capture_schema_version": "2.0.0",
+            "capture_source": "glasses",
+            "capture_tier_hint": "tier2_glasses",
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
             "intended_space_type": "indoor",
 
             // Additional metadata (not required by pipeline but useful)
-            "capture_source": "glasses",
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),
             "duration_seconds": artifacts.durationSeconds,
             "frame_count": artifacts.frameCount

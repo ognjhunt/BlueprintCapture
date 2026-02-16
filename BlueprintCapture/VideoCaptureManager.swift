@@ -99,6 +99,26 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let confidenceFile: String?
     }
 
+    struct PipelinePoseRow: Codable {
+        let pose_schema_version: String
+        let frameIndex: Int
+        let timestamp: Double
+        let transform: [[Double]]
+        let frame_id: String
+        let t_device_sec: Double
+        let T_world_camera: [[Double]]
+    }
+
+    static let poseSchemaVersion = "2.0"
+    static let captureSchemaVersion = "2.0.0"
+    static let captureSource = "iphone"
+    static let captureTierHint = "tier1_iphone"
+
+    static func deviceTimeSeconds(frameTimestamp: TimeInterval, firstFrameTimestamp: TimeInterval?) -> Double {
+        let base = firstFrameTimestamp ?? frameTimestamp
+        return max(0.0, frameTimestamp - base)
+    }
+
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
 
@@ -152,6 +172,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var exposureTimer: Timer?
     private var currentARKitArtifacts: RecordingArtifacts.ARKitArtifacts?
     private var arFrameCount: Int = 0
+    private var arFirstFrameTimestamp: TimeInterval?
     private var exportedMeshAnchors: Set<UUID> = []
     @available(iOS 16.0, *)
     private var objectReconstructionManager: ObjectPointCloudReconstruction?
@@ -338,6 +359,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         currentArtifacts = artifacts
         currentARKitArtifacts = artifacts.arKit
         arFrameCount = 0
+        arFirstFrameTimestamp = nil
         exportedMeshAnchors.removeAll()
         latestUploadPayload = nil
         exposureSamples = []
@@ -940,6 +962,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             }
             arPoseLogFileHandle = nil
             arIntrinsicsWritten = false
+            arFirstFrameTimestamp = nil
             if #available(iOS 16.0, *) {
                 if let summary = self.objectReconstructionManager?.finalize() {
                     self.objectReconstructionSummary = summary
@@ -1021,6 +1044,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let cameraTransform = matrixToArray(frame.camera.transform)
         let intrinsics = matrixToArray(frame.camera.intrinsics)
         let resolution = [Int(frame.camera.imageResolution.width), Int(frame.camera.imageResolution.height)]
+        if arFirstFrameTimestamp == nil {
+            arFirstFrameTimestamp = frame.timestamp
+        }
+        let tDeviceSec = Self.deviceTimeSeconds(frameTimestamp: frame.timestamp, firstFrameTimestamp: arFirstFrameTimestamp)
 
         var sceneDepthFile: String?
         var smoothedDepthFile: String?
@@ -1086,9 +1113,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             print("Failed to encode ARKit frame log entry: \(error)")
         }
 
-        // Also append to poses.jsonl with GPU pipeline-compatible schema
-        // Pipeline expects: {"frameIndex": 0, "timestamp": 0.0, "transform": [[r00,r01,r02,tx],[r10,r11,r12,ty],[r20,r21,r22,tz],[0,0,0,1]]}
-        // Transform is a 4x4 camera-to-world matrix in row-major format
+        // Also append to poses.jsonl with both legacy and bridge-compatible schema.
+        // Legacy fields retained: frameIndex, timestamp, transform
+        // Bridge fields added: pose_schema_version, frame_id, t_device_sec, T_world_camera
         if let poseHandle = arPoseLogFileHandle {
             let m = frame.camera.transform
             // Convert from SIMD column-major to row-major format for pipeline compatibility
@@ -1102,8 +1129,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 [Double(m.columns.0.z), Double(m.columns.1.z), Double(m.columns.2.z), Double(m.columns.3.z)],
                 [Double(m.columns.0.w), Double(m.columns.1.w), Double(m.columns.2.w), Double(m.columns.3.w)]
             ]
-            struct PoseRow: Codable { let frameIndex: Int; let timestamp: Double; let transform: [[Double]] }
-            let row = PoseRow(frameIndex: frameIndex, timestamp: frame.timestamp, transform: transform)
+            let row = PipelinePoseRow(
+                pose_schema_version: Self.poseSchemaVersion,
+                frameIndex: frameIndex,
+                timestamp: frame.timestamp,
+                transform: transform,
+                frame_id: frameId,
+                t_device_sec: tDeviceSec,
+                T_world_camera: transform
+            )
             do {
                 let json = try JSONEncoder().encode(row)
                 poseHandle.write(json)
@@ -1442,6 +1476,7 @@ private extension VideoCaptureManager {
         arSessionRecorder = nil
         arDataQueue.async { [weak self] in
             self?.arFrameCount = 0
+            self?.arFirstFrameTimestamp = nil
             self?.exportedMeshAnchors.removeAll()
         }
     }
@@ -1489,6 +1524,9 @@ private extension VideoCaptureManager {
                 "height": height,
                 "capture_start_epoch_ms": epochMs,
                 "has_lidar": hasLiDAR,
+                "capture_schema_version": Self.captureSchemaVersion,
+                "capture_source": Self.captureSource,
+                "capture_tier_hint": Self.captureTierHint,
                 // Optional fields that enhance processing
                 "scale_hint_m_per_unit": 1.0,
                 "intended_space_type": "home"
