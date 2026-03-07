@@ -186,6 +186,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                         self.uploads[id] = latestRecord
                         self.subject.send(.progress(id: id, progress: 1.0))
                         self.subject.send(.completed(latestRecord.request))
+                        self.removeLocalArtifacts(for: latestRecord.request)
                         print("✅ [UploadService] Upload finished id=\(id)")
                     }
                     continuation.resume()
@@ -224,6 +225,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.uploads[id] = latestRecord
             self.subject.send(.progress(id: id, progress: 1.0))
             self.subject.send(.completed(latestRecord.request))
+            self.removeLocalArtifacts(for: latestRecord.request)
         }
         #endif
     }
@@ -343,8 +345,19 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.uploads[id] = latestRecord
             self.subject.send(.progress(id: id, progress: 1.0))
             self.subject.send(.completed(latestRecord.request))
+            self.removeLocalArtifacts(for: latestRecord.request)
         }
         return true
+    }
+
+    private func removeLocalArtifacts(for request: CaptureUploadRequest) {
+        let packageURL = request.packageURL
+        do {
+            try FileManager.default.removeItem(at: packageURL)
+            print("🧹 [UploadService] Removed local artifacts at \(packageURL.path)")
+        } catch {
+            print("⚠️ [UploadService] Failed to remove local artifacts at \(packageURL.path): \(error.localizedDescription)")
+        }
     }
 
     private func contentType(for url: URL) -> String {
