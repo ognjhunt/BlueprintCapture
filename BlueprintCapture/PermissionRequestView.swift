@@ -7,10 +7,10 @@ struct PermissionRequestView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Enable evidence capture")
+                    Text("Enable capture sensors")
                         .font(.largeTitle.weight(.bold))
                         .blueprintGradientText()
-                    Text("Camera and microphone are required for phone capture. Motion data helps downstream geometry but is optional to the workflow.")
+                    Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
                         .font(.callout)
                         .blueprintSecondaryOnDark()
                 }
@@ -22,7 +22,7 @@ struct PermissionRequestView: View {
                     PermissionRow(title: "Microphone", description: "Captures spatial audio for AI transcription", granted: viewModel.microphoneAuthorized)
                 }
                 BlueprintGlassCard {
-                    PermissionRow(title: "Motion & Fitness (optional)", description: "Adds device pose information for metric scale when available", granted: viewModel.motionAuthorized)
+                    PermissionRow(title: "Motion & Fitness", description: "Adds device pose information for metric scale", granted: viewModel.motionAuthorized)
                 }
 
                 Spacer()

@@ -8,23 +8,13 @@ struct ContentView: View {
             Group {
                 switch viewModel.step {
                 case .collectProfile:
-                    ProfileReviewView(profile: viewModel.profile, onContinue: viewModel.continueFromProfile)
-                case .defineSubmission:
-                    QualificationIntakeView(viewModel: viewModel)
+                    ProfileReviewView(profile: viewModel.profile, onContinue: viewModel.requestLocation)
                 case .confirmLocation:
                     LocationConfirmationView(viewModel: viewModel)
                 case .requestPermissions:
                     PermissionRequestView(viewModel: viewModel)
-                case .reviewCapture:
-                    CaptureReviewView(viewModel: viewModel)
                 case .readyToCapture:
-                    if let captureContext = viewModel.activeCaptureContext {
-                        CaptureSessionView(viewModel: viewModel, captureContext: captureContext)
-                    } else {
-                        ProgressView("Preparing capture…")
-                    }
-                case .captureSummary:
-                    CaptureSummaryView(viewModel: viewModel)
+                    CaptureSessionView(viewModel: viewModel, targetId: nil, reservationId: nil)
                 }
             }
             .navigationTitle("Blueprint Capture")

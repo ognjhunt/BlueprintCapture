@@ -456,14 +456,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
-        try protectCaptureArtifacts(at: parentDir)
         if fileManager.fileExists(atPath: recordingDir.path) {
             try fileManager.removeItem(at: recordingDir)
         }
         try fileManager.createDirectory(at: recordingDir, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: framesDir, withIntermediateDirectories: true)
-        try protectCaptureArtifacts(at: recordingDir)
-        try protectCaptureArtifacts(at: framesDir)
 
         return CaptureArtifacts(
             baseFilename: baseName,
@@ -477,18 +474,6 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             endedAt: Date(), // Will be updated on stop
             frameCount: 0,
             durationSeconds: 0
-        )
-    }
-
-    private func protectCaptureArtifacts(at directoryURL: URL) throws {
-        var resourceValues = URLResourceValues()
-        resourceValues.isExcludedFromBackup = true
-        var mutableURL = directoryURL
-        try mutableURL.setResourceValues(resourceValues)
-
-        try FileManager.default.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: directoryURL.path
         )
     }
 
@@ -791,7 +776,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
-            "intended_space_type": "indoor",
+            "intended_space_type": "industrial_unknown",
 
             // Additional metadata (not required by pipeline but useful)
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),

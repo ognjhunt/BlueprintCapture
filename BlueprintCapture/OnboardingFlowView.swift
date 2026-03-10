@@ -2,11 +2,17 @@ import SwiftUI
 import AVFoundation
 import UserNotifications
 import CoreLocation
+import UIKit
 
+/// Glasses-only onboarding:
+/// 1) Welcome -> 2) Permissions (Camera, Notifications, Location When-In-Use) -> 3) Connect Glasses -> Done
 struct OnboardingFlowView: View {
-    enum Step: Int, CaseIterable { case welcome, permissions, complete }
+    enum Step: Int, CaseIterable { case welcome, permissions, connectGlasses, complete }
 
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
+
+    @ObservedObject var glassesManager: GlassesCaptureManager
+    @ObservedObject var alertsManager: NearbyAlertsManager
 
     @State private var step: Step = .welcome
 
@@ -15,25 +21,23 @@ struct OnboardingFlowView: View {
             ZStack {
                 switch step {
                 case .welcome:
-                    WelcomeIntroView(
-                        onContinue: {
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .permissions }
-                        }
-                    )
+                    WelcomeIntroView {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .permissions }
+                    }
                 case .permissions:
-                    PermissionsEnableView(
-                        onContinue: {
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .complete }
-                        }
-                    )
+                    PermissionsEnableView(alertsManager: alertsManager) {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .connectGlasses }
+                    }
+                case .connectGlasses:
+                    ConnectGlassesStepView(glassesManager: glassesManager) {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .complete }
+                    }
                 case .complete:
-                    CompletionView(
-                        onFinish: {
-                            isOnboarded = true
-                            UserDeviceService.updateLocalUser(fields: ["finishedOnboarding": true])
-                            AppSessionService.shared.log("onboardingComplete")
-                        }
-                    )
+                    CompletionView {
+                        isOnboarded = true
+                        UserDeviceService.updateLocalUser(fields: ["finishedOnboarding": true])
+                        AppSessionService.shared.log("onboardingComplete")
+                    }
                 }
             }
             .toolbar { ToolbarTitleContent(step: step) }
@@ -42,279 +46,312 @@ struct OnboardingFlowView: View {
     }
 }
 
+// MARK: - Step 1: Welcome
+
 private struct WelcomeIntroView: View {
     let onContinue: () -> Void
 
     var body: some View {
-        VStack(spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Qualification-first capture")
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-                Text("Collect site evidence for a real task zone")
-                    .font(.system(size: 28, weight: .heavy))
-                    .blueprintGradientText()
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 8)
+        VStack(spacing: 28) {
+            Spacer()
 
-            VStack(spacing: 12) {
-                HStack(spacing: 8) {
-                    BlueprintPill("Phone-first", icon: "iphone")
-                    BlueprintPill("Task-zone guided", icon: "viewfinder")
-                }
-                HStack(spacing: 8) {
-                    BlueprintPill("Evidence QA ready", icon: "checklist")
-                    BlueprintPill("ARKit optional", icon: "arkit")
-                }
+            VStack(spacing: 16) {
+                Image(systemName: "eyeglasses")
+                    .font(.system(size: 72))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                Text("Get paid to\nscan spaces")
+                    .font(.system(size: 32, weight: .bold))
+                    .multilineTextAlignment(.center)
+
+                Text("Connect your Meta smart glasses, capture a short walkthrough, and get paid once QC approves.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
             }
 
-            TabView {
-                ValueCard(icon: "doc.text.viewfinder", title: "Start from a submission", subtitle: "Define the site, task, and task-zone boundaries before recording anything.")
-                ValueCard(icon: "camera.viewfinder", title: "Capture with your phone", subtitle: "Record a guided evidence pass with video, motion logs, and optional ARKit enrichment.")
-                ValueCard(icon: "square.stack.3d.down.right", title: "Keep downstream outputs usable", subtitle: "Package the evidence so later geometry, labels, and structure artifacts can attach cleanly.")
+            Spacer()
+
+            VStack(spacing: 14) {
+                featureRow(icon: "bolt.fill", text: "One-tap scans from nearby alerts")
+                featureRow(icon: "icloud.and.arrow.up", text: "Auto-upload after recording")
+                featureRow(icon: "dollarsign.circle", text: "Paid after quality verification")
             }
-            .tabViewStyle(.page)
-            .frame(height: 280)
+            .padding(.horizontal, 28)
 
-            Spacer(minLength: 16)
+            Spacer()
 
-            Button(action: onContinue) { Text("Set up capture") }
+            Button("Get Started", action: onContinue)
                 .buttonStyle(BlueprintPrimaryButtonStyle())
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
         }
-        .padding()
     }
-}
 
-private struct ValueCard: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(spacing: 18) {
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 56))
-                .foregroundStyle(BlueprintTheme.primary)
-            Text(title)
-                .font(.headline)
-            Text(subtitle)
-                .font(.subheadline)
+                .font(.body)
+                .foregroundStyle(BlueprintTheme.brandTeal)
+                .frame(width: 24)
+
+            Text(text)
+                .font(.body)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+
+            Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(BlueprintTheme.surface)
-                .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 6)
-        )
-        .padding(.horizontal)
     }
 }
+
+// MARK: - Step 2: Permissions (Camera, Notifications, Location)
 
 private struct PermissionsEnableView: View {
+    @ObservedObject var alertsManager: NearbyAlertsManager
     let onContinue: () -> Void
 
     @State private var cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
-    @State private var microphoneGranted = AVAudioSession.sharedInstance().recordPermission == .granted
     @State private var locationGranted: Bool = {
         let status = CLLocationManager().authorizationStatus
         return status == .authorizedWhenInUse || status == .authorizedAlways
     }()
     @State private var notificationsGranted = false
+
     @State private var isRequesting = false
+    @State private var showingPermissionAlert = false
 
     private let notificationService = NotificationService()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Enable evidence capture")
-                        .font(.title2).fontWeight(.bold)
-                        .blueprintGradientText()
-                    Text("Camera and microphone power the default phone workflow. Location helps tie the submission to the correct site.")
-                        .font(.callout)
-                        .blueprintSecondaryOnDark()
-                }
+        VStack(spacing: 22) {
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.shield.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
 
-                BlueprintGlassCard {
-                    PermissionsRow(title: "Camera", description: "Records the walkthrough evidence", granted: cameraGranted)
-                    Divider()
-                    PermissionsRow(title: "Microphone", description: "Captures audio context for review and transcription", granted: microphoneGranted)
-                    Divider()
-                    PermissionsRow(title: "Location", description: "Anchors the submission to the correct site", granted: locationGranted)
-                }
+                Text("Enable Permissions")
+                    .font(.title2.weight(.bold))
 
-                BlueprintGlassCard {
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: notificationsGranted ? "checkmark.seal.fill" : "bell.badge.fill")
-                            .symbolRenderingMode(.palette)
-                            .foregroundStyle(notificationsGranted ? BlueprintTheme.successGreen : BlueprintTheme.primary)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Notifications (recommended)").font(.headline).blueprintPrimaryOnDark()
-                            Text("Get reminders when an evidence pass finishes uploading or needs a recap.")
-                                .font(.subheadline).blueprintSecondaryOnDark()
-                            Button(action: requestNotifications) { Text(notificationsGranted ? "Enabled" : "Enable notifications") }
-                                .buttonStyle(BlueprintSecondaryButtonStyle())
-                                .disabled(notificationsGranted)
-                        }
-                        Spacer()
-                    }
-                }
-
-                Button(action: enableAll) {
-                    HStack {
-                        if isRequesting { ProgressView().tint(.white) }
-                        Text(grantedAll ? "Continue" : "Enable and continue")
-                    }
-                }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-                .disabled(isRequesting)
-                .padding(.bottom, 8)
+                Text("We use these to find nearby scan jobs and record with your glasses.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
             }
-            .padding(.horizontal)
-            .padding(.top, -15)
+            .padding(.top, 28)
+
+            VStack(spacing: 12) {
+                permissionRow(title: "Location", icon: "location.fill", granted: locationGranted)
+                permissionRow(title: "Notifications", icon: "bell.fill", granted: notificationsGranted)
+                permissionRow(title: "Camera", icon: "camera.fill", granted: cameraGranted)
+            }
+            .padding(.horizontal, 24)
+
+            Spacer()
+
+            Button(action: enableAll) {
+                if isRequesting {
+                    ProgressView().tint(.white)
+                } else {
+                    Text("Enable")
+                }
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .disabled(isRequesting)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .task { refreshNotificationStatus() }
+        .task {
+            refreshStatuses()
+        }
+        .onChange(of: alertsManager.authorizationStatus) { _, _ in
+            refreshStatuses()
+        }
+        .alert("Permissions Required", isPresented: $showingPermissionAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Continue Anyway") { onContinue() }
+        } message: {
+            Text("Location and notifications are recommended for nearby alerts. Camera is required for capture.")
+        }
     }
 
-    private var grantedAll: Bool { cameraGranted && microphoneGranted && locationGranted }
+    private func permissionRow(title: String, icon: String, granted: Bool) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(granted ? BlueprintTheme.successGreen : .secondary)
+                .frame(width: 24)
+
+            Text(title)
+                .font(.body)
+                .foregroundStyle(.primary)
+
+            Spacer()
+
+            Image(systemName: granted ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(granted ? BlueprintTheme.successGreen : .secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var requiredPermissionsGranted: Bool { cameraGranted && locationGranted }
+
+    private func refreshStatuses() {
+        cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
+        let status = CLLocationManager().authorizationStatus
+        locationGranted = status == .authorizedWhenInUse || status == .authorizedAlways
+
+        alertsManager.refreshNotificationStatus()
+        notificationsGranted = alertsManager.notificationsGranted
+    }
 
     private func enableAll() {
-        if grantedAll {
-            onContinue()
-            return
-        }
         isRequesting = true
         Task {
-            await requestCamera()
-            await requestMicrophone()
-            await requestLocation()
-            await MainActor.run {
-                isRequesting = false
-                onContinue()
-            }
-        }
-    }
+            let cam = await AVCaptureDevice.requestAccess(for: .video)
+            UserDeviceService.setPermission("camera", granted: cam)
 
-    private func requestCamera() async {
-        let granted = await AVCaptureDevice.requestAccess(for: .video)
-        await MainActor.run { self.cameraGranted = granted }
-        UserDeviceService.setPermission("camera", granted: granted)
-        AppSessionService.shared.log("permission.camera", metadata: ["granted": granted])
-    }
+            alertsManager.requestWhenInUseAuthorization()
+            UserDeviceService.setPermission("location", granted: alertsManager.isLocationAuthorized)
 
-    private func requestMicrophone() async {
-        let granted = await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { allowed in
-                continuation.resume(returning: allowed)
-            }
-        }
-        await MainActor.run { self.microphoneGranted = granted }
-        UserDeviceService.setPermission("microphone", granted: granted)
-        AppSessionService.shared.log("permission.microphone", metadata: ["granted": granted])
-    }
-
-    private func requestLocation() async {
-        let granted = await LocationPermissionRequester.requestWhenInUse()
-        await MainActor.run { self.locationGranted = granted }
-        UserDeviceService.setPermission("location", granted: granted)
-        AppSessionService.shared.log("permission.location", metadata: ["granted": granted])
-    }
-
-    private func requestNotifications() {
-        Task {
             await notificationService.requestAuthorizationIfNeeded()
-            refreshNotificationStatus()
-            UNUserNotificationCenter.current().getNotificationSettings { settings in
-                let granted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
-                UserDeviceService.setPermission("notifications", granted: granted)
-                AppSessionService.shared.log("permission.notifications", metadata: ["granted": granted])
-            }
-        }
-    }
+            alertsManager.refreshNotificationStatus()
+            UserDeviceService.setPermission("notifications", granted: alertsManager.notificationsGranted)
 
-    private func refreshNotificationStatus() {
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            DispatchQueue.main.async {
-                self.notificationsGranted = settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional
+            await MainActor.run {
+                refreshStatuses()
+                isRequesting = false
+                if requiredPermissionsGranted {
+                    onContinue()
+                } else {
+                    showingPermissionAlert = true
+                }
             }
         }
     }
 }
 
-private struct PermissionsRow: View {
-    let title: String
-    let description: String
-    let granted: Bool
+// MARK: - Step 3: Connect Glasses (Required)
+
+private struct ConnectGlassesStepView: View {
+    @ObservedObject var glassesManager: GlassesCaptureManager
+    let onContinue: () -> Void
+
+    @State private var showingConnectSheet = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: granted ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(granted ? BlueprintTheme.successGreen : BlueprintTheme.warningOrange)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .blueprintPrimaryOnDark()
-                Text(description)
-                    .font(.subheadline)
-                    .blueprintSecondaryOnDark()
-            }
+        VStack(spacing: 24) {
             Spacer()
+
+            VStack(spacing: 12) {
+                Image(systemName: "eyeglasses")
+                    .font(.system(size: 56))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                Text("Connect Your Glasses")
+                    .font(.title2.weight(.bold))
+
+                Text("Required to capture scans in this app.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+
+            Spacer()
+
+            VStack(spacing: 12) {
+                Button {
+                    showingConnectSheet = true
+                } label: {
+                    Text(connectionButtonTitle)
+                }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
+
+                if case .connected = glassesManager.connectionState {
+                    Button("Continue", action: onContinue)
+                        .buttonStyle(BlueprintSuccessButtonStyle())
+                } else {
+                    Text("You can connect now and start scanning immediately.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(granted ? 0.10 : 0.03))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(granted ? 0.14 : 0.06), lineWidth: 1)
-        )
+        .sheet(isPresented: $showingConnectSheet) {
+            GlassesConnectSheet(glassesManager: glassesManager) {
+                showingConnectSheet = false
+            }
+        }
+    }
+
+    private var connectionButtonTitle: String {
+        switch glassesManager.connectionState {
+        case .connected:
+            return "Manage Connection"
+        case .connecting:
+            return "Connecting…"
+        case .scanning:
+            return "Scanning…"
+        case .error:
+            return "Try Again"
+        case .disconnected:
+            return "Connect Glasses"
+        }
     }
 }
+
+// MARK: - Step 4: Done
 
 private struct CompletionView: View {
     let onFinish: () -> Void
 
     var body: some View {
         VStack(spacing: 28) {
-            VStack(spacing: 12) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 60))
+            Spacer()
+
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 72))
                     .foregroundStyle(BlueprintTheme.successGreen)
-                Text("You’re ready to qualify sites")
-                    .font(.title2).fontWeight(.bold)
-                    .blueprintGradientText()
-                Text("Start from a manual submission, review the task zone, and record an evidence pass with your phone.")
-                    .font(.subheadline).blueprintSecondaryOnDark()
+
+                Text("You're All Set")
+                    .font(.title.weight(.bold))
+
+                Text("We’ll notify you when curated scan jobs are nearby.")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, 28)
             }
-            .padding(.top, 32)
 
             Spacer()
 
-            Button(action: onFinish) { Text("Open capture workflow") }
+            Button("Start Scanning", action: onFinish)
                 .buttonStyle(BlueprintPrimaryButtonStyle())
-                .padding(.horizontal)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
         }
-        .padding()
     }
 }
 
+// MARK: - Toolbar title
+
 private struct ToolbarTitleContent: ToolbarContent {
     let step: OnboardingFlowView.Step
-
     var body: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             Text(title)
@@ -322,12 +359,13 @@ private struct ToolbarTitleContent: ToolbarContent {
                 .foregroundStyle(.white.opacity(0.9))
         }
     }
-
     private var title: String {
         switch step {
         case .welcome: return "Welcome"
         case .permissions: return "Permissions"
+        case .connectGlasses: return "Glasses"
         case .complete: return "All set"
         }
     }
 }
+

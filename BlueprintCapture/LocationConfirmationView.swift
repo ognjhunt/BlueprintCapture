@@ -9,10 +9,10 @@ struct LocationConfirmationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Confirm site location")
+                Text("Confirm location")
                     .font(.largeTitle.weight(.bold))
                     .blueprintGradientText()
-                Text("Anchor this submission to the correct site before collecting task-zone evidence.")
+                Text("We use your current position to anchor the walkthrough to an exact address.")
                     .font(.callout)
                     .blueprintSecondaryOnDark()
             }
@@ -28,7 +28,7 @@ struct LocationConfirmationView: View {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(BlueprintTheme.errorRed)
                     } else {
-                        ProgressView("Detecting your site…")
+                        ProgressView("Detecting your venue…")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,7 +137,7 @@ struct LocationConfirmationView: View {
                     viewModel.locationManager.requestLocation()
                 }
             } label: {
-                Text(viewModel.currentAddress == nil ? "Retry location" : "Use this site")
+                Text(viewModel.currentAddress == nil ? "Retry location" : "Use this location")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
             .disabled(viewModel.currentAddress == nil && viewModel.locationError == nil)

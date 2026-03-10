@@ -7,10 +7,10 @@ struct ProfileReviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Operator profile")
+                Text("Welcome back")
                     .font(.largeTitle.weight(.bold))
                     .blueprintGradientText()
-                Text("Confirm who is creating this qualification submission before the evidence workflow begins.")
+                Text("Please confirm your details before we begin the capture walkthrough.")
                     .font(.callout)
                     .blueprintSecondaryOnDark()
             }
@@ -30,7 +30,7 @@ struct ProfileReviewView: View {
             Spacer()
 
             Button(action: onContinue) {
-                Text("Continue to intake")
+                Text("Looks good — continue")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
         }

@@ -9,16 +9,14 @@ import MapKit
 final class CaptureFlowViewModel: NSObject, ObservableObject {
     enum Step {
         case collectProfile
-        case defineSubmission
         case confirmLocation
         case requestPermissions
-        case reviewCapture
         case readyToCapture
-        case captureSummary
     }
 
     @Published var profile: UserProfile = .placeholder
     @Published var step: Step = .collectProfile
+    @Published var isOnboarded: Bool = false
     @Published var currentAddress: String?
     @Published var locationStatus: CLAuthorizationStatus = .notDetermined
     @Published var locationError: String?
@@ -27,35 +25,34 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var motionAuthorized = false
     @Published var addressSearchResults: [AddressResult] = []
     @Published var isSearchingAddress = false
-    @Published var submissionDraft = SiteSubmissionDraft()
-    @Published var captureChecklist = TaskCaptureContext.defaultChecklist()
-    @Published var evidenceCoverageDeclarations = TaskCaptureContext.defaultCoverageDeclarations()
-    @Published private(set) var activeCaptureContext: TaskCaptureContext?
-    @Published private(set) var latestCompletedCaptureContext: TaskCaptureContext?
     @Published private(set) var uploadStatuses: [UploadStatus] = []
 
-    let locationManager = CLLocationManager()
-    let captureManager = VideoCaptureManager()
+    /// Stores current target info for the active capture session (set before starting capture)
+    var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
 
+    let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
+    // Google Places
     private let placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService()
     private let placesDetails: PlacesDetailsServiceProtocol = PlacesDetailsService()
-    private let motionManager = CMMotionActivityManager()
-    private let uploadService: CaptureUploadServiceProtocol
-    private let pipelineBridge: CapturePipelineBridgeProtocol
     private var placesSessionToken: String?
+    private let motionManager = CMMotionActivityManager()
+    let captureManager: VideoCaptureManager
+
     private var hasRequestedPermissions = false
+    private let onboardingKey = "com.blueprint.isOnboarded"
+    private let uploadService: CaptureUploadServiceProtocol
+    private let targetStateService: TargetStateServiceProtocol
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var searchDebounceTask: Task<Void, Never>?
-    private var currentSearchQuery = ""
+    private var currentSearchQuery: String = ""
 
-    init(
-        uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
-        pipelineBridge: CapturePipelineBridgeProtocol = CapturePipelineBridge()
-    ) {
+    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+         targetStateService: TargetStateServiceProtocol = TargetStateService()) {
         self.uploadService = uploadService
-        self.pipelineBridge = pipelineBridge
+        self.targetStateService = targetStateService
+        self.captureManager = VideoCaptureManager()
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
@@ -66,52 +63,204 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         } else {
             motionAuthorized = true
         }
+
+        // Check if user has already completed onboarding
+        isOnboarded = UserDefaults.standard.bool(forKey: onboardingKey)
+
         observeUploadEvents()
-    }
-
-    var canContinueFromIntake: Bool {
-        submissionDraft.canCreateSubmission
-    }
-
-    var canReviewCapture: Bool {
-        canContinueFromIntake && !(resolvedSiteLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    }
-
-    var canStartCapture: Bool {
-        guard let context = pendingCaptureContext() else { return false }
-        return context.isReadyForCapture
-    }
-
-    private var resolvedSiteLocation: String {
-        let current = currentAddress?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !current.isEmpty {
-            return current
-        }
-        return submissionDraft.siteLocation.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func loadProfile() async {
         try? await Task.sleep(nanoseconds: 300_000_000)
         profile = .sample
+        
+        // If user is already onboarded, skip profile review and go to location confirmation
+        if isOnboarded {
+            step = .confirmLocation
+        }
+    }
+    
+    func completeOnboarding() {
+        UserDefaults.standard.set(true, forKey: onboardingKey)
+        isOnboarded = true
     }
 
-    func continueFromProfile() {
-        step = .defineSubmission
-    }
-
-    func continueFromIntake() {
+    func requestLocation() {
+        completeOnboarding()
+        guard CLLocationManager.locationServicesEnabled() else {
+            locationError = "Location services are disabled. Enable them in Settings to continue."
+            step = .confirmLocation
+            return
+        }
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.requestWhenInUseAuthorization()
+        locationManager.requestLocation()
         step = .confirmLocation
-        requestCurrentLocationIfPossible()
     }
 
     func confirmAddress() {
-        submissionDraft.syncSiteLocation(currentAddress)
-        guard canReviewCapture else { return }
-        if cameraAuthorized, microphoneAuthorized {
-            step = .reviewCapture
-        } else {
+        guard cameraAuthorized, microphoneAuthorized, motionAuthorized else {
             step = .requestPermissions
+            return
         }
+        moveToCapture()
+    }
+
+    /// Debounced address search with proper cleanup and state management
+    /// Matches the approach from the React autocomplete solution
+    func searchAddresses(query: String) async {
+        // Cancel any pending search task
+        searchDebounceTask?.cancel()
+        
+        // Update current query immediately
+        currentSearchQuery = query
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Clear results if query is too short
+        guard trimmed.count >= 3 else {
+            await MainActor.run { 
+                self.addressSearchResults = []
+                self.isSearchingAddress = false
+            }
+            // Reset session token when clearing search
+            placesSessionToken = nil
+            return
+        }
+        
+        // Set loading state immediately
+        await MainActor.run { self.isSearchingAddress = true }
+        
+        // Create debounced search task (350ms delay matching React solution)
+        searchDebounceTask = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: 350_000_000) // 350ms
+                
+                // Check if this task was cancelled during sleep
+                guard !Task.isCancelled else {
+                    print("🔍 [Autocomplete] Search cancelled for '\(trimmed)'")
+                    return
+                }
+                
+                // Perform the actual search
+                await performAddressSearch(query: trimmed)
+            } catch {
+                // Task was cancelled
+                print("🔍 [Autocomplete] Search task cancelled")
+            }
+        }
+    }
+    
+    /// Internal method that performs the actual autocomplete search
+    /// This is called after debounce delay
+    private func performAddressSearch(query: String) async {
+        // Ensure session token exists (reuse across autocomplete requests, reset on selection)
+        if placesSessionToken == nil {
+            placesSessionToken = UUID().uuidString
+            print("🔑 [Autocomplete] Created new session token: \(placesSessionToken ?? "")")
+        }
+        
+        // Check if query still matches current query (prevent stale results)
+        guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            print("🔍 [Autocomplete] Query changed, skipping stale search for '\(query)'")
+            await MainActor.run { self.isSearchingAddress = false }
+            return
+        }
+        
+        defer { 
+            Task { @MainActor in 
+                self.isSearchingAddress = false 
+            } 
+        }
+        
+        if AppConfig.placesAPIKey() != nil {
+            do {
+                let suggestions = try await placesAutocomplete.autocomplete(
+                    input: query,
+                    sessionToken: placesSessionToken ?? UUID().uuidString,
+                    origin: nil,
+                    radiusMeters: nil
+                )
+                print("🔍 [Autocomplete] Got \(suggestions.count) suggestions for '\(query)'")
+                
+                // Check again if query is still current
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after fetch, discarding results")
+                    return
+                }
+                
+                guard !suggestions.isEmpty else {
+                    print("⚠️ [Autocomplete] No suggestions returned, falling back to MapKit")
+                    throw NSError(domain: "AutocompleteError", code: -1, userInfo: nil)
+                }
+                
+                // Fetch details for display-friendly address fragments
+                let details = try await placesDetails.fetchDetails(placeIds: suggestions.map { $0.placeId })
+                print("📋 [Places Details] Got details for \(details.count) of \(suggestions.count) suggestions")
+                
+                // Final check if query is still current before showing results
+                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                    print("🔍 [Autocomplete] Query changed after details fetch, discarding results")
+                    return
+                }
+                
+                let byId = Dictionary(uniqueKeysWithValues: details.map { ($0.placeId, $0) })
+                let mapped: [AddressResult] = suggestions.compactMap { s in
+                    let d = byId[s.placeId]
+                    let title = s.primaryText
+                    let subtitle = s.secondaryText.isEmpty ? (d?.formattedAddress ?? "") : s.secondaryText
+                    return AddressResult(
+                        title: title,
+                        subtitle: subtitle,
+                        completionTitle: title,
+                        completionSubtitle: subtitle
+                    )
+                }
+                print("✅ [Autocomplete] Displaying \(mapped.count) search results")
+                await MainActor.run { self.addressSearchResults = Array(mapped.prefix(5)) }
+                return
+            } catch {
+                print("❌ [Autocomplete] Error: \(error.localizedDescription)")
+                // Fall through to MapKit on error
+            }
+        }
+
+        // MapKit Fallback
+        print("📍 [MapKit] Falling back to MapKit search for '\(query)'")
+        let searchRequest = MKLocalSearch.Request()
+        searchRequest.naturalLanguageQuery = query
+        let search = MKLocalSearch(request: searchRequest)
+        do {
+            let response = try await search.start()
+            
+            // Final check if query is still current
+            guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
+                print("📍 [MapKit] Query changed after fetch, discarding results")
+                return
+            }
+            
+            let results = response.mapItems.prefix(5).map { mapItem in
+                let title = mapItem.name ?? "Unknown"
+                let subtitle = mapItem.placemark.locality ?? mapItem.placemark.administrativeArea ?? ""
+                return AddressResult(
+                    title: title,
+                    subtitle: subtitle,
+                    completionTitle: title,
+                    completionSubtitle: subtitle
+                )
+            }
+            print("📍 [MapKit] Displaying \(results.count) search results")
+            await MainActor.run { self.addressSearchResults = Array(results) }
+        } catch {
+            print("❌ [MapKit Search] Error: \(error.localizedDescription)")
+            await MainActor.run { self.addressSearchResults = [] }
+        }
+    }
+    
+    func selectAddress(_ result: AddressResult) {
+        currentAddress = "\(result.title), \(result.subtitle)"
+        addressSearchResults = []
+        // Clear session token on selection (matching React solution approach)
+        placesSessionToken = nil
     }
 
     func requestPermissions() {
@@ -128,117 +277,6 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 evaluatePermissions()
             }
         }
-    }
-
-    func beginCapture() {
-        submissionDraft.syncSiteLocation(currentAddress)
-        guard let context = pendingCaptureContext(), context.isReadyForCapture else { return }
-        activeCaptureContext = context
-        captureManager.configureCaptureContext(context)
-        step = .readyToCapture
-    }
-
-    func cancelActiveCapture() {
-        captureManager.stopRecording()
-        captureManager.stopSession()
-        captureManager.configureCaptureContext(nil)
-        activeCaptureContext = nil
-        step = .reviewCapture
-    }
-
-    func prepareAnotherCapturePass() {
-        activeCaptureContext = nil
-        captureManager.configureCaptureContext(nil)
-        step = .reviewCapture
-    }
-
-    func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts) {
-        guard let activeCaptureContext else { return }
-        let metadata = CaptureUploadMetadata(
-            id: UUID(),
-            submissionId: activeCaptureContext.submissionId,
-            siteId: activeCaptureContext.siteId,
-            taskId: activeCaptureContext.taskId,
-            capturePassId: activeCaptureContext.capturePass.capturePassId,
-            creatorId: profile.id.uuidString,
-            capturedAt: artifacts.startedAt,
-            uploadedAt: nil
-        )
-        do {
-            let stagedOutput = try pipelineBridge.stageArtifacts(
-                for: activeCaptureContext,
-                recording: artifacts,
-                requestedLanesOverride: nil
-            )
-            let request = CaptureUploadRequest(
-                packageURL: artifacts.packageURL,
-                metadata: metadata,
-                artifacts: stagedOutput.artifacts
-            )
-            uploadService.enqueue(request)
-        } catch {
-            uploadStatusMap[metadata.id] = UploadStatus(
-                metadata: metadata,
-                packageURL: artifacts.packageURL,
-                state: .failed(message: error.localizedDescription)
-            )
-            refreshUploadStatuses()
-        }
-        latestCompletedCaptureContext = activeCaptureContext
-        step = .captureSummary
-    }
-
-    func retryUpload(id: UUID) {
-        uploadService.retryUpload(id: id)
-    }
-
-    func dismissUpload(id: UUID) {
-        uploadStatusMap.removeValue(forKey: id)
-        refreshUploadStatuses()
-    }
-
-    func searchAddresses(query: String) async {
-        searchDebounceTask?.cancel()
-        currentSearchQuery = query
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard trimmed.count >= 3 else {
-            await MainActor.run {
-                self.addressSearchResults = []
-                self.isSearchingAddress = false
-            }
-            placesSessionToken = nil
-            return
-        }
-
-        await MainActor.run { self.isSearchingAddress = true }
-
-        searchDebounceTask = Task { @MainActor in
-            do {
-                try await Task.sleep(nanoseconds: 350_000_000)
-                guard !Task.isCancelled else { return }
-                await performAddressSearch(query: trimmed)
-            } catch {
-                print("🔍 [Autocomplete] Search task cancelled")
-            }
-        }
-    }
-
-    func selectAddress(_ result: AddressResult) {
-        currentAddress = "\(result.title), \(result.subtitle)"
-        submissionDraft.syncSiteLocation(currentAddress)
-        addressSearchResults = []
-        placesSessionToken = nil
-    }
-
-    private func requestCurrentLocationIfPossible() {
-        guard CLLocationManager.locationServicesEnabled() else {
-            locationError = "Location services are disabled. Enable them in Settings to continue."
-            return
-        }
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.requestWhenInUseAuthorization()
-        locationManager.requestLocation()
     }
 
     private func requestCameraAccess() async {
@@ -290,18 +328,74 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     private func evaluatePermissions() {
-        if cameraAuthorized && microphoneAuthorized {
-            step = .reviewCapture
+        if cameraAuthorized && microphoneAuthorized && motionAuthorized {
+            moveToCapture()
         }
     }
 
-    private func pendingCaptureContext() -> TaskCaptureContext? {
-        submissionDraft.syncSiteLocation(currentAddress)
-        let context = submissionDraft.makeTaskCaptureContext(
-            checklist: captureChecklist,
-            coverage: evidenceCoverageDeclarations
+    private func moveToCapture() {
+        step = .readyToCapture
+        captureManager.configureSession()
+        captureManager.startSession()
+    }
+
+    func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
+        print("📦 [CaptureFlowViewModel] handleRecordingFinished targetId=\(targetId ?? "nil") reservationId=\(reservationId ?? "nil") package=\(artifacts.packageURL.lastPathComponent)")
+        let jobId = reservationId ?? targetId ?? UUID().uuidString
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: targetId,
+            reservationId: reservationId,
+            jobId: jobId,
+            creatorId: profile.id.uuidString,
+            capturedAt: Date(),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            intakePacket: QualificationIntakePacket(
+                workflowName: currentTargetInfo?.name,
+                taskSteps: [],
+                knownBlockers: ["Structured intake was not completed before capture."]
+            ),
+            scaffoldingPacket: CaptureScaffoldingPacket(
+                scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "object_point_clouds"],
+                coveragePlan: [
+                    "Capture primary route plus each workcell boundary.",
+                    "Pause at narrow aisles, thresholds, and handoff points."
+                ],
+                uncertaintyPriors: ["missing_intake": 0.6]
+            ),
+            captureModality: "iphone_arkit_lidar"
         )
-        return context
+        let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
+
+        // Capture target info before clearing (for upload status display)
+        let targetName = currentTargetInfo?.name
+        let payoutRange = currentTargetInfo?.estimatedPayoutRange
+
+        // Clear current target info after capture
+        currentTargetInfo = nil
+
+        print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id) targetName=\(targetName ?? "nil")")
+        enqueueUploadWithTargetInfo(request, targetName: targetName, payoutRange: payoutRange)
+    }
+
+    private func enqueueUploadWithTargetInfo(_ request: CaptureUploadRequest, targetName: String?, payoutRange: ClosedRange<Int>?) {
+        // Store target info before enqueueing so we can use it when creating UploadStatus
+        let id = request.metadata.id
+        uploadStatusMap[id] = UploadStatus(request: request, targetName: targetName, estimatedPayoutRange: payoutRange)
+        refreshUploadStatuses()
+
+        // Now enqueue the actual upload
+        uploadService.enqueue(request)
+    }
+
+    func retryUpload(id: UUID) {
+        uploadService.retryUpload(id: id)
+    }
+
+    func dismissUpload(id: UUID) {
+        uploadStatusMap.removeValue(forKey: id)
+        refreshUploadStatuses()
     }
 
     private func observeUploadEvents() {
@@ -316,17 +410,32 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private func handleUpload(_ event: CaptureUploadService.Event) {
         switch event {
         case .queued(let request):
-            uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
+            print("📤 [Upload] queued id=\(request.metadata.id) targetId=\(request.metadata.targetId ?? "nil")")
+            // Only create new status if we don't already have one (we may have pre-created it with target info)
+            if uploadStatusMap[request.metadata.id] == nil {
+                uploadStatusMap[request.metadata.id] = UploadStatus(request: request)
+            }
         case .progress(let id, let progress):
+            print("📤 [Upload] progress id=\(id) progress=\(String(format: "%.2f", progress))")
             guard var status = uploadStatusMap[id] else { break }
             status.state = .uploading(progress: progress)
             uploadStatusMap[id] = status
         case .completed(let request):
+            print("📤 [Upload] completed id=\(request.metadata.id)")
             guard var status = uploadStatusMap[request.metadata.id] else { break }
             status.metadata = request.metadata
             status.state = .completed
             uploadStatusMap[request.metadata.id] = status
+            // Mark target as completed in Firestore so it no longer appears in Nearby
+            if let targetId = request.metadata.targetId, !targetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Task { [weak self] in
+                    guard let self else { return }
+                    do { try await self.targetStateService.complete(targetId: targetId) }
+                    catch { print("⚠️ Failed to mark target completed for \(targetId): \(error.localizedDescription)") }
+                }
+            }
         case .failed(let request, let error):
+            print("📤 [Upload] failed id=\(request.metadata.id) error=\(error.localizedDescription)")
             guard var status = uploadStatusMap[request.metadata.id] else { break }
             status.metadata = request.metadata
             status.state = .failed(message: error.localizedDescription)
@@ -340,79 +449,6 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         uploadStatuses = uploadStatusMap
             .values
             .sorted { $0.metadata.capturedAt > $1.metadata.capturedAt }
-    }
-
-    private func performAddressSearch(query: String) async {
-        if placesSessionToken == nil {
-            placesSessionToken = UUID().uuidString
-        }
-
-        guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else {
-            await MainActor.run { self.isSearchingAddress = false }
-            return
-        }
-
-        defer {
-            Task { @MainActor in
-                self.isSearchingAddress = false
-            }
-        }
-
-        if AppConfig.placesAPIKey() != nil {
-            do {
-                let suggestions = try await placesAutocomplete.autocomplete(
-                    input: query,
-                    sessionToken: placesSessionToken ?? UUID().uuidString,
-                    origin: nil,
-                    radiusMeters: nil
-                )
-
-                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-                guard !suggestions.isEmpty else {
-                    throw NSError(domain: "AutocompleteError", code: -1, userInfo: nil)
-                }
-
-                let details = try await placesDetails.fetchDetails(placeIds: suggestions.map { $0.placeId })
-                guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-
-                let byId = Dictionary(uniqueKeysWithValues: details.map { ($0.placeId, $0) })
-                let mapped: [AddressResult] = suggestions.compactMap { suggestion in
-                    let detail = byId[suggestion.placeId]
-                    let title = suggestion.primaryText
-                    let subtitle = suggestion.secondaryText.isEmpty ? (detail?.formattedAddress ?? "") : suggestion.secondaryText
-                    return AddressResult(
-                        title: title,
-                        subtitle: subtitle,
-                        completionTitle: title,
-                        completionSubtitle: subtitle
-                    )
-                }
-                await MainActor.run { self.addressSearchResults = Array(mapped.prefix(5)) }
-                return
-            } catch {
-                print("❌ [Autocomplete] Error: \(error.localizedDescription)")
-            }
-        }
-
-        let searchRequest = MKLocalSearch.Request()
-        searchRequest.naturalLanguageQuery = query
-        let search = MKLocalSearch(request: searchRequest)
-        do {
-            let response = try await search.start()
-            guard query == currentSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
-
-            let results = response.mapItems.prefix(5).map { mapItem in
-                AddressResult(
-                    title: mapItem.name ?? "Unknown",
-                    subtitle: mapItem.placemark.locality ?? mapItem.placemark.administrativeArea ?? "",
-                    completionTitle: mapItem.name ?? "Unknown",
-                    completionSubtitle: mapItem.placemark.locality ?? mapItem.placemark.administrativeArea ?? ""
-                )
-            }
-            await MainActor.run { self.addressSearchResults = Array(results) }
-        } catch {
-            await MainActor.run { self.addressSearchResults = [] }
-        }
     }
 }
 
@@ -434,7 +470,6 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
                         .compactMap { $0 }
                         .joined(separator: ", ")
                 }
-                submissionDraft.syncSiteLocation(currentAddress)
             }
         }
     }
@@ -449,6 +484,8 @@ extension CaptureFlowViewModel {
         var metadata: CaptureUploadMetadata
         let packageURL: URL
         var state: State
+        var targetName: String?
+        var estimatedPayoutRange: ClosedRange<Int>?
 
         var id: UUID { metadata.id }
 
@@ -459,16 +496,12 @@ extension CaptureFlowViewModel {
             case failed(message: String)
         }
 
-        init(request: CaptureUploadRequest) {
+        init(request: CaptureUploadRequest, targetName: String? = nil, estimatedPayoutRange: ClosedRange<Int>? = nil) {
             self.metadata = request.metadata
             self.packageURL = request.packageURL
             self.state = .queued
-        }
-
-        init(metadata: CaptureUploadMetadata, packageURL: URL, state: State) {
-            self.metadata = metadata
-            self.packageURL = packageURL
-            self.state = state
+            self.targetName = targetName
+            self.estimatedPayoutRange = estimatedPayoutRange
         }
     }
 }

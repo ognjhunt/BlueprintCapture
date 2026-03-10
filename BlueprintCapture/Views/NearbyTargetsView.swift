@@ -3,13 +3,19 @@ import Combine
 
 struct NearbyTargetsView: View {
     @StateObject private var viewModel = NearbyTargetsViewModel()
-    @State private var isRefreshing = false
     @State private var selectedItem: NearbyTargetsViewModel.NearbyItem?
     @State private var showActions = false
     @State private var showReserveConfirm = false
     @State private var reserveMessage: String?
     @State private var navigateToCapture = false
-    @StateObject private var captureFlow = CaptureFlowViewModel()
+
+    // Use shared CaptureFlowViewModel if provided (from MainTabView), otherwise create local
+    private var sharedCaptureFlow: CaptureFlowViewModel?
+    @StateObject private var localCaptureFlow = CaptureFlowViewModel()
+    private var captureFlow: CaptureFlowViewModel {
+        sharedCaptureFlow ?? localCaptureFlow
+    }
+
     @State private var activeReservation: Reservation?
     @State private var reservedItem: NearbyTargetsViewModel.NearbyItem?
     @State private var showDirectionsPrompt = false
@@ -17,69 +23,53 @@ struct NearbyTargetsView: View {
     @State private var now = Date()
     @Environment(\.openURL) private var openURL
     private let countdownTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    // Controls whether the action sheet should remain open after dismissing the alert
     @State private var keepActionsOpenAfterAlert = false
-    // Switching reservation confirmation state
     @State private var showSwitchReservationConfirm = false
     @State private var pendingReservationItem: NearbyTargetsViewModel.NearbyItem?
     @State private var switchFromTargetId: String?
     @State private var showAddressSheet = false
     @State private var addressQuery: String = ""
-    @AppStorage("NearbyTargetsAddressHintShown") private var addressHintShown: Bool = false
-    @State private var showChipHint = false
-    // Alert for reservation expiry while app is active
+    @State private var recentQueries: [RecentQuery] = []
+    @FocusState private var isAddressFieldFocused: Bool
     @State private var showExpiryAlert = false
     @State private var expiryMessage: String?
-    @State private var lastRefreshedAt: Date? = nil
+
+    // MARK: - Initializers
+
+    init(sharedCaptureFlow: CaptureFlowViewModel? = nil) {
+        self.sharedCaptureFlow = sharedCaptureFlow
+    }
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
-                currentAddressChip()
-                    .padding(.horizontal)
-                    .padding(.top, 4)
-                    .onTapGesture { showAddressSheet = true }
-                FilterBar(radius: $viewModel.selectedRadius, limit: $viewModel.selectedLimit, sort: $viewModel.selectedSort)
-                    .padding(.horizontal)
-                    .padding(.top, 0)
-                metaBar()
-                    .padding(.horizontal)
+            VStack(spacing: 0) {
+                // Simple location header
+                locationHeader
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
+                // Active reservation banner (if any)
                 if let reservation = activeReservation, let item = reservedItem, reservation.reservedUntil > now {
                     reservationBanner(item: item, reservation: reservation)
-                        .padding(.horizontal)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
                 }
 
                 content
             }
-            .navigationTitle("Nearby Targets")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Earn")
+            .navigationBarTitleDisplayMode(.large)
             .fullScreenCover(isPresented: $navigateToCapture) {
-                if let item = reservedItem {
-                    CaptureSessionView(viewModel: captureFlow, captureContext: legacyCaptureContext(for: item))
-                } else {
-                    Text("No capture context available.")
-                }
+                CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id ?? selectedItem?.id, reservationId: nil)
             }
         }
-        // Transparent nav bar to let hero gradient show through
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .toolbarColorScheme(.light, for: .navigationBar)
-        .blueprintScreenBackground()
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .blueprintAppBackground()
         .task { viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
         .sheet(isPresented: $showAddressSheet) { addressSearchSheet }
-            .onAppear {
-                if !addressHintShown {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        showChipHint = true
-                        addressHintShown = true
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                            showChipHint = false
-                        }
-                    }
-                }
-            }
         .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
             guard
                 let info = note.userInfo as? [String: Any],
@@ -95,10 +85,9 @@ struct NearbyTargetsView: View {
             now = date
             if let res = activeReservation, res.reservedUntil <= date {
                 let name = reservedItem?.target.displayName ?? "this location"
-                expiryMessage = "You didn’t start mapping within the hour, so we auto‑cancelled your reservation for \(name)."
+                expiryMessage = "Reservation expired for \(name)."
                 showExpiryAlert = true
                 if let reserved = reservedItem {
-                    // Clean up backend and any scheduled expiry notification
                     Task { await viewModel.cancelReservation(for: reserved.id) }
                     viewModel.cancelReservationExpiryNotification(for: reserved.id)
                 }
@@ -113,78 +102,162 @@ struct NearbyTargetsView: View {
         })
         .onChange(of: viewModel.state) { _, newValue in
             if case .loaded = newValue {
-                lastRefreshedAt = Date()
                 Task { await syncActiveReservationState() }
             }
+        }
+    }
+
+    // MARK: - Simple Location Header
+    private var locationHeader: some View {
+        VStack(spacing: 10) {
+            Button {
+                showAddressSheet = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "location.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+
+                    if let address = viewModel.currentAddress {
+                        Text(address)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    } else {
+                        Text("Detecting location...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+            }
+            .buttonStyle(.plain)
+
+            // Recording Policy Filter
+            policyFilterBar
+        }
+    }
+
+    private var policyFilterBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shield.checkered")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text("Show:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(RecordingPolicyFilter.allCases, id: \.rawValue) { filter in
+                policyFilterChip(filter)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func policyFilterChip(_ filter: RecordingPolicyFilter) -> some View {
+        Button {
+            viewModel.policyFilter = filter
+        } label: {
+            Text(filter.shortLabel)
+                .font(.caption2.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(viewModel.policyFilter == filter ? policyFilterColor(filter).opacity(0.15) : Color(.systemFill))
+                )
+                .overlay(
+                    Capsule().stroke(viewModel.policyFilter == filter ? policyFilterColor(filter).opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+                .foregroundStyle(viewModel.policyFilter == filter ? policyFilterColor(filter) : .secondary)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func policyFilterColor(_ filter: RecordingPolicyFilter) -> Color {
+        switch filter {
+        case .all: return .secondary
+        case .excludeRestricted: return .orange
+        case .safeOnly: return .green
         }
     }
 
     @ViewBuilder private var content: some View {
         switch viewModel.state {
         case .idle, .loading:
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        case .error(let message):
-            VStack(spacing: 12) {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(BlueprintTheme.warningOrange)
-                    .multilineTextAlignment(.center)
-                Button("Retry") { Task { await viewModel.refresh() } }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
-                    .padding(.horizontal)
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.2)
+                Text("Finding opportunities...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
+        case .error(let message):
+            VStack(spacing: 20) {
+                Image(systemName: "wifi.slash")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary)
+                Text("Couldn't load opportunities")
+                    .font(.headline)
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button("Try Again") { Task { await viewModel.refresh() } }
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .loaded:
             if viewModel.items.isEmpty {
-                VStack(spacing: 8) {
-                    Text("No targets within \(String(format: "%.1f", viewModel.selectedRadius.rawValue)) miles")
+                VStack(spacing: 20) {
+                    Image(systemName: "mappin.slash")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.secondary)
+                    Text("No opportunities nearby")
                         .font(.headline)
-                    Button("Expand radius to 5 mi") { viewModel.selectedRadius = .five }
+                    Text("Try searching a different location")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("Search Location") { showAddressSheet = true }
                         .buttonStyle(BlueprintSecondaryButtonStyle())
                 }
+                .padding(32)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
             } else {
-                List {
-                    // Pin reserved item (if any) to the top
-                    if let res = activeReservation, let pinned = reservedItem {
-                        let secondsRemaining = max(0, Int(res.reservedUntil.timeIntervalSince(now)))
-                        Section {
-                            TargetRow(
-                                item: pinned,
-                                reservationSecondsRemaining: secondsRemaining,
-                                isOnSite: viewModel.isOnSite(pinned.target),
-                                reservedByMe: true
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedItem = pinned
-                                showActions = true
-                            }
-                        } header: {
-                            Text("Your reservation").font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(viewModel.items) { item in
+                            let status = viewModel.reservationStatus(for: item.id)
+                            let secondsRemaining: Int? = {
+                                if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id {
+                                    return max(0, Int(res.reservedUntil.timeIntervalSince(now)))
+                                }
+                                if case .reserved(let until) = status {
+                                    let secs = Int(until.timeIntervalSince(now))
+                                    return secs > 0 ? secs : nil
+                                }
+                                return nil
+                            }()
+                            let isReservedByMe: Bool = {
+                                if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id, res.reservedUntil > now { return true }
+                                return false
+                            }()
 
-                    ForEach(viewModel.items) { item in
-                        let status = viewModel.reservationStatus(for: item.id)
-                        let secondsRemaining: Int? = {
-                            if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id {
-                                let secs = Int(res.reservedUntil.timeIntervalSince(now))
-                                return max(0, secs)
-                            }
-                            if case .reserved(let until) = status {
-                                let secs = Int(until.timeIntervalSince(now))
-                                return secs > 0 ? secs : nil
-                            }
-                            return nil
-                        }()
-                        let isReservedByMe: Bool = {
-                            if let res = activeReservation, let reserved = reservedItem, reserved.id == item.id, res.reservedUntil > now { return true }
-                            return false
-                        }()
-                        // Skip duplicate of pinned row in the main list
-                        if reservedItem?.id == item.id { EmptyView() } else {
                             TargetRow(
                                 item: item,
                                 reservationSecondsRemaining: secondsRemaining,
@@ -196,30 +269,24 @@ struct NearbyTargetsView: View {
                                 selectedItem = item
                                 showActions = true
                             }
-                            }
+                        }
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .listRowSeparator(.hidden)
-                .listSectionSeparator(.hidden)
-                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                .listRowBackground(Color.clear)
-                .background(Color.clear)
                 .refreshable {
                     await viewModel.refresh()
-                    lastRefreshedAt = Date()
                 }
                 .sheet(isPresented: $showActions) {
                     if let item = selectedItem { actionSheet(for: item) }
                 }
-                .alert("Start route?", isPresented: $showDirectionsPrompt, actions: {
-                    Button("Start route") {
+                .alert("Get Directions?", isPresented: $showDirectionsPrompt, actions: {
+                    Button("Open Maps") {
                         if let item = directionsItem { openDirections(to: item) }
                     }
-                    Button("Not now", role: .cancel) {}
+                    Button("Not Now", role: .cancel) {}
                 }, message: {
-                    Text("You're not on-site yet. Would you like directions to this location?")
+                    Text("Navigate to this location to start mapping.")
                 })
             }
         }
@@ -231,372 +298,309 @@ struct NearbyTargetsView: View {
 }
 
 private extension NearbyTargetsView {
-    func legacyCaptureContext(for item: NearbyTargetsViewModel.NearbyItem) -> TaskCaptureContext {
-        SiteSubmissionDraft(
-            siteName: item.target.displayName,
-            siteLocation: item.target.address ?? "Unknown location",
-            taskStatement: "Legacy nearby-target walkthrough.",
-            workflowContext: "This fallback path preserves the old nearby capture screen for dormant code paths.",
-            taskZoneBoundaryNotes: "Zone not declared in legacy flow."
-        ).makeTaskCaptureContext(
-            checklist: TaskCaptureContext.defaultChecklist().map {
-                var checklistItem = $0
-                checklistItem.isCompleted = true
-                return checklistItem
-            },
-            coverage: TaskCaptureContext.defaultCoverageDeclarations().map {
-                var coverageItem = $0
-                coverageItem.isCovered = true
-                return coverageItem
-            }
-        )
-    }
-
-    @ViewBuilder
-    func currentAddressChip() -> some View {
-        if let address = viewModel.currentAddress {
-            HStack {
-                Spacer(minLength: 0)
-                Button {
-                    showAddressSheet = true
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .foregroundStyle(BlueprintTheme.brandTeal)
-                        Text(address)
-                            .font(.callout)
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                        if viewModel.isUsingCustomSearchCenter {
-                            Text("(custom)")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        HStack(spacing: 6) {
-                            Image(systemName: "magnifyingglass")
-                            Text("Change")
-                        }
-                        .font(.caption)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(BlueprintTheme.primary.opacity(0.12)))
-                        .foregroundStyle(BlueprintTheme.primary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Current area: \(address)")
-                .accessibilityHint("Double tap to search a different location")
-                .popover(isPresented: $showChipHint) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tip")
-                            .font(.caption).fontWeight(.semibold)
-                        Text("Tap here to change the area you're searching")
-                            .font(.footnote)
-                        Button("Got it") { showChipHint = false }
-                            .font(.caption)
-                    }
-                    .padding(12)
-                }
-                Spacer(minLength: 0)
-            }
-        } else {
-            HStack {
-                Spacer(minLength: 0)
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Detecting your location…")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                )
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private func metaBar() -> some View {
-        HStack(spacing: 10) {
-            Label("\(viewModel.items.count) results", systemImage: "list.bullet")
-                .font(.footnote).foregroundStyle(.secondary)
-            if let ts = lastRefreshedAt {
-                Text("• Updated \(relativeTime(from: ts))")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                Task { await viewModel.refresh(); lastRefreshedAt = Date() }
-            } label: {
-                Image(systemName: "arrow.clockwise.circle.fill").foregroundStyle(BlueprintTheme.brandTeal)
-            }.buttonStyle(.plain)
-        }
-    }
-
-    private func relativeTime(from date: Date) -> String {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f.localizedString(for: date, relativeTo: Date())
-    }
-
     private var addressSearchSheet: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                HStack {
+            VStack(spacing: 0) {
+                // Search field
+                HStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Search another address", text: $addressQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: addressQuery) { _, newVal in
-                            Task { await viewModel.searchAddresses(query: newVal) }
+
+                    TextField("Search address or place", text: $addressQuery)
+                        .textInputAutocapitalization(.words)
+                        .disableAutocorrection(true)
+                        .focused($isAddressFieldFocused)
+                        .onChange(of: addressQuery) { _, newValue in
+                            Task { await viewModel.searchAddresses(query: newValue) }
                         }
-                }
-                .padding(.horizontal)
 
-                if viewModel.isSearchingAddress {
-                    ProgressView("Searching…")
-                        .padding(.top, 8)
-                }
-
-                if !viewModel.addressSearchResults.isEmpty {
-                    List(viewModel.addressSearchResults) { result in
+                    if !addressQuery.isEmpty {
                         Button {
-                            viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
                             addressQuery = ""
-                            showAddressSheet = false
+                            Task { await viewModel.searchAddresses(query: "") }
                         } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: result.isEstablishment ? "building.2.fill" : "mappin.circle.fill")
-                                    .foregroundStyle(result.isEstablishment ? BlueprintTheme.brandTeal : .secondary)
-                                    .font(.title3)
-                                    .frame(width: 28)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(result.title)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .listStyle(.plain)
-                } else if addressQuery.count >= 3 && !viewModel.isSearchingAddress {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("No results found")
-                            .font(.headline)
-                            .foregroundStyle(.secondary)
-                        Text("Try a different search term")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else if addressQuery.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "map.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.5))
-                        VStack(spacing: 6) {
-                            Text("Search for a location")
-                                .font(.headline)
-                            Text("Enter a store name or street address")
-                                .font(.subheadline)
+                            Image(systemName: "xmark.circle.fill")
                                 .foregroundStyle(.secondary)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding()
 
-                if viewModel.isUsingCustomSearchCenter {
-                    Button {
-                        viewModel.clearCustomSearchCenter()
-                        addressQuery = ""
-                        showAddressSheet = false
-                    } label: {
-                        Label("Use my current location", systemImage: "location.fill")
+                Divider()
+
+                // Results
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if viewModel.isSearchingAddress {
+                            HStack {
+                                ProgressView()
+                                Text("Searching...")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 40)
+                        } else if !viewModel.addressSearchResults.isEmpty {
+                            ForEach(viewModel.addressSearchResults) { result in
+                                Button {
+                                    registerRecentSearch(from: result)
+                                    viewModel.setCustomSearchCenter(coordinate: result.coordinate, address: result.formatted)
+                                    addressQuery = ""
+                                    showAddressSheet = false
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: result.isEstablishment ? "building.2" : "mappin")
+                                            .frame(width: 24)
+                                            .foregroundStyle(BlueprintTheme.brandTeal)
+
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(result.title)
+                                                .font(.body)
+                                                .foregroundStyle(.primary)
+                                            if !result.subtitle.isEmpty {
+                                                Text(result.subtitle)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            }
+                                        }
+
+                                        Spacer()
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.plain)
+
+                                Divider().padding(.leading, 56)
+                            }
+                        } else if addressQuery.isEmpty {
+                            // Current location option
+                            if viewModel.isUsingCustomSearchCenter {
+                                Button {
+                                    viewModel.clearCustomSearchCenter()
+                                    addressQuery = ""
+                                    showAddressSheet = false
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "location.fill")
+                                            .frame(width: 24)
+                                            .foregroundStyle(BlueprintTheme.primary)
+
+                                        Text("Use current location")
+                                            .foregroundStyle(.primary)
+
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 14)
+                                }
+                                .buttonStyle(.plain)
+
+                                Divider().padding(.leading, 56)
+                            }
+
+                            // Recent searches
+                            if !recentQueries.isEmpty {
+                                ForEach(recentQueries) { recent in
+                                    Button {
+                                        addressQuery = recent.primary
+                                        isAddressFieldFocused = true
+                                        Task { await viewModel.searchAddresses(query: recent.primary) }
+                                    } label: {
+                                        HStack(spacing: 12) {
+                                            Image(systemName: "clock")
+                                                .frame(width: 24)
+                                                .foregroundStyle(.secondary)
+
+                                            Text(recent.primary)
+                                                .foregroundStyle(.primary)
+
+                                            Spacer()
+                                        }
+                                        .padding(.horizontal, 20)
+                                        .padding(.vertical, 14)
+                                    }
+                                    .buttonStyle(.plain)
+
+                                    Divider().padding(.leading, 56)
+                                }
+                            }
+                        } else if addressQuery.count >= 3 {
+                            Text("No results found")
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 40)
+                        }
                     }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
-                    .padding(.horizontal)
                 }
             }
-            .navigationTitle("Search location")
+            .navigationTitle("Search Location")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { showAddressSheet = false }
                 }
             }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    isAddressFieldFocused = true
+                }
+            }
+        }
+    }
+
+    private func registerRecentSearch(from result: NearbyTargetsViewModel.LocationSearchResult) {
+        let entry = RecentQuery(primary: result.title, secondary: result.subtitle)
+        if let existingIndex = recentQueries.firstIndex(where: { $0.matches(entry) }) {
+            recentQueries.remove(at: existingIndex)
+        }
+        recentQueries.insert(entry, at: 0)
+        if recentQueries.count > 5 {
+            recentQueries = Array(recentQueries.prefix(5))
+        }
+    }
+
+    private struct RecentQuery: Identifiable, Equatable {
+        let id = UUID()
+        let primary: String
+        let secondary: String
+
+        func matches(_ other: RecentQuery) -> Bool {
+            primary.caseInsensitiveCompare(other.primary) == .orderedSame &&
+            secondary.caseInsensitiveCompare(other.secondary) == .orderedSame
         }
     }
     @ViewBuilder func actionSheet(for item: NearbyTargetsViewModel.NearbyItem) -> some View {
-        let status = viewModel.reservationStatus(for: item.id)
-        let isReservedHere: Bool = {
-            if case .reserved(let until) = status { return until > now }
-            return false
-        }()
         let isReservedByMe: Bool = {
-            // Prefer live target_state owner comparison to work across sessions
             if let s = viewModel.targetStates[item.id], let owner = s.reservedBy {
                 return owner == UserDeviceService.resolvedUserId()
             }
             if let res = activeReservation { return res.targetId == item.id && res.reservedUntil > now }
             return false
         }()
-        let reservedUntilTime: Date? = {
-            if case .reserved(let until) = status { return until }
-            return nil
-        }()
+        let isOnSite = viewModel.isOnSite(item.target) || AppConfig.allowOffsiteCheckIn()
 
-        VStack(spacing: 16) {
-            Capsule().fill(Color.secondary.opacity(0.4)).frame(width: 36, height: 5).padding(.top, 8)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(item.target.displayName).font(.headline)
-                Text(item.target.address ?? "").font(.subheadline).foregroundStyle(.secondary)
+        VStack(spacing: 20) {
+            // Handle
+            Capsule()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(width: 36, height: 4)
+                .padding(.top, 8)
+
+            // Location info
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.target.displayName)
+                    .font(.title3.weight(.semibold))
+
+                if let address = item.target.address {
+                    Text(address)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Payout highlight
+                HStack(spacing: 16) {
+                    Label("$\(item.estimatedPayoutUsd)", systemImage: "dollarsign.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.successGreen)
+
+                    Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 4)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Status text if already reserved
-            switch viewModel.reservationStatus(for: item.id) {
-            case .reserved(let until):
-                Text("Reserved until \(until.formatted(date: .omitted, time: .shortened))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            case .none:
-                EmptyView()
-            }
+            Divider()
 
+            // Primary action
             VStack(spacing: 12) {
-                if !isReservedHere {
+                if isOnSite {
                     Button {
-                        attemptReserve(item)
-                    } label: {
-                        Label("Reserve for 1 hour", systemImage: "clock.badge.checkmark")
-                    }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
-                }
+                        Task {
+                            do {
+                                try await viewModel.checkIn(item.target)
+                                await MainActor.run {
+                                    reservedItem = item
 
-                if viewModel.isOnSite(item.target) {
-                    Button {
-                        // If someone else reserved it, inform instead of attempting check-in
-                        if isReservedHere && !isReservedByMe, let until = reservedUntilTime {
-                            reserveMessage = "This venue is reserved until \(until.formatted(date: .omitted, time: .shortened)). If that user isn’t checked in and actively mapping by then, you can start mapping once you’re on-site."
-                            keepActionsOpenAfterAlert = true
-                            showReserveConfirm = true
-                        } else {
-                            // On-site: perform check-in and navigate to capture
-                            Task {
-                                do {
-                                    try await viewModel.checkIn(item.target)
-                                    await MainActor.run {
-                                        captureFlow.step = .readyToCapture
-                                        captureFlow.captureManager.configureSession()
-                                        captureFlow.captureManager.startSession()
-                                        navigateToCapture = true
-                                        showActions = false
-                                    }
-                                } catch {
-                                    await MainActor.run {
-                                        reserveMessage = "We couldn't check you in. Please try again."
-                                        showReserveConfirm = true
-                                    }
+                                    // Set target info for upload progress display
+                                    // Create a payout range: base estimate ±30% based on quality
+                                    let basePayout = item.estimatedPayoutUsd
+                                    let minPayout = max(50, Int(Double(basePayout) * 0.7))
+                                    let maxPayout = Int(Double(basePayout) * 1.3)
+                                    captureFlow.currentTargetInfo = (
+                                        name: item.target.displayName,
+                                        estimatedPayoutRange: minPayout...maxPayout
+                                    )
+
+                                    captureFlow.step = .readyToCapture
+                                    captureFlow.captureManager.configureSession()
+                                    captureFlow.captureManager.startSession()
+                                    navigateToCapture = true
+                                    showActions = false
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    reserveMessage = "Couldn't start mapping. Please try again."
+                                    showReserveConfirm = true
                                 }
                             }
                         }
                     } label: {
-                        Label("Check in & start mapping", systemImage: "mappin.and.ellipse")
+                        Text("Start Mapping")
                     }
                     .buttonStyle(BlueprintSuccessButtonStyle())
                 } else {
                     Button {
-                        // Off-site: show guidance alert and keep sheet open; include reservation info if held by someone else
-                        if isReservedHere && !isReservedByMe, let until = reservedUntilTime {
-                            reserveMessage = "This venue is reserved until \(until.formatted(date: .omitted, time: .shortened)). If that user isn’t checked in and actively mapping by then, you can start once you’re on‑site. You’re not detected on‑site yet."
-                        } else {
-                            reserveMessage = "You're not detected on-site yet. Head to the location, then tap Check in to begin mapping."
-                        }
-                        keepActionsOpenAfterAlert = true
-                        showReserveConfirm = true
-                    } label: {
-                        Label("Check in & start mapping", systemImage: "mappin.and.ellipse")
-                    }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
-                }
-
-                if !viewModel.isOnSite(item.target) {
-                    Button {
                         openDirections(to: item)
+                        showActions = false
                     } label: {
-                        Label("Get directions", systemImage: "arrow.triangle.turn.up.right.circle")
+                        Text("Get Directions")
                     }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
+                    .buttonStyle(BlueprintPrimaryButtonStyle())
+
+                    Text("You need to be at this location to start mapping")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
 
-                // Show Cancel Reservation button if this item is currently reserved by me
+                // Cancel reservation if active
                 if isReservedByMe {
-                    Divider().padding(.vertical, 8)
-                    Button(role: .destructive) {
+                    Button {
                         Task { await cancelActiveReservation() }
                         showActions = false
                     } label: {
-                        Label("Cancel reservation", systemImage: "xmark.circle")
-                            .foregroundStyle(BlueprintTheme.errorRed)
+                        Text("Cancel Reservation")
                     }
                     .buttonStyle(BlueprintSecondaryButtonStyle())
                 }
             }
-            .padding(.top, 4)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: 0)
         }
-        .padding()
-        .presentationDetents([.medium, .large])
-                .alert("Reservation", isPresented: $showReserveConfirm, actions: {
-            Button("OK", role: .cancel) {
-                // Dismiss alert and optionally keep the action sheet open
-                showReserveConfirm = false
-                if !keepActionsOpenAfterAlert { showActions = false }
-                // Reset for the next alert
-                keepActionsOpenAfterAlert = false
-            }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 24)
+        .presentationDetents([.height(340)])
+        .alert("Info", isPresented: $showReserveConfirm, actions: {
+            Button("OK", role: .cancel) { showReserveConfirm = false }
         }, message: {
             Text(reserveMessage ?? "")
         })
-                .alert("Switch reservation?", isPresented: $showSwitchReservationConfirm, actions: {
-                    Button("Switch", role: .destructive) { confirmSwitchReservation() }
-                    Button("Keep current", role: .cancel) { showSwitchReservationConfirm = false }
-                }, message: {
-                    Text("You already have an active reservation. You can only reserve one location at a time. Switching will cancel your current reservation and reserve this new location.")
-                })
+        .alert("Switch reservation?", isPresented: $showSwitchReservationConfirm, actions: {
+            Button("Switch", role: .destructive) { confirmSwitchReservation() }
+            Button("Cancel", role: .cancel) { showSwitchReservationConfirm = false }
+        }, message: {
+            Text("You can only have one reservation at a time. Switch to this location?")
+        })
     }
 
     @ViewBuilder
@@ -680,9 +684,6 @@ private extension NearbyTargetsView {
     private func performReservation(for item: NearbyTargetsViewModel.NearbyItem) async {
         do {
             let res = try await viewModel.reserveTarget(item.target)
-            reserveMessage = "This location is now reserved for you for 1 hour (until \(res.reservedUntil.formatted(date: .omitted, time: .shortened))). If you are not on-site and mapping within that hour, it will be un-reserved."
-            keepActionsOpenAfterAlert = false
-            showReserveConfirm = true
             activeReservation = res
             reservedItem = item
             // Also schedule a background expiry notification just in case user backgrounds the app
