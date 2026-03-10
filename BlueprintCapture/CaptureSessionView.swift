@@ -1,50 +1,23 @@
 import SwiftUI
 import AVFoundation
 import UIKit
-import ARKit
-import RealityKit
 
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
-    @ObservedObject private var captureManager: VideoCaptureManager
     @State private var didAutoStart = false
     @State private var isEnding = false
-    @Environment(\.dismiss) private var dismiss
-    let targetId: String?
-    let reservationId: String?
-    @State private var shouldDismissOnCompletion = false
-
-    // Venue permission for this capture (would be set when user selects a location)
-    @State private var venuePermission: VenuePermission? = .demo
-
-    init(viewModel: CaptureFlowViewModel, targetId: String?, reservationId: String?) {
-        self.viewModel = viewModel
-        self._captureManager = ObservedObject(initialValue: viewModel.captureManager)
-        self.targetId = targetId
-        self.reservationId = reservationId
-    }
+    let captureContext: TaskCaptureContext
 
     var body: some View {
         ZStack {
-            // Use ARView when ARSession is active, otherwise use AVCaptureSession preview
-            if captureManager.usesARSessionForCapture {
-                ARCameraPreview(session: captureManager.arSession)
-                    .ignoresSafeArea()
-            } else {
-                CameraPreview(session: captureManager.session)
-                    .ignoresSafeArea()
-            }
+            CameraPreview(session: viewModel.captureManager.session)
+                .ignoresSafeArea()
 
             VStack(spacing: 12) {
-                // Top bar with permission badge
-                HStack {
-                    Spacer()
-                    VenuePermissionBadge(permission: venuePermission)
-                }
-                .padding(.horizontal)
-                .padding(.top, 8)
+                headerCard
+                    .padding(.horizontal)
+                    .padding(.top)
 
-                // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
                     uploadStatusList
                         .padding(.horizontal)
@@ -52,15 +25,7 @@ struct CaptureSessionView: View {
 
                 Spacer()
 
-                // Capture guidance overlay (when recording)
-                if captureManager.captureState.isRecording {
-                    CaptureGuidanceView()
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                }
-
-                // Error banner + retry control when recording fails
-                if case .error(let reason) = captureManager.captureState {
+                if case .error(let reason) = viewModel.captureManager.captureState {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Recording failed", systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote.weight(.semibold))
@@ -73,10 +38,10 @@ struct CaptureSessionView: View {
                         Button {
                             retryRecording()
                         } label: {
-                            Label("Retry Recording", systemImage: "arrow.clockwise")
+                            Label("Retry recording", systemImage: "arrow.clockwise")
                         }
                         .buttonStyle(BlueprintPrimaryButtonStyle())
-                        .disabled(captureManager.captureState.isRecording)
+                        .disabled(viewModel.captureManager.captureState.isRecording)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
@@ -87,13 +52,20 @@ struct CaptureSessionView: View {
                     .padding(.horizontal)
                 }
 
-                // End Session button only
                 HStack {
+                    Button {
+                        viewModel.cancelActiveCapture()
+                    } label: {
+                        Label("Back to review", systemImage: "chevron.left")
+                    }
+                    .buttonStyle(BlueprintSecondaryButtonStyle())
+
                     Spacer()
+
                     Button {
                         endSession()
                     } label: {
-                        Label(isEnding ? "Ending…" : "End Session", systemImage: isEnding ? "hourglass" : "stop.fill")
+                        Label(isEnding ? "Ending…" : "End session", systemImage: isEnding ? "hourglass" : "stop.fill")
                     }
                     .buttonStyle(BlueprintSecondaryButtonStyle())
                     .disabled(isEnding)
@@ -102,79 +74,79 @@ struct CaptureSessionView: View {
                 .padding(.bottom)
             }
         }
-        .onReceive(captureManager.$captureState) { state in
-            switch state {
-            case .idle:
-                print("📥 [CaptureSessionView] captureState → idle")
-            case .recording(_):
-                print("📥 [CaptureSessionView] captureState → recording")
-            case .finished(_):
-                print("📥 [CaptureSessionView] captureState → finished")
-            case .error(let message):
-                print("📥 [CaptureSessionView] captureState → error (\(message))")
-            }
+        .onReceive(viewModel.captureManager.$captureState) { state in
             switch state {
             case .finished(let artifacts):
-                viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
+                viewModel.handleRecordingFinished(artifacts: artifacts)
                 isEnding = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             case .idle:
                 isEnding = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             case .error:
                 isEnding = false
                 didAutoStart = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             default:
                 break
             }
         }
         .onAppear {
+            viewModel.captureManager.configureCaptureContext(captureContext)
             autoStartRecordingIfNeeded()
         }
+        .onDisappear {
+            viewModel.captureManager.stopSession()
+        }
+    }
+
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(captureContext.siteName)
+                .font(.headline)
+            Text(captureContext.taskStatement)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 12) {
+                Label("Phone capture", systemImage: "iphone")
+                Label("ARKit optional", systemImage: "arkit")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            Text("Pass \(captureContext.capturePass.capturePassId)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground).opacity(0.92))
+        )
     }
 
     private func autoStartRecordingIfNeeded() {
         guard !didAutoStart else { return }
         didAutoStart = true
-        print("🎬 [Capture] View appeared — auto start flow")
-        // Ensure the session is configured and running, then start recording automatically
-        if !captureManager.session.isRunning {
-            print("🎥 [Capture] Starting AVCaptureSession…")
-            captureManager.configureSession()
-            captureManager.startSession()
+        let manager = viewModel.captureManager
+        if !manager.session.isRunning {
+            manager.configureSession()
+            manager.startSession()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("⏺️ [Capture] Auto-start recording…")
-            captureManager.startRecording()
+            manager.startRecording()
         }
     }
 
     private func retryRecording() {
-        guard !captureManager.captureState.isRecording else { return }
-        print("🔄 [Capture] Retry Recording tapped")
+        guard !viewModel.captureManager.captureState.isRecording else { return }
         didAutoStart = true
-        captureManager.configureSession()
-
-        if !captureManager.session.isRunning {
-            captureManager.startSession()
+        let manager = viewModel.captureManager
+        manager.configureSession()
+        if !manager.session.isRunning {
+            manager.startSession()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                captureManager.startRecording()
+                manager.startRecording()
             }
         } else {
-            captureManager.startRecording()
+            manager.startRecording()
         }
     }
 
@@ -194,29 +166,21 @@ struct CaptureSessionView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(Color(.secondarySystemBackground).opacity(0.92))
         )
     }
 
     private func endSession() {
         guard !isEnding else { return }
         isEnding = true
-        print("🛑 [Capture] End Session tapped — stopping recording & session")
-        // Stop recording (if active) and the camera session
-        if captureManager.captureState.isRecording {
-            shouldDismissOnCompletion = true
-            captureManager.stopRecording()
+        if viewModel.captureManager.captureState.isRecording {
+            viewModel.captureManager.stopRecording()
         } else {
-            print("ℹ️ [Capture] No active recording when ending session")
-            shouldDismissOnCompletion = false
-            viewModel.step = .confirmLocation
-            dismiss()
+            viewModel.cancelActiveCapture()
+            isEnding = false
         }
-        captureManager.stopSession()
     }
 }
-
-// (Removed old CaptureOverlay, RecordButton and share sheet for the simplified UX)
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
@@ -249,104 +213,6 @@ private final class PreviewView: UIView {
     }
 }
 
-// MARK: - ARView Camera Preview
-
-private struct ARCameraPreview: UIViewRepresentable {
-    let session: ARSession
-
-    func makeUIView(context: Context) -> ARView {
-        let arView = ARView(frame: .zero)
-        arView.session = session
-        arView.renderOptions = [.disablePersonOcclusion, .disableDepthOfField, .disableMotionBlur]
-        // Use camera rendering only - no virtual content
-        arView.environment.background = .cameraFeed()
-        return arView
-    }
-
-    func updateUIView(_ uiView: ARView, context: Context) {
-        // Session is managed externally by VideoCaptureManager
-    }
-}
-
-// MARK: - Capture Guidance View
-
-private struct CaptureGuidanceView: View {
-    @State private var currentTipIndex = 0
-    @State private var showTip = true
-
-    private let tips = [
-        CaptureGuidanceTip(icon: "arrow.left.and.right", text: "Move slowly and steadily"),
-        CaptureGuidanceTip(icon: "cube.transparent", text: "Scan corners and edges"),
-        CaptureGuidanceTip(icon: "lightbulb", text: "Ensure good lighting"),
-        CaptureGuidanceTip(icon: "hand.raised", text: "Keep phone upright"),
-        CaptureGuidanceTip(icon: "arrow.triangle.2.circlepath", text: "Overlap scanned areas")
-    ]
-
-    var body: some View {
-        HStack(spacing: 12) {
-            // Recording indicator
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 10, height: 10)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.red.opacity(0.5), lineWidth: 2)
-                            .scaleEffect(showTip ? 1.5 : 1.0)
-                            .opacity(showTip ? 0 : 1)
-                    )
-                Text("REC")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.red)
-            }
-
-            Divider()
-                .frame(height: 20)
-
-            // Rotating tips
-            if currentTipIndex < tips.count {
-                let tip = tips[currentTipIndex]
-                HStack(spacing: 8) {
-                    Image(systemName: tip.icon)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                    Text(tip.text)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.ultraThinMaterial)
-                .environment(\.colorScheme, .dark)
-        )
-        .onAppear {
-            startTipRotation()
-        }
-        .animation(.easeInOut(duration: 0.5), value: currentTipIndex)
-        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: showTip)
-    }
-
-    private func startTipRotation() {
-        Timer.scheduledTimer(withTimeInterval: 4.0, repeats: true) { _ in
-            withAnimation {
-                currentTipIndex = (currentTipIndex + 1) % tips.count
-            }
-        }
-    }
-}
-
-private struct CaptureGuidanceTip {
-    let icon: String
-    let text: String
-}
-
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
         if case .recording = self { return true }
@@ -357,8 +223,24 @@ private extension VideoCaptureManager.CaptureState {
 #Preview {
     CaptureSessionView(
         viewModel: CaptureFlowViewModel(),
-        targetId: "target-123",
-        reservationId: "reservation-456"
+        captureContext: SiteSubmissionDraft(
+            siteName: "Pilot bakery",
+            siteLocation: "Durham, NC",
+            taskStatement: "Capture the packaging handoff zone.",
+            workflowContext: "Operators bag finished goods and place them onto a cart.",
+            taskZoneBoundaryNotes: "Counter edge to outbound cart."
+        ).makeTaskCaptureContext(
+            checklist: TaskCaptureContext.defaultChecklist().map {
+                var item = $0
+                item.isCompleted = true
+                return item
+            },
+            coverage: TaskCaptureContext.defaultCoverageDeclarations().map {
+                var item = $0
+                item.isCovered = true
+                return item
+            }
+        )
     )
 }
 
@@ -369,20 +251,16 @@ private struct UploadStatusRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(status.metadata.jobId)
+                    Text(status.metadata.capturePassId)
                         .font(.subheadline.weight(.semibold))
-                    if let targetId = status.metadata.targetId {
-                        Text("Target: \(targetId)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let reservationId = status.metadata.reservationId {
-                        Text("Reservation: \(reservationId)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Submission \(status.metadata.submissionId)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Site \(status.metadata.siteId) • Task \(status.metadata.taskId)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(status.metadata.capturedAt, style: .time)
@@ -420,27 +298,14 @@ private struct UploadStatusRow: View {
 
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Upload failed", systemImage: "xmark.octagon.fill")
-                        .foregroundStyle(.red)
-                    Text(message)
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
-                        Button("Retry", action: retry)
-                            .buttonStyle(.borderedProminent)
-                            .font(.caption)
-                        Button("Dismiss", action: dismiss)
-                            .buttonStyle(.borderless)
-                            .font(.caption)
-                    }
+                        .foregroundStyle(.red)
+                    Button("Retry", action: retry)
+                        .buttonStyle(.borderless)
+                        .font(.caption)
                 }
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-        )
     }
 }
