@@ -51,6 +51,13 @@ struct QualificationIntakePacket: Equatable, Codable {
         self.peopleTrafficNotes = peopleTrafficNotes
         self.captureRestrictions = captureRestrictions
     }
+
+    var isComplete: Bool {
+        let hasWorkflow = !(workflowName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let hasSteps = !taskSteps.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.isEmpty
+        let hasZoneOrOwner = !((zone?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) && (owner?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true))
+        return hasWorkflow && hasSteps && hasZoneOrOwner
+    }
 }
 
 struct CaptureScaffoldingPacket: Equatable, Codable {
@@ -58,6 +65,11 @@ struct CaptureScaffoldingPacket: Equatable, Codable {
     let scaffoldingUsed: [String]
     let coveragePlan: [String]
     let calibrationAssets: [String]
+    let scaleAnchorAssets: [String]
+    let checkpointAssets: [String]
+    let validatedScaleMeters: Double?
+    let validatedPoseCoverage: Double?
+    let hiddenZoneBound: Double?
     let uncertaintyPriors: [String: Double]
 
     init(
@@ -65,13 +77,38 @@ struct CaptureScaffoldingPacket: Equatable, Codable {
         scaffoldingUsed: [String] = [],
         coveragePlan: [String] = [],
         calibrationAssets: [String] = [],
+        scaleAnchorAssets: [String] = [],
+        checkpointAssets: [String] = [],
+        validatedScaleMeters: Double? = nil,
+        validatedPoseCoverage: Double? = nil,
+        hiddenZoneBound: Double? = nil,
         uncertaintyPriors: [String: Double] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.scaffoldingUsed = scaffoldingUsed
         self.coveragePlan = coveragePlan
         self.calibrationAssets = calibrationAssets
+        self.scaleAnchorAssets = scaleAnchorAssets
+        self.checkpointAssets = checkpointAssets
+        self.validatedScaleMeters = validatedScaleMeters
+        self.validatedPoseCoverage = validatedPoseCoverage
+        self.hiddenZoneBound = hiddenZoneBound
         self.uncertaintyPriors = uncertaintyPriors
+    }
+
+    var hasValidatedMetricBundle: Bool {
+        guard !calibrationAssets.isEmpty,
+              !scaleAnchorAssets.isEmpty,
+              !checkpointAssets.isEmpty,
+              let validatedScaleMeters,
+              validatedScaleMeters > 0,
+              let validatedPoseCoverage,
+              validatedPoseCoverage >= 0.7,
+              let hiddenZoneBound,
+              hiddenZoneBound <= 0.35 else {
+            return false
+        }
+        return true
     }
 }
 
@@ -92,6 +129,7 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let intakePacket: QualificationIntakePacket?
     let scaffoldingPacket: CaptureScaffoldingPacket?
     let captureModality: String?
+    let evidenceTier: String?
 }
 
 struct CaptureUploadRequest: Equatable {
@@ -119,6 +157,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case fileMissing
         case cancelled
         case uploadFailed
+        case missingStructuredIntake
 
         var errorDescription: String? {
             switch self {
@@ -128,6 +167,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Upload cancelled."
             case .uploadFailed:
                 return "Upload failed. Please try again."
+            case .missingStructuredIntake:
+                return "Structured intake is required before upload."
             }
         }
     }
@@ -147,9 +188,16 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         let captureId: String
         let captureSource: String
         let captureModality: String
+        let evidenceTier: String
         let scaffoldingUsed: [String]
         let coveragePlan: [String]
         let calibrationAssets: [String]
+        let scaleAnchorAssets: [String]
+        let checkpointAssets: [String]
+        let validatedScaleMeters: Double?
+        let validatedPoseCoverage: Double?
+        let hiddenZoneBound: Double?
+        let validatedMetricBundle: Bool
         let uncertaintyPriors: [String: Double]
         let intakePresent: Bool
         let capturedAt: String
@@ -177,7 +225,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     func retryUpload(id: UUID) {
         queue.async {
-            guard var record = self.uploads[id] else { return }
+            guard let record = self.uploads[id] else { return }
             record.task?.cancel()
             self.uploads[id] = record
             var request = record.request
@@ -213,6 +261,16 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         guard let record = queue.sync(execute: { uploads[id] }) else { return }
         let packageURL = record.request.packageURL
         print("🚀 [UploadService] performUpload start id=\(id) url=\(packageURL.path)")
+
+        guard record.request.metadata.intakePacket?.isComplete == true else {
+            queue.async {
+                guard var failingRecord = self.uploads[id] else { return }
+                failingRecord.task = nil
+                self.uploads[id] = failingRecord
+                self.subject.send(.failed(failingRecord.request, .missingStructuredIntake))
+            }
+            return
+        }
 
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
             print("❌ [UploadService] package missing at path=\(packageURL.path)")
@@ -400,9 +458,18 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     json["scene_id"] = sceneId
                     json["capture_id"] = captureId
                     json["capture_modality"] = captureModality(for: request)
+                    json["evidence_tier"] = evidenceTier(for: request)
                     json["scaffolding_used"] = request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []
                     json["coverage_plan"] = request.metadata.scaffoldingPacket?.coveragePlan ?? []
                     json["calibration_assets"] = request.metadata.scaffoldingPacket?.calibrationAssets ?? []
+                    json["scaffolding_validation"] = [
+                        "scale_anchor_count": request.metadata.scaffoldingPacket?.scaleAnchorAssets.count ?? 0,
+                        "checkpoint_count": request.metadata.scaffoldingPacket?.checkpointAssets.count ?? 0,
+                        "validated_scale_m": request.metadata.scaffoldingPacket?.validatedScaleMeters as Any,
+                        "validated_pose_coverage": request.metadata.scaffoldingPacket?.validatedPoseCoverage as Any,
+                        "hidden_zone_bound": request.metadata.scaffoldingPacket?.hiddenZoneBound as Any,
+                        "validated_metric_bundle": request.metadata.scaffoldingPacket?.hasValidatedMetricBundle ?? false,
+                    ]
                     json["uncertainty_priors"] = request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:]
                     if !bucket.isEmpty {
                         json["video_uri"] = bucket + "/" + remoteBasePath + "walkthrough.mov"
@@ -515,6 +582,23 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return "glasses_video_only"
     }
 
+    private func evidenceTier(for request: CaptureUploadRequest) -> String {
+        if let explicit = request.metadata.evidenceTier?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return explicit
+        }
+        let intakeComplete = request.metadata.intakePacket?.isComplete == true
+        if request.metadata.captureSource == .iphoneVideo && intakeComplete {
+            return "qualified_metric_capture"
+        }
+        if request.metadata.captureSource == .metaGlasses,
+           request.metadata.scaffoldingPacket?.hasValidatedMetricBundle == true,
+           intakeComplete {
+            return "glasses_with_validated_scaffolding"
+        }
+        return "pre_screen_video"
+    }
+
     private func materializeSupplementalFiles(in directory: URL, request: CaptureUploadRequest, remoteBasePath: String) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
@@ -531,11 +615,18 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             captureId: captureIdentifier(for: request),
             captureSource: request.metadata.captureSource.rawValue,
             captureModality: captureModality(for: request),
+            evidenceTier: evidenceTier(for: request),
             scaffoldingUsed: request.metadata.scaffoldingPacket?.scaffoldingUsed ?? [],
             coveragePlan: request.metadata.scaffoldingPacket?.coveragePlan ?? [],
             calibrationAssets: request.metadata.scaffoldingPacket?.calibrationAssets ?? [],
+            scaleAnchorAssets: request.metadata.scaffoldingPacket?.scaleAnchorAssets ?? [],
+            checkpointAssets: request.metadata.scaffoldingPacket?.checkpointAssets ?? [],
+            validatedScaleMeters: request.metadata.scaffoldingPacket?.validatedScaleMeters,
+            validatedPoseCoverage: request.metadata.scaffoldingPacket?.validatedPoseCoverage,
+            hiddenZoneBound: request.metadata.scaffoldingPacket?.hiddenZoneBound,
+            validatedMetricBundle: request.metadata.scaffoldingPacket?.hasValidatedMetricBundle ?? false,
             uncertaintyPriors: request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:],
-            intakePresent: request.metadata.intakePacket != nil,
+            intakePresent: request.metadata.intakePacket?.isComplete == true,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         if let contextData = try? encoder.encode(context) {

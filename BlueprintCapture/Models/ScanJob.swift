@@ -92,6 +92,8 @@ struct ScanJob: Identifiable, Equatable {
             scaffoldingUsed: [],
             coveragePlan: capturePlan,
             calibrationAssets: [],
+            scaleAnchorAssets: [],
+            checkpointAssets: [],
             uncertaintyPriors: priors
         )
     }

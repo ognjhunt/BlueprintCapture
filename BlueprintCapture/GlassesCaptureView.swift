@@ -643,19 +643,19 @@ final class GlassesUploadViewModel: ObservableObject {
             capturedAt: artifacts.startedAt,
             uploadedAt: nil,
             captureSource: .metaGlasses,
-            intakePacket: QualificationIntakePacket(
-                workflowName: targetId,
-                taskSteps: [],
-                knownBlockers: ["Structured intake was not provided on-device."]
-            ),
+            intakePacket: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 coveragePlan: [
                     "Collect a scale-anchor still image before or after the walkthrough.",
                     "Pause at critical workcells for 2-3 seconds."
                 ],
+                calibrationAssets: [],
+                scaleAnchorAssets: [],
+                checkpointAssets: [],
                 uncertaintyPriors: ["missing_intake": 0.85]
             ),
-            captureModality: "glasses_video_only"
+            captureModality: "glasses_video_only",
+            evidenceTier: "pre_screen_video"
         )
 
         activeUploadId = metadata.id

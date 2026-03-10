@@ -51,7 +51,8 @@ final class UploadQueueViewModel: ObservableObject {
             captureSource: .metaGlasses,
             intakePacket: job.qualificationIntakePacket,
             scaffoldingPacket: job.defaultScaffoldingPacket,
-            captureModality: "glasses_video_only"
+            captureModality: "glasses_video_only",
+            evidenceTier: "pre_screen_video"
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         let payoutUsd = job.payoutDollars
