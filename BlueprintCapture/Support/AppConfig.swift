@@ -7,10 +7,15 @@ enum MapProvider: String {
 
 enum AppConfig {
     static let mapProvider: MapProvider = .appleSnapshot
-    static let pendingStartScanJobIdKey = "com.blueprint.pendingStartScanJobId"
 
     private static func secretsPlist() -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+    }
+
+    private static func googleServicePlist() -> [String: Any]? {
+        guard let url = Bundle.main.url(forResource: "GoogleService-Info", withExtension: "plist"),
               let data = try? Data(contentsOf: url) else { return nil }
         return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
@@ -33,8 +38,11 @@ enum AppConfig {
         return nil
     }
 
-    static func perplexityAPIKey() -> String? {
-        secretsPlist()?["PERPLEXITY_API_KEY"] as? String
+    static func storageBucket() -> String? {
+        if let plist = googleServicePlist() {
+            return plist["STORAGE_BUCKET"] as? String
+        }
+        return nil
     }
 
     // MARK: - Stripe
@@ -82,21 +90,6 @@ enum AppConfig {
             if let str = plist["FALLBACK_MAX_RESERVATION_AIR_MILES"] as? String, let val = Double(str) { return val }
         }
         return 35.0
-    }
-
-    // MARK: - Testing Overrides
-    static func allowOffsiteCheckIn() -> Bool {
-        #if DEBUG
-        return true
-        #else
-        if let plist = secretsPlist() {
-            if let flag = plist["ALLOW_OFFSITE_CHECKIN"] as? Bool { return flag }
-            if let str = plist["ALLOW_OFFSITE_CHECKIN"] as? String {
-                return (str as NSString).boolValue
-            }
-        }
-        return false
-        #endif
     }
 }
 

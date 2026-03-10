@@ -42,6 +42,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let placesDetails: PlacesDetailsServiceProtocol = PlacesDetailsService()
     private let motionManager = CMMotionActivityManager()
     private let uploadService: CaptureUploadServiceProtocol
+    private let pipelineBridge: CapturePipelineBridgeProtocol
     private var placesSessionToken: String?
     private var hasRequestedPermissions = false
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
@@ -49,8 +50,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var searchDebounceTask: Task<Void, Never>?
     private var currentSearchQuery = ""
 
-    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
+    init(
+        uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+        pipelineBridge: CapturePipelineBridgeProtocol = CapturePipelineBridge()
+    ) {
         self.uploadService = uploadService
+        self.pipelineBridge = pipelineBridge
         super.init()
         locationManager.delegate = self
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
@@ -156,11 +161,29 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             taskId: activeCaptureContext.taskId,
             capturePassId: activeCaptureContext.capturePass.capturePassId,
             creatorId: profile.id.uuidString,
-            capturedAt: Date(),
+            capturedAt: artifacts.startedAt,
             uploadedAt: nil
         )
-        let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
-        uploadService.enqueue(request)
+        do {
+            let stagedOutput = try pipelineBridge.stageArtifacts(
+                for: activeCaptureContext,
+                recording: artifacts,
+                requestedLanesOverride: nil
+            )
+            let request = CaptureUploadRequest(
+                packageURL: artifacts.packageURL,
+                metadata: metadata,
+                artifacts: stagedOutput.artifacts
+            )
+            uploadService.enqueue(request)
+        } catch {
+            uploadStatusMap[metadata.id] = UploadStatus(
+                metadata: metadata,
+                packageURL: artifacts.packageURL,
+                state: .failed(message: error.localizedDescription)
+            )
+            refreshUploadStatuses()
+        }
         latestCompletedCaptureContext = activeCaptureContext
         step = .captureSummary
     }
@@ -440,6 +463,12 @@ extension CaptureFlowViewModel {
             self.metadata = request.metadata
             self.packageURL = request.packageURL
             self.state = .queued
+        }
+
+        init(metadata: CaptureUploadMetadata, packageURL: URL, state: State) {
+            self.metadata = metadata
+            self.packageURL = packageURL
+            self.state = state
         }
     }
 }

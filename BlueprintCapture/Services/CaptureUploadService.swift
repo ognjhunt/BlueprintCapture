@@ -15,9 +15,59 @@ struct CaptureUploadMetadata: Identifiable, Codable, Equatable {
     var uploadedAt: Date?
 }
 
+struct CaptureUploadArtifact: Identifiable, Equatable {
+    enum Role: String, Equatable {
+        case legacyPackage
+        case rawVideo
+        case motionLog
+        case capturePackageManifest
+        case rawManifest
+        case arKitFrameLog
+        case arKitPoses
+        case arKitIntrinsics
+        case arKitDepth
+        case arKitConfidence
+        case arKitMesh
+        case keyframe
+        case framesIndex
+        case qaReport
+        case captureDescriptor
+    }
+
+    let localFileURL: URL
+    let storagePath: String
+    let contentType: String
+    let role: Role
+    let required: Bool
+
+    var id: String { storagePath }
+
+    static func legacyPackage(localFileURL: URL, storagePath: String) -> CaptureUploadArtifact {
+        CaptureUploadArtifact(
+            localFileURL: localFileURL,
+            storagePath: storagePath,
+            contentType: "application/zip",
+            role: .legacyPackage,
+            required: true
+        )
+    }
+}
+
 struct CaptureUploadRequest: Equatable {
     let packageURL: URL
     var metadata: CaptureUploadMetadata
+    var artifacts: [CaptureUploadArtifact]
+
+    init(packageURL: URL, metadata: CaptureUploadMetadata, artifacts: [CaptureUploadArtifact]? = nil) {
+        self.packageURL = packageURL
+        self.metadata = metadata
+        self.artifacts = artifacts ?? [
+            .legacyPackage(
+                localFileURL: packageURL,
+                storagePath: CaptureUploadService.storagePath(forLegacyPackageAt: packageURL, metadata: metadata)
+            )
+        ]
+    }
 }
 
 protocol CaptureUploadServiceProtocol: AnyObject {
@@ -104,11 +154,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     static func storagePath(for request: CaptureUploadRequest) -> String {
+        storagePath(forLegacyPackageAt: request.packageURL, metadata: request.metadata)
+    }
+
+    static func storagePath(forLegacyPackageAt packageURL: URL, metadata: CaptureUploadMetadata) -> String {
         let timestampFormatter = ISO8601DateFormatter()
         timestampFormatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        let ts = timestampFormatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
-        let basename = request.packageURL.lastPathComponent
-        return "site_submissions/\(request.metadata.submissionId)/sites/\(request.metadata.siteId)/tasks/\(request.metadata.taskId)/capture_passes/\(request.metadata.capturePassId)/\(ts)-\(basename)"
+        let ts = timestampFormatter.string(from: metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
+        let basename = packageURL.lastPathComponent
+        return "site_submissions/\(metadata.submissionId)/sites/\(metadata.siteId)/tasks/\(metadata.taskId)/capture_passes/\(metadata.capturePassId)/\(ts)-\(basename)"
     }
 
     private func storeAndBeginUpload(request: CaptureUploadRequest) {
@@ -126,9 +180,22 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     private func performUpload(for id: UUID) async {
         guard let record = queue.sync(execute: { uploads[id] }) else { return }
-        let packageURL = record.request.packageURL
+        let artifacts = record.request.artifacts
 
-        guard FileManager.default.fileExists(atPath: packageURL.path) else {
+        guard !artifacts.isEmpty else {
+            queue.async {
+                guard var failingRecord = self.uploads[id] else { return }
+                failingRecord.task = nil
+                self.uploads[id] = failingRecord
+                self.subject.send(.failed(failingRecord.request, .fileMissing))
+            }
+            return
+        }
+
+        let missingArtifact = artifacts.first {
+            $0.required && !FileManager.default.fileExists(atPath: $0.localFileURL.path)
+        }
+        guard missingArtifact == nil else {
             queue.async {
                 guard var failingRecord = self.uploads[id] else { return }
                 failingRecord.task = nil
@@ -139,56 +206,44 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         #if canImport(FirebaseStorage)
-        let storage = Storage.storage()
-        let path = Self.storagePath(for: record.request)
-        let ref = storage.reference(withPath: path)
-
-        let metadata = StorageMetadata()
-        metadata.contentType = "application/zip"
-        metadata.customMetadata = Self.customMetadata(for: record.request.metadata)
-
-        let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
-
-        let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-            guard let self else { return }
-            let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
-            self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
-        }
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            let successHandle = uploadTask.observe(.success) { [weak self] _ in
-                guard let self else { continuation.resume(); return }
-                self.queue.async {
-                    guard var latestRecord = self.uploads[id] else { continuation.resume(); return }
-                    latestRecord.request.metadata.uploadedAt = Date()
-                    latestRecord.task = nil
-                    self.uploads[id] = latestRecord
-                    self.subject.send(.progress(id: id, progress: 1.0))
-                    self.subject.send(.completed(latestRecord.request))
-                }
-                continuation.resume()
+        do {
+            for (index, artifact) in artifacts.enumerated() {
+                if Task.isCancelled { return }
+                try await uploadArtifact(
+                    artifact,
+                    metadata: record.request.metadata,
+                    uploadID: id,
+                    completedArtifactCount: index,
+                    totalArtifactCount: artifacts.count
+                )
             }
-
-            let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
-                guard let self else { continuation.resume(); return }
-                self.queue.async {
-                    guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
-                    failingRecord.task = nil
-                    self.uploads[id] = failingRecord
-                    self.subject.send(.failed(failingRecord.request, .uploadFailed))
-                }
-                continuation.resume()
+            queue.async {
+                guard var latestRecord = self.uploads[id] else { return }
+                latestRecord.request.metadata.uploadedAt = Date()
+                latestRecord.task = nil
+                self.uploads[id] = latestRecord
+                self.subject.send(.progress(id: id, progress: 1.0))
+                self.subject.send(.completed(latestRecord.request))
             }
-
-            _ = (progressHandle, successHandle, failureHandle)
+        } catch {
+            queue.async {
+                guard var failingRecord = self.uploads[id] else { return }
+                failingRecord.task = nil
+                self.uploads[id] = failingRecord
+                self.subject.send(.failed(failingRecord.request, .uploadFailed))
+            }
         }
         #else
-        let steps = 12
-        for step in 1...steps {
-            try? await Task.sleep(nanoseconds: 150_000_000)
-            if Task.isCancelled { return }
-            let progress = Double(step) / Double(steps)
-            subject.send(.progress(id: id, progress: min(progress, 0.999)))
+        let totalArtifactCount = max(artifacts.count, 1)
+        for (artifactIndex, _) in artifacts.enumerated() {
+            let steps = 6
+            for step in 1...steps {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                if Task.isCancelled { return }
+                let artifactProgress = Double(step) / Double(steps)
+                let progress = (Double(artifactIndex) + artifactProgress) / Double(totalArtifactCount)
+                subject.send(.progress(id: id, progress: min(progress, 0.999)))
+            }
         }
         queue.async {
             guard var latestRecord = self.uploads[id] else { return }
@@ -200,4 +255,50 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
         #endif
     }
+
+    #if canImport(FirebaseStorage)
+    private func uploadArtifact(
+        _ artifact: CaptureUploadArtifact,
+        metadata: CaptureUploadMetadata,
+        uploadID: UUID,
+        completedArtifactCount: Int,
+        totalArtifactCount: Int
+    ) async throws {
+        let storage = Storage.storage()
+        let ref = storage.reference(withPath: artifact.storagePath)
+        let uploadMetadata = StorageMetadata()
+        uploadMetadata.contentType = artifact.contentType
+        uploadMetadata.customMetadata = Self.customMetadata(for: metadata)
+        let uploadTask = ref.putFile(from: artifact.localFileURL, metadata: uploadMetadata)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            var progressHandle = ""
+            var successHandle = ""
+            var failureHandle = ""
+
+            progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+                guard let self else { return }
+                let artifactProgress = Double(snapshot.progress?.fractionCompleted ?? 0)
+                let overall = (Double(completedArtifactCount) + artifactProgress) / Double(max(totalArtifactCount, 1))
+                self.subject.send(.progress(id: uploadID, progress: min(max(overall, 0.0), 0.999)))
+            }
+
+            successHandle = uploadTask.observe(.success) { _ in
+                uploadTask.removeObserver(withHandle: progressHandle)
+                uploadTask.removeObserver(withHandle: successHandle)
+                uploadTask.removeObserver(withHandle: failureHandle)
+                continuation.resume()
+            }
+
+            failureHandle = uploadTask.observe(.failure) { _ in
+                uploadTask.removeObserver(withHandle: progressHandle)
+                uploadTask.removeObserver(withHandle: successHandle)
+                uploadTask.removeObserver(withHandle: failureHandle)
+                continuation.resume(throwing: UploadError.uploadFailed)
+            }
+
+            _ = (progressHandle, successHandle, failureHandle)
+        }
+    }
+    #endif
 }
