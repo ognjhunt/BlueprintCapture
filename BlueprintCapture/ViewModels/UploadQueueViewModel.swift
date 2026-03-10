@@ -8,16 +8,19 @@ final class UploadQueueViewModel: ObservableObject {
     private let uploadService: CaptureUploadServiceProtocol
     private let targetStateService: TargetStateServiceProtocol
     private let store: UploadQueueStore
+    private let exportService: CaptureExportServiceProtocol
 
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
     init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
-         store: UploadQueueStore = UploadQueueStore()) {
+         store: UploadQueueStore = UploadQueueStore(),
+         exportService: CaptureExportServiceProtocol = CaptureExportService()) {
         self.uploadService = uploadService
         self.targetStateService = targetStateService
         self.store = store
+        self.exportService = exportService
 
         observeUploadEvents()
         restorePending()
@@ -50,9 +53,11 @@ final class UploadQueueViewModel: ObservableObject {
             uploadedAt: nil,
             captureSource: .metaGlasses,
             intakePacket: job.qualificationIntakePacket,
+            intakeMetadata: CaptureIntakeMetadata(source: .authoritative),
             scaffoldingPacket: job.defaultScaffoldingPacket,
             captureModality: "glasses_video_only",
-            evidenceTier: "pre_screen_video"
+            evidenceTier: "pre_screen_video",
+            captureContextHint: "\(job.title) at \(job.address)"
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         let payoutUsd = job.payoutDollars
@@ -61,6 +66,14 @@ final class UploadQueueViewModel: ObservableObject {
 
     func retryUpload(id: UUID) {
         uploadService.retryUpload(id: id)
+    }
+
+    func exportCapture(id: UUID) async throws -> FinalizedCaptureBundle {
+        guard let status = uploadStatusMap[id] else {
+            throw CaptureBundleFinalizer.FinalizationError.packageMissing
+        }
+        let request = CaptureUploadRequest(packageURL: status.packageURL, metadata: status.metadata)
+        return try await exportService.exportCapture(request: request)
     }
 
     func dismissUpload(id: UUID) {

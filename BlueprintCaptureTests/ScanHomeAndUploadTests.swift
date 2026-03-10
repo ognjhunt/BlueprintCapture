@@ -9,11 +9,11 @@ struct ScanHomeAndUploadTests {
     @Test func scanHome_filtersJobsByTargetStateOwnershipAndCompletion() async throws {
         let currentUserId = "user_current"
 
-        let jobA = ScanJob(id: "a", title: "A", address: "A", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
-        let jobB = ScanJob(id: "b", title: "B", address: "B", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
-        let jobC = ScanJob(id: "c", title: "C", address: "C", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
-        let jobD = ScanJob(id: "d", title: "D", address: "D", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
-        let jobE = ScanJob(id: "e", title: "E", address: "E", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let jobA = makeJob(id: "a", title: "A", address: "A", lat: 0, lng: 0, updatedAt: Date())
+        let jobB = makeJob(id: "b", title: "B", address: "B", lat: 0, lng: 0, updatedAt: Date())
+        let jobC = makeJob(id: "c", title: "C", address: "C", lat: 0, lng: 0, updatedAt: Date())
+        let jobD = makeJob(id: "d", title: "D", address: "D", lat: 0, lng: 0, updatedAt: Date())
+        let jobE = makeJob(id: "e", title: "E", address: "E", lat: 0, lng: 0, updatedAt: Date())
 
         let ranked: [ScanHomeViewModel.RankedJob] = [
             .init(job: jobA, distanceMeters: 10),
@@ -45,8 +45,8 @@ struct ScanHomeAndUploadTests {
         let user = CLLocation(latitude: 0, longitude: 0)
         let now = Date()
 
-        let ready = ScanJob(id: "ready", title: "Ready", address: "R", lat: 0, lng: 0, payoutCents: 1000, estMinutes: 10, active: true, updatedAt: now, category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
-        let far = ScanJob(id: "far", title: "Far", address: "F", lat: 0.01, lng: 0.0, payoutCents: 999999, estMinutes: 10, active: true, updatedAt: now, category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 10)
+        let ready = makeJob(id: "ready", title: "Ready", address: "R", lat: 0, lng: 0, updatedAt: now)
+        let far = makeJob(id: "far", title: "Far", address: "F", lat: 0.01, lng: 0.0, payoutCents: 999999, priority: 10, updatedAt: now)
 
         let ranked = ScanHomeViewModel.rankJobsForFeed(jobs: [far, ready], userLocation: user, feedRadiusMeters: 10 * 1609.34)
         #expect(ranked.first?.job.id == "ready")
@@ -76,7 +76,7 @@ struct ScanHomeAndUploadTests {
             durationSeconds: 3.0
         )
 
-        let job = ScanJob(id: "job_123", title: "Job", address: "Addr", lat: 0, lng: 0, payoutCents: 5000, estMinutes: 10, active: true, updatedAt: Date(), category: nil, instructions: [], allowedAreas: [], restrictedAreas: [], permissionDocURL: nil, checkinRadiusM: 150, alertRadiusM: 200, priority: 0)
+        let job = makeJob(id: "job_123", title: "Job", address: "Addr", lat: 0, lng: 0, payoutCents: 5000, updatedAt: Date())
 
         vm.enqueueGlassesCapture(artifacts: artifacts, job: job)
         #expect(upload.enqueued.count == 1)
@@ -97,6 +97,50 @@ struct ScanHomeAndUploadTests {
 
         #expect(targets.completedTargetIds.contains("job_123"))
     }
+}
+
+private func makeJob(
+    id: String,
+    title: String,
+    address: String,
+    lat: Double,
+    lng: Double,
+    payoutCents: Int = 1000,
+    priority: Int = 0,
+    updatedAt: Date
+) -> ScanJob {
+    ScanJob(
+        id: id,
+        title: title,
+        address: address,
+        lat: lat,
+        lng: lng,
+        payoutCents: payoutCents,
+        estMinutes: 10,
+        active: true,
+        updatedAt: updatedAt,
+        category: nil,
+        instructions: [],
+        allowedAreas: [],
+        restrictedAreas: [],
+        permissionDocURL: nil,
+        checkinRadiusM: 150,
+        alertRadiusM: 200,
+        priority: priority,
+        workflowName: nil,
+        workflowSteps: [],
+        targetKPI: nil,
+        zone: nil,
+        shift: nil,
+        owner: nil,
+        adjacentSystems: [],
+        privacyRestrictions: [],
+        securityRestrictions: [],
+        knownBlockers: [],
+        nonRoutineModes: [],
+        peopleTrafficNotes: [],
+        captureRestrictions: []
+    )
 }
 
 // MARK: - Mocks
@@ -139,4 +183,3 @@ final class MockTargetStateService: TargetStateServiceProtocol {
 
     func fetchActiveReservationForCurrentUser() async -> Reservation? { nil }
 }
-

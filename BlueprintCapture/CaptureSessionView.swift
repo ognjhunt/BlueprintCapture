@@ -12,7 +12,6 @@ struct CaptureSessionView: View {
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
-    @State private var shouldDismissOnCompletion = false
 
     // Venue permission for this capture (would be set when user selects a location)
     @State private var venuePermission: VenuePermission? = .demo
@@ -87,13 +86,18 @@ struct CaptureSessionView: View {
                     .padding(.horizontal)
                 }
 
-                // End Session button only
+                if case .finished = captureManager.captureState,
+                   viewModel.pendingCaptureRequest != nil || viewModel.finishedCaptureActionState != .idle {
+                    finishedCaptureCard
+                        .padding(.horizontal)
+                }
+
                 HStack {
                     Spacer()
                     Button {
                         endSession()
                     } label: {
-                        Label(isEnding ? "Ending…" : "End Session", systemImage: isEnding ? "hourglass" : "stop.fill")
+                        Label(buttonTitle, systemImage: buttonIcon)
                     }
                     .buttonStyle(BlueprintSecondaryButtonStyle())
                     .disabled(isEnding)
@@ -117,32 +121,25 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
                 isEnding = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             case .idle:
                 isEnding = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             case .error:
                 isEnding = false
                 didAutoStart = false
-                if shouldDismissOnCompletion {
-                    shouldDismissOnCompletion = false
-                    viewModel.step = .confirmLocation
-                    dismiss()
-                }
             default:
                 break
             }
         }
         .onAppear {
             autoStartRecordingIfNeeded()
+        }
+        .sheet(item: $viewModel.manualIntakeDraft) { draft in
+            ManualIntakeSheetView(draft: draft) { updatedDraft in
+                viewModel.submitManualIntake(updatedDraft)
+            }
+        }
+        .sheet(item: $viewModel.shareSheetItem) { shareItem in
+            ShareSheet(items: [shareItem.url])
         }
     }
 
@@ -198,21 +195,121 @@ struct CaptureSessionView: View {
         )
     }
 
+    @ViewBuilder
+    private var finishedCaptureCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Capture Ready")
+                .font(.headline)
+
+            if let targetName = viewModel.pendingCaptureTargetName {
+                Text(targetName)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch viewModel.finishedCaptureActionState {
+            case .idle:
+                Text("Upload the finalized bundle or export it for local pipeline testing.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            case .generatingIntake:
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Generating intake from the video…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            case .exporting:
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Finalizing export bundle…")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            case .failed(let message):
+                Text(message)
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    viewModel.startPendingCaptureUpload()
+                } label: {
+                    Text("Upload")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
+                .disabled(isWorking)
+
+                Button {
+                    viewModel.startPendingCaptureExport()
+                } label: {
+                    Text("Export for Testing")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BlueprintSecondaryButtonStyle())
+                .disabled(isWorking)
+            }
+
+            Button("Done", action: completeAndDismiss)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var isWorking: Bool {
+        switch viewModel.finishedCaptureActionState {
+        case .generatingIntake, .exporting:
+            return true
+        case .idle, .failed:
+            return false
+        }
+    }
+
+    private var buttonTitle: String {
+        if case .finished = captureManager.captureState {
+            return "Done"
+        }
+        return isEnding ? "Ending…" : "End Session"
+    }
+
+    private var buttonIcon: String {
+        if case .finished = captureManager.captureState {
+            return "checkmark.circle"
+        }
+        return isEnding ? "hourglass" : "stop.fill"
+    }
+
     private func endSession() {
         guard !isEnding else { return }
         isEnding = true
         print("🛑 [Capture] End Session tapped — stopping recording & session")
-        // Stop recording (if active) and the camera session
+        if case .finished = captureManager.captureState {
+            completeAndDismiss()
+            return
+        }
         if captureManager.captureState.isRecording {
-            shouldDismissOnCompletion = true
             captureManager.stopRecording()
         } else {
             print("ℹ️ [Capture] No active recording when ending session")
-            shouldDismissOnCompletion = false
             viewModel.step = .confirmLocation
             dismiss()
         }
         captureManager.stopSession()
+    }
+
+    private func completeAndDismiss() {
+        captureManager.stopSession()
+        viewModel.clearFinishedCapture()
+        viewModel.step = .confirmLocation
+        dismiss()
     }
 }
 

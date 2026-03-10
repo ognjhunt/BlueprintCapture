@@ -14,6 +14,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case readyToCapture
     }
 
+    enum FinishedCaptureActionState: Equatable {
+        case idle
+        case generatingIntake
+        case exporting
+        case failed(String)
+    }
+
     @Published var profile: UserProfile = .placeholder
     @Published var step: Step = .collectProfile
     @Published var isOnboarded: Bool = false
@@ -26,6 +33,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var addressSearchResults: [AddressResult] = []
     @Published var isSearchingAddress = false
     @Published private(set) var uploadStatuses: [UploadStatus] = []
+    @Published var pendingCaptureRequest: CaptureUploadRequest?
+    @Published var pendingCaptureTargetName: String?
+    @Published var pendingCapturePayoutRange: ClosedRange<Int>?
+    @Published var finishedCaptureActionState: FinishedCaptureActionState = .idle
+    @Published var manualIntakeDraft: CaptureManualIntakeDraft?
+    @Published var shareSheetItem: ShareSheetItem?
 
     /// Stores current target info for the active capture session (set before starting capture)
     var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
@@ -43,15 +56,22 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let onboardingKey = "com.blueprint.isOnboarded"
     private let uploadService: CaptureUploadServiceProtocol
     private let targetStateService: TargetStateServiceProtocol
+    private let intakeResolutionService: IntakeResolutionServiceProtocol
+    private let exportService: CaptureExportServiceProtocol
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var searchDebounceTask: Task<Void, Never>?
     private var currentSearchQuery: String = ""
+    private var pendingPostCaptureAction: PendingPostCaptureAction?
 
     init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
-         targetStateService: TargetStateServiceProtocol = TargetStateService()) {
+         targetStateService: TargetStateServiceProtocol = TargetStateService(),
+         intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
+         exportService: CaptureExportServiceProtocol = CaptureExportService()) {
         self.uploadService = uploadService
         self.targetStateService = targetStateService
+        self.intakeResolutionService = intakeResolutionService
+        self.exportService = exportService
         self.captureManager = VideoCaptureManager()
         super.init()
         locationManager.delegate = self
@@ -352,6 +372,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             uploadedAt: nil,
             captureSource: .iphoneVideo,
             intakePacket: nil,
+            intakeMetadata: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "object_point_clouds"],
                 coveragePlan: [
@@ -364,19 +385,102 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 uncertaintyPriors: ["missing_intake": 0.6]
             ),
             captureModality: "iphone_arkit_lidar",
-            evidenceTier: nil
+            evidenceTier: nil,
+            captureContextHint: [currentTargetInfo?.name, currentAddress].compactMap { $0 }.joined(separator: " | ").nilIfEmpty
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 
-        // Capture target info before clearing (for upload status display)
-        let targetName = currentTargetInfo?.name
-        let payoutRange = currentTargetInfo?.estimatedPayoutRange
-
-        // Clear current target info after capture
+        pendingCaptureRequest = request
+        pendingCaptureTargetName = currentTargetInfo?.name
+        pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange
+        finishedCaptureActionState = .idle
         currentTargetInfo = nil
+        print("📦 [CaptureFlowViewModel] Pending capture ready jobId=\(jobId) id=\(metadata.id)")
+    }
 
-        print("📦 [CaptureFlowViewModel] Enqueuing upload jobId=\(jobId) id=\(metadata.id) targetName=\(targetName ?? "nil")")
-        enqueueUploadWithTargetInfo(request, targetName: targetName, payoutRange: payoutRange)
+    func startPendingCaptureUpload() {
+        guard let request = pendingCaptureRequest else { return }
+        pendingPostCaptureAction = .upload
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .upload) }
+    }
+
+    func startPendingCaptureExport() {
+        guard let request = pendingCaptureRequest else { return }
+        pendingPostCaptureAction = .export
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .export) }
+    }
+
+    func submitManualIntake(_ draft: CaptureManualIntakeDraft) {
+        guard let request = pendingCaptureRequest else { return }
+        manualIntakeDraft = nil
+        let resolvedRequest = request.withManualIntake(draft.makePacket())
+        pendingCaptureRequest = resolvedRequest
+        let action = pendingPostCaptureAction ?? .export
+        Task { await resolvePendingCaptureAndContinue(request: resolvedRequest, action: action, skipResolution: true) }
+    }
+
+    func clearFinishedCapture() {
+        pendingCaptureRequest = nil
+        pendingCaptureTargetName = nil
+        pendingCapturePayoutRange = nil
+        finishedCaptureActionState = .idle
+        manualIntakeDraft = nil
+        pendingPostCaptureAction = nil
+    }
+
+    private func resolvePendingCaptureAndContinue(
+        request: CaptureUploadRequest,
+        action: PendingPostCaptureAction,
+        skipResolution: Bool = false
+    ) async {
+        await MainActor.run {
+            finishedCaptureActionState = action == .export ? .exporting : .generatingIntake
+        }
+
+        let resolution: IntakeResolutionOutcome
+        if skipResolution {
+            resolution = .resolved(request)
+        } else {
+            resolution = await intakeResolutionService.resolve(request: request)
+        }
+
+        switch resolution {
+        case .resolved(let resolvedRequest):
+            await MainActor.run {
+                self.pendingCaptureRequest = resolvedRequest
+                self.finishedCaptureActionState = .idle
+            }
+            switch action {
+            case .upload:
+                await MainActor.run {
+                    self.enqueueUploadWithTargetInfo(
+                        resolvedRequest,
+                        targetName: self.pendingCaptureTargetName,
+                        payoutRange: self.pendingCapturePayoutRange
+                    )
+                    self.clearFinishedCapture()
+                }
+            case .export:
+                do {
+                    let bundle = try await exportService.exportCapture(request: resolvedRequest)
+                    await MainActor.run {
+                        let shareURL = bundle.shareURL ?? bundle.captureRootURL
+                        self.shareSheetItem = ShareSheetItem(url: shareURL)
+                        self.pendingCaptureRequest = resolvedRequest
+                    }
+                } catch {
+                    await MainActor.run {
+                        self.finishedCaptureActionState = .failed(error.localizedDescription)
+                    }
+                }
+            }
+        case .needsManualEntry(let unresolvedRequest, let draft):
+            await MainActor.run {
+                self.pendingCaptureRequest = unresolvedRequest
+                self.manualIntakeDraft = draft
+                self.finishedCaptureActionState = .idle
+            }
+        }
     }
 
     private func enqueueUploadWithTargetInfo(_ request: CaptureUploadRequest, targetName: String?, payoutRange: ClosedRange<Int>?) {
@@ -450,6 +554,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             .values
             .sorted { $0.metadata.capturedAt > $1.metadata.capturedAt }
     }
+
+    private enum PendingPostCaptureAction {
+        case upload
+        case export
+    }
 }
 
 extension CaptureFlowViewModel: CLLocationManagerDelegate {
@@ -512,4 +621,10 @@ struct AddressResult: Identifiable {
     let subtitle: String
     let completionTitle: String
     let completionSubtitle: String
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
 }

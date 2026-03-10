@@ -6,6 +6,8 @@ struct UploadProgressOverlayView: View {
     @ObservedObject var viewModel: UploadQueueViewModel
     @State private var isExpanded = false
     @State private var showProcessingComplete = false
+    @State private var shareItem: ShareSheetItem?
+    @State private var exportErrorMessage: String?
 
     /// The most recent active upload (uploading or just completed)
     private var activeUpload: UploadQueueViewModel.UploadStatus? {
@@ -58,6 +60,17 @@ struct UploadProgressOverlayView: View {
             .padding(.horizontal, 16)
             .padding(.bottom, 90) // Above tab bar
             .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
+            .sheet(item: $shareItem) { item in
+                ShareSheet(items: [item.url])
+            }
+            .alert("Export failed", isPresented: Binding(
+                get: { exportErrorMessage != nil },
+                set: { if !$0 { exportErrorMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(exportErrorMessage ?? "Unable to export the finalized bundle.")
+            }
         }
     }
 
@@ -389,21 +402,48 @@ struct UploadProgressOverlayView: View {
     private func actionButtons(for upload: UploadQueueViewModel.UploadStatus) -> some View {
         switch upload.state {
         case .completed:
-            Button {
-                withAnimation {
-                    viewModel.dismissUpload(id: upload.id)
-                    isExpanded = false
+            HStack(spacing: 12) {
+                Button {
+                    Task {
+                        do {
+                            let bundle = try await viewModel.exportCapture(id: upload.id)
+                            await MainActor.run {
+                                shareItem = ShareSheetItem(url: bundle.shareURL ?? bundle.captureRootURL)
+                            }
+                        } catch {
+                            await MainActor.run {
+                                exportErrorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                } label: {
+                    Text("Export for Testing")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(BlueprintTheme.primary)
+                        )
                 }
-            } label: {
-                Text("Done")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(BlueprintTheme.successGreen)
-                    )
+
+                Button {
+                    withAnimation {
+                        viewModel.dismissUpload(id: upload.id)
+                        isExpanded = false
+                    }
+                } label: {
+                    Text("Done")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(BlueprintTheme.successGreen)
+                        )
+                }
             }
 
         case .failed:

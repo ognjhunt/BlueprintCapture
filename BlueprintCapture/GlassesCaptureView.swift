@@ -23,6 +23,14 @@ struct GlassesCaptureView: View {
             }
         }
         .blueprintAppBackground()
+        .sheet(item: $uploadViewModel.manualIntakeDraft) { draft in
+            ManualIntakeSheetView(draft: draft) { updatedDraft in
+                uploadViewModel.submitManualIntake(updatedDraft)
+            }
+        }
+        .sheet(item: $uploadViewModel.shareSheetItem) { shareItem in
+            ShareSheet(items: [shareItem.url])
+        }
     }
 
     @ViewBuilder
@@ -459,7 +467,15 @@ struct GlassesCaptureView: View {
 
             // Upload status
             VStack(spacing: 16) {
-                if case .uploading(let progress) = uploadViewModel.state {
+                if case .resolvingIntake = uploadViewModel.state {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                            .tint(BlueprintTheme.brandTeal)
+                        Text("Generating intake...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if case .uploading(let progress) = uploadViewModel.state {
                     VStack(spacing: 8) {
                         ProgressView(value: progress)
                             .progressViewStyle(.linear)
@@ -473,6 +489,10 @@ struct GlassesCaptureView: View {
                     Label("Upload complete", systemImage: "checkmark.circle.fill")
                         .font(.headline)
                         .foregroundStyle(BlueprintTheme.successGreen)
+                } else if case .exported = uploadViewModel.state {
+                    Label("Export ready", systemImage: "square.and.arrow.up.fill")
+                        .font(.headline)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
                 } else if case .failed(let message) = uploadViewModel.state {
                     VStack(spacing: 8) {
                         Label("Upload failed", systemImage: "exclamationmark.triangle.fill")
@@ -492,21 +512,57 @@ struct GlassesCaptureView: View {
                     }
                     .buttonStyle(BlueprintPrimaryButtonStyle())
                     .padding(.horizontal, 24)
-                } else if case .failed = uploadViewModel.state {
-                    Button {
-                        uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
-                    } label: {
-                        Text("Retry Upload")
+                } else if case .exported = uploadViewModel.state {
+                    VStack(spacing: 12) {
+                        Button {
+                            uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
+                        } label: {
+                            Text("Upload")
+                        }
+                        .buttonStyle(BlueprintPrimaryButtonStyle())
+
+                        Button {
+                            uploadViewModel.reset()
+                            captureManager.reset()
+                        } label: {
+                            Text("Done")
+                        }
+                        .buttonStyle(BlueprintSecondaryButtonStyle())
                     }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
+                    .padding(.horizontal, 24)
+                } else if case .failed = uploadViewModel.state {
+                    VStack(spacing: 12) {
+                        Button {
+                            uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
+                        } label: {
+                            Text("Retry Upload")
+                        }
+                        .buttonStyle(BlueprintPrimaryButtonStyle())
+
+                        Button {
+                            uploadViewModel.exportForTesting(artifacts: artifacts, locationId: locationId)
+                        } label: {
+                            Text("Export for Testing")
+                        }
+                        .buttonStyle(BlueprintSecondaryButtonStyle())
+                    }
                     .padding(.horizontal, 24)
                 } else if case .idle = uploadViewModel.state {
-                    Button {
-                        uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
-                    } label: {
-                        Text("Upload")
+                    VStack(spacing: 12) {
+                        Button {
+                            uploadViewModel.upload(artifacts: artifacts, locationId: locationId)
+                        } label: {
+                            Text("Upload")
+                        }
+                        .buttonStyle(BlueprintPrimaryButtonStyle())
+
+                        Button {
+                            uploadViewModel.exportForTesting(artifacts: artifacts, locationId: locationId)
+                        } label: {
+                            Text("Export for Testing")
+                        }
+                        .buttonStyle(BlueprintSecondaryButtonStyle())
                     }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
                     .padding(.horizontal, 24)
                 }
             }
@@ -601,22 +657,37 @@ struct GlassesCaptureView: View {
     }
 }
 
+@MainActor
 final class GlassesUploadViewModel: ObservableObject {
     enum UploadState: Equatable {
         case idle
+        case resolvingIntake
         case uploading(Double)
         case completed
+        case exported
         case failed(String)
     }
 
     @Published var state: UploadState = .idle
+    @Published var manualIntakeDraft: CaptureManualIntakeDraft?
+    @Published var shareSheetItem: ShareSheetItem?
 
     private let uploadService: CaptureUploadServiceProtocol
+    private let intakeResolutionService: IntakeResolutionServiceProtocol
+    private let exportService: CaptureExportServiceProtocol
     private var cancellables = Set<AnyCancellable>()
     private var activeUploadId: UUID?
+    private var currentRequest: CaptureUploadRequest?
+    private var pendingAction: PendingAction?
 
-    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService()) {
+    init(
+        uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+        intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
+        exportService: CaptureExportServiceProtocol = CaptureExportService()
+    ) {
         self.uploadService = uploadService
+        self.intakeResolutionService = intakeResolutionService
+        self.exportService = exportService
 
         uploadService.events
             .receive(on: DispatchQueue.main)
@@ -632,6 +703,40 @@ final class GlassesUploadViewModel: ObservableObject {
     }
 
     func upload(artifacts: GlassesCaptureManager.CaptureArtifacts, locationId: String) {
+        let request = prepareRequest(artifacts: artifacts, locationId: locationId)
+        pendingAction = .upload
+        Task { await resolveAndContinue(request: request, action: .upload) }
+    }
+
+    func exportForTesting(artifacts: GlassesCaptureManager.CaptureArtifacts, locationId: String) {
+        let request = prepareRequest(artifacts: artifacts, locationId: locationId)
+        pendingAction = .export
+        Task { await resolveAndContinue(request: request, action: .export) }
+    }
+
+    func submitManualIntake(_ draft: CaptureManualIntakeDraft) {
+        guard let request = currentRequest else { return }
+        manualIntakeDraft = nil
+        let resolvedRequest = request.withManualIntake(draft.makePacket())
+        currentRequest = resolvedRequest
+        let action = pendingAction ?? .export
+        Task { await resolveAndContinue(request: resolvedRequest, action: action, skipResolution: true) }
+    }
+
+    func reset() {
+        state = .idle
+        activeUploadId = nil
+        currentRequest = nil
+        pendingAction = nil
+        manualIntakeDraft = nil
+        shareSheetItem = nil
+    }
+
+    private func prepareRequest(artifacts: GlassesCaptureManager.CaptureArtifacts, locationId: String) -> CaptureUploadRequest {
+        if let currentRequest, currentRequest.packageURL == artifacts.packageURL {
+            return currentRequest
+        }
+
         let trimmed = locationId.trimmingCharacters(in: .whitespacesAndNewlines)
         let targetId = trimmed.isEmpty ? nil : trimmed
         let metadata = CaptureUploadMetadata(
@@ -644,6 +749,7 @@ final class GlassesUploadViewModel: ObservableObject {
             uploadedAt: nil,
             captureSource: .metaGlasses,
             intakePacket: nil,
+            intakeMetadata: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 coveragePlan: [
                     "Collect a scale-anchor still image before or after the walkthrough.",
@@ -655,18 +761,50 @@ final class GlassesUploadViewModel: ObservableObject {
                 uncertaintyPriors: ["missing_intake": 0.85]
             ),
             captureModality: "glasses_video_only",
-            evidenceTier: "pre_screen_video"
+            evidenceTier: "pre_screen_video",
+            captureContextHint: targetId
         )
-
-        activeUploadId = metadata.id
-        state = .uploading(0)
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
-        uploadService.enqueue(request)
+        currentRequest = request
+        return request
     }
 
-    func reset() {
-        state = .idle
-        activeUploadId = nil
+    private func resolveAndContinue(
+        request: CaptureUploadRequest,
+        action: PendingAction,
+        skipResolution: Bool = false
+    ) async {
+        state = .resolvingIntake
+
+        let outcome: IntakeResolutionOutcome
+        if skipResolution {
+            outcome = .resolved(request)
+        } else {
+            outcome = await intakeResolutionService.resolve(request: request)
+        }
+
+        switch outcome {
+        case .resolved(let resolvedRequest):
+            currentRequest = resolvedRequest
+            switch action {
+            case .upload:
+                activeUploadId = resolvedRequest.metadata.id
+                state = .uploading(0)
+                uploadService.enqueue(resolvedRequest)
+            case .export:
+                do {
+                    let bundle = try await exportService.exportCapture(request: resolvedRequest)
+                    shareSheetItem = ShareSheetItem(url: bundle.shareURL ?? bundle.captureRootURL)
+                    state = .exported
+                } catch {
+                    state = .failed(error.localizedDescription)
+                }
+            }
+        case .needsManualEntry(let unresolvedRequest, let draft):
+            currentRequest = unresolvedRequest
+            manualIntakeDraft = draft
+            state = .idle
+        }
     }
 
     private func handle(_ event: CaptureUploadService.Event) {
@@ -679,11 +817,18 @@ final class GlassesUploadViewModel: ObservableObject {
             state = .uploading(progress)
         case .completed(let request):
             guard request.metadata.id == activeUploadId else { return }
+            currentRequest = request
             state = .completed
         case .failed(let request, let error):
             guard request.metadata.id == activeUploadId else { return }
+            currentRequest = request
             state = .failed(error.errorDescription ?? "Upload failed")
         }
+    }
+
+    private enum PendingAction {
+        case upload
+        case export
     }
 }
 
