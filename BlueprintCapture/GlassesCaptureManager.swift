@@ -776,7 +776,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
-            "intended_space_type": "indoor",
+            "intended_space_type": "industrial_unknown",
 
             // Additional metadata (not required by pipeline but useful)
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),

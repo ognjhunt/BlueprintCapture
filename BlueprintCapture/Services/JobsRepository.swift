@@ -129,7 +129,20 @@ final class JobsRepository: JobsRepositoryProtocol {
             permissionDocURL: permissionURL,
             checkinRadiusM: toInt(data["checkin_radius_m"]) ?? 150,
             alertRadiusM: toInt(data["alert_radius_m"]) ?? 200,
-            priority: toInt(data["priority"]) ?? 0
+            priority: toInt(data["priority"]) ?? 0,
+            workflowName: data["workflow_name"] as? String,
+            workflowSteps: toStringArray(data["workflow_steps"]),
+            targetKPI: data["target_kpi"] as? String,
+            zone: data["zone"] as? String,
+            shift: data["shift"] as? String,
+            owner: data["owner"] as? String,
+            adjacentSystems: toStringArray(data["adjacent_systems"]),
+            privacyRestrictions: toStringArray(data["privacy_restrictions"]),
+            securityRestrictions: toStringArray(data["security_restrictions"]),
+            knownBlockers: toStringArray(data["known_blockers"]),
+            nonRoutineModes: toStringArray(data["non_routine_modes"]),
+            peopleTrafficNotes: toStringArray(data["people_traffic_notes"]),
+            captureRestrictions: toStringArray(data["capture_restrictions"])
         )
     }
 
@@ -155,7 +168,20 @@ final class JobsRepository: JobsRepositoryProtocol {
                 permissionDocURL: nil,
                 checkinRadiusM: 150,
                 alertRadiusM: 200,
-                priority: 1
+                priority: 1,
+                workflowName: "Dock-to-staging tote handoff",
+                workflowSteps: ["Dock entry", "Staging aisle", "Outbound handoff"],
+                targetKPI: "handoff throughput",
+                zone: "dock_a",
+                shift: "day",
+                owner: "warehouse_supervisor",
+                adjacentSystems: ["WMS", "dock_door_controls"],
+                privacyRestrictions: ["No employee faces in shareable outputs"],
+                securityRestrictions: ["Do not capture shipping labels at readable resolution"],
+                knownBlockers: ["Forklift congestion during peaks"],
+                nonRoutineModes: ["jam clearing"],
+                peopleTrafficNotes: ["Shared aisle with forklifts and pickers"],
+                captureRestrictions: ["Avoid office corridor"]
             ),
             ScanJob(
                 id: "job_mock_retail_002",
@@ -174,9 +200,21 @@ final class JobsRepository: JobsRepositoryProtocol {
                 permissionDocURL: nil,
                 checkinRadiusM: 150,
                 alertRadiusM: 200,
-                priority: 0
+                priority: 0,
+                workflowName: "Backroom replenishment walk",
+                workflowSteps: ["Receiving shelf", "Stock corridor", "Sales-floor handoff door"],
+                targetKPI: "replenishment cycle time",
+                zone: "backroom_b",
+                shift: "night",
+                owner: "store_ops_manager",
+                adjacentSystems: ["inventory_terminal"],
+                privacyRestrictions: ["No employee faces in submitted clips"],
+                securityRestrictions: ["Do not record cash handling zones"],
+                knownBlockers: ["Narrow ladder storage alcove"],
+                nonRoutineModes: ["closing cleanup"],
+                peopleTrafficNotes: ["Variable clutter from replenishment carts"],
+                captureRestrictions: ["Skip registers"]
             )
         ]
     }
 }
-

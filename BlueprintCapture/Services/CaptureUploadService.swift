@@ -7,6 +7,74 @@ import FirebaseStorage
 import FirebaseCore
 #endif
 
+struct QualificationIntakePacket: Equatable, Codable {
+    let schemaVersion: String
+    let workflowName: String?
+    let taskSteps: [String]
+    let targetKPI: String?
+    let zone: String?
+    let shift: String?
+    let owner: String?
+    let adjacentSystems: [String]
+    let privacySecurityLimits: [String]
+    let knownBlockers: [String]
+    let nonRoutineModes: [String]
+    let peopleTrafficNotes: [String]
+    let captureRestrictions: [String]
+
+    init(
+        schemaVersion: String = "v1",
+        workflowName: String? = nil,
+        taskSteps: [String] = [],
+        targetKPI: String? = nil,
+        zone: String? = nil,
+        shift: String? = nil,
+        owner: String? = nil,
+        adjacentSystems: [String] = [],
+        privacySecurityLimits: [String] = [],
+        knownBlockers: [String] = [],
+        nonRoutineModes: [String] = [],
+        peopleTrafficNotes: [String] = [],
+        captureRestrictions: [String] = []
+    ) {
+        self.schemaVersion = schemaVersion
+        self.workflowName = workflowName
+        self.taskSteps = taskSteps
+        self.targetKPI = targetKPI
+        self.zone = zone
+        self.shift = shift
+        self.owner = owner
+        self.adjacentSystems = adjacentSystems
+        self.privacySecurityLimits = privacySecurityLimits
+        self.knownBlockers = knownBlockers
+        self.nonRoutineModes = nonRoutineModes
+        self.peopleTrafficNotes = peopleTrafficNotes
+        self.captureRestrictions = captureRestrictions
+    }
+}
+
+struct CaptureScaffoldingPacket: Equatable, Codable {
+    let schemaVersion: String
+    let scaffoldingUsed: [String]
+    let coveragePlan: [String]
+    let calibrationAssets: [String]
+    let uncertaintyPriors: [String: Double]
+
+    init(
+        schemaVersion: String = "v1",
+        scaffoldingUsed: [String] = [],
+        coveragePlan: [String] = [],
+        calibrationAssets: [String] = [],
+        uncertaintyPriors: [String: Double] = [:]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.scaffoldingUsed = scaffoldingUsed
+        self.coveragePlan = coveragePlan
+        self.calibrationAssets = calibrationAssets
+        self.uncertaintyPriors = uncertaintyPriors
+    }
+}
+
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo
@@ -21,6 +89,9 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let capturedAt: Date
     var uploadedAt: Date?
     let captureSource: CaptureSource
+    let intakePacket: QualificationIntakePacket?
+    let scaffoldingPacket: CaptureScaffoldingPacket?
+    let captureModality: String?
 }
 
 struct CaptureUploadRequest: Equatable {
@@ -70,10 +141,33 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         var task: Task<Void, Never>?
     }
 
+    private struct CaptureContextFile: Codable {
+        let schemaVersion: String
+        let sceneId: String
+        let captureId: String
+        let captureSource: String
+        let captureModality: String
+        let scaffoldingUsed: [String]
+        let coveragePlan: [String]
+        let calibrationAssets: [String]
+        let uncertaintyPriors: [String: Double]
+        let intakePresent: Bool
+        let capturedAt: String
+    }
+
+    private struct UploadCompletionFile: Codable {
+        let schemaVersion: String
+        let sceneId: String
+        let captureId: String
+        let rawPrefix: String
+        let completedAt: String
+    }
+
     private let queue = DispatchQueue(label: "com.blueprint.captureUploadService")
     private var uploads: [UUID: UploadRecord] = [:]
     private let subject = PassthroughSubject<Event, Never>()
     private let storageBucketURL = "gs://blueprint-8c1ca.appspot.com"
+    private let completionMarkerFilename = "capture_upload_complete.json"
 
     func enqueue(_ request: CaptureUploadRequest) {
         queue.async {
@@ -232,6 +326,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     // Upload all files under a directory, preserving relative paths beneath remoteBasePath
     private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, request: CaptureUploadRequest) async -> Bool {
         print("📁 [UploadService] Preparing directory upload at \(localDirectory.path)")
+        materializeSupplementalFiles(in: localDirectory, request: request, remoteBasePath: remoteBasePath)
         // Gather files
         guard let enumerator = FileManager.default.enumerator(at: localDirectory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
             print("❌ [UploadService] Failed to enumerate directory at \(localDirectory.path)")
@@ -254,6 +349,11 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     totalBytes += Int64(size)
                 }
             }
+        }
+        files.sort { $0.path < $1.path }
+        if let markerIndex = files.firstIndex(where: { $0.lastPathComponent == completionMarkerFilename }) {
+            let marker = files.remove(at: markerIndex)
+            files.append(marker)
         }
         guard !files.isEmpty, totalBytes > 0 else {
             print("❌ [UploadService] No files found to upload under \(localDirectory.path)")
@@ -281,11 +381,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             custom["creatorId"] = request.metadata.creatorId
             custom["capturedAt"] = ISO8601DateFormatter().string(from: request.metadata.capturedAt)
             custom["captureSource"] = request.metadata.captureSource.rawValue
+            custom["sceneId"] = sceneIdentifier(for: request)
+            custom["captureId"] = captureIdentifier(for: request)
             if let t = request.metadata.targetId { custom["targetId"] = t }
             if let r = request.metadata.reservationId { custom["reservationId"] = r }
             md.customMetadata = custom
 
-            // If manifest.json, patch scene_id and video_uri before uploading
+            // If manifest.json, patch canonical capture metadata before uploading
             let uploadSourceURL: URL
             if relPath == "manifest.json" {
                 let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("manifest-\(UUID().uuidString).json")
@@ -293,8 +395,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     let data = try Data(contentsOf: file)
                     var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
                     let sceneId = sceneIdentifier(for: request)
+                    let captureId = captureIdentifier(for: request)
                     let bucket = storageBucketURL
                     json["scene_id"] = sceneId
+                    json["capture_id"] = captureId
+                    json["capture_modality"] = captureModality(for: request)
+                    json["scaffolding_used"] = request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []
+                    json["coverage_plan"] = request.metadata.scaffoldingPacket?.coveragePlan ?? []
+                    json["calibration_assets"] = request.metadata.scaffoldingPacket?.calibrationAssets ?? []
+                    json["uncertainty_priors"] = request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:]
                     if !bucket.isEmpty {
                         json["video_uri"] = bucket + "/" + remoteBasePath + "walkthrough.mov"
                     }
@@ -380,16 +489,71 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     private func sceneBasePath(for request: CaptureUploadRequest) -> String {
         let sceneId = sceneIdentifier(for: request)
-        let source = request.metadata.captureSource == .metaGlasses ? "glasses" : "iphone"
-        let folder = uploadFolderComponent(for: request)
-        return "scenes/\(sceneId)/\(source)/\(folder)/"
+        let captureId = captureIdentifier(for: request)
+        return "scenes/\(sceneId)/captures/\(captureId)/"
     }
 
-    private func uploadFolderComponent(for request: CaptureUploadRequest) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withDashSeparatorInDate, .withColonSeparatorInTime]
-        let ts = formatter.string(from: request.metadata.capturedAt).replacingOccurrences(of: ":", with: "-")
-        return "\(ts)-\(request.metadata.id.uuidString)"
+    private func captureIdentifier(for request: CaptureUploadRequest) -> String {
+        let trimmed = request.metadata.id.uuidString.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        return UUID().uuidString
+    }
+
+    private func captureModality(for request: CaptureUploadRequest) -> String {
+        if let explicit = request.metadata.captureModality?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return explicit
+        }
+        if request.metadata.captureSource == .iphoneVideo {
+            return "iphone_arkit_lidar"
+        }
+        if !(request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).isEmpty {
+            return "glasses_plus_scaffolding"
+        }
+        return "glasses_video_only"
+    }
+
+    private func materializeSupplementalFiles(in directory: URL, request: CaptureUploadRequest, remoteBasePath: String) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+
+        if let intakePacket = request.metadata.intakePacket,
+           let intakeData = try? encoder.encode(intakePacket) {
+            let intakeURL = directory.appendingPathComponent("intake_packet.json")
+            try? intakeData.write(to: intakeURL, options: .atomic)
+        }
+
+        let context = CaptureContextFile(
+            schemaVersion: "v1",
+            sceneId: sceneIdentifier(for: request),
+            captureId: captureIdentifier(for: request),
+            captureSource: request.metadata.captureSource.rawValue,
+            captureModality: captureModality(for: request),
+            scaffoldingUsed: request.metadata.scaffoldingPacket?.scaffoldingUsed ?? [],
+            coveragePlan: request.metadata.scaffoldingPacket?.coveragePlan ?? [],
+            calibrationAssets: request.metadata.scaffoldingPacket?.calibrationAssets ?? [],
+            uncertaintyPriors: request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:],
+            intakePresent: request.metadata.intakePacket != nil,
+            capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
+        )
+        if let contextData = try? encoder.encode(context) {
+            let contextURL = directory.appendingPathComponent("capture_context.json")
+            try? contextData.write(to: contextURL, options: .atomic)
+        }
+
+        let completion = UploadCompletionFile(
+            schemaVersion: "v1",
+            sceneId: sceneIdentifier(for: request),
+            captureId: captureIdentifier(for: request),
+            rawPrefix: storageBucketURL + "/" + remoteBasePath,
+            completedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        if let completionData = try? encoder.encode(completion) {
+            let completionURL = directory.appendingPathComponent(completionMarkerFilename)
+            try? completionData.write(to: completionURL, options: .atomic)
+        }
     }
     #endif
 }

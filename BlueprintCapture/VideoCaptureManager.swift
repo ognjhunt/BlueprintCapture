@@ -1529,7 +1529,7 @@ private extension VideoCaptureManager {
                 "capture_tier_hint": Self.captureTierHint,
                 // Optional fields that enhance processing
                 "scale_hint_m_per_unit": 1.0,
-                "intended_space_type": "home"
+                "intended_space_type": "industrial_unknown"
             ]
 
             // Add exposure samples if available (optional but recommended)

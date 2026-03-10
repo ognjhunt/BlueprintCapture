@@ -350,7 +350,21 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             creatorId: profile.id.uuidString,
             capturedAt: Date(),
             uploadedAt: nil,
-            captureSource: .iphoneVideo
+            captureSource: .iphoneVideo,
+            intakePacket: QualificationIntakePacket(
+                workflowName: currentTargetInfo?.name,
+                taskSteps: [],
+                knownBlockers: ["Structured intake was not completed before capture."]
+            ),
+            scaffoldingPacket: CaptureScaffoldingPacket(
+                scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "object_point_clouds"],
+                coveragePlan: [
+                    "Capture primary route plus each workcell boundary.",
+                    "Pause at narrow aisles, thresholds, and handoff points."
+                ],
+                uncertaintyPriors: ["missing_intake": 0.6]
+            ),
+            captureModality: "iphone_arkit_lidar"
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 

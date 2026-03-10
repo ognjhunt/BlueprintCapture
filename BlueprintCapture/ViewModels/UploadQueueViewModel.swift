@@ -48,7 +48,10 @@ final class UploadQueueViewModel: ObservableObject {
             creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: artifacts.startedAt,
             uploadedAt: nil,
-            captureSource: .metaGlasses
+            captureSource: .metaGlasses,
+            intakePacket: job.qualificationIntakePacket,
+            scaffoldingPacket: job.defaultScaffoldingPacket,
+            captureModality: "glasses_video_only"
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         let payoutUsd = job.payoutDollars
@@ -195,4 +198,3 @@ extension UploadQueueViewModel {
         }
     }
 }
-
