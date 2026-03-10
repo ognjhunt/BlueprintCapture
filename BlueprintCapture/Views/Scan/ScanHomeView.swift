@@ -12,6 +12,7 @@ struct ScanHomeView: View {
     @State private var selectedItem: ScanHomeViewModel.JobItem?
     @State private var showConnectSheet = false
     @State private var recordingJob: ScanJob?
+    @State private var showAnywhereCapture = false
     @State private var pendingStartJobId: String?
 
     @State private var payoutsReady: Bool = false
@@ -31,6 +32,8 @@ struct ScanHomeView: View {
                     glassesStatusCard
 
                     setupCards
+
+                    captureAnywhereCard
 
                     if let ready = viewModel.readyNow {
                         readyNowCard(item: ready)
@@ -63,6 +66,10 @@ struct ScanHomeView: View {
         }
         .fullScreenCover(item: $recordingJob) { job in
             ScanRecordingView(job: job, glassesManager: glassesManager, uploadQueue: uploadQueue)
+                .preferredColorScheme(.dark)
+        }
+        .fullScreenCover(isPresented: $showAnywhereCapture) {
+            AnywhereCaptureFlowView()
                 .preferredColorScheme(.dark)
         }
         .alert("Error", isPresented: $viewModel.showErrorAlert) {
@@ -194,6 +201,65 @@ struct ScanHomeView: View {
                 }
             }
         }
+    }
+
+    private var captureAnywhereCard: some View {
+        Button {
+            showAnywhereCapture = true
+        } label: {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Capture anywhere", systemImage: "camera.metering.center.weighted")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+
+                    Text("Use your iPhone to record the space around you, even when there isn’t a curated job nearby.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+
+                    HStack(spacing: 8) {
+                        tag(text: "iPhone")
+                        tag(text: "Phase 1")
+                        tag(text: "Exportable")
+                    }
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.up.right.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(.secondarySystemBackground), BlueprintTheme.brandTeal.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func tag(text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(BlueprintTheme.brandTeal)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(BlueprintTheme.brandTeal.opacity(0.12))
+            )
     }
 
     private enum SetupButtonStyle { case primary, secondary }
