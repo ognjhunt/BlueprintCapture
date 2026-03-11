@@ -3,6 +3,7 @@ import Foundation
 struct CaptureIntakeInferenceResult: Equatable {
     let intakePacket: QualificationIntakePacket
     let metadata: CaptureIntakeMetadata
+    let taskHypothesis: CaptureTaskHypothesis
 }
 
 protocol CaptureIntakeInferenceServiceProtocol {
@@ -316,6 +317,17 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
                 fps: fps,
                 confidence: payload.confidence,
                 warnings: payload.warnings ?? []
+            ),
+            taskHypothesis: CaptureTaskHypothesis(
+                packet: packet,
+                metadata: CaptureIntakeMetadata(
+                    source: .aiInferred,
+                    model: model,
+                    fps: fps,
+                    confidence: payload.confidence,
+                    warnings: payload.warnings ?? []
+                ),
+                status: .accepted
             )
         )
     }

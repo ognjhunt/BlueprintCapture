@@ -9,6 +9,12 @@ enum CaptureIntakeSource: String, Codable {
     case aiInferred = "ai_inferred"
 }
 
+enum CaptureTaskHypothesisStatus: String, Codable {
+    case accepted
+    case needsConfirmation = "needs_confirmation"
+    case rejected
+}
+
 struct CaptureIntakeMetadata: Equatable, Codable {
     let source: CaptureIntakeSource
     let model: String?
@@ -28,6 +34,97 @@ struct CaptureIntakeMetadata: Equatable, Codable {
         self.fps = fps
         self.confidence = confidence
         self.warnings = warnings
+    }
+}
+
+struct CaptureTaskHypothesis: Equatable, Codable {
+    let schemaVersion: String
+    let workflowName: String?
+    let taskSteps: [String]
+    let targetKPI: String?
+    let zone: String?
+    let owner: String?
+    let confidence: Double?
+    let source: CaptureIntakeSource
+    let model: String?
+    let fps: Int?
+    let warnings: [String]
+    let status: CaptureTaskHypothesisStatus
+
+    init(
+        schemaVersion: String = "v1",
+        workflowName: String? = nil,
+        taskSteps: [String] = [],
+        targetKPI: String? = nil,
+        zone: String? = nil,
+        owner: String? = nil,
+        confidence: Double? = nil,
+        source: CaptureIntakeSource = .aiInferred,
+        model: String? = nil,
+        fps: Int? = nil,
+        warnings: [String] = [],
+        status: CaptureTaskHypothesisStatus = .accepted
+    ) {
+        self.schemaVersion = schemaVersion
+        self.workflowName = workflowName
+        self.taskSteps = taskSteps
+        self.targetKPI = targetKPI
+        self.zone = zone
+        self.owner = owner
+        self.confidence = confidence
+        self.source = source
+        self.model = model
+        self.fps = fps
+        self.warnings = warnings
+        self.status = status
+    }
+
+    init(packet: QualificationIntakePacket, metadata: CaptureIntakeMetadata, status: CaptureTaskHypothesisStatus) {
+        self.init(
+            workflowName: packet.workflowName,
+            taskSteps: packet.taskSteps,
+            targetKPI: packet.targetKPI,
+            zone: packet.zone,
+            owner: packet.owner,
+            confidence: metadata.confidence,
+            source: metadata.source,
+            model: metadata.model,
+            fps: metadata.fps,
+            warnings: metadata.warnings,
+            status: status
+        )
+    }
+
+    func with(status: CaptureTaskHypothesisStatus) -> CaptureTaskHypothesis {
+        CaptureTaskHypothesis(
+            schemaVersion: schemaVersion,
+            workflowName: workflowName,
+            taskSteps: taskSteps,
+            targetKPI: targetKPI,
+            zone: zone,
+            owner: owner,
+            confidence: confidence,
+            source: source,
+            model: model,
+            fps: fps,
+            warnings: warnings,
+            status: status
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case workflowName = "workflow_name"
+        case taskSteps = "task_steps"
+        case targetKPI = "target_kpi"
+        case zone
+        case owner
+        case confidence
+        case source
+        case model
+        case fps
+        case warnings
+        case status
     }
 }
 
@@ -69,6 +166,7 @@ struct CaptureManualIntakeDraft: Equatable, Identifiable {
     var zone: String
     var owner: String
     var helperText: String
+    var reviewTitle: String
 
     init(
         id: UUID = UUID(),
@@ -76,7 +174,8 @@ struct CaptureManualIntakeDraft: Equatable, Identifiable {
         taskStepsText: String = "",
         zone: String = "",
         owner: String = "",
-        helperText: String = "Add a workflow name, at least one task step, and either a zone or owner."
+        helperText: String = "Add a workflow name, at least one task step, and either a zone or owner.",
+        reviewTitle: String = "Complete Intake"
     ) {
         self.id = id
         self.workflowName = workflowName
@@ -84,6 +183,7 @@ struct CaptureManualIntakeDraft: Equatable, Identifiable {
         self.zone = zone
         self.owner = owner
         self.helperText = helperText
+        self.reviewTitle = reviewTitle
     }
 
     init(packet: QualificationIntakePacket?, helperText: String) {
@@ -92,7 +192,8 @@ struct CaptureManualIntakeDraft: Equatable, Identifiable {
             taskStepsText: (packet?.taskSteps ?? []).joined(separator: "\n"),
             zone: packet?.zone ?? "",
             owner: packet?.owner ?? "",
-            helperText: helperText
+            helperText: helperText,
+            reviewTitle: "Complete Intake"
         )
     }
 
@@ -223,6 +324,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeInferenceFPS: Int?
         let intakeInferenceConfidence: Double?
         let intakeWarnings: [String]
+        let taskHypothesisStatus: String?
         let capturedAt: String
     }
 
@@ -235,6 +337,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     }
 
     private let completionMarkerFilename = "capture_upload_complete.json"
+    private let taskHypothesisFilename = "task_hypothesis.json"
 
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
         guard request.metadata.intakePacket?.isComplete == true else {
@@ -326,10 +429,16 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             intakeInferenceFPS: intakeMetadata?.fps,
             intakeInferenceConfidence: intakeMetadata?.confidence,
             intakeWarnings: intakeMetadata?.warnings ?? [],
+            taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let contextURL = directory.appendingPathComponent("capture_context.json")
         try encoder.encode(context).write(to: contextURL, options: .atomic)
+
+        if let taskHypothesis = request.metadata.taskHypothesis {
+            let taskHypothesisURL = directory.appendingPathComponent(taskHypothesisFilename)
+            try encoder.encode(taskHypothesis).write(to: taskHypothesisURL, options: .atomic)
+        }
 
         let completion = UploadCompletionFile(
             schemaVersion: "v1",
@@ -418,13 +527,29 @@ protocol IntakeResolutionServiceProtocol {
 
 final class IntakeResolutionService: IntakeResolutionServiceProtocol {
     private let inferenceService: CaptureIntakeInferenceServiceProtocol
+    private let autoAcceptConfidenceThreshold: Double
 
-    init(inferenceService: CaptureIntakeInferenceServiceProtocol = CaptureIntakeInferenceService()) {
+    init(
+        inferenceService: CaptureIntakeInferenceServiceProtocol = CaptureIntakeInferenceService(),
+        autoAcceptConfidenceThreshold: Double = 0.8
+    ) {
         self.inferenceService = inferenceService
+        self.autoAcceptConfidenceThreshold = autoAcceptConfidenceThreshold
     }
 
     func resolve(request: CaptureUploadRequest) async -> IntakeResolutionOutcome {
         if request.metadata.intakePacket?.isComplete == true {
+            if request.metadata.taskHypothesis?.status == .needsConfirmation {
+                let draft = CaptureManualIntakeDraft(
+                    workflowName: request.metadata.intakePacket?.workflowName ?? "",
+                    taskStepsText: (request.metadata.intakePacket?.taskSteps ?? []).joined(separator: "\n"),
+                    zone: request.metadata.intakePacket?.zone ?? "",
+                    owner: request.metadata.intakePacket?.owner ?? "",
+                    helperText: manualEntryHelperText(taskHypothesis: request.metadata.taskHypothesis),
+                    reviewTitle: "Review AI Task Guess"
+                )
+                return .needsManualEntry(request: request, draft: draft)
+            }
             var resolved = request
             if resolved.metadata.intakeMetadata == nil {
                 resolved.metadata.intakeMetadata = CaptureIntakeMetadata(source: .authoritative)
@@ -434,10 +559,29 @@ final class IntakeResolutionService: IntakeResolutionServiceProtocol {
 
         do {
             let inferred = try await inferenceService.inferIntake(for: request)
-            var resolved = request
-            resolved.metadata.intakePacket = inferred.intakePacket
-            resolved.metadata.intakeMetadata = inferred.metadata
-            return .resolved(resolved)
+            var candidate = request
+            candidate.metadata.intakePacket = inferred.intakePacket
+            candidate.metadata.intakeMetadata = inferred.metadata
+
+            let inferredConfidence = inferred.metadata.confidence ?? 0.0
+            let autoAccept = inferred.intakePacket.isComplete && inferredConfidence >= autoAcceptConfidenceThreshold
+            candidate.metadata.taskHypothesis = inferred.taskHypothesis.with(
+                status: autoAccept ? .accepted : .needsConfirmation
+            )
+
+            if autoAccept {
+                return .resolved(candidate)
+            }
+
+            let draft = CaptureManualIntakeDraft(
+                workflowName: inferred.intakePacket.workflowName ?? "",
+                taskStepsText: inferred.intakePacket.taskSteps.joined(separator: "\n"),
+                zone: inferred.intakePacket.zone ?? "",
+                owner: inferred.intakePacket.owner ?? "",
+                helperText: manualEntryHelperText(taskHypothesis: candidate.metadata.taskHypothesis),
+                reviewTitle: "Review AI Task Guess"
+            )
+            return .needsManualEntry(request: candidate, draft: draft)
         } catch {
             let draft = CaptureManualIntakeDraft(
                 packet: request.metadata.intakePacket,
@@ -446,6 +590,17 @@ final class IntakeResolutionService: IntakeResolutionServiceProtocol {
             return .needsManualEntry(request: request, draft: draft)
         }
     }
+
+    private func manualEntryHelperText(taskHypothesis: CaptureTaskHypothesis?) -> String {
+        guard let taskHypothesis else {
+            return "AI intake was unavailable. Enter minimal workflow details to continue."
+        }
+        let workflow = taskHypothesis.workflowName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Unknown task"
+        let confidence = Int(round((taskHypothesis.confidence ?? 0.0) * 100.0))
+        let warnings = taskHypothesis.warnings.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let warningText = warnings.isEmpty ? "Please confirm or edit the task before continuing." : "Warnings: " + warnings.joined(separator: " ")
+        return "We think this task is '\(workflow)' (\(confidence)% confidence). \(warningText)"
+    }
 }
 
 extension CaptureUploadRequest {
@@ -453,6 +608,9 @@ extension CaptureUploadRequest {
         var request = self
         request.metadata.intakePacket = packet
         request.metadata.intakeMetadata = CaptureIntakeMetadata(source: .humanManual)
+        if let taskHypothesis = request.metadata.taskHypothesis {
+            request.metadata.taskHypothesis = taskHypothesis.with(status: .accepted)
+        }
         return request
     }
 }

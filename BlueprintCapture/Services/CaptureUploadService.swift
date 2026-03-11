@@ -128,6 +128,7 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let captureSource: CaptureSource
     var intakePacket: QualificationIntakePacket?
     var intakeMetadata: CaptureIntakeMetadata?
+    var taskHypothesis: CaptureTaskHypothesis?
     let scaffoldingPacket: CaptureScaffoldingPacket?
     let captureModality: String?
     let evidenceTier: String?

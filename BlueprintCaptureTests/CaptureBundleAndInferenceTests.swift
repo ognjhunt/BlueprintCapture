@@ -31,6 +31,17 @@ struct CaptureBundleAndInferenceTests {
                 zone: "Aisle 4"
             ),
             intakeMetadata: CaptureIntakeMetadata(source: .aiInferred, model: "gemini-3-flash-preview", fps: 3, confidence: 0.72),
+            taskHypothesis: CaptureTaskHypothesis(
+                workflowName: "Inbound walk",
+                taskSteps: ["Enter aisle", "Walk route"],
+                zone: "Aisle 4",
+                confidence: 0.72,
+                source: .aiInferred,
+                model: "gemini-3-flash-preview",
+                fps: 3,
+                warnings: [],
+                status: .accepted
+            ),
             scaffoldingPacket: CaptureScaffoldingPacket(scaffoldingUsed: ["arkit_depth"]),
             captureModality: "iphone_arkit_lidar",
             evidenceTier: nil,
@@ -55,6 +66,12 @@ struct CaptureBundleAndInferenceTests {
         let context = try #require(contextObject as? [String: Any])
         #expect(context["intakeSource"] as? String == "ai_inferred")
         #expect(context["intakeInferenceModel"] as? String == "gemini-3-flash-preview")
+        #expect(context["taskHypothesisStatus"] as? String == "accepted")
+
+        let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
+        let hypothesis = try #require(hypothesisObject as? [String: Any])
+        #expect(hypothesis["workflow_name"] as? String == "Inbound walk")
+        #expect(hypothesis["status"] as? String == "accepted")
 
         let exporter = CaptureExportService(finalizer: finalizer)
         let bundle = try await exporter.exportCapture(request: request)
@@ -79,6 +96,7 @@ struct CaptureBundleAndInferenceTests {
             captureSource: .metaGlasses,
             intakePacket: QualificationIntakePacket(workflowName: "Job flow", taskSteps: ["Walk"], zone: "Dock"),
             intakeMetadata: nil,
+            taskHypothesis: nil,
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
@@ -91,6 +109,43 @@ struct CaptureBundleAndInferenceTests {
             #expect(resolved.metadata.intakeMetadata?.source == .authoritative)
         case .needsManualEntry:
             Issue.record("Authoritative intake should not require manual entry")
+        }
+    }
+
+    @Test
+    func intakeResolutionRequiresConfirmationForLowConfidenceAIHypothesis() async throws {
+        let service = IntakeResolutionService(
+            inferenceService: LowConfidenceInferenceService(),
+            autoAcceptConfidenceThreshold: 0.8
+        )
+        let request = CaptureUploadRequest(packageURL: URL(fileURLWithPath: "/tmp/fake"), metadata: CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "job-low",
+            reservationId: nil,
+            jobId: "job-low",
+            creatorId: "tester",
+            capturedAt: Date(),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: "Packing area"
+        ))
+
+        let outcome = await service.resolve(request: request)
+        switch outcome {
+        case .resolved:
+            Issue.record("Low-confidence AI hypothesis should require manual confirmation")
+        case .needsManualEntry(let unresolved, let draft):
+            #expect(unresolved.metadata.intakeMetadata?.source == .aiInferred)
+            #expect(unresolved.metadata.taskHypothesis?.status == .needsConfirmation)
+            #expect(draft.reviewTitle == "Review AI Task Guess")
+            #expect(draft.helperText.contains("We think this task is"))
+            #expect(draft.workflowName == "Walkthrough")
         }
     }
 
@@ -186,6 +241,7 @@ struct CaptureBundleAndInferenceTests {
             captureSource: .iphoneVideo,
             intakePacket: nil,
             intakeMetadata: nil,
+            taskHypothesis: nil,
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
@@ -207,6 +263,28 @@ struct CaptureBundleAndInferenceTests {
 private struct FailingInferenceService: CaptureIntakeInferenceServiceProtocol {
     func inferIntake(for request: CaptureUploadRequest) async throws -> CaptureIntakeInferenceResult {
         throw CaptureIntakeInferenceService.ServiceError.missingAPIKey
+    }
+}
+
+private struct LowConfidenceInferenceService: CaptureIntakeInferenceServiceProtocol {
+    func inferIntake(for request: CaptureUploadRequest) async throws -> CaptureIntakeInferenceResult {
+        let packet = QualificationIntakePacket(
+            workflowName: "Walkthrough",
+            taskSteps: ["Step one", "Step two"],
+            zone: "Packing"
+        )
+        let metadata = CaptureIntakeMetadata(
+            source: .aiInferred,
+            model: "gemini-3-flash-preview",
+            fps: 3,
+            confidence: 0.62,
+            warnings: ["Task is generic and should be confirmed."]
+        )
+        return CaptureIntakeInferenceResult(
+            intakePacket: packet,
+            metadata: metadata,
+            taskHypothesis: CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
+        )
     }
 }
 

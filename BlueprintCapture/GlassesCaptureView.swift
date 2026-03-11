@@ -24,7 +24,7 @@ struct GlassesCaptureView: View {
         }
         .blueprintAppBackground()
         .sheet(item: $uploadViewModel.manualIntakeDraft) { draft in
-            ManualIntakeSheetView(draft: draft) { updatedDraft in
+            ManualIntakeSheetView(title: draft.reviewTitle, draft: draft) { updatedDraft in
                 uploadViewModel.submitManualIntake(updatedDraft)
             }
         }
@@ -750,6 +750,7 @@ final class GlassesUploadViewModel: ObservableObject {
             captureSource: .metaGlasses,
             intakePacket: nil,
             intakeMetadata: nil,
+            taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 coveragePlan: [
                     "Collect a scale-anchor still image before or after the walkthrough.",

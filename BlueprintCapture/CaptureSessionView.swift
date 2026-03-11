@@ -134,7 +134,7 @@ struct CaptureSessionView: View {
             autoStartRecordingIfNeeded()
         }
         .sheet(item: $viewModel.manualIntakeDraft) { draft in
-            ManualIntakeSheetView(draft: draft) { updatedDraft in
+            ManualIntakeSheetView(title: draft.reviewTitle, draft: draft) { updatedDraft in
                 viewModel.submitManualIntake(updatedDraft)
             }
         }

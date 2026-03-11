@@ -54,6 +54,7 @@ final class UploadQueueViewModel: ObservableObject {
             captureSource: .metaGlasses,
             intakePacket: job.qualificationIntakePacket,
             intakeMetadata: CaptureIntakeMetadata(source: .authoritative),
+            taskHypothesis: nil,
             scaffoldingPacket: job.defaultScaffoldingPacket,
             captureModality: "glasses_video_only",
             evidenceTier: "pre_screen_video",

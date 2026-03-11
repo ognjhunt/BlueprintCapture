@@ -373,6 +373,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             captureSource: .iphoneVideo,
             intakePacket: nil,
             intakeMetadata: nil,
+            taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "object_point_clouds"],
                 coveragePlan: [
