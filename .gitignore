@@ -64,6 +64,7 @@ fastlane/test_output
 # Sensitive files - DO NOT COMMIT
 # Use Secrets.example.plist as a template
 BlueprintCapture/Support/Secrets.plist
+BlueprintCapture/Support/Secrets.local.plist
 Secrets.plist
 *.pem
 *.p12

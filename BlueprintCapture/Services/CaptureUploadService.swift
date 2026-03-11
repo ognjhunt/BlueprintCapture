@@ -112,6 +112,47 @@ struct CaptureScaffoldingPacket: Equatable, Codable {
     }
 }
 
+struct SceneMemoryCaptureMetadata: Equatable, Codable {
+    let continuityScore: Double?
+    let lightingConsistency: String?
+    let dynamicObjectDensity: String?
+    let operatorNotes: [String]
+    let inaccessibleAreas: [String]
+
+    init(
+        continuityScore: Double? = nil,
+        lightingConsistency: String? = nil,
+        dynamicObjectDensity: String? = nil,
+        operatorNotes: [String] = [],
+        inaccessibleAreas: [String] = []
+    ) {
+        self.continuityScore = continuityScore
+        self.lightingConsistency = lightingConsistency
+        self.dynamicObjectDensity = dynamicObjectDensity
+        self.operatorNotes = operatorNotes
+        self.inaccessibleAreas = inaccessibleAreas
+    }
+}
+
+struct CaptureRightsMetadata: Equatable, Codable {
+    let derivedSceneGenerationAllowed: Bool
+    let dataLicensingAllowed: Bool
+    let payoutEligible: Bool
+    let consentNotes: [String]
+
+    init(
+        derivedSceneGenerationAllowed: Bool = true,
+        dataLicensingAllowed: Bool = false,
+        payoutEligible: Bool = false,
+        consentNotes: [String] = []
+    ) {
+        self.derivedSceneGenerationAllowed = derivedSceneGenerationAllowed
+        self.dataLicensingAllowed = dataLicensingAllowed
+        self.payoutEligible = payoutEligible
+        self.consentNotes = consentNotes
+    }
+}
+
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo
@@ -133,6 +174,8 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let captureModality: String?
     let evidenceTier: String?
     let captureContextHint: String?
+    let sceneMemory: SceneMemoryCaptureMetadata?
+    let captureRights: CaptureRightsMetadata?
 }
 
 struct CaptureUploadRequest: Equatable {

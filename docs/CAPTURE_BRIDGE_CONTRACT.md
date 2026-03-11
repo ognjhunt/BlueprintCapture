@@ -54,6 +54,33 @@ The iOS/glasses capture manifests must include:
 }
 ```
 
+Scene-memory readiness metadata should also be attached when available:
+
+```json
+{
+  "scene_memory_capture": {
+    "continuity_score": 0.0,
+    "lighting_consistency": "stable|variable|unknown",
+    "dynamic_object_density": "low|medium|high|unknown",
+    "sensor_availability": {
+      "arkit_poses": true,
+      "arkit_intrinsics": true,
+      "arkit_depth": true,
+      "arkit_confidence": false
+    },
+    "operator_notes": [],
+    "inaccessible_areas": [],
+    "world_model_candidate": true
+  },
+  "capture_rights": {
+    "derived_scene_generation_allowed": true,
+    "data_licensing_allowed": false,
+    "capture_contributor_payout_eligible": false,
+    "consent_notes": []
+  }
+}
+```
+
 ## `arkit/poses.jsonl` v2 row (backward compatible)
 
 Each row includes both legacy and bridge fields:
@@ -118,6 +145,7 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
   },
   "qa_status": "passed|blocked",
   "qa_report_uri": "gs://...",
+  "requested_lanes": ["qualification", "scene_memory", "advanced_geometry"],
   "auto_triggered": true,
   "generated_at": "ISO-8601"
 }
@@ -149,6 +177,11 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
     "pose_matches": 0,
     "pose_match_rate": 0.0,
     "p95_pose_delta_sec": 0.0
+  },
+  "scene_memory_readiness": {
+    "world_model_candidate": true,
+    "recommended_lane": "scene_memory",
+    "derived_only": true
   },
   "reasons": [],
   "warnings": [],

@@ -277,6 +277,14 @@ enum CaptureBundleContext {
         return "pre_screen_video"
     }
 
+    static func worldModelCandidate(for request: CaptureUploadRequest) -> Bool {
+        if let continuityScore = request.metadata.sceneMemory?.continuityScore,
+           continuityScore > 0 {
+            return continuityScore >= 0.5
+        }
+        return request.metadata.intakePacket?.isComplete == true
+    }
+
     static func rawDirectoryURL(for request: CaptureUploadRequest) -> URL {
         request.packageURL
     }
@@ -325,6 +333,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeInferenceConfidence: Double?
         let intakeWarnings: [String]
         let taskHypothesisStatus: String?
+        let sceneMemory: SceneMemoryCaptureMetadata?
+        let captureRights: CaptureRightsMetadata?
+        let worldModelCandidate: Bool
         let capturedAt: String
     }
 
@@ -390,6 +401,26 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "validated_metric_bundle": request.metadata.scaffoldingPacket?.hasValidatedMetricBundle ?? false,
         ]
         json["uncertainty_priors"] = request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:]
+        json["scene_memory_capture"] = [
+            "continuity_score": request.metadata.sceneMemory?.continuityScore as Any,
+            "lighting_consistency": request.metadata.sceneMemory?.lightingConsistency as Any,
+            "dynamic_object_density": request.metadata.sceneMemory?.dynamicObjectDensity as Any,
+            "sensor_availability": [
+                "arkit_poses": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/poses.jsonl").path),
+                "arkit_intrinsics": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/intrinsics.json").path),
+                "arkit_depth": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/depth").path),
+                "arkit_confidence": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/confidence").path),
+            ],
+            "operator_notes": request.metadata.sceneMemory?.operatorNotes ?? [],
+            "inaccessible_areas": request.metadata.sceneMemory?.inaccessibleAreas ?? [],
+            "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request),
+        ]
+        json["capture_rights"] = [
+            "derived_scene_generation_allowed": request.metadata.captureRights?.derivedSceneGenerationAllowed ?? true,
+            "data_licensing_allowed": request.metadata.captureRights?.dataLicensingAllowed ?? false,
+            "capture_contributor_payout_eligible": request.metadata.captureRights?.payoutEligible ?? false,
+            "consent_notes": request.metadata.captureRights?.consentNotes ?? [],
+        ]
         json["video_uri"] = mode.videoURI
 
         let patched = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes])
@@ -430,6 +461,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             intakeInferenceConfidence: intakeMetadata?.confidence,
             intakeWarnings: intakeMetadata?.warnings ?? [],
             taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
+            sceneMemory: request.metadata.sceneMemory,
+            captureRights: request.metadata.captureRights,
+            worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let contextURL = directory.appendingPathComponent("capture_context.json")

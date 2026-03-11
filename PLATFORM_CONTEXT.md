@@ -16,6 +16,12 @@ This repo is one part of a three-repo system.
 
 This platform is qualification-first.
 
+Canonical scene doctrine:
+
+- capture evidence serves qualification first
+- the same capture should also be world-model-ready when possible
+- derived scenes and datasets are downstream products, not default truth
+
 The capture app should be treated as the evidence entry point for a scoped request, not as the product center of gravity by itself.
 
 ## What This Repo Owns
@@ -29,6 +35,7 @@ Its main jobs are:
 - preserve device, timing, and optional ARKit data needed downstream
 - upload the evidence bundle into the storage layout expected by the bridge and pipeline
 - support recapture when evidence is incomplete or low quality
+- attach scene-memory readiness metadata and rights metadata without doing reconstruction in-app
 
 This repo should be treated as the system that turns field capture into a reusable evidence bundle, not as the place where readiness decisions are made.
 
@@ -92,10 +99,10 @@ The correct stack remains:
 
 1. primary product: site qualification / readiness pack
 2. secondary product: qualified opportunity exchange for robot teams
-3. third product: deeper evaluation / geometry / simulation package
+3. third product: scene memory / preview simulation / evaluation package
 4. fourth product: training data / managed tuning / licensing
 
-This repo exists to gather the evidence needed for step 1.
+This repo exists to gather the evidence needed for step 1 and to make that evidence reusable for downstream scene-memory derivation.
 
 It should not assume that every capture should become:
 
@@ -128,6 +135,7 @@ That means agents should optimize for:
 - compatibility with downstream descriptor / QA generation
 
 Do not let shiny reconstruction paths replace evidence integrity as the default priority.
+Do not let world-model ambitions weaken the raw capture contract or decision-grade evidence rules.
 
 ## Practical Rule For Agents In This Repo
 

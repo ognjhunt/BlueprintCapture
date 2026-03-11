@@ -45,7 +45,20 @@ struct CaptureBundleAndInferenceTests {
             scaffoldingPacket: CaptureScaffoldingPacket(scaffoldingUsed: ["arkit_depth"]),
             captureModality: "iphone_arkit_lidar",
             evidenceTier: nil,
-            captureContextHint: "Target scene"
+            captureContextHint: "Target scene",
+            sceneMemory: SceneMemoryCaptureMetadata(
+                continuityScore: 0.88,
+                lightingConsistency: "stable",
+                dynamicObjectDensity: "low",
+                operatorNotes: ["Kept camera height steady"],
+                inaccessibleAreas: ["Locked mezzanine"]
+            ),
+            captureRights: CaptureRightsMetadata(
+                derivedSceneGenerationAllowed: true,
+                dataLicensingAllowed: true,
+                payoutEligible: true,
+                consentNotes: ["Site owner approved downstream preview generation"]
+            )
         )
         let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
 
@@ -57,6 +70,10 @@ struct CaptureBundleAndInferenceTests {
         #expect(manifest["scene_id"] as? String == "scene-123")
         #expect(manifest["video_uri"] as? String == "raw/walkthrough.mov")
         #expect(manifest["capture_modality"] as? String == "iphone_arkit_lidar")
+        let sceneMemory = try #require(manifest["scene_memory_capture"] as? [String: Any])
+        #expect(sceneMemory["world_model_candidate"] as? Bool == true)
+        let captureRights = try #require(manifest["capture_rights"] as? [String: Any])
+        #expect(captureRights["data_licensing_allowed"] as? Bool == true)
 
         let completionObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_upload_complete.json")))
         let completion = try #require(completionObject as? [String: Any])
@@ -67,6 +84,7 @@ struct CaptureBundleAndInferenceTests {
         #expect(context["intakeSource"] as? String == "ai_inferred")
         #expect(context["intakeInferenceModel"] as? String == "gemini-3-flash-preview")
         #expect(context["taskHypothesisStatus"] as? String == "accepted")
+        #expect(context["worldModelCandidate"] as? Bool == true)
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])

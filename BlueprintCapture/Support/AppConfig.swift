@@ -9,61 +9,81 @@ enum AppConfig {
     static let mapProvider: MapProvider = .appleSnapshot
     static let pendingStartScanJobIdKey = "com.blueprint.pendingStartScanJobId"
 
-    private static func secretsPlist() -> [String: Any]? {
-        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+    private static func plist(named name: String) -> [String: Any]? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "plist"),
               let data = try? Data(contentsOf: url) else { return nil }
         return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
     }
 
+    private static func secretsValue(_ keys: [String]) -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        for key in keys {
+            if let value = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               value.isEmpty == false {
+                return value
+            }
+        }
+
+        for plistName in ["Secrets.local", "Secrets"] {
+            guard let plist = plist(named: plistName) else { continue }
+            for key in keys {
+                if let value = (plist[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   value.isEmpty == false {
+                    return value
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private static func secretsPlist() -> [String: Any]? {
+        plist(named: "Secrets.local") ?? plist(named: "Secrets")
+    }
+
     static func streetViewAPIKey() -> String? {
-        secretsPlist()? ["STREET_VIEW_API_KEY"] as? String
+        secretsValue(["STREET_VIEW_API_KEY"])
     }
 
     static func placesAPIKey() -> String? {
-        if let plist = secretsPlist() {
-            return plist["PLACES_API_KEY"] as? String ?? plist["GOOGLE_PLACES_API_KEY"] as? String
-        }
-        return nil
+        secretsValue(["PLACES_API_KEY", "GOOGLE_PLACES_API_KEY"])
     }
 
     static func geminiAPIKey() -> String? {
-        if let plist = secretsPlist() {
-            return plist["GEMINI_API_KEY"] as? String ?? plist["GOOGLE_AI_API_KEY"] as? String ?? plist["GEMINI_MAPS_API_KEY"] as? String
-        }
-        return nil
+        secretsValue(["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_MAPS_API_KEY"])
     }
 
     static func perplexityAPIKey() -> String? {
-        secretsPlist()?["PERPLEXITY_API_KEY"] as? String
+        secretsValue(["PERPLEXITY_API_KEY"])
     }
 
     // MARK: - Stripe
     static func stripePublishableKey() -> String? {
-        secretsPlist()? ["STRIPE_PUBLISHABLE_KEY"] as? String
+        secretsValue(["STRIPE_PUBLISHABLE_KEY"])
     }
 
     static func stripeAccountID() -> String? {
-        secretsPlist()? ["STRIPE_ACCOUNT_ID"] as? String
+        secretsValue(["STRIPE_ACCOUNT_ID"])
     }
 
     static func backendBaseURL() -> URL? {
-        if let string = secretsPlist()? ["BACKEND_BASE_URL"] as? String { return URL(string: string) }
+        if let string = secretsValue(["BACKEND_BASE_URL"]) { return URL(string: string) }
         return nil
     }
 
 
     static func stripeOnboardingURL() -> URL? {
-        if let string = secretsPlist()? ["STRIPE_ONBOARDING_URL"] as? String { return URL(string: string) }
+        if let string = secretsValue(["STRIPE_ONBOARDING_URL"]) { return URL(string: string) }
         return nil
     }
 
     static func stripePayoutScheduleURL() -> URL? {
-        if let string = secretsPlist()? ["STRIPE_PAYOUT_SCHEDULE_URL"] as? String { return URL(string: string) }
+        if let string = secretsValue(["STRIPE_PAYOUT_SCHEDULE_URL"]) { return URL(string: string) }
         return nil
     }
 
     static func stripeInstantPayoutURL() -> URL? {
-        if let string = secretsPlist()? ["STRIPE_INSTANT_PAYOUT_URL"] as? String { return URL(string: string) }
+        if let string = secretsValue(["STRIPE_INSTANT_PAYOUT_URL"]) { return URL(string: string) }
         return nil
     }
 
@@ -104,4 +124,3 @@ extension Notification.Name {
     static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
     static let AuthStateDidChange = Notification.Name("Blueprint.AuthStateDidChange")
 }
-

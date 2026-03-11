@@ -11,6 +11,11 @@ protocol CaptureIntakeInferenceServiceProtocol {
 }
 
 final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol {
+    private struct InlineVideoPayload {
+        let base64Data: String
+        let mimeType: String
+    }
+
     enum ServiceError: LocalizedError {
         case missingAPIKey
         case missingVideo
@@ -77,6 +82,8 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
     private let apiKeyProvider: () -> String?
     private let primaryModel = "gemini-3.1-flash-lite-preview"
     private let fallbackModel = "gemini-3-flash-preview"
+    private let maxInlineVideoBytes = 70 * 1024 * 1024
+    private let thinkingLevel = "HIGH"
 
     init(
         session: URLSession = .shared,
@@ -92,6 +99,7 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
         }
 
         let videoURL = try locateVideoURL(for: request)
+        let inlineVideo = try? makeInlineVideoPayload(for: videoURL)
         let models = [primaryModel, fallbackModel]
         let fpsOptions = [3, 5]
         var lastError: Error = ServiceError.invalidResponse
@@ -99,15 +107,38 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
         for model in models {
             for fps in fpsOptions {
                 do {
-                    let uploadedFile = try await uploadVideo(videoURL, apiKey: apiKey)
-                    let readyFile = try await waitUntilReady(file: uploadedFile, apiKey: apiKey)
-                    let result = try await generateIntake(
-                        request: request,
-                        file: readyFile,
-                        model: model,
-                        fps: fps,
-                        apiKey: apiKey
-                    )
+                    let result: CaptureIntakeInferenceResult
+                    if let inlineVideo {
+                        do {
+                            result = try await generateInlineIntake(
+                                request: request,
+                                inlineVideo: inlineVideo,
+                                model: model,
+                                fps: fps,
+                                apiKey: apiKey
+                            )
+                        } catch {
+                            let uploadedFile = try await uploadVideo(videoURL, apiKey: apiKey)
+                            let readyFile = try await waitUntilReady(file: uploadedFile, apiKey: apiKey)
+                            result = try await generateIntake(
+                                request: request,
+                                file: readyFile,
+                                model: model,
+                                fps: fps,
+                                apiKey: apiKey
+                            )
+                        }
+                    } else {
+                        let uploadedFile = try await uploadVideo(videoURL, apiKey: apiKey)
+                        let readyFile = try await waitUntilReady(file: uploadedFile, apiKey: apiKey)
+                        result = try await generateIntake(
+                            request: request,
+                            file: readyFile,
+                            model: model,
+                            fps: fps,
+                            apiKey: apiKey
+                        )
+                    }
                     if result.intakePacket.isComplete {
                         return result
                     }
@@ -140,11 +171,12 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
     private func uploadVideo(_ videoURL: URL, apiKey: String) async throws -> UploadedFileResource {
         let videoData = try Data(contentsOf: videoURL)
         let mimeType = mimeType(for: videoURL)
-        let startURL = URL(string: "https://generativelanguage.googleapis.com/upload/v1beta/files?key=\(apiKey)")!
+        let startURL = URL(string: "https://generativelanguage.googleapis.com/upload/v1beta/files")!
 
         var startRequest = URLRequest(url: startURL)
         startRequest.httpMethod = "POST"
         startRequest.timeoutInterval = 60
+        startRequest.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         startRequest.addValue("resumable", forHTTPHeaderField: "X-Goog-Upload-Protocol")
         startRequest.addValue("start", forHTTPHeaderField: "X-Goog-Upload-Command")
         startRequest.addValue(String(videoData.count), forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length")
@@ -155,12 +187,13 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
             options: []
         )
 
-        let (_, startResponse) = try await session.data(for: startRequest)
+        let (startData, startResponse) = try await session.data(for: startRequest)
         guard let http = startResponse as? HTTPURLResponse else {
             throw ServiceError.uploadFailed("Invalid start response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            throw ServiceError.uploadFailed("HTTP \(http.statusCode)")
+            let message = String(data: startData, encoding: .utf8) ?? "unknown"
+            throw ServiceError.uploadFailed("HTTP \(http.statusCode): \(message.prefix(300))")
         }
         guard let uploadURLString = http.value(forHTTPHeaderField: "X-Goog-Upload-URL"),
               let uploadURL = URL(string: uploadURLString) else {
@@ -198,8 +231,10 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
 
         for _ in 0..<20 {
             try await Task.sleep(nanoseconds: 1_000_000_000)
-            let statusURL = URL(string: "https://generativelanguage.googleapis.com/v1beta/\(file.name)?key=\(apiKey)")!
-            let (data, response) = try await session.data(from: statusURL)
+            let statusURL = URL(string: "https://generativelanguage.googleapis.com/v1beta/\(file.name)")!
+            var statusRequest = URLRequest(url: statusURL)
+            statusRequest.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+            let (data, response) = try await session.data(for: statusRequest)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                 continue
             }
@@ -224,15 +259,35 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
         fps: Int,
         apiKey: String
     ) async throws -> CaptureIntakeInferenceResult {
-        let body = makeGenerationBody(request: request, file: file, fps: fps, includeSchema: true)
+        let body = makeGenerationBody(request: request, file: file, fps: fps, model: model, includeSchema: true)
         do {
             return try await performGeneration(body: body, model: model, fps: fps, apiKey: apiKey)
         } catch let error as ServiceError {
             guard case .generationFailed(let message) = error,
-                  message.contains("responseSchema") || message.contains("Unknown name") else {
+                  message.contains("responseSchema") || message.contains("responseJsonSchema") || message.contains("Unknown name") else {
                 throw error
             }
-            let fallbackBody = makeGenerationBody(request: request, file: file, fps: fps, includeSchema: false)
+            let fallbackBody = makeGenerationBody(request: request, file: file, fps: fps, model: model, includeSchema: false)
+            return try await performGeneration(body: fallbackBody, model: model, fps: fps, apiKey: apiKey)
+        }
+    }
+
+    private func generateInlineIntake(
+        request: CaptureUploadRequest,
+        inlineVideo: InlineVideoPayload,
+        model: String,
+        fps: Int,
+        apiKey: String
+    ) async throws -> CaptureIntakeInferenceResult {
+        let body = makeInlineGenerationBody(request: request, inlineVideo: inlineVideo, fps: fps, model: model, includeSchema: true)
+        do {
+            return try await performGeneration(body: body, model: model, fps: fps, apiKey: apiKey)
+        } catch let error as ServiceError {
+            guard case .generationFailed(let message) = error,
+                  message.contains("responseSchema") || message.contains("responseJsonSchema") || message.contains("Unknown name") else {
+                throw error
+            }
+            let fallbackBody = makeInlineGenerationBody(request: request, inlineVideo: inlineVideo, fps: fps, model: model, includeSchema: false)
             return try await performGeneration(body: fallbackBody, model: model, fps: fps, apiKey: apiKey)
         }
     }
@@ -243,10 +298,11 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
         fps: Int,
         apiKey: String
     ) async throws -> CaptureIntakeInferenceResult {
-        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(apiKey)")!
+        let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 180
+        request.addValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
 
@@ -336,6 +392,7 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
         request: CaptureUploadRequest,
         file: UploadedFileResource,
         fps: Int,
+        model: String,
         includeSchema: Bool
     ) -> [String: Any] {
         let contextHint = request.metadata.captureContextHint?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -359,7 +416,7 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
             ["text": prompt],
             [
                 "fileData": [
-                    "mimeType": file.mimeType ?? "video/quicktime",
+                    "mimeType": file.mimeType ?? "video/mov",
                     "fileUri": file.uri
                 ],
                 "videoMetadata": [
@@ -374,49 +431,120 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
                     "parts": parts
                 ]
             ],
-            "generationConfig": [
-                "responseMimeType": "application/json"
-            ]
+            "generationConfig": generationConfig(for: model, includeSchema: includeSchema)
         ]
 
-        if includeSchema {
-            body["generationConfig"] = [
-                "responseMimeType": "application/json",
-                "responseSchema": [
-                    "type": "OBJECT",
-                    "properties": [
-                        "workflowName": ["type": "STRING"],
-                        "taskSteps": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "targetKPI": ["type": "STRING"],
-                        "zone": ["type": "STRING"],
-                        "shift": ["type": "STRING"],
-                        "owner": ["type": "STRING"],
-                        "adjacentSystems": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "privacySecurityLimits": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "knownBlockers": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "nonRoutineModes": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "peopleTrafficNotes": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "captureRestrictions": ["type": "ARRAY", "items": ["type": "STRING"]],
-                        "confidence": ["type": "NUMBER"],
-                        "warnings": ["type": "ARRAY", "items": ["type": "STRING"]]
-                    ],
-                    "required": ["workflowName", "taskSteps"]
+        return body
+    }
+
+    private func makeInlineGenerationBody(
+        request: CaptureUploadRequest,
+        inlineVideo: InlineVideoPayload,
+        fps: Int,
+        model: String,
+        includeSchema: Bool
+    ) -> [String: Any] {
+        let contextHint = request.metadata.captureContextHint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt = """
+        You are inferring a structured workflow intake packet from a capture walkthrough video for local pipeline testing.
+
+        Requirements:
+        - Infer the most plausible workflow name.
+        - Infer ordered task steps from the visible walkthrough.
+        - Ensure at least one of zone or owner is populated. Prefer zone if it can be inferred from the environment or context hint.
+        - Keep speculative business-only fields conservative.
+        - Respond with JSON only.
+
+        Known metadata:
+        - capture_source: \(request.metadata.captureSource.rawValue)
+        - scene_id_hint: \(CaptureBundleContext.sceneIdentifier(for: request))
+        - capture_context_hint: \(contextHint?.isEmpty == false ? contextHint! : "none")
+        """
+
+        let parts: [[String: Any]] = [
+            [
+                "inlineData": [
+                    "mimeType": inlineVideo.mimeType,
+                    "data": inlineVideo.base64Data
+                ],
+                "videoMetadata": [
+                    "fps": fps
                 ]
+            ],
+            ["text": prompt]
+        ]
+
+        var body: [String: Any] = [
+            "contents": [
+                [
+                    "parts": parts
+                ]
+            ],
+            "generationConfig": generationConfig(for: model, includeSchema: includeSchema)
+        ]
+
+        return body
+    }
+
+    private func generationConfig(for model: String, includeSchema: Bool) -> [String: Any] {
+        var config: [String: Any] = [
+            "responseMimeType": "application/json"
+        ]
+
+        if model.hasPrefix("gemini-3") {
+            config["thinkingConfig"] = [
+                "thinkingLevel": thinkingLevel
             ]
         }
 
-        return body
+        if includeSchema {
+            config["responseSchema"] = [
+                "type": "OBJECT",
+                "properties": [
+                    "workflowName": ["type": "STRING"],
+                    "taskSteps": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "targetKPI": ["type": "STRING"],
+                    "zone": ["type": "STRING"],
+                    "shift": ["type": "STRING"],
+                    "owner": ["type": "STRING"],
+                    "adjacentSystems": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "privacySecurityLimits": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "knownBlockers": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "nonRoutineModes": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "peopleTrafficNotes": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "captureRestrictions": ["type": "ARRAY", "items": ["type": "STRING"]],
+                    "confidence": ["type": "NUMBER"],
+                    "warnings": ["type": "ARRAY", "items": ["type": "STRING"]]
+                ],
+                "required": ["workflowName", "taskSteps"]
+            ]
+        }
+
+        return config
     }
 
     private func mimeType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "mov":
-            return "video/quicktime"
+            return "video/mov"
         case "mp4":
             return "video/mp4"
         default:
             return "application/octet-stream"
         }
+    }
+
+    private func makeInlineVideoPayload(for url: URL) throws -> InlineVideoPayload? {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        guard let fileSize = values.fileSize, fileSize > 0, fileSize <= maxInlineVideoBytes else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: url)
+        return InlineVideoPayload(
+            base64Data: data.base64EncodedString(),
+            mimeType: mimeType(for: url)
+        )
     }
 
     private func extractJSONObject(from text: String) -> String? {
