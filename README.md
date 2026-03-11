@@ -1,55 +1,74 @@
 # BlueprintCapture
 
-A SwiftUI-based iOS app for capturing AR walkthroughs. This app allows users to record video of spaces with motion data for AI analysis.
+BlueprintCapture is the evidence-capture app for Blueprint.
 
-## Project Structure
+It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream qualification and scene-memory derivation. It does not run reconstruction, world models, or scene generation in-app.
 
-### App Entry Points
-- **BlueprintCaptureApp.swift** - Main SwiftUI app entry point with scene setup
-- **ContentView.swift** - Navigation flow container with state management
-- **AppDelegate.swift** - App lifecycle management
+## What This Repo Produces
 
-### Views
-- **ProfileReviewView.swift** - User profile information screen
-- **LocationConfirmationView.swift** - Location selection and confirmation
-- **PermissionRequestView.swift** - Camera/microphone permission requests
-- **CaptureSessionView.swift** - Main video capture interface with preview
+Canonical raw upload layout:
 
-### Data & Logic
-- **CaptureFlowViewModel.swift** - Main state management for capture flow
-- **VideoCaptureManager.swift** - AVFoundation-based video capture manager
-- **UserProfile.swift** - User data model
+```text
+scenes/{scene_id}/captures/{capture_id}/raw/
+  manifest.json
+  intake_packet.json
+  capture_context.json
+  capture_upload_complete.json
+  walkthrough.mov
+  motion.jsonl
+  arkit/
+    poses.jsonl
+    frames.jsonl
+    intrinsics.json
+    depth/
+    confidence/
+    meshes/
+```
 
-### Configuration
-- **Info.plist** - App configuration and privacy permissions
-- **Assets.xcassets** - App icons and colors
+The bridge then emits:
 
-## Features
+```text
+scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
+scenes/{scene_id}/captures/{capture_id}/qa_report.json
+```
 
-- SwiftUI-based interface using functional components and Tailwind-like styling
-- AVFoundation video capture with motion tracking
-- Location-based capture anchoring
-- Camera and microphone access with permission handling
+## Core Rules
 
-## Requirements
+- Qualification comes first.
+- This repo is the evidence-capture layer, not the readiness-decision layer.
+- Capture-backed scene memory is downstream of the raw bundle.
+- Generated scenes are downstream derived products, not truth.
+- ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.
 
-- iOS 15.0+
-- SwiftUI 2.0+
-- Xcode 13+
+## Main Areas
 
-## Building & Running
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift): iPhone capture and ARKit logging
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/GlassesCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/GlassesCaptureManager.swift): Meta glasses capture
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift): bundle finalization and export
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureUploadService.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureUploadService.swift): upload pipeline
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts): frame extraction bridge
+
+## Build
 
 ```bash
-# Open the project in Xcode
 open BlueprintCapture.xcodeproj
+```
 
-# Build for iOS device or simulator
+```bash
 xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture
 ```
 
-## Architecture Notes
+## Tests
 
-- Uses MVVM pattern with SwiftUI
-- SwiftUI views for all UI (no UIKit storyboards)
-- AVFoundation for video capture instead of Metal/ARKit
-- Reactive state management with @Published properties
+Swift:
+
+```bash
+xcodebuild test -project BlueprintCapture.xcodeproj -scheme BlueprintCapture -destination 'platform=iOS Simulator,name=iPhone 15' -only-testing:BlueprintCaptureTests/CaptureBundleAndInferenceTests -only-testing:BlueprintCaptureTests/PipelineContractTests -only-testing:BlueprintCaptureTests/ScanHomeAndUploadTests
+```
+
+Cloud bridge:
+
+```bash
+cd cloud/extract-frames
+npm test
+```

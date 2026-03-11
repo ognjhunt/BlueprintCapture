@@ -57,6 +57,23 @@ struct ScanJob: Identifiable, Equatable {
         return instructions
     }
 
+    var inaccessibleAreasForCapture: [String] {
+        if !captureRestrictions.isEmpty {
+            return captureRestrictions
+        }
+        return restrictedAreas
+    }
+
+    var captureConsentStatus: CaptureConsentStatus {
+        if permissionDocURL != nil {
+            return .documented
+        }
+        if !allowedAreas.isEmpty || !restrictedAreas.isEmpty {
+            return .policyOnly
+        }
+        return .unknown
+    }
+
     var qualificationIntakePacket: QualificationIntakePacket {
         var privacySecurityLimits = privacyRestrictions
         for item in securityRestrictions where !privacySecurityLimits.contains(item) {

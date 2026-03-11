@@ -278,11 +278,10 @@ enum CaptureBundleContext {
     }
 
     static func worldModelCandidate(for request: CaptureUploadRequest) -> Bool {
-        if let continuityScore = request.metadata.sceneMemory?.continuityScore,
-           continuityScore > 0 {
-            return continuityScore >= 0.5
+        guard let continuityScore = request.metadata.sceneMemory?.continuityScore else {
+            return false
         }
-        return request.metadata.intakePacket?.isComplete == true
+        return continuityScore >= 0.5
     }
 
     static func rawDirectoryURL(for request: CaptureUploadRequest) -> URL {
@@ -333,8 +332,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeInferenceConfidence: Double?
         let intakeWarnings: [String]
         let taskHypothesisStatus: String?
-        let sceneMemory: SceneMemoryCaptureMetadata?
-        let captureRights: CaptureRightsMetadata?
+        let sceneMemory: SceneMemoryCaptureMetadata
+        let captureRights: CaptureRightsMetadata
         let worldModelCandidate: Bool
         let capturedAt: String
     }
@@ -349,6 +348,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
     private let completionMarkerFilename = "capture_upload_complete.json"
     private let taskHypothesisFilename = "task_hypothesis.json"
+    private let fileManager = FileManager.default
 
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
         guard request.metadata.intakePacket?.isComplete == true else {
@@ -375,6 +375,86 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         )
     }
 
+    private func normalizedSceneMemory(for request: CaptureUploadRequest, directory: URL) -> SceneMemoryCaptureMetadata {
+        let metadata = request.metadata.sceneMemory
+        return SceneMemoryCaptureMetadata(
+            continuityScore: metadata?.continuityScore,
+            lightingConsistency: normalizedSceneValue(metadata?.lightingConsistency),
+            dynamicObjectDensity: normalizedSceneValue(metadata?.dynamicObjectDensity),
+            operatorNotes: metadata?.operatorNotes ?? [],
+            inaccessibleAreas: metadata?.inaccessibleAreas ?? []
+        )
+    }
+
+    private func normalizedCaptureRights(for request: CaptureUploadRequest) -> CaptureRightsMetadata {
+        let metadata = request.metadata.captureRights
+        return CaptureRightsMetadata(
+            derivedSceneGenerationAllowed: metadata?.derivedSceneGenerationAllowed ?? false,
+            dataLicensingAllowed: metadata?.dataLicensingAllowed ?? false,
+            payoutEligible: metadata?.payoutEligible ?? false,
+            consentStatus: metadata?.consentStatus ?? .unknown,
+            permissionDocumentURI: metadata?.permissionDocumentURI,
+            consentScope: metadata?.consentScope ?? [],
+            consentNotes: metadata?.consentNotes ?? []
+        )
+    }
+
+    private func normalizedSceneValue(_ value: String?) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty == false ? trimmed : nil) ?? "unknown"
+    }
+
+    private func sensorAvailability(for request: CaptureUploadRequest, directory: URL) -> [String: Bool] {
+        let motion = fileManager.fileExists(atPath: directory.appendingPathComponent("motion.jsonl").path)
+        guard request.metadata.captureSource == .iphoneVideo else {
+            return [
+                "arkit_poses": false,
+                "arkit_intrinsics": false,
+                "arkit_depth": false,
+                "arkit_confidence": false,
+                "arkit_meshes": false,
+                "motion": motion,
+            ]
+        }
+
+        return [
+            "arkit_poses": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/poses.jsonl").path),
+            "arkit_intrinsics": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/intrinsics.json").path),
+            "arkit_depth": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/depth").path),
+            "arkit_confidence": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/confidence").path),
+            "arkit_meshes": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/meshes").path),
+            "motion": motion,
+        ]
+    }
+
+    private func manifestSceneMemory(
+        for request: CaptureUploadRequest,
+        directory: URL,
+        normalized: SceneMemoryCaptureMetadata
+    ) -> [String: Any] {
+        [
+            "continuity_score": normalized.continuityScore as Any,
+            "lighting_consistency": normalized.lightingConsistency ?? "unknown",
+            "dynamic_object_density": normalized.dynamicObjectDensity ?? "unknown",
+            "sensor_availability": sensorAvailability(for: request, directory: directory),
+            "operator_notes": normalized.operatorNotes,
+            "inaccessible_areas": normalized.inaccessibleAreas,
+            "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request),
+        ]
+    }
+
+    private func manifestCaptureRights(_ rights: CaptureRightsMetadata) -> [String: Any] {
+        [
+            "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
+            "data_licensing_allowed": rights.dataLicensingAllowed,
+            "capture_contributor_payout_eligible": rights.payoutEligible,
+            "consent_status": rights.consentStatus.rawValue,
+            "permission_document_uri": rights.permissionDocumentURI as Any,
+            "consent_scope": rights.consentScope,
+            "consent_notes": rights.consentNotes,
+        ]
+    }
+
     private func patchManifest(in directory: URL, request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws {
         let manifestURL = directory.appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
@@ -385,6 +465,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
         let data = try Data(contentsOf: manifestURL)
         var json = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
+        let normalizedRights = normalizedCaptureRights(for: request)
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
         json["capture_modality"] = CaptureBundleContext.captureModality(for: request)
@@ -401,26 +483,12 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "validated_metric_bundle": request.metadata.scaffoldingPacket?.hasValidatedMetricBundle ?? false,
         ]
         json["uncertainty_priors"] = request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:]
-        json["scene_memory_capture"] = [
-            "continuity_score": request.metadata.sceneMemory?.continuityScore as Any,
-            "lighting_consistency": request.metadata.sceneMemory?.lightingConsistency as Any,
-            "dynamic_object_density": request.metadata.sceneMemory?.dynamicObjectDensity as Any,
-            "sensor_availability": [
-                "arkit_poses": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/poses.jsonl").path),
-                "arkit_intrinsics": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/intrinsics.json").path),
-                "arkit_depth": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/depth").path),
-                "arkit_confidence": FileManager.default.fileExists(atPath: directory.appendingPathComponent("arkit/confidence").path),
-            ],
-            "operator_notes": request.metadata.sceneMemory?.operatorNotes ?? [],
-            "inaccessible_areas": request.metadata.sceneMemory?.inaccessibleAreas ?? [],
-            "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request),
-        ]
-        json["capture_rights"] = [
-            "derived_scene_generation_allowed": request.metadata.captureRights?.derivedSceneGenerationAllowed ?? true,
-            "data_licensing_allowed": request.metadata.captureRights?.dataLicensingAllowed ?? false,
-            "capture_contributor_payout_eligible": request.metadata.captureRights?.payoutEligible ?? false,
-            "consent_notes": request.metadata.captureRights?.consentNotes ?? [],
-        ]
+        json["scene_memory_capture"] = manifestSceneMemory(
+            for: request,
+            directory: directory,
+            normalized: normalizedSceneMemory
+        )
+        json["capture_rights"] = manifestCaptureRights(normalizedRights)
         json["video_uri"] = mode.videoURI
 
         let patched = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes])
@@ -437,6 +505,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
 
         let intakeMetadata = request.metadata.intakeMetadata
+        let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
+        let normalizedRights = normalizedCaptureRights(for: request)
         let context = CaptureContextFile(
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
@@ -461,8 +531,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             intakeInferenceConfidence: intakeMetadata?.confidence,
             intakeWarnings: intakeMetadata?.warnings ?? [],
             taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
-            sceneMemory: request.metadata.sceneMemory,
-            captureRights: request.metadata.captureRights,
+            sceneMemory: normalizedSceneMemory,
+            captureRights: normalizedRights,
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )

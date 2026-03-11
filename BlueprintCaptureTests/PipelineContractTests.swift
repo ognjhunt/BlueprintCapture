@@ -52,4 +52,17 @@ struct PipelineContractTests {
         #expect(VideoCaptureManager.captureSource == "iphone")
         #expect(VideoCaptureManager.captureTierHint == "tier1_iphone")
     }
+
+    @Test
+    func captureRightsDefaultsStayConservative() {
+        let rights = CaptureRightsMetadata()
+
+        #expect(rights.derivedSceneGenerationAllowed == false)
+        #expect(rights.dataLicensingAllowed == false)
+        #expect(rights.payoutEligible == false)
+        #expect(rights.consentStatus == .unknown)
+        #expect(rights.permissionDocumentURI == nil)
+        #expect(rights.consentScope.isEmpty)
+        #expect(rights.consentNotes.isEmpty)
+    }
 }

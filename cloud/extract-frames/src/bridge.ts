@@ -30,7 +30,7 @@ export type QualityGateInput = {
 export type QualityGateResult = {
   status: "passed" | "blocked";
   captureTier: "tier1_iphone" | "tier2_glasses";
-  nurecMode: "mono_pose_assisted" | "mono_slam";
+  processingProfile: "pose_assisted" | "video_only";
   reasons: string[];
   warnings: string[];
 };
@@ -244,7 +244,7 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     return {
       status: "blocked",
       captureTier: input.captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses",
-      nurecMode: input.captureSource === "iphone" ? "mono_pose_assisted" : "mono_slam",
+      processingProfile: input.captureSource === "iphone" ? "pose_assisted" : "video_only",
       reasons,
       warnings,
     };
@@ -256,7 +256,7 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
       return {
         status: "passed",
         captureTier: "tier1_iphone",
-        nurecMode: "mono_pose_assisted",
+        processingProfile: "pose_assisted",
         reasons,
         warnings,
       };
@@ -269,7 +269,7 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     return {
       status: "passed",
       captureTier: "tier2_glasses",
-      nurecMode: "mono_slam",
+      processingProfile: "video_only",
       reasons,
       warnings,
     };
@@ -281,7 +281,7 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
   return {
     status: "passed",
     captureTier: "tier2_glasses",
-    nurecMode: "mono_slam",
+    processingProfile: "video_only",
     reasons,
     warnings,
   };

@@ -531,13 +531,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         // the Meta glasses camera. The glasses camera is mounted on the user's head, while the
         // phone may be in the user's pocket or hand.
         //
-        // DO NOT use this motion data as camera motion for 3D reconstruction!
-        //
         // When real Meta DAT SDK integration is available, this should be replaced with
-        // glasses-specific IMU data from the MWDAT SDK if available. Until then, the downstream
-        // pipeline should treat glasses captures as "video-only" and run SLAM for pose estimation.
+        // glasses-specific IMU data from the MWDAT SDK if available. Until then, treat this as
+        // diagnostic-only evidence and not as glasses-mounted camera motion.
         //
-        // This phone IMU data is logged for diagnostic/debugging purposes only.
+        // This phone IMU data is logged for diagnostic purposes only.
         do {
             if FileManager.default.fileExists(atPath: artifacts.motionLogURL.path) {
                 try FileManager.default.removeItem(at: artifacts.motionLogURL)
@@ -756,11 +754,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func writeManifest(artifacts: CaptureArtifacts) async {
-        // GPU Pipeline-compatible manifest schema
-        // Required fields: scene_id, device_model, os_version, fps_source, width, height, capture_start_epoch_ms, has_lidar
+        // Raw capture manifest.
         let manifest: [String: Any] = [
-            // Required fields for pipeline trigger
-            // These are patched by CaptureUploadService during directory upload with actual values
+            // These are patched by CaptureUploadService during directory upload with actual values.
             "scene_id": "",  // Patched with targetId/reservationId during upload
             "video_uri": "", // Patched with full GCS gs://... path during upload
             "device_model": "Meta Ray-Ban Smart Glasses",

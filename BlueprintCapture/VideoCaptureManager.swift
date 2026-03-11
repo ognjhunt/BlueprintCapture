@@ -30,8 +30,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             let meshDirectoryURL: URL?
             let posesLogURL: URL
             let intrinsicsURL: URL
-            let objectDirectoryURL: URL?
-            let objectIndexURL: URL?
         }
 
         let baseFilename: String
@@ -47,10 +45,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             var items: [Any] = [packageURL, videoURL, motionLogURL, manifestURL]
             if let arKit {
                 items.append(arKit.frameLogURL)
-                if let indexURL = arKit.objectIndexURL,
-                   FileManager.default.fileExists(atPath: indexURL.path) {
-                    items.append(indexURL)
-                }
             }
             return items
         }
@@ -63,29 +57,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     struct CaptureUploadPayload: Codable, Equatable {
         let packageURL: URL
     }
-
-#if canImport(ARKit)
-    @available(iOS 16.0, *)
-    struct ObjectSegmentationMask {
-        let identifier: UUID
-        let label: String?
-        let pixelBuffer: CVPixelBuffer
-        let confidence: Float
-
-        init(identifier: UUID, label: String?, pixelBuffer: CVPixelBuffer, confidence: Float = 1.0) {
-            self.identifier = identifier
-            self.label = label
-            self.pixelBuffer = pixelBuffer
-            self.confidence = confidence
-        }
-    }
-
-    @available(iOS 16.0, *)
-    struct ObjectSegmentationFrame {
-        let timestamp: TimeInterval
-        let masks: [ObjectSegmentationMask]
-    }
-#endif
 
     private struct ARFrameLogEntry: Codable {
         let frameIndex: Int
@@ -174,10 +145,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var arFrameCount: Int = 0
     private var arFirstFrameTimestamp: TimeInterval?
     private var exportedMeshAnchors: Set<UUID> = []
-    @available(iOS 16.0, *)
-    private var objectReconstructionManager: ObjectPointCloudReconstruction?
-    @available(iOS 16.0, *)
-    private var objectReconstructionSummary: ObjectPointCloudReconstruction.Output?
     private var isARRunning: Bool = false
     private var shouldSkipARKitOnNextRecording: Bool = false
     private let supportsARCapture: Bool = VideoCaptureManager.evaluateARCaptureSupport()
@@ -218,9 +185,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     /// Use ARSession-based video recording on iOS 17+ devices that support ARKit.
     /// This allows ARKit to own the camera for recording video while also capturing
-    /// poses, depth, and intrinsics - which are critical for the downstream GPU pipeline.
-    /// When enabled, the pipeline can skip expensive SLAM/SfM processing since it has
-    /// metric-accurate ARKit poses.
+    /// poses, depth, and intrinsics that strengthen the raw evidence bundle.
     private var canUseARSessionRecorder: Bool {
         guard #available(iOS 17.0, *) else { return false }
         return supportsARCapture
@@ -423,30 +388,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         print("⏹️ [Capture] stopRecording requested")
     }
-
-#if canImport(ARKit)
-    @available(iOS 16.0, *)
-    func submitObjectSegmentationFrame(_ frame: ObjectSegmentationFrame) {
-        arDataQueue.async { [weak self] in
-            guard let self else { return }
-            guard let manager = self.objectReconstructionManager else { return }
-            let masks = frame.masks.map {
-                ObjectPointCloudReconstruction.SegmentationMask(
-                    identifier: $0.identifier,
-                    label: $0.label,
-                    pixelBuffer: $0.pixelBuffer,
-                    confidence: $0.confidence
-                )
-            }
-            guard !masks.isEmpty else { return }
-            let segmentationFrame = ObjectPointCloudReconstruction.SegmentationFrame(
-                timestamp: frame.timestamp,
-                masks: masks
-            )
-            manager.enqueue(segmentationFrame: segmentationFrame)
-        }
-    }
-#endif
 
     private func startScreenRecording(for artifacts: RecordingArtifacts) {
         guard screenRecorder.isAvailable else {
@@ -805,32 +746,18 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let depth = root.appendingPathComponent("depth", isDirectory: true)
         let confidence = root.appendingPathComponent("confidence", isDirectory: true)
         let mesh = root.appendingPathComponent("meshes", isDirectory: true)
-        let objects = root.appendingPathComponent("objects", isDirectory: true)
         let frameLog = root.appendingPathComponent("frames.jsonl")
         let posesLog = root.appendingPathComponent("poses.jsonl")
         let intrinsics = root.appendingPathComponent("intrinsics.json")
-        let objectIndex = objects.appendingPathComponent("index.json")
 
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: depth, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: confidence, withIntermediateDirectories: true)
             try fileManager.createDirectory(at: mesh, withIntermediateDirectories: true)
-            if fileManager.fileExists(atPath: objects.path) {
-                try fileManager.removeItem(at: objects)
-            }
-            try fileManager.createDirectory(at: objects, withIntermediateDirectories: true)
             fileManager.createFile(atPath: frameLog.path, contents: nil)
             fileManager.createFile(atPath: posesLog.path, contents: nil)
             fileManager.createFile(atPath: intrinsics.path, contents: nil)
-            if fileManager.fileExists(atPath: objectIndex.path) {
-                try? fileManager.removeItem(at: objectIndex)
-            }
-            if #available(iOS 16.0, *) {
-                objectReconstructionManager = ObjectPointCloudReconstruction(outputDirectory: objects, indexURL: objectIndex)
-                objectReconstructionManager?.reset()
-                objectReconstructionSummary = nil
-            }
             return RecordingArtifacts.ARKitArtifacts(
                 rootDirectoryURL: root,
                 frameLogURL: frameLog,
@@ -838,9 +765,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 confidenceDirectoryURL: confidence,
                 meshDirectoryURL: mesh,
                 posesLogURL: posesLog,
-                intrinsicsURL: intrinsics,
-                objectDirectoryURL: objects,
-                objectIndexURL: objectIndex
+                intrinsicsURL: intrinsics
             )
         } catch {
             print("Failed to set up ARKit capture directories: \(error)")
@@ -963,14 +888,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             arPoseLogFileHandle = nil
             arIntrinsicsWritten = false
             arFirstFrameTimestamp = nil
-            if #available(iOS 16.0, *) {
-                if let summary = self.objectReconstructionManager?.finalize() {
-                    self.objectReconstructionSummary = summary
-                } else {
-                    self.objectReconstructionSummary = nil
-                }
-                self.objectReconstructionManager = nil
-            }
         }
         isARRunning = false
     }
@@ -1085,10 +1002,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             } catch {
                 print("Failed to persist confidence map: \(error)")
             }
-        }
-
-        if #available(iOS 16.0, *), let reconstructor = objectReconstructionManager {
-            reconstructor.process(frame: frame)
         }
 
         let entry = ARFrameLogEntry(
@@ -1456,10 +1369,6 @@ private extension VideoCaptureManager {
         print("🧹 [Capture] cleanupAfterRecording")
         currentArtifacts = nil
         currentARKitArtifacts = nil
-        if #available(iOS 16.0, *) {
-            objectReconstructionManager = nil
-            objectReconstructionSummary = nil
-        }
         currentCameraIntrinsics = nil
         currentExposureSettings = nil
         exposureSamples = []
@@ -1500,8 +1409,7 @@ private extension VideoCaptureManager {
         let epochMs = Int64(artifacts.startedAt.timeIntervalSince1970 * 1000.0)
         let captureStartTime = artifacts.startedAt
 
-        // Convert exposure samples to pipeline-compatible format
-        // Pipeline expects: {"iso": 100, "exposure_duration": 0.008, "timestamp": 0.0}
+        // Convert exposure samples into raw evidence timing relative to capture start.
         let pipelineExposureSamples: [[String: Any]] = self.exposureSamples.map { sample in
             // Convert timestamp to seconds from capture start
             let timestampSeconds = sample.timestamp.timeIntervalSince(captureStartTime)
@@ -1514,7 +1422,7 @@ private extension VideoCaptureManager {
 
         let writeBlock = {
             var dict: [String: Any] = [
-                // Required fields for GPU pipeline trigger
+                // Required raw capture fields.
                 "scene_id": "",  // Will be patched by upload service
                 "video_uri": "", // Will be patched by upload service
                 "device_model": deviceModel,
@@ -1527,23 +1435,14 @@ private extension VideoCaptureManager {
                 "capture_schema_version": Self.captureSchemaVersion,
                 "capture_source": Self.captureSource,
                 "capture_tier_hint": Self.captureTierHint,
-                // Optional fields that enhance processing
+                // Optional fields that help downstream scene-memory derivation.
                 "scale_hint_m_per_unit": 1.0,
                 "intended_space_type": "industrial_unknown"
             ]
 
-            // Add exposure samples if available (optional but recommended)
+            // Exposure samples stay in the raw bundle for downstream use.
             if !pipelineExposureSamples.isEmpty {
                 dict["exposure_samples"] = pipelineExposureSamples
-            }
-
-            // Add object point cloud references if available
-            if #available(iOS 16.0, *),
-               let summary = self.objectReconstructionSummary,
-               let arKitArtifacts = artifacts.arKit,
-               let indexURL = arKitArtifacts.objectIndexURL {
-                dict["object_point_cloud_index"] = self.relativePath(for: indexURL, relativeTo: artifacts.directoryURL)
-                dict["object_point_cloud_count"] = summary.objectCount
             }
             do {
                 let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes])
@@ -1664,15 +1563,7 @@ private extension VideoCaptureManager {
             depthDirectory: arKit.depthDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
             confidenceDirectory: arKit.confidenceDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
             meshDirectory: arKit.meshDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
-            frameCount: frameCount,
-            objectIndexFile: arKit.objectIndexURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
-            objectDirectory: arKit.objectDirectoryURL.map { relativePath(for: $0, relativeTo: artifacts.directoryURL) },
-            objectCount: {
-                if #available(iOS 16.0, *) {
-                    return self.objectReconstructionSummary?.objectCount
-                }
-                return nil
-            }()
+            frameCount: frameCount
         )
     }
 
@@ -2036,9 +1927,6 @@ extension VideoCaptureManager {
             let confidenceDirectory: String?
             let meshDirectory: String?
             let frameCount: Int
-            let objectIndexFile: String?
-            let objectDirectory: String?
-            let objectCount: Int?
         }
     }
 }

@@ -54,9 +54,12 @@ struct CaptureBundleAndInferenceTests {
                 inaccessibleAreas: ["Locked mezzanine"]
             ),
             captureRights: CaptureRightsMetadata(
-                derivedSceneGenerationAllowed: true,
+                derivedSceneGenerationAllowed: false,
                 dataLicensingAllowed: true,
                 payoutEligible: true,
+                consentStatus: .documented,
+                permissionDocumentURI: "https://example.com/permission.pdf",
+                consentScope: ["Sales floor", "Entry"],
                 consentNotes: ["Site owner approved downstream preview generation"]
             )
         )
@@ -72,8 +75,18 @@ struct CaptureBundleAndInferenceTests {
         #expect(manifest["capture_modality"] as? String == "iphone_arkit_lidar")
         let sceneMemory = try #require(manifest["scene_memory_capture"] as? [String: Any])
         #expect(sceneMemory["world_model_candidate"] as? Bool == true)
+        let sensorAvailability = try #require(sceneMemory["sensor_availability"] as? [String: Any])
+        #expect(sensorAvailability["arkit_intrinsics"] as? Bool == true)
+        #expect(sensorAvailability["arkit_meshes"] as? Bool == false)
+        #expect(sensorAvailability["motion"] as? Bool == false)
         let captureRights = try #require(manifest["capture_rights"] as? [String: Any])
         #expect(captureRights["data_licensing_allowed"] as? Bool == true)
+        #expect(captureRights["derived_scene_generation_allowed"] as? Bool == false)
+        #expect(captureRights["consent_status"] as? String == "documented")
+        #expect(captureRights["permission_document_uri"] as? String == "https://example.com/permission.pdf")
+        #expect((captureRights["consent_scope"] as? [String]) == ["Sales floor", "Entry"])
+        #expect(manifest["object_point_cloud_index"] == nil)
+        #expect(manifest["object_point_cloud_count"] == nil)
 
         let completionObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_upload_complete.json")))
         let completion = try #require(completionObject as? [String: Any])
@@ -85,6 +98,10 @@ struct CaptureBundleAndInferenceTests {
         #expect(context["intakeInferenceModel"] as? String == "gemini-3-flash-preview")
         #expect(context["taskHypothesisStatus"] as? String == "accepted")
         #expect(context["worldModelCandidate"] as? Bool == true)
+        let contextCaptureRights = try #require(context["captureRights"] as? [String: Any])
+        #expect(contextCaptureRights["consentStatus"] as? String == "documented")
+        #expect(contextCaptureRights["permissionDocumentURI"] as? String == "https://example.com/permission.pdf")
+        #expect((contextCaptureRights["consentScope"] as? [String]) == ["Sales floor", "Entry"])
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])
@@ -118,7 +135,9 @@ struct CaptureBundleAndInferenceTests {
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
-            captureContextHint: nil
+            captureContextHint: nil,
+            sceneMemory: nil,
+            captureRights: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -148,7 +167,9 @@ struct CaptureBundleAndInferenceTests {
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
-            captureContextHint: "Test capture"
+            captureContextHint: "Test capture",
+            sceneMemory: nil,
+            captureRights: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -181,7 +202,9 @@ struct CaptureBundleAndInferenceTests {
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
-            captureContextHint: "Packing area"
+            captureContextHint: "Packing area",
+            sceneMemory: nil,
+            captureRights: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -293,7 +316,9 @@ struct CaptureBundleAndInferenceTests {
             scaffoldingPacket: nil,
             captureModality: nil,
             evidenceTier: nil,
-            captureContextHint: "Packing area"
+            captureContextHint: "Packing area",
+            sceneMemory: nil,
+            captureRights: nil
         ))
 
         let service = CaptureIntakeInferenceService(session: session, apiKeyProvider: { "test-key" })

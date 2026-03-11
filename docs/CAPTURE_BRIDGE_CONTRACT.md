@@ -1,123 +1,98 @@
 # Capture Bridge Contract
 
-This document defines the bridge contract emitted by `cloud/extract-frames/src/index.ts` for each uploaded capture.
+This document defines the bridge contract emitted by [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts).
 
-## Scope
+## Input Paths
 
-- Inbound capture path (primary):
-  - `scenes/{scene_id}/{source}/{capture_id}/raw/walkthrough.mov`
-- Compatibility path:
-  - `targets/{scene_id}/raw/walkthrough.mov`
-
-The bridge extracts frames, aligns ARKit pose data, emits QA artifacts, and writes a trigger request for downstream orchestration when quality gates pass.
-
-## Upload Layout
-
-Input capture layout:
+Canonical:
 
 ```text
-scenes/{scene_id}/{source}/{capture_id}/raw/
+scenes/{scene_id}/captures/{capture_id}/raw/walkthrough.mov
+```
+
+Accepted for compatibility:
+
+```text
+scenes/{scene_id}/{source}/{capture_id}/raw/walkthrough.mov
+targets/{scene_id}/raw/walkthrough.mov
+```
+
+## Raw Bundle
+
+```text
+scenes/{scene_id}/captures/{capture_id}/raw/
   manifest.json
+  intake_packet.json
+  capture_context.json
+  capture_upload_complete.json
   walkthrough.mov
   motion.jsonl
   arkit/...
 ```
 
-Bridge outputs:
-
-```text
-scenes/{scene_id}/{source}/{capture_id}/frames/
-  000001.jpg
-  ...
-  index.jsonl
-
-scenes/{scene_id}/images/
-  {capture_id}_keyframe.jpg
-
-scenes/{scene_id}/captures/{capture_id}/
-  capture_descriptor.json
-  qa_report.json
-
-scenes/{scene_id}/prompts/
-  scene_request.json   (written only on QA pass)
-```
-
-## `manifest.json` additions
-
-The iOS/glasses capture manifests must include:
+## Required Manifest Fields
 
 ```json
 {
+  "scene_id": "string",
+  "video_uri": "string",
+  "device_model": "string",
+  "os_version": "string",
+  "fps_source": 30.0,
+  "width": 1920,
+  "height": 1440,
+  "capture_start_epoch_ms": 1702137045123,
+  "has_lidar": true,
   "capture_schema_version": "2.0.0",
   "capture_source": "iphone|glasses",
   "capture_tier_hint": "tier1_iphone|tier2_glasses"
 }
 ```
 
-Scene-memory readiness metadata should also be attached when available:
+## Scene Memory And Rights Blocks
+
+The manifest must also carry normalized scene-memory and rights metadata:
 
 ```json
 {
   "scene_memory_capture": {
-    "continuity_score": 0.0,
-    "lighting_consistency": "stable|variable|unknown",
-    "dynamic_object_density": "low|medium|high|unknown",
+    "continuity_score": null,
+    "lighting_consistency": "unknown",
+    "dynamic_object_density": "unknown",
     "sensor_availability": {
-      "arkit_poses": true,
-      "arkit_intrinsics": true,
-      "arkit_depth": true,
-      "arkit_confidence": false
+      "arkit_poses": false,
+      "arkit_intrinsics": false,
+      "arkit_depth": false,
+      "arkit_confidence": false,
+      "arkit_meshes": false,
+      "motion": false
     },
     "operator_notes": [],
     "inaccessible_areas": [],
-    "world_model_candidate": true
+    "world_model_candidate": false
   },
   "capture_rights": {
-    "derived_scene_generation_allowed": true,
+    "derived_scene_generation_allowed": false,
     "data_licensing_allowed": false,
     "capture_contributor_payout_eligible": false,
+    "consent_status": "documented|policy_only|unknown",
+    "permission_document_uri": null,
+    "consent_scope": [],
     "consent_notes": []
   }
 }
 ```
 
-## `arkit/poses.jsonl` v2 row (backward compatible)
+## Output Files
 
-Each row includes both legacy and bridge fields:
-
-```json
-{
-  "pose_schema_version": "2.0",
-  "frameIndex": 0,
-  "timestamp": 12345.6789,
-  "transform": [[...],[...],[...],[...]],
-  "frame_id": "000001",
-  "t_device_sec": 0.0,
-  "T_world_camera": [[...],[...],[...],[...]]
-}
+```text
+scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl
+scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
+scenes/{scene_id}/captures/{capture_id}/qa_report.json
+scenes/{scene_id}/images/{capture_id}_keyframe.jpg
 ```
 
-## `frames/index.jsonl` row
-
-Each extracted frame includes canonical frame timing plus optional aligned ARKit pose:
-
-```json
-{
-  "frame_id": "000001",
-  "t_video_sec": 0.0,
-  "arkit_pose": {
-    "pose_frame_id": "000001",
-    "pose_schema_version": "2.0",
-    "source_schema": "v2|legacy|mixed",
-    "T_world_camera": [[...],[...],[...],[...]],
-    "t_device_sec": 0.0,
-    "delta_sec": 0.0,
-    "match_type": "frame_id|time"
-  }
-}
-```
-
-## `capture_descriptor.json` schema
+## capture_descriptor.json
 
 ```json
 {
@@ -126,11 +101,10 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
   "capture_id": "string",
   "capture_source": "iphone|glasses|unknown",
   "capture_tier": "tier1_iphone|tier2_glasses",
+  "processing_profile": "pose_assisted|video_only",
   "raw_prefix_uri": "gs://...",
   "frames_index_uri": "gs://...",
   "keyframe_uri": "gs://.../images/{capture_id}_keyframe.jpg",
-  "nurec_mode": "mono_pose_assisted|mono_slam",
-  "swap_focus": ["kitchen", "warehouse"],
   "intended_space_type": "string",
   "quality": {
     "pose_match_rate": 0.0,
@@ -143,15 +117,16 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
     "arkit_depth_prefix_uri": "gs://...",
     "arkit_confidence_prefix_uri": "gs://..."
   },
+  "scene_memory_capture": {},
+  "capture_rights": {},
+  "requested_lanes": ["qualification", "scene_memory"],
   "qa_status": "passed|blocked",
   "qa_report_uri": "gs://...",
-  "requested_lanes": ["qualification", "scene_memory", "advanced_geometry"],
-  "auto_triggered": true,
   "generated_at": "ISO-8601"
 }
 ```
 
-## `qa_report.json` schema
+## qa_report.json
 
 ```json
 {
@@ -161,7 +136,7 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
   "capture_source": "iphone|glasses|unknown",
   "capture_tier_initial": "tier1_iphone|tier2_glasses",
   "capture_tier_final": "tier1_iphone|tier2_glasses",
-  "nurec_mode": "mono_pose_assisted|mono_slam",
+  "processing_profile": "pose_assisted|video_only",
   "status": "passed|blocked",
   "required_files": {
     "walkthrough": true,
@@ -179,59 +154,18 @@ Each extracted frame includes canonical frame timing plus optional aligned ARKit
     "p95_pose_delta_sec": 0.0
   },
   "scene_memory_readiness": {
-    "world_model_candidate": true,
-    "recommended_lane": "scene_memory",
+    "world_model_candidate": false,
+    "recommended_lane": "qualification|scene_memory",
     "derived_only": true
   },
   "reasons": [],
   "warnings": [],
-  "auto_triggered": true,
-  "trigger_error": null,
   "generated_at": "ISO-8601"
 }
 ```
 
-## Auto trigger payload (`scene_request.json`)
+## Notes
 
-Written to `scenes/{scene_id}/prompts/scene_request.json` on QA pass:
-
-```json
-{
-  "schema_version": "v1",
-  "scene_id": "string",
-  "source_mode": "image",
-  "quality_tier": "standard",
-  "image": {
-    "gcs_uri": "gs://.../images/{capture_id}_keyframe.jpg",
-    "generation": "string"
-  },
-  "constraints": {
-    "capture_bundle": {
-      "scene_id": "string",
-      "capture_id": "string",
-      "capture_source": "string",
-      "capture_tier": "string",
-      "nurec_mode": "string",
-      "raw_prefix_uri": "gs://...",
-      "frames_index_uri": "gs://...",
-      "keyframe_uri": "gs://...",
-      "descriptor_uri": "gs://...",
-      "qa_report_uri": "gs://...",
-      "swap_focus": ["kitchen", "warehouse"]
-    }
-  },
-  "provider_policy": "openai_primary",
-  "fallback": {
-    "allow_image_fallback": false
-  }
-}
-```
-
-## Quality gate defaults
-
-- Tier-1 iPhone (`mono_pose_assisted`): requires strong ARKit alignment.
-- Tier-2 (`mono_slam`): glasses captures and degraded iPhone captures.
-- Block conditions:
-  - missing/invalid required files
-  - invalid manifest required fields
-  - insufficient extracted frame count
+- The bridge writes descriptor and QA outputs only.
+- It does not write a downstream generation request payload.
+- Generated scenes, if any, belong to downstream systems.

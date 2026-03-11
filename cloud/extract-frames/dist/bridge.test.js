@@ -94,7 +94,7 @@ test("evaluateQualityGate passes tier1 iPhone with strong pose alignment", () =>
     });
     assert.equal(result.status, "passed");
     assert.equal(result.captureTier, "tier1_iphone");
-    assert.equal(result.nurecMode, "mono_pose_assisted");
+    assert.equal(result.processingProfile, "pose_assisted");
 });
 test("evaluateQualityGate demotes degraded iPhone capture to tier2", () => {
     const result = evaluateQualityGate({
@@ -108,7 +108,7 @@ test("evaluateQualityGate demotes degraded iPhone capture to tier2", () => {
     });
     assert.equal(result.status, "passed");
     assert.equal(result.captureTier, "tier2_glasses");
-    assert.equal(result.nurecMode, "mono_slam");
+    assert.equal(result.processingProfile, "video_only");
     assert.ok(result.warnings.includes("insufficient_arkit_alignment_demoted_to_tier2"));
 });
 test("evaluateQualityGate blocks invalid manifest", () => {

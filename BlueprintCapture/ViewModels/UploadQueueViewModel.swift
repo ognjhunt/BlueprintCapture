@@ -43,6 +43,7 @@ final class UploadQueueViewModel: ObservableObject {
     }
 
     func enqueueGlassesCapture(artifacts: GlassesCaptureManager.CaptureArtifacts, job: ScanJob) {
+        let payoutEligible = job.payoutCents > 0
         let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: job.id,
@@ -58,7 +59,23 @@ final class UploadQueueViewModel: ObservableObject {
             scaffoldingPacket: job.defaultScaffoldingPacket,
             captureModality: "glasses_video_only",
             evidenceTier: "pre_screen_video",
-            captureContextHint: "\(job.title) at \(job.address)"
+            captureContextHint: "\(job.title) at \(job.address)",
+            sceneMemory: SceneMemoryCaptureMetadata(
+                continuityScore: nil,
+                lightingConsistency: "unknown",
+                dynamicObjectDensity: "unknown",
+                operatorNotes: [],
+                inaccessibleAreas: job.inaccessibleAreasForCapture
+            ),
+            captureRights: CaptureRightsMetadata(
+                derivedSceneGenerationAllowed: false,
+                dataLicensingAllowed: false,
+                payoutEligible: payoutEligible,
+                consentStatus: job.captureConsentStatus,
+                permissionDocumentURI: job.permissionDocURL?.absoluteString,
+                consentScope: job.allowedAreas,
+                consentNotes: []
+            )
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         let payoutUsd = job.payoutDollars

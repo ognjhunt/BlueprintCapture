@@ -1,73 +1,43 @@
-# 🚀 BlueprintCapture - Quick Start Guide
+# BlueprintCapture Quick Start
 
-## ✅ Status: Ready to Build
+## What You Are Building
 
-All Metal/Renderer code has been successfully removed. Your app is now a pure **SwiftUI + AVFoundation** application.
+This app captures walkthrough evidence and packages a raw bundle for downstream qualification and scene-memory work.
 
-## 📁 Clean File Structure
+It is not a reconstruction app.
 
-```
-BlueprintCapture/
-├── 🎯 App Entry Points
-│   ├── BlueprintCaptureApp.swift        (Main app)
-│   ├── ContentView.swift                (Navigation)
-│   └── AppDelegate.swift                (Lifecycle)
-│
-├── 📱 SwiftUI Views
-│   ├── CaptureSessionView.swift         (Video capture UI)
-│   ├── ProfileReviewView.swift          (User profile)
-│   ├── LocationConfirmationView.swift   (Location picker)
-│   └── PermissionRequestView.swift      (Permissions)
-│
-├── 🔧 Business Logic
-│   ├── CaptureFlowViewModel.swift       (State management)
-│   ├── VideoCaptureManager.swift        (AVFoundation wrapper)
-│   └── UserProfile.swift                (Data model)
-│
-└── ⚙️ Configuration
-    ├── Info.plist                       (App settings)
-    └── Assets.xcassets                  (Icons & colors)
-```
-
-## 🚫 Removed
-
-- ❌ Shaders.metal
-- ❌ ShaderTypes.h
-- ❌ Renderer.swift
-- ❌ ViewController.swift
-- ❌ Main.storyboard
-- ❌ All Metal compilation
-
-## ✨ What You Get
-
-- ✅ SwiftUI-based UI
-- ✅ Simple AVFoundation video capture
-- ✅ Camera preview with overlay
-- ✅ Motion data collection
-- ✅ Location integration
-- ✅ Zero build errors
-
-## 🏗️ How to Build
+## Start
 
 ```bash
-# Method 1: Xcode
 open BlueprintCapture.xcodeproj
-# Then press ▶️ or Cmd+R
+```
 
-# Method 2: Command line
+Or:
+
+```bash
 xcodebuild -project BlueprintCapture.xcodeproj \
   -scheme BlueprintCapture \
   -destination "platform=iOS Simulator,name=iPhone 15"
 ```
 
-## 📝 Next Steps
+## Primary Flow
 
-1. **Open in Xcode**: `open BlueprintCapture.xcodeproj`
-2. **Select a simulator or device**
-3. **Build & run**: Press ▶️ or Cmd+R
-4. **Test the app**: Follow the onboarding flow
-5. **Add web interface**: Create a separate React app for the dashboard
+1. Complete onboarding.
+2. Reserve or select a capture target.
+3. Record with iPhone or Meta glasses.
+4. Let the app finalize the raw bundle.
+5. Upload the bundle under `scenes/{scene_id}/captures/{capture_id}/raw/`.
 
----
+## What To Verify
 
-**Note**: No Metal rendering means no AR visualization, but you retain all video capture, motion tracking, and sensor integration capabilities. Perfect for a backend-focused app!
+- `manifest.json` exists and is patched with `scene_id` and `video_uri`
+- `capture_context.json` exists
+- `capture_upload_complete.json` exists
+- ARKit files are present for iPhone captures when the device supports them
+- scene-memory and rights metadata are present even when values are unknown
+
+## Key Paths
+
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift)
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift)
+- [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts)

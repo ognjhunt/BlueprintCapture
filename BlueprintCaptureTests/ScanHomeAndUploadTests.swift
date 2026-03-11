@@ -83,6 +83,11 @@ struct ScanHomeAndUploadTests {
         #expect(upload.enqueued.first?.metadata.targetId == "job_123")
         #expect(upload.enqueued.first?.metadata.jobId == "job_123")
         #expect(upload.enqueued.first?.metadata.captureSource == .metaGlasses)
+        #expect(upload.enqueued.first?.metadata.sceneMemory?.inaccessibleAreas == ["Back office"])
+        #expect(upload.enqueued.first?.metadata.captureRights?.consentStatus == .documented)
+        #expect(upload.enqueued.first?.metadata.captureRights?.permissionDocumentURI == "https://example.com/permit.pdf")
+        #expect(upload.enqueued.first?.metadata.captureRights?.consentScope == ["Sales floor"])
+        #expect(upload.enqueued.first?.metadata.captureRights?.payoutEligible == true)
 
         // Simulate successful upload completion.
         if let req = upload.enqueued.first {
@@ -121,9 +126,9 @@ private func makeJob(
         updatedAt: updatedAt,
         category: nil,
         instructions: [],
-        allowedAreas: [],
-        restrictedAreas: [],
-        permissionDocURL: nil,
+        allowedAreas: ["Sales floor"],
+        restrictedAreas: ["Back office"],
+        permissionDocURL: URL(string: "https://example.com/permit.pdf"),
         checkinRadiusM: 150,
         alertRadiusM: 200,
         priority: priority,

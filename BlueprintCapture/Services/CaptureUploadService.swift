@@ -134,21 +134,36 @@ struct SceneMemoryCaptureMetadata: Equatable, Codable {
     }
 }
 
+enum CaptureConsentStatus: String, Codable {
+    case documented
+    case policyOnly = "policy_only"
+    case unknown
+}
+
 struct CaptureRightsMetadata: Equatable, Codable {
     let derivedSceneGenerationAllowed: Bool
     let dataLicensingAllowed: Bool
     let payoutEligible: Bool
+    let consentStatus: CaptureConsentStatus
+    let permissionDocumentURI: String?
+    let consentScope: [String]
     let consentNotes: [String]
 
     init(
-        derivedSceneGenerationAllowed: Bool = true,
+        derivedSceneGenerationAllowed: Bool = false,
         dataLicensingAllowed: Bool = false,
         payoutEligible: Bool = false,
+        consentStatus: CaptureConsentStatus = .unknown,
+        permissionDocumentURI: String? = nil,
+        consentScope: [String] = [],
         consentNotes: [String] = []
     ) {
         self.derivedSceneGenerationAllowed = derivedSceneGenerationAllowed
         self.dataLicensingAllowed = dataLicensingAllowed
         self.payoutEligible = payoutEligible
+        self.consentStatus = consentStatus
+        self.permissionDocumentURI = permissionDocumentURI
+        self.consentScope = consentScope
         self.consentNotes = consentNotes
     }
 }

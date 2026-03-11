@@ -763,7 +763,23 @@ final class GlassesUploadViewModel: ObservableObject {
             ),
             captureModality: "glasses_video_only",
             evidenceTier: "pre_screen_video",
-            captureContextHint: targetId
+            captureContextHint: targetId,
+            sceneMemory: SceneMemoryCaptureMetadata(
+                continuityScore: nil,
+                lightingConsistency: "unknown",
+                dynamicObjectDensity: "unknown",
+                operatorNotes: [],
+                inaccessibleAreas: []
+            ),
+            captureRights: CaptureRightsMetadata(
+                derivedSceneGenerationAllowed: false,
+                dataLicensingAllowed: false,
+                payoutEligible: false,
+                consentStatus: .unknown,
+                permissionDocumentURI: nil,
+                consentScope: [],
+                consentNotes: []
+            )
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         currentRequest = request

@@ -375,7 +375,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             intakeMetadata: nil,
             taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
-                scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "object_point_clouds"],
+                scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "arkit_meshes"],
                 coveragePlan: [
                     "Capture primary route plus each workcell boundary.",
                     "Pause at narrow aisles, thresholds, and handoff points."
@@ -387,7 +387,23 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             ),
             captureModality: "iphone_arkit_lidar",
             evidenceTier: nil,
-            captureContextHint: [currentTargetInfo?.name, currentAddress].compactMap { $0 }.joined(separator: " | ").nilIfEmpty
+            captureContextHint: [currentTargetInfo?.name, currentAddress].compactMap { $0 }.joined(separator: " | ").nilIfEmpty,
+            sceneMemory: SceneMemoryCaptureMetadata(
+                continuityScore: nil,
+                lightingConsistency: "unknown",
+                dynamicObjectDensity: "unknown",
+                operatorNotes: [],
+                inaccessibleAreas: []
+            ),
+            captureRights: CaptureRightsMetadata(
+                derivedSceneGenerationAllowed: false,
+                dataLicensingAllowed: false,
+                payoutEligible: false,
+                consentStatus: .unknown,
+                permissionDocumentURI: nil,
+                consentScope: [],
+                consentNotes: []
+            )
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 

@@ -2,20 +2,11 @@ import { onObjectFinalized } from "firebase-functions/v2/storage";
 import * as logger from "firebase-functions/logger";
 import { Storage } from "@google-cloud/storage";
 import { tmpdir } from "os";
-import { join, dirname, basename } from "path";
-import {
-  mkdirSync,
-  writeFileSync,
-  readdirSync,
-  statSync,
-  readFileSync,
-  createWriteStream,
-} from "fs";
+import { join, basename } from "path";
+import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync } from "fs";
 import { spawn } from "child_process";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
-import AdmZip from "adm-zip";
-import archiver from "archiver";
 import {
   buildPoseIndex,
   chooseKeyframeCandidate,
@@ -98,7 +89,7 @@ async function loadArkitPoses(
 type CapturePathInfo = {
   mode: "scenes" | "targets";
   sceneId: string;
-  captureSourcePath: string;
+  captureSourcePath: string | null;
   captureId: string;
   scenePrefix: string;
   capturePrefix: string;
@@ -106,11 +97,33 @@ type CapturePathInfo = {
   framesPrefix: string;
   capturesPrefix: string;
   keyframeObjectName: string;
-  sceneRequestObjectName: string;
 };
 
-function parseCapturePath(objectName: string, generation: string): CapturePathInfo | null {
+export function parseCapturePath(objectName: string, generation: string): CapturePathInfo | null {
   const parts = objectName.split("/");
+  if (
+    parts.length >= 6 &&
+    parts[0] === "scenes" &&
+    parts[2] === "captures" &&
+    parts[4] === "raw"
+  ) {
+    const sceneId = parts[1];
+    const captureId = parts[3];
+    const scenePrefix = `scenes/${sceneId}`;
+    const capturePrefix = `${scenePrefix}/captures/${captureId}`;
+    return {
+      mode: "scenes",
+      sceneId,
+      captureSourcePath: null,
+      captureId,
+      scenePrefix,
+      capturePrefix,
+      rawPrefix: `${capturePrefix}/raw`,
+      framesPrefix: `${capturePrefix}/frames`,
+      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
+      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
+    };
+  }
   if (parts.length >= 6 && parts[0] === "scenes" && parts[4] === "raw") {
     const sceneId = parts[1];
     const captureSourcePath = parts[2];
@@ -128,7 +141,6 @@ function parseCapturePath(objectName: string, generation: string): CapturePathIn
       framesPrefix: `${capturePrefix}/frames`,
       capturesPrefix: `${scenePrefix}/captures/${captureId}`,
       keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
-      sceneRequestObjectName: `${scenePrefix}/prompts/scene_request.json`,
     };
   }
   if (parts.length >= 4 && parts[0] === "targets" && parts[2] === "raw") {
@@ -147,7 +159,6 @@ function parseCapturePath(objectName: string, generation: string): CapturePathIn
       framesPrefix: `${capturePrefix}/frames`,
       capturesPrefix: `${scenePrefix}/captures/${captureId}`,
       keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
-      sceneRequestObjectName: `${scenePrefix}/prompts/scene_request.json`,
     };
   }
   return null;
@@ -209,7 +220,94 @@ function asString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function validateManifest(manifest: Record<string, unknown> | null): {
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function hasStringArray(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null): Record<string, unknown> {
+  const raw = asRecord(manifest?.scene_memory_capture);
+  const sensorAvailability = asRecord(raw?.sensor_availability);
+  return {
+    continuity_score: asFiniteNumber(raw?.continuity_score) ?? null,
+    lighting_consistency: asString(raw?.lighting_consistency) ?? "unknown",
+    dynamic_object_density: asString(raw?.dynamic_object_density) ?? "unknown",
+    sensor_availability: {
+      arkit_poses: sensorAvailability?.arkit_poses === true,
+      arkit_intrinsics: sensorAvailability?.arkit_intrinsics === true,
+      arkit_depth: sensorAvailability?.arkit_depth === true,
+      arkit_confidence: sensorAvailability?.arkit_confidence === true,
+      arkit_meshes: sensorAvailability?.arkit_meshes === true,
+      motion: sensorAvailability?.motion === true,
+    },
+    operator_notes: hasStringArray(raw?.operator_notes) ? raw?.operator_notes : [],
+    inaccessible_areas: hasStringArray(raw?.inaccessible_areas) ? raw?.inaccessible_areas : [],
+    world_model_candidate: raw?.world_model_candidate === true,
+  };
+}
+
+function normalizedCaptureRights(manifest: Record<string, unknown> | null): Record<string, unknown> {
+  const raw = asRecord(manifest?.capture_rights);
+  return {
+    derived_scene_generation_allowed: raw?.derived_scene_generation_allowed === true,
+    data_licensing_allowed: raw?.data_licensing_allowed === true,
+    capture_contributor_payout_eligible: raw?.capture_contributor_payout_eligible === true,
+    consent_status: asString(raw?.consent_status) ?? "unknown",
+    permission_document_uri: asString(raw?.permission_document_uri) ?? null,
+    consent_scope: hasStringArray(raw?.consent_scope) ? raw?.consent_scope : [],
+    consent_notes: hasStringArray(raw?.consent_notes) ? raw?.consent_notes : [],
+  };
+}
+
+function validateSceneMemoryCapture(manifest: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  const sceneMemory = asRecord(manifest.scene_memory_capture);
+  if (!sceneMemory) {
+    warnings.push("missing_scene_memory_capture");
+    return warnings;
+  }
+  const sensors = asRecord(sceneMemory.sensor_availability);
+  const hasRequiredArrays =
+    hasStringArray(sceneMemory.operator_notes) && hasStringArray(sceneMemory.inaccessible_areas);
+  const hasRequiredSensors =
+    sensors !== undefined &&
+    typeof sensors.arkit_poses === "boolean" &&
+    typeof sensors.arkit_intrinsics === "boolean" &&
+    typeof sensors.arkit_depth === "boolean" &&
+    typeof sensors.arkit_confidence === "boolean" &&
+    typeof sensors.arkit_meshes === "boolean" &&
+    typeof sensors.motion === "boolean";
+  if (!hasRequiredArrays || !hasRequiredSensors) {
+    warnings.push("malformed_scene_memory_capture");
+  }
+  return warnings;
+}
+
+function validateCaptureRights(manifest: Record<string, unknown>): string[] {
+  const warnings: string[] = [];
+  const captureRights = asRecord(manifest.capture_rights);
+  if (!captureRights) {
+    warnings.push("missing_capture_rights");
+    return warnings;
+  }
+  const consentStatus = asString(captureRights.consent_status);
+  const validConsentStatus =
+    consentStatus === "documented" || consentStatus === "policy_only" || consentStatus === "unknown";
+  const hasValidScope = hasStringArray(captureRights.consent_scope);
+  const hasValidNotes = hasStringArray(captureRights.consent_notes);
+  if (!validConsentStatus || !hasValidScope || !hasValidNotes) {
+    warnings.push("malformed_capture_rights");
+  }
+  return warnings;
+}
+
+export function validateManifest(manifest: Record<string, unknown> | null): {
   valid: boolean;
   missingRequired: string[];
   warnings: string[];
@@ -246,6 +344,8 @@ function validateManifest(manifest: Record<string, unknown> | null): {
       warnings.push(`missing_${field}`);
     }
   }
+  warnings.push(...validateSceneMemoryCapture(manifest));
+  warnings.push(...validateCaptureRights(manifest));
 
   return {
     valid: missingRequired.length === 0,
@@ -256,7 +356,8 @@ function validateManifest(manifest: Record<string, unknown> | null): {
 
 /**
  * extractFrames
- * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov (iOS uploader format)
+ * - Trigger: scenes/<scene>/captures/<capture_id>/raw/walkthrough.mov (canonical iOS uploader format)
+ *   OR: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov (legacy scenes format)
  *   OR: targets/<scene>/raw/walkthrough.mov (legacy format)
  * - Output: <same_prefix>/frames/*.jpg + index.jsonl
  * - FPS: 5
@@ -498,13 +599,13 @@ export const extractFrames = onObjectFinalized(
     const finalReasons = [...qualityGate.reasons];
     const finalWarnings = [...manifestValidation.warnings, ...qualityGate.warnings];
     let finalStatus = qualityGate.status;
-    let autoTriggered = false;
-    let triggerError: string | null = null;
 
     const rawPrefixUri = gsUri(bucketName, pathInfo.rawPrefix);
     const framesIndexUri = gsUri(bucketName, `${pathInfo.framesPrefix}/index.jsonl`);
-    const descriptorUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/capture_descriptor.json`);
     const qaReportUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/qa_report.json`);
+    const sceneMemoryCapture = normalizedSceneMemoryCapture(manifest);
+    const captureRights = normalizedCaptureRights(manifest);
+    const worldModelCandidate = sceneMemoryCapture.world_model_candidate === true;
 
     const captureDescriptor: Record<string, unknown> = {
       schema_version: "v1",
@@ -512,11 +613,10 @@ export const extractFrames = onObjectFinalized(
       capture_id: pathInfo.captureId,
       capture_source: captureSource,
       capture_tier: qualityGate.captureTier,
+      processing_profile: qualityGate.processingProfile,
       raw_prefix_uri: rawPrefixUri,
       frames_index_uri: framesIndexUri,
       keyframe_uri: keyframeUri,
-      nurec_mode: qualityGate.nurecMode,
-      swap_focus: ["kitchen", "warehouse"],
       intended_space_type: asString(manifest?.intended_space_type) ?? "unknown",
       quality: {
         pose_match_rate: poseMatchRate,
@@ -529,58 +629,17 @@ export const extractFrames = onObjectFinalized(
         arkit_depth_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/depth`),
         arkit_confidence_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/confidence`),
       },
+      scene_memory_capture: sceneMemoryCapture,
+      capture_rights: captureRights,
+      requested_lanes: ["qualification", "scene_memory"],
       generated_at: new Date().toISOString(),
     };
 
-    if (finalStatus === "passed" && pathInfo.mode === "scenes") {
-      if (!keyframeUri) {
-        finalStatus = "blocked";
-        finalReasons.push("missing_keyframe");
-      } else {
-        const sceneRequestPayload = {
-          schema_version: "v1",
-          scene_id: pathInfo.sceneId,
-          source_mode: "image",
-          quality_tier: "standard",
-          image: {
-            gcs_uri: keyframeUri,
-            generation: objectGeneration,
-          },
-          constraints: {
-            capture_bundle: {
-              scene_id: pathInfo.sceneId,
-              capture_id: pathInfo.captureId,
-              capture_source: captureSource,
-              capture_tier: qualityGate.captureTier,
-              nurec_mode: qualityGate.nurecMode,
-              raw_prefix_uri: rawPrefixUri,
-              frames_index_uri: framesIndexUri,
-              keyframe_uri: keyframeUri,
-              descriptor_uri: descriptorUri,
-              qa_report_uri: qaReportUri,
-              swap_focus: ["kitchen", "warehouse"],
-            },
-          },
-          provider_policy: "openai_primary",
-          fallback: {
-            allow_image_fallback: false,
-          },
-        };
-        try {
-          await bucket
-            .file(pathInfo.sceneRequestObjectName)
-            .save(JSON.stringify(sceneRequestPayload, null, 2), {
-              contentType: "application/json",
-            });
-          autoTriggered = true;
-        } catch (error) {
-          finalStatus = "blocked";
-          finalReasons.push("scene_request_write_failed");
-          triggerError = error instanceof Error ? error.message : "unknown_error";
-        }
-      }
-    } else if (pathInfo.mode !== "scenes") {
-      finalWarnings.push("legacy_targets_path_no_source_orchestrator_trigger");
+    if (!keyframeUri) {
+      finalWarnings.push("missing_keyframe");
+    }
+    if (pathInfo.mode === "targets") {
+      finalWarnings.push("legacy_targets_path");
     }
 
     const qaReport: Record<string, unknown> = {
@@ -592,7 +651,7 @@ export const extractFrames = onObjectFinalized(
         asString(manifest?.capture_tier_hint) ??
         (captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses"),
       capture_tier_final: qualityGate.captureTier,
-      nurec_mode: qualityGate.nurecMode,
+      processing_profile: qualityGate.processingProfile,
       status: finalStatus,
       required_files: {
         walkthrough: walkthroughExists,
@@ -609,16 +668,18 @@ export const extractFrames = onObjectFinalized(
         pose_match_rate: poseMatchRate,
         p95_pose_delta_sec: p95PoseDeltaSec,
       },
+      scene_memory_readiness: {
+        world_model_candidate: worldModelCandidate,
+        recommended_lane: finalStatus === "passed" ? "scene_memory" : "qualification",
+        derived_only: true,
+      },
       reasons: finalReasons,
       warnings: finalWarnings,
-      auto_triggered: autoTriggered,
-      trigger_error: triggerError,
       generated_at: new Date().toISOString(),
     };
 
     captureDescriptor.qa_status = finalStatus;
     captureDescriptor.qa_report_uri = qaReportUri;
-    captureDescriptor.auto_triggered = autoTriggered;
 
     await bucket
       .file(`${pathInfo.capturesPrefix}/capture_descriptor.json`)
@@ -637,252 +698,6 @@ export const extractFrames = onObjectFinalized(
       captureId: pathInfo.captureId,
       sceneId: pathInfo.sceneId,
       qaStatus: finalStatus,
-      autoTriggered,
-    });
-  }
-);
-
-/* ---------- RoomPlan cleaning helpers ---------- */
-
-function addDirToZip(zip: AdmZip, rootDir: string, currentDir: string) {
-  const entries = readdirSync(currentDir);
-  for (const name of entries) {
-    const full = join(currentDir, name);
-    const relPath = full.substring(rootDir.length + 1);
-    const stats = statSync(full);
-    if (stats.isDirectory()) {
-      addDirToZip(zip, rootDir, full);
-    } else {
-      zip.addLocalFile(full, dirname(relPath), name);
-    }
-  }
-}
-
-function findFileRecursive(rootDir: string, targetFileName: string): string | null {
-  const entries = readdirSync(rootDir);
-  for (const name of entries) {
-    const full = join(rootDir, name);
-    const stats = statSync(full);
-    if (stats.isDirectory()) {
-      const found = findFileRecursive(full, targetFileName);
-      if (found) {
-        return found;
-      }
-    } else if (name === targetFileName) {
-      return full;
-    }
-  }
-  return null;
-}
-
-function removeObjectGrpFromUsd(usdContent: string): string {
-  const lines = usdContent.split("\n");
-  const output: string[] = [];
-  let insideObjectGrp = false;
-  let braceDepth = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-
-    if (insideObjectGrp) {
-      const openBraces = (line.match(/{/g) || []).length;
-      const closeBraces = (line.match(/}/g) || []).length;
-      braceDepth += openBraces - closeBraces;
-
-      if (braceDepth <= 0) {
-        insideObjectGrp = false;
-        braceDepth = 0;
-      }
-      continue;
-    }
-
-    if (trimmed.startsWith("def ") && trimmed.includes('"Object_grp"')) {
-      insideObjectGrp = true;
-      const openBraces = (line.match(/{/g) || []).length;
-      const closeBraces = (line.match(/}/g) || []).length;
-      braceDepth = openBraces - closeBraces;
-      continue;
-    }
-
-    if (trimmed.startsWith("over ") && trimmed.includes('"Object_grp"')) {
-      insideObjectGrp = true;
-      const openBraces = (line.match(/{/g) || []).length;
-      const closeBraces = (line.match(/}/g) || []).length;
-      braceDepth = openBraces - closeBraces;
-      continue;
-    }
-
-    output.push(line);
-  }
-
-  return output.join("\n");
-}
-
-function getAllFilesInDir(dir: string, fileList: string[] = []): string[] {
-  const files = readdirSync(dir);
-  for (const file of files) {
-    const filePath = join(dir, file);
-    const stats = statSync(filePath);
-    if (stats.isDirectory()) {
-      getAllFilesInDir(filePath, fileList);
-    } else {
-      fileList.push(filePath);
-    }
-  }
-  return fileList;
-}
-
-async function createUncompressedUsdz(sourceDir: string, outputPath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const output = createWriteStream(outputPath);
-    const archive = archiver("zip", {
-      store: true,
-      zlib: { level: 0 },
-    });
-
-    output.on("close", () => {
-      logger.info(`Created USDZ with ${archive.pointer()} bytes`);
-      resolve();
-    });
-
-    archive.on("error", (err) => {
-      reject(err);
-    });
-
-    archive.pipe(output);
-
-    const allFiles = getAllFilesInDir(sourceDir);
-    const usdFiles = allFiles.filter((f) => f.endsWith(".usdc") || f.endsWith(".usda"));
-    const otherFiles = allFiles.filter((f) => !f.endsWith(".usdc") && !f.endsWith(".usda"));
-
-    if (usdFiles.length > 0) {
-      const firstFile = usdFiles[0];
-      const relativePath = firstFile.substring(sourceDir.length + 1);
-      archive.file(firstFile, { name: relativePath });
-    }
-
-    const sortedOtherFiles = [...usdFiles.slice(1), ...otherFiles].sort();
-    for (const file of sortedOtherFiles) {
-      const relativePath = file.substring(sourceDir.length + 1);
-      archive.file(file, { name: relativePath });
-    }
-
-    archive.finalize();
-  });
-}
-
-async function processUsdzToRemoveObjects(
-  usdzPath: string,
-  outputPath: string
-): Promise<void> {
-  const extractDir = join(dirname(usdzPath), `usdz-extract-${Date.now()}`);
-  mkdirSync(extractDir, { recursive: true });
-
-  const zip = new AdmZip(usdzPath);
-  zip.extractAllTo(extractDir, true);
-
-  const allFiles = getAllFilesInDir(extractDir);
-  for (const filePath of allFiles) {
-    const fileName = basename(filePath);
-    if (fileName.endsWith(".usda") || fileName.endsWith(".usd")) {
-      try {
-        const content = readFileSync(filePath, "utf8");
-        const modified = removeObjectGrpFromUsd(content);
-        writeFileSync(filePath, modified, "utf8");
-        logger.info(`Modified USD file: ${fileName}`);
-      } catch (err) {
-        logger.warn(`Could not read/modify ${fileName} as text, skipping`, { error: err });
-      }
-    }
-  }
-
-  await createUncompressedUsdz(extractDir, outputPath);
-  logger.info(`Created modified USDZ: ${outputPath}`);
-}
-
-/**
- * cleanRoomplan
- * - Trigger: scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader format)
- *   OR: targets/<scene>/raw/roomplan.zip (legacy format)
- * - Looks for RoomPlanParametric.usdz inside the zip
- * - Writes RoomPlanArchitectureOnly.usdz with Object_grp removed
- * - Re-zips and uploads to <same_prefix>/processed/roomplan.zip
- */
-export const cleanRoomplan = onObjectFinalized(
-  {
-    region: "us-central1",
-    memory: "2GiB",
-    timeoutSeconds: 540,
-    cpu: 2,
-  },
-  async (event) => {
-    const bucketName = event.bucket;
-    const objectName = event.data?.name || "";
-    const contentType = event.data?.contentType || "";
-
-    // Handle both path formats:
-    // - scenes/<scene_id>/<source>/<capture_id>/raw/roomplan.zip (iOS uploader)
-    // - targets/<scene_id>/raw/roomplan.zip (legacy)
-    const isScenesPath = objectName.startsWith("scenes/") && objectName.endsWith("/raw/roomplan.zip");
-    const isTargetsPath = objectName.startsWith("targets/") && objectName.endsWith("/raw/roomplan.zip");
-
-    if (!isScenesPath && !isTargetsPath) {
-      logger.info("Skipping object (not a roomplan.zip under scenes/*/.../raw/ or targets/*/raw/)", {
-        objectName,
-        contentType,
-      });
-      return;
-    }
-
-    logger.info("Starting RoomPlan cleanup", { bucketName, objectName });
-
-    const bucket = storage.bucket(bucketName);
-    const tmp = tmpdir();
-    const localZip = join(tmp, `roomplan-${Date.now()}.zip`);
-    const extractDir = join(tmp, `roomplan-extract-${Date.now()}`);
-    mkdirSync(extractDir, { recursive: true });
-
-    await bucket.file(objectName).download({ destination: localZip });
-
-    const zip = new AdmZip(localZip);
-    zip.extractAllTo(extractDir, true);
-
-    const usdzPath = findFileRecursive(extractDir, "RoomPlanParametric.usdz");
-    if (!usdzPath) {
-      logger.error("RoomPlanParametric.usdz not found after unzip", {
-        extractDir,
-      });
-      return;
-    }
-
-    const roomplanDir = dirname(usdzPath);
-    logger.info("Found RoomPlanParametric.usdz", {
-      usdzPath,
-      roomplanDir,
-    });
-
-    const architectureOnlyPath = join(roomplanDir, "RoomPlanArchitectureOnly.usdz");
-    await processUsdzToRemoveObjects(usdzPath, architectureOnlyPath);
-
-    const processedZipPath = join(tmp, `roomplan-processed-${Date.now()}.zip`);
-    const newZip = new AdmZip();
-    addDirToZip(newZip, extractDir, extractDir);
-    newZip.writeZip(processedZipPath);
-
-    // Output to processed/ folder next to raw/
-    // scenes/<scene>/<source>/<capture_id>/raw/roomplan.zip -> scenes/<scene>/<source>/<capture_id>/processed/roomplan.zip
-    // targets/<scene>/raw/roomplan.zip -> targets/<scene>/processed/roomplan.zip
-    const capturePrefix = dirname(dirname(objectName)); // Everything before /raw/
-    const processedObjectName = `${capturePrefix}/processed/roomplan.zip`;
-
-    await bucket.upload(processedZipPath, {
-      destination: processedObjectName,
-      metadata: { contentType: "application/zip" },
-    });
-
-    logger.info("Uploaded processed RoomPlan zip with architecture-only USDZ", {
-      processedObjectName,
     });
   }
 );
