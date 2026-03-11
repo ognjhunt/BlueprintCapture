@@ -312,6 +312,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let schemaVersion: String
         let sceneId: String
         let captureId: String
+        let siteSubmissionId: String
         let captureSource: String
         let captureModality: String
         let evidenceTier: String
@@ -332,6 +333,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeInferenceConfidence: Double?
         let intakeWarnings: [String]
         let taskHypothesisStatus: String?
+        let taskTextHint: String?
+        let taskSteps: [String]
         let sceneMemory: SceneMemoryCaptureMetadata
         let captureRights: CaptureRightsMetadata
         let worldModelCandidate: Bool
@@ -469,6 +472,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let normalizedRights = normalizedCaptureRights(for: request)
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
+        json["site_submission_id"] = request.metadata.jobId
         json["capture_modality"] = CaptureBundleContext.captureModality(for: request)
         json["evidence_tier"] = CaptureBundleContext.evidenceTier(for: request)
         json["scaffolding_used"] = request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []
@@ -488,6 +492,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             directory: directory,
             normalized: normalizedSceneMemory
         )
+        json["task_text_hint"] = request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName
+        json["task_steps"] = request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? []
         json["capture_rights"] = manifestCaptureRights(normalizedRights)
         json["video_uri"] = mode.videoURI
 
@@ -511,6 +517,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
             captureId: CaptureBundleContext.captureIdentifier(for: request),
+            siteSubmissionId: request.metadata.jobId,
             captureSource: request.metadata.captureSource.rawValue,
             captureModality: CaptureBundleContext.captureModality(for: request),
             evidenceTier: CaptureBundleContext.evidenceTier(for: request),
@@ -531,6 +538,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             intakeInferenceConfidence: intakeMetadata?.confidence,
             intakeWarnings: intakeMetadata?.warnings ?? [],
             taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
+            taskTextHint: request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName,
+            taskSteps: request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? [],
             sceneMemory: normalizedSceneMemory,
             captureRights: normalizedRights,
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),
