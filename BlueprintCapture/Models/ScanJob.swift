@@ -30,6 +30,13 @@ struct ScanJob: Identifiable, Equatable {
     let zone: String?
     let shift: String?
     let owner: String?
+    let facilityTemplate: String?
+    let benchmarkStations: [String]
+    let lightingWindows: [String]
+    let movableObstacles: [String]
+    let floorConditionNotes: [String]
+    let reflectiveSurfaceNotes: [String]
+    let accessRules: [String]
     let adjacentSystems: [String]
     let privacyRestrictions: [String]
     let securityRestrictions: [String]
@@ -86,12 +93,27 @@ struct ScanJob: Identifiable, Equatable {
             zone: zone ?? allowedAreas.first,
             shift: shift,
             owner: owner,
+            facilityTemplate: facilityTemplate ?? category,
+            requiredCoverageAreas: [
+                "Ingress and egress route",
+                "Primary task zone",
+                "Benchmark station or handoff point",
+                "Restricted or failure-prone boundary",
+                "Floor transition or dock turn"
+            ],
+            benchmarkStations: benchmarkStations,
             adjacentSystems: adjacentSystems,
             privacySecurityLimits: privacySecurityLimits,
             knownBlockers: knownBlockers,
             nonRoutineModes: nonRoutineModes,
             peopleTrafficNotes: peopleTrafficNotes,
-            captureRestrictions: captureRestrictions.isEmpty ? restrictedAreas : captureRestrictions
+            captureRestrictions: captureRestrictions.isEmpty ? restrictedAreas : captureRestrictions,
+            lightingWindows: lightingWindows,
+            shiftTrafficWindows: peopleTrafficNotes,
+            movableObstacles: movableObstacles,
+            floorConditionNotes: floorConditionNotes,
+            reflectiveSurfaceNotes: reflectiveSurfaceNotes,
+            accessRules: accessRules
         )
     }
 
@@ -99,6 +121,8 @@ struct ScanJob: Identifiable, Equatable {
         let capturePlan = [
             "Start with entry and egress routes.",
             "Pause at each workcell boundary for 2-3 seconds.",
+            "Capture every benchmark station, dock turn, and narrow threshold.",
+            "Record restricted-zone boundaries and handoff points from both approach directions.",
             "Capture at least one still photo for any critical handoff or scale reference."
         ]
         let priors: [String: Double] = [

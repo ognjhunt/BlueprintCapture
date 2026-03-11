@@ -335,6 +335,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let taskHypothesisStatus: String?
         let taskTextHint: String?
         let taskSteps: [String]
+        let facilityTemplate: String?
+        let requiredCoverageAreas: [String]
+        let benchmarkStations: [String]
+        let lightingWindows: [String]
+        let shiftTrafficWindows: [String]
+        let movableObstacles: [String]
+        let floorConditionNotes: [String]
+        let reflectiveSurfaceNotes: [String]
+        let accessRules: [String]
         let sceneMemory: SceneMemoryCaptureMetadata
         let captureRights: CaptureRightsMetadata
         let worldModelCandidate: Bool
@@ -494,6 +503,19 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         )
         json["task_text_hint"] = request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName
         json["task_steps"] = request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? []
+        json["capture_profile"] = [
+            "facility_template": request.metadata.intakePacket?.facilityTemplate as Any,
+            "required_coverage_areas": request.metadata.intakePacket?.requiredCoverageAreas ?? [],
+            "benchmark_stations": request.metadata.intakePacket?.benchmarkStations ?? []
+        ]
+        json["environment_variability"] = [
+            "lighting_windows": request.metadata.intakePacket?.lightingWindows ?? [],
+            "shift_traffic_windows": request.metadata.intakePacket?.shiftTrafficWindows ?? [],
+            "movable_obstacles": request.metadata.intakePacket?.movableObstacles ?? [],
+            "floor_condition_notes": request.metadata.intakePacket?.floorConditionNotes ?? [],
+            "reflective_surface_notes": request.metadata.intakePacket?.reflectiveSurfaceNotes ?? [],
+            "access_rules": request.metadata.intakePacket?.accessRules ?? []
+        ]
         json["capture_rights"] = manifestCaptureRights(normalizedRights)
         json["video_uri"] = mode.videoURI
 
@@ -540,6 +562,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
             taskTextHint: request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName,
             taskSteps: request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? [],
+            facilityTemplate: request.metadata.intakePacket?.facilityTemplate,
+            requiredCoverageAreas: request.metadata.intakePacket?.requiredCoverageAreas ?? [],
+            benchmarkStations: request.metadata.intakePacket?.benchmarkStations ?? [],
+            lightingWindows: request.metadata.intakePacket?.lightingWindows ?? [],
+            shiftTrafficWindows: request.metadata.intakePacket?.shiftTrafficWindows ?? [],
+            movableObstacles: request.metadata.intakePacket?.movableObstacles ?? [],
+            floorConditionNotes: request.metadata.intakePacket?.floorConditionNotes ?? [],
+            reflectiveSurfaceNotes: request.metadata.intakePacket?.reflectiveSurfaceNotes ?? [],
+            accessRules: request.metadata.intakePacket?.accessRules ?? [],
             sceneMemory: normalizedSceneMemory,
             captureRights: normalizedRights,
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),

@@ -378,7 +378,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "arkit_meshes"],
                 coveragePlan: [
                     "Capture primary route plus each workcell boundary.",
-                    "Pause at narrow aisles, thresholds, and handoff points."
+                    "Pause at narrow aisles, thresholds, dock turns, and handoff points.",
+                    "Record restricted-zone boundaries and any failure-prone floor transitions."
                 ],
                 calibrationAssets: [],
                 scaleAnchorAssets: [],

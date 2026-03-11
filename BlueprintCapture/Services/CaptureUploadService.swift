@@ -15,12 +15,21 @@ struct QualificationIntakePacket: Equatable, Codable {
     let zone: String?
     let shift: String?
     let owner: String?
+    let facilityTemplate: String?
+    let requiredCoverageAreas: [String]
+    let benchmarkStations: [String]
     let adjacentSystems: [String]
     let privacySecurityLimits: [String]
     let knownBlockers: [String]
     let nonRoutineModes: [String]
     let peopleTrafficNotes: [String]
     let captureRestrictions: [String]
+    let lightingWindows: [String]
+    let shiftTrafficWindows: [String]
+    let movableObstacles: [String]
+    let floorConditionNotes: [String]
+    let reflectiveSurfaceNotes: [String]
+    let accessRules: [String]
 
     init(
         schemaVersion: String = "v1",
@@ -30,12 +39,21 @@ struct QualificationIntakePacket: Equatable, Codable {
         zone: String? = nil,
         shift: String? = nil,
         owner: String? = nil,
+        facilityTemplate: String? = nil,
+        requiredCoverageAreas: [String] = [],
+        benchmarkStations: [String] = [],
         adjacentSystems: [String] = [],
         privacySecurityLimits: [String] = [],
         knownBlockers: [String] = [],
         nonRoutineModes: [String] = [],
         peopleTrafficNotes: [String] = [],
-        captureRestrictions: [String] = []
+        captureRestrictions: [String] = [],
+        lightingWindows: [String] = [],
+        shiftTrafficWindows: [String] = [],
+        movableObstacles: [String] = [],
+        floorConditionNotes: [String] = [],
+        reflectiveSurfaceNotes: [String] = [],
+        accessRules: [String] = []
     ) {
         self.schemaVersion = schemaVersion
         self.workflowName = workflowName
@@ -44,12 +62,21 @@ struct QualificationIntakePacket: Equatable, Codable {
         self.zone = zone
         self.shift = shift
         self.owner = owner
+        self.facilityTemplate = facilityTemplate
+        self.requiredCoverageAreas = requiredCoverageAreas
+        self.benchmarkStations = benchmarkStations
         self.adjacentSystems = adjacentSystems
         self.privacySecurityLimits = privacySecurityLimits
         self.knownBlockers = knownBlockers
         self.nonRoutineModes = nonRoutineModes
         self.peopleTrafficNotes = peopleTrafficNotes
         self.captureRestrictions = captureRestrictions
+        self.lightingWindows = lightingWindows
+        self.shiftTrafficWindows = shiftTrafficWindows
+        self.movableObstacles = movableObstacles
+        self.floorConditionNotes = floorConditionNotes
+        self.reflectiveSurfaceNotes = reflectiveSurfaceNotes
+        self.accessRules = accessRules
     }
 
     var isComplete: Bool {

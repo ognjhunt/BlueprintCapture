@@ -754,7 +754,8 @@ final class GlassesUploadViewModel: ObservableObject {
             scaffoldingPacket: CaptureScaffoldingPacket(
                 coveragePlan: [
                     "Collect a scale-anchor still image before or after the walkthrough.",
-                    "Pause at critical workcells for 2-3 seconds."
+                    "Pause at critical workcells for 2-3 seconds.",
+                    "Record dock turns, restricted-zone edges, and floor transitions."
                 ],
                 calibrationAssets: [],
                 scaleAnchorAssets: [],
