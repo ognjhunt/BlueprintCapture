@@ -583,9 +583,11 @@ final class IntakeResolutionService: IntakeResolutionServiceProtocol {
             )
             return .needsManualEntry(request: candidate, draft: draft)
         } catch {
+            let helperText = inferenceFailureHelperText(for: error)
+            print("🤖 [IntakeResolution] AI inference failed: \(helperText)")
             let draft = CaptureManualIntakeDraft(
                 packet: request.metadata.intakePacket,
-                helperText: "AI intake was unavailable. Enter minimal workflow details to continue."
+                helperText: helperText
             )
             return .needsManualEntry(request: request, draft: draft)
         }
@@ -600,6 +602,15 @@ final class IntakeResolutionService: IntakeResolutionServiceProtocol {
         let warnings = taskHypothesis.warnings.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         let warningText = warnings.isEmpty ? "Please confirm or edit the task before continuing." : "Warnings: " + warnings.joined(separator: " ")
         return "We think this task is '\(workflow)' (\(confidence)% confidence). \(warningText)"
+    }
+
+    private func inferenceFailureHelperText(for error: Error) -> String {
+        let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        #if DEBUG
+        return "AI intake failed: \(detail)"
+        #else
+        return "AI intake failed. \(detail) Enter minimal workflow details to continue."
+        #endif
     }
 }
 

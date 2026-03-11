@@ -113,6 +113,36 @@ struct CaptureBundleAndInferenceTests {
     }
 
     @Test
+    func intakeResolutionShowsSpecificGeminiFailureReasonInManualFallback() async throws {
+        let service = IntakeResolutionService(inferenceService: FailingInferenceService())
+        let request = CaptureUploadRequest(packageURL: URL(fileURLWithPath: "/tmp/fake"), metadata: CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "job-error",
+            reservationId: nil,
+            jobId: "job-error",
+            creatorId: "tester",
+            capturedAt: Date(),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: "Test capture"
+        ))
+
+        let outcome = await service.resolve(request: request)
+        switch outcome {
+        case .resolved:
+            Issue.record("Inference failure should require manual entry")
+        case .needsManualEntry(_, let draft):
+            #expect(draft.helperText.contains("Gemini API key is not configured"))
+        }
+    }
+
+    @Test
     func intakeResolutionRequiresConfirmationForLowConfidenceAIHypothesis() async throws {
         let service = IntakeResolutionService(
             inferenceService: LowConfidenceInferenceService(),
