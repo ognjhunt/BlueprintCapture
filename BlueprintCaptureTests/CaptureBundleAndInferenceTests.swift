@@ -31,17 +31,7 @@ struct CaptureBundleAndInferenceTests {
                 zone: "Aisle 4"
             ),
             intakeMetadata: CaptureIntakeMetadata(source: .aiInferred, model: "gemini-3-flash-preview", fps: 3, confidence: 0.72),
-            taskHypothesis: CaptureTaskHypothesis(
-                workflowName: "Inbound walk",
-                taskSteps: ["Enter aisle", "Walk route"],
-                zone: "Aisle 4",
-                confidence: 0.72,
-                source: .aiInferred,
-                model: "gemini-3-flash-preview",
-                fps: 3,
-                warnings: [],
-                status: .accepted
-            ),
+            taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(scaffoldingUsed: ["arkit_depth"]),
             captureModality: "iphone_arkit_lidar",
             evidenceTier: nil,
@@ -73,15 +63,21 @@ struct CaptureBundleAndInferenceTests {
         #expect(manifest["scene_id"] as? String == "scene-123")
         #expect(manifest["site_submission_id"] as? String == "scene-123")
         #expect(manifest["video_uri"] as? String == "raw/walkthrough.mov")
-        #expect(manifest["capture_modality"] as? String == "iphone_arkit_lidar")
+        #expect(manifest["capture_modality"] as? String == "iphone_video_only")
+        #expect(manifest["evidence_tier"] as? String == "pre_screen_video")
         #expect(manifest["task_text_hint"] as? String == "Inbound walk")
         #expect((manifest["task_steps"] as? [String]) == ["Enter aisle", "Walk route"])
+        #expect((manifest["scaffolding_used"] as? [String]) == [])
         let sceneMemory = try #require(manifest["scene_memory_capture"] as? [String: Any])
         #expect(sceneMemory["world_model_candidate"] as? Bool == true)
         let sensorAvailability = try #require(sceneMemory["sensor_availability"] as? [String: Any])
-        #expect(sensorAvailability["arkit_intrinsics"] as? Bool == true)
+        #expect(sensorAvailability["arkit_intrinsics"] as? Bool == false)
+        #expect(sensorAvailability["arkit_poses"] as? Bool == false)
         #expect(sensorAvailability["arkit_meshes"] as? Bool == false)
         #expect(sensorAvailability["motion"] as? Bool == false)
+        let captureEvidence = try #require(manifest["capture_evidence"] as? [String: Any])
+        #expect(captureEvidence["arkit_intrinsics_valid"] as? Bool == false)
+        #expect(captureEvidence["arkit_pose_rows"] as? Int == 0)
         let captureRights = try #require(manifest["capture_rights"] as? [String: Any])
         #expect(captureRights["data_licensing_allowed"] as? Bool == true)
         #expect(captureRights["derived_scene_generation_allowed"] as? Bool == false)
@@ -97,22 +93,26 @@ struct CaptureBundleAndInferenceTests {
 
         let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
         let context = try #require(contextObject as? [String: Any])
-        #expect(context["siteSubmissionId"] as? String == "scene-123")
-        #expect(context["intakeSource"] as? String == "ai_inferred")
-        #expect(context["intakeInferenceModel"] as? String == "gemini-3-flash-preview")
-        #expect(context["taskHypothesisStatus"] as? String == "accepted")
-        #expect(context["taskTextHint"] as? String == "Inbound walk")
-        #expect((context["taskSteps"] as? [String]) == ["Enter aisle", "Walk route"])
-        #expect(context["worldModelCandidate"] as? Bool == true)
-        let contextCaptureRights = try #require(context["captureRights"] as? [String: Any])
-        #expect(contextCaptureRights["consentStatus"] as? String == "documented")
-        #expect(contextCaptureRights["permissionDocumentURI"] as? String == "https://example.com/permission.pdf")
-        #expect((contextCaptureRights["consentScope"] as? [String]) == ["Sales floor", "Entry"])
+        #expect(context["site_submission_id"] as? String == "scene-123")
+        #expect(context["intake_source"] as? String == "ai_inferred")
+        #expect(context["intake_inference_model"] as? String == "gemini-3-flash-preview")
+        #expect(context["task_hypothesis_status"] as? String == "accepted")
+        #expect(context["task_text_hint"] as? String == "Inbound walk")
+        #expect((context["task_steps"] as? [String]) == ["Enter aisle", "Walk route"])
+        #expect(context["world_model_candidate"] as? Bool == true)
+        let contextCaptureRights = try #require(context["capture_rights"] as? [String: Any])
+        #expect(contextCaptureRights["consent_status"] as? String == "documented")
+        #expect(contextCaptureRights["permission_document_uri"] as? String == "https://example.com/permission.pdf")
+        #expect((contextCaptureRights["consent_scope"] as? [String]) == ["Sales floor", "Entry"])
+        let contextEvidence = try #require(context["capture_evidence"] as? [String: Any])
+        #expect(contextEvidence["arkit_intrinsics_valid"] as? Bool == false)
+        #expect(contextEvidence["motion_samples"] as? Int == 0)
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])
         #expect(hypothesis["workflow_name"] as? String == "Inbound walk")
         #expect(hypothesis["status"] as? String == "accepted")
+        #expect(hypothesis["source"] as? String == "ai_inferred")
 
         let exporter = CaptureExportService(finalizer: finalizer)
         let bundle = try await exporter.exportCapture(request: request)
@@ -121,6 +121,83 @@ struct CaptureBundleAndInferenceTests {
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("walkthrough.mov").path))
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("arkit/intrinsics.json").path))
         #expect(fileManager.fileExists(atPath: (bundle.shareURL ?? bundle.captureRootURL).path))
+    }
+
+    @Test
+    func finalizerPreservesValidARKitEvidenceAndManualHypothesisSource() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-evidence-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        let arkit = raw.appendingPathComponent("arkit", isDirectory: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("depth", isDirectory: true), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("confidence", isDirectory: true), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("meshes", isDirectory: true), withIntermediateDirectories: true)
+
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
+        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("{\"fx\":1200,\"fy\":1195,\"cx\":640,\"cy\":360,\"width\":1280,\"height\":720}".utf8)
+            .write(to: arkit.appendingPathComponent("intrinsics.json"))
+        try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
+            .write(to: arkit.appendingPathComponent("poses.jsonl"))
+        try Data("{\"frame_index\":0}\n".utf8).write(to: arkit.appendingPathComponent("frames.jsonl"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
+        try Data("v 0 0 0\n".utf8).write(to: arkit.appendingPathComponent("meshes/mesh-1.obj"))
+        try Data("{\"timestamp\":1.0,\"t_capture_sec\":0.1,\"motion_provenance\":\"phone_imu_diagnostic_only\"}\n".utf8)
+            .write(to: raw.appendingPathComponent("motion.jsonl"))
+
+        let baseRequest = CaptureUploadRequest(packageURL: raw, metadata: CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "scene-arkit",
+            reservationId: nil,
+            jobId: "scene-arkit",
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: CaptureScaffoldingPacket(coveragePlan: ["Cover dock turns"]),
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: SceneMemoryCaptureMetadata(continuityScore: 0.9),
+            captureRights: nil
+        )).withManualIntake(QualificationIntakePacket(
+            workflowName: "Inbound walk",
+            taskSteps: ["Enter aisle", "Walk route"],
+            zone: "Aisle 4"
+        ))
+
+        let finalizer = CaptureBundleFinalizer()
+        _ = try finalizer.finalize(request: baseRequest, mode: .localExport())
+
+        let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
+        let manifest = try #require(manifestObject as? [String: Any])
+        #expect(manifest["capture_modality"] as? String == "iphone_arkit_lidar")
+        #expect(manifest["evidence_tier"] as? String == "qualified_metric_capture")
+        #expect((manifest["scaffolding_used"] as? [String]) == ["arkit_depth", "arkit_meshes", "arkit_pose_log"])
+
+        let sceneMemory = try #require(manifest["scene_memory_capture"] as? [String: Any])
+        let sensorAvailability = try #require(sceneMemory["sensor_availability"] as? [String: Any])
+        #expect(sensorAvailability["arkit_poses"] as? Bool == true)
+        #expect(sensorAvailability["arkit_intrinsics"] as? Bool == true)
+        #expect(sensorAvailability["arkit_depth"] as? Bool == true)
+        #expect(sceneMemory["motion_provenance"] as? String == "phone_imu_diagnostic_only")
+        #expect(sceneMemory["motion_timestamps_capture_relative"] as? Bool == true)
+
+        let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
+        let context = try #require(contextObject as? [String: Any])
+        let contextEvidence = try #require(context["capture_evidence"] as? [String: Any])
+        #expect(contextEvidence["motion_provenance"] as? String == "phone_imu_diagnostic_only")
+        #expect(contextEvidence["motion_timestamps_capture_relative"] as? Bool == true)
+        #expect(contextEvidence["arkit_pose_rows"] as? Int == 1)
+
+        let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
+        let hypothesis = try #require(hypothesisObject as? [String: Any])
+        #expect(hypothesis["source"] as? String == "human_manual")
+        #expect(hypothesis["status"] as? String == "accepted")
     }
 
     @Test

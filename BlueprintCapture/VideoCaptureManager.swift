@@ -918,10 +918,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     private func writeMotionSample(_ motion: CMDeviceMotion) {
-        guard currentArtifacts != nil else { return }
+        guard let artifacts = currentArtifacts else { return }
         let sample = CaptureManifest.MotionSample(
             timestamp: motion.timestamp,
+            tCaptureSec: max(0.0, Date().timeIntervalSince(artifacts.startedAt)),
             wallTime: Date(),
+            motionProvenance: "iphone_device_imu",
             attitude: .init(
                 roll: motion.attitude.roll,
                 pitch: motion.attitude.pitch,
@@ -1904,7 +1906,9 @@ extension VideoCaptureManager {
 
         struct MotionSample: Codable, Equatable {
             let timestamp: TimeInterval
+            let tCaptureSec: Double
             let wallTime: Date
+            let motionProvenance: String
             let attitude: Attitude
             let rotationRate: Vector3
             let gravity: Vector3

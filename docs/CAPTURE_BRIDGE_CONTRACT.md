@@ -25,6 +25,7 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   intake_packet.json
   capture_context.json
   capture_upload_complete.json
+  task_hypothesis.json
   walkthrough.mov
   motion.jsonl
   arkit/...
@@ -69,7 +70,9 @@ The manifest must also carry normalized scene-memory and rights metadata:
     },
     "operator_notes": [],
     "inaccessible_areas": [],
-    "world_model_candidate": false
+    "world_model_candidate": false,
+    "motion_provenance": null,
+    "motion_timestamps_capture_relative": false
   },
   "capture_rights": {
     "derived_scene_generation_allowed": false,
@@ -82,6 +85,34 @@ The manifest must also carry normalized scene-memory and rights metadata:
   }
 }
 ```
+
+The manifest also includes a validated `capture_evidence` block:
+
+```json
+{
+  "capture_evidence": {
+    "arkit_frame_rows": 0,
+    "arkit_pose_rows": 0,
+    "arkit_intrinsics_valid": false,
+    "arkit_depth_frames": 0,
+    "arkit_confidence_frames": 0,
+    "arkit_mesh_files": 0,
+    "motion_samples": 0,
+    "motion_provenance": null,
+    "motion_timestamps_capture_relative": false
+  }
+}
+```
+
+Supplemental files use stable snake_case keys:
+
+```text
+intake_packet.json
+capture_context.json
+task_hypothesis.json
+```
+
+`task_hypothesis.json` is always materialized for finalized bundles. If intake was authoritative or manually entered, the file is synthesized from the resolved intake packet.
 
 ## Output Files
 
@@ -115,7 +146,17 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
     "arkit_poses_uri": "gs://...",
     "arkit_intrinsics_uri": "gs://...",
     "arkit_depth_prefix_uri": "gs://...",
-    "arkit_confidence_prefix_uri": "gs://..."
+    "arkit_confidence_prefix_uri": "gs://...",
+    "arkit_meshes_prefix_uri": "gs://...",
+    "motion_uri": "gs://...",
+    "artifact_validity": {
+      "arkit_poses": true,
+      "arkit_intrinsics": true,
+      "arkit_depth": true,
+      "arkit_confidence": true,
+      "arkit_meshes": false,
+      "motion": true
+    }
   },
   "scene_memory_capture": {},
   "capture_rights": {},

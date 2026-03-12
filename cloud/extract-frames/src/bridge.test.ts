@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildCaptureBundleReferences,
   buildPoseIndex,
   chooseKeyframeCandidate,
+  evaluateClaimedArtifacts,
   evaluateQualityGate,
   findClosestPoseByTime,
   parsePoseRows,
@@ -141,4 +143,55 @@ test("evaluateQualityGate blocks invalid manifest", () => {
   });
   assert.equal(result.status, "blocked");
   assert.ok(result.reasons.includes("invalid_manifest"));
+});
+
+test("evaluateClaimedArtifacts blocks false pose and intrinsics claims", () => {
+  const evaluation = evaluateClaimedArtifacts({
+    claimed: {
+      arkit_poses: true,
+      arkit_intrinsics: true,
+      arkit_depth: true,
+      arkit_confidence: false,
+      arkit_meshes: false,
+      motion: true,
+    },
+    actual: {
+      arkit_poses: false,
+      arkit_intrinsics: false,
+      arkit_depth: false,
+      arkit_confidence: false,
+      arkit_meshes: false,
+      motion: true,
+    },
+  });
+
+  assert.ok(evaluation.blockers.includes("claimed_arkit_poses_missing_or_empty"));
+  assert.ok(evaluation.blockers.includes("claimed_arkit_intrinsics_invalid"));
+  assert.ok(evaluation.warnings.includes("claimed_arkit_depth_missing_or_empty"));
+});
+
+test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
+  const captureBundle = buildCaptureBundleReferences({
+    bucketName: "bucket",
+    rawPrefix: "scenes/scene/captures/capture/raw",
+    availability: {
+      arkit_poses: true,
+      arkit_intrinsics: false,
+      arkit_depth: true,
+      arkit_confidence: false,
+      arkit_meshes: false,
+      motion: true,
+    },
+  });
+
+  assert.equal(
+    captureBundle.arkit_poses_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/poses.jsonl"
+  );
+  assert.equal(captureBundle.arkit_intrinsics_uri, undefined);
+  assert.equal(
+    captureBundle.arkit_depth_prefix_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/depth"
+  );
+  assert.equal(captureBundle.motion_uri, "gs://bucket/scenes/scene/captures/capture/raw/motion.jsonl");
 });

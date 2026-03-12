@@ -35,6 +35,21 @@ export type QualityGateResult = {
   warnings: string[];
 };
 
+export type ArtifactAvailability = {
+  arkit_poses: boolean;
+  arkit_intrinsics: boolean;
+  arkit_depth: boolean;
+  arkit_confidence: boolean;
+  arkit_meshes: boolean;
+  motion: boolean;
+};
+
+export type ClaimedArtifactEvaluation = {
+  valid: ArtifactAvailability;
+  blockers: string[];
+  warnings: string[];
+};
+
 function toFiniteNumber(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return undefined;
@@ -285,4 +300,66 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
     reasons,
     warnings,
   };
+}
+
+export function evaluateClaimedArtifacts(input: {
+  claimed: ArtifactAvailability;
+  actual: ArtifactAvailability;
+}): ClaimedArtifactEvaluation {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  const valid = input.actual;
+
+  if (input.claimed.arkit_poses && !input.actual.arkit_poses) {
+    blockers.push("claimed_arkit_poses_missing_or_empty");
+  }
+  if (input.claimed.arkit_intrinsics && !input.actual.arkit_intrinsics) {
+    blockers.push("claimed_arkit_intrinsics_invalid");
+  }
+  if (input.claimed.arkit_depth && !input.actual.arkit_depth) {
+    warnings.push("claimed_arkit_depth_missing_or_empty");
+  }
+  if (input.claimed.arkit_confidence && !input.actual.arkit_confidence) {
+    warnings.push("claimed_arkit_confidence_missing_or_empty");
+  }
+  if (input.claimed.arkit_meshes && !input.actual.arkit_meshes) {
+    warnings.push("claimed_arkit_meshes_missing_or_empty");
+  }
+  if (input.claimed.motion && !input.actual.motion) {
+    warnings.push("claimed_motion_missing_or_empty");
+  }
+
+  return { valid, blockers, warnings };
+}
+
+export function buildCaptureBundleReferences(input: {
+  bucketName: string;
+  rawPrefix: string;
+  availability: ArtifactAvailability;
+}): Record<string, unknown> {
+  const base = `gs://${input.bucketName}/${input.rawPrefix}`;
+  const captureBundle: Record<string, unknown> = {
+    artifact_validity: input.availability,
+  };
+
+  if (input.availability.arkit_poses) {
+    captureBundle.arkit_poses_uri = `${base}/arkit/poses.jsonl`;
+  }
+  if (input.availability.arkit_intrinsics) {
+    captureBundle.arkit_intrinsics_uri = `${base}/arkit/intrinsics.json`;
+  }
+  if (input.availability.arkit_depth) {
+    captureBundle.arkit_depth_prefix_uri = `${base}/arkit/depth`;
+  }
+  if (input.availability.arkit_confidence) {
+    captureBundle.arkit_confidence_prefix_uri = `${base}/arkit/confidence`;
+  }
+  if (input.availability.arkit_meshes) {
+    captureBundle.arkit_meshes_prefix_uri = `${base}/arkit/meshes`;
+  }
+  if (input.availability.motion) {
+    captureBundle.motion_uri = `${base}/motion.jsonl`;
+  }
+
+  return captureBundle;
 }

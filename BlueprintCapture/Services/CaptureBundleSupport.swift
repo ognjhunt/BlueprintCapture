@@ -219,6 +219,51 @@ enum IntakeResolutionOutcome {
     case needsManualEntry(request: CaptureUploadRequest, draft: CaptureManualIntakeDraft)
 }
 
+struct CaptureEvidenceSummary: Equatable, Codable {
+    let arkitFrameRows: Int
+    let arkitPoseRows: Int
+    let arkitIntrinsicsValid: Bool
+    let arkitDepthFrames: Int
+    let arkitConfidenceFrames: Int
+    let arkitMeshFiles: Int
+    let motionSamples: Int
+    let motionProvenance: String?
+    let motionTimestampsCaptureRelative: Bool
+
+    var sensorAvailability: [String: Bool] {
+        [
+            "arkit_poses": arkitPoseRows > 0,
+            "arkit_intrinsics": arkitIntrinsicsValid,
+            "arkit_depth": arkitDepthFrames > 0,
+            "arkit_confidence": arkitConfidenceFrames > 0,
+            "arkit_meshes": arkitMeshFiles > 0,
+            "motion": motionSamples > 0,
+        ]
+    }
+
+    var hasUsableARKitBundle: Bool {
+        arkitPoseRows > 0 && arkitIntrinsicsValid
+    }
+
+    var hasLiDAREvidence: Bool {
+        arkitDepthFrames > 0 || arkitConfidenceFrames > 0
+    }
+
+    var derivedScaffoldingUsed: [String] {
+        var scaffolding: [String] = []
+        if arkitPoseRows > 0 {
+            scaffolding.append("arkit_pose_log")
+        }
+        if arkitDepthFrames > 0 {
+            scaffolding.append("arkit_depth")
+        }
+        if arkitMeshFiles > 0 {
+            scaffolding.append("arkit_meshes")
+        }
+        return scaffolding
+    }
+}
+
 enum CaptureBundleContext {
     static func sceneIdentifier(for request: CaptureUploadRequest) -> String {
         if let trimmed = request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
@@ -246,13 +291,9 @@ enum CaptureBundleContext {
         sceneBasePath(for: request) + "raw/"
     }
 
-    static func captureModality(for request: CaptureUploadRequest) -> String {
-        if let explicit = request.metadata.captureModality?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !explicit.isEmpty {
-            return explicit
-        }
+    static func captureModality(for request: CaptureUploadRequest, evidence: CaptureEvidenceSummary) -> String {
         if request.metadata.captureSource == .iphoneVideo {
-            return "iphone_arkit_lidar"
+            return evidence.hasUsableARKitBundle ? "iphone_arkit_lidar" : "iphone_video_only"
         }
         if !(request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).isEmpty {
             return "glasses_plus_scaffolding"
@@ -260,13 +301,9 @@ enum CaptureBundleContext {
         return "glasses_video_only"
     }
 
-    static func evidenceTier(for request: CaptureUploadRequest) -> String {
-        if let explicit = request.metadata.evidenceTier?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !explicit.isEmpty {
-            return explicit
-        }
+    static func evidenceTier(for request: CaptureUploadRequest, evidence: CaptureEvidenceSummary) -> String {
         let intakeComplete = request.metadata.intakePacket?.isComplete == true
-        if request.metadata.captureSource == .iphoneVideo && intakeComplete {
+        if request.metadata.captureSource == .iphoneVideo && intakeComplete && evidence.hasUsableARKitBundle {
             return "qualified_metric_capture"
         }
         if request.metadata.captureSource == .metaGlasses,
@@ -346,6 +383,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let accessRules: [String]
         let sceneMemory: SceneMemoryCaptureMetadata
         let captureRights: CaptureRightsMetadata
+        let captureEvidence: CaptureEvidenceSummary
         let worldModelCandidate: Bool
         let capturedAt: String
     }
@@ -416,42 +454,136 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         return (trimmed?.isEmpty == false ? trimmed : nil) ?? "unknown"
     }
 
-    private func sensorAvailability(for request: CaptureUploadRequest, directory: URL) -> [String: Bool] {
-        let motion = fileManager.fileExists(atPath: directory.appendingPathComponent("motion.jsonl").path)
-        guard request.metadata.captureSource == .iphoneVideo else {
-            return [
-                "arkit_poses": false,
-                "arkit_intrinsics": false,
-                "arkit_depth": false,
-                "arkit_confidence": false,
-                "arkit_meshes": false,
-                "motion": motion,
-            ]
+    private func countJSONLines(in url: URL, requireJSONObject: Bool = true) -> Int {
+        guard let data = try? Data(contentsOf: url),
+              let content = String(data: data, encoding: .utf8) else {
+            return 0
+        }
+        return content.split(whereSeparator: \.isNewline).reduce(into: 0) { count, line in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            if !requireJSONObject {
+                count += 1
+                return
+            }
+            guard let lineData = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData),
+                  object is [String: Any] else {
+                return
+            }
+            count += 1
+        }
+    }
+
+    private func isValidIntrinsicsFile(at url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        let requiredPositiveFields = ["fx", "fy"]
+        for key in requiredPositiveFields {
+            guard let value = object[key] as? Double, value > 0 else {
+                return false
+            }
+        }
+        let requiredFiniteFields = ["cx", "cy"]
+        for key in requiredFiniteFields {
+            guard let value = object[key] as? Double, value.isFinite else {
+                return false
+            }
+        }
+        guard let width = object["width"] as? Int, width > 0,
+              let height = object["height"] as? Int, height > 0 else {
+            return false
+        }
+        return true
+    }
+
+    private func countFiles(in directory: URL, extensions: Set<String>) -> Int {
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return 0
         }
 
-        return [
-            "arkit_poses": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/poses.jsonl").path),
-            "arkit_intrinsics": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/intrinsics.json").path),
-            "arkit_depth": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/depth").path),
-            "arkit_confidence": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/confidence").path),
-            "arkit_meshes": fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/meshes").path),
-            "motion": motion,
-        ]
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            let ext = fileURL.pathExtension.lowercased()
+            guard extensions.contains(ext) else { continue }
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values?.isRegularFile == true, (values?.fileSize ?? 0) > 0 else { continue }
+            count += 1
+        }
+        return count
+    }
+
+    private func inspectMotionMetadata(at url: URL, captureSource: CaptureUploadMetadata.CaptureSource) -> (samples: Int, provenance: String?, captureRelative: Bool) {
+        guard let data = try? Data(contentsOf: url),
+              let content = String(data: data, encoding: .utf8) else {
+            return (0, nil, false)
+        }
+
+        var samples = 0
+        var provenance: String?
+        var captureRelative = false
+
+        for line in content.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let lineData = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                continue
+            }
+            samples += 1
+            if provenance == nil {
+                provenance = object["motion_provenance"] as? String
+            }
+            if !captureRelative, object["t_capture_sec"] is Double {
+                captureRelative = true
+            }
+        }
+
+        if samples > 0, provenance == nil {
+            provenance = captureSource == .metaGlasses ? "phone_imu_diagnostic_only" : "iphone_device_imu"
+        }
+
+        return (samples, provenance, captureRelative)
+    }
+
+    private func inspectEvidence(in directory: URL, request: CaptureUploadRequest) -> CaptureEvidenceSummary {
+        let arkitDirectory = directory.appendingPathComponent("arkit", isDirectory: true)
+        let posesURL = arkitDirectory.appendingPathComponent("poses.jsonl")
+        let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
+        let intrinsicsURL = arkitDirectory.appendingPathComponent("intrinsics.json")
+        let motionURL = directory.appendingPathComponent("motion.jsonl")
+
+        let motion = inspectMotionMetadata(at: motionURL, captureSource: request.metadata.captureSource)
+        return CaptureEvidenceSummary(
+            arkitFrameRows: countJSONLines(in: framesURL),
+            arkitPoseRows: countJSONLines(in: posesURL),
+            arkitIntrinsicsValid: isValidIntrinsicsFile(at: intrinsicsURL),
+            arkitDepthFrames: countFiles(in: arkitDirectory.appendingPathComponent("depth", isDirectory: true), extensions: ["png"]),
+            arkitConfidenceFrames: countFiles(in: arkitDirectory.appendingPathComponent("confidence", isDirectory: true), extensions: ["png"]),
+            arkitMeshFiles: countFiles(in: arkitDirectory.appendingPathComponent("meshes", isDirectory: true), extensions: ["obj"]),
+            motionSamples: motion.samples,
+            motionProvenance: motion.provenance,
+            motionTimestampsCaptureRelative: motion.captureRelative
+        )
     }
 
     private func manifestSceneMemory(
         for request: CaptureUploadRequest,
-        directory: URL,
+        evidence: CaptureEvidenceSummary,
         normalized: SceneMemoryCaptureMetadata
     ) -> [String: Any] {
         [
             "continuity_score": normalized.continuityScore as Any,
             "lighting_consistency": normalized.lightingConsistency ?? "unknown",
             "dynamic_object_density": normalized.dynamicObjectDensity ?? "unknown",
-            "sensor_availability": sensorAvailability(for: request, directory: directory),
+            "sensor_availability": evidence.sensorAvailability,
             "operator_notes": normalized.operatorNotes,
             "inaccessible_areas": normalized.inaccessibleAreas,
             "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request),
+            "motion_provenance": evidence.motionProvenance as Any,
+            "motion_timestamps_capture_relative": evidence.motionTimestampsCaptureRelative,
         ]
     }
 
@@ -479,12 +611,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         var json = (try JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
+        let evidence = inspectEvidence(in: directory, request: request)
+        let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
         json["site_submission_id"] = request.metadata.jobId
-        json["capture_modality"] = CaptureBundleContext.captureModality(for: request)
-        json["evidence_tier"] = CaptureBundleContext.evidenceTier(for: request)
-        json["scaffolding_used"] = request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []
+        json["capture_modality"] = CaptureBundleContext.captureModality(for: request, evidence: evidence)
+        json["evidence_tier"] = CaptureBundleContext.evidenceTier(for: request, evidence: evidence)
+        json["scaffolding_used"] = derivedScaffolding
         json["coverage_plan"] = request.metadata.scaffoldingPacket?.coveragePlan ?? []
         json["calibration_assets"] = request.metadata.scaffoldingPacket?.calibrationAssets ?? []
         json["scaffolding_validation"] = [
@@ -498,9 +632,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         json["uncertainty_priors"] = request.metadata.scaffoldingPacket?.uncertaintyPriors ?? [:]
         json["scene_memory_capture"] = manifestSceneMemory(
             for: request,
-            directory: directory,
+            evidence: evidence,
             normalized: normalizedSceneMemory
         )
+        json["capture_evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(evidence))
         json["task_text_hint"] = request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName
         json["task_steps"] = request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? []
         json["capture_profile"] = [
@@ -524,8 +659,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     }
 
     private func materializeSupplementalFiles(in directory: URL, request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        let encoder = JSONEncoder.snakeCase
+        let evidence = inspectEvidence(in: directory, request: request)
+        let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
 
         if let intakePacket = request.metadata.intakePacket {
             let intakeURL = directory.appendingPathComponent("intake_packet.json")
@@ -535,15 +671,16 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeMetadata = request.metadata.intakeMetadata
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
+        let taskHypothesis = request.metadata.taskHypothesis ?? synthesizedTaskHypothesis(for: request)
         let context = CaptureContextFile(
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
             captureId: CaptureBundleContext.captureIdentifier(for: request),
             siteSubmissionId: request.metadata.jobId,
             captureSource: request.metadata.captureSource.rawValue,
-            captureModality: CaptureBundleContext.captureModality(for: request),
-            evidenceTier: CaptureBundleContext.evidenceTier(for: request),
-            scaffoldingUsed: request.metadata.scaffoldingPacket?.scaffoldingUsed ?? [],
+            captureModality: CaptureBundleContext.captureModality(for: request, evidence: evidence),
+            evidenceTier: CaptureBundleContext.evidenceTier(for: request, evidence: evidence),
+            scaffoldingUsed: derivedScaffolding,
             coveragePlan: request.metadata.scaffoldingPacket?.coveragePlan ?? [],
             calibrationAssets: request.metadata.scaffoldingPacket?.calibrationAssets ?? [],
             scaleAnchorAssets: request.metadata.scaffoldingPacket?.scaleAnchorAssets ?? [],
@@ -559,9 +696,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             intakeInferenceFPS: intakeMetadata?.fps,
             intakeInferenceConfidence: intakeMetadata?.confidence,
             intakeWarnings: intakeMetadata?.warnings ?? [],
-            taskHypothesisStatus: request.metadata.taskHypothesis?.status.rawValue,
-            taskTextHint: request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName,
-            taskSteps: request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? [],
+            taskHypothesisStatus: taskHypothesis.status.rawValue,
+            taskTextHint: taskHypothesis.workflowName ?? request.metadata.intakePacket?.workflowName,
+            taskSteps: taskHypothesis.taskSteps,
             facilityTemplate: request.metadata.intakePacket?.facilityTemplate,
             requiredCoverageAreas: request.metadata.intakePacket?.requiredCoverageAreas ?? [],
             benchmarkStations: request.metadata.intakePacket?.benchmarkStations ?? [],
@@ -573,16 +710,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             accessRules: request.metadata.intakePacket?.accessRules ?? [],
             sceneMemory: normalizedSceneMemory,
             captureRights: normalizedRights,
+            captureEvidence: evidence,
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let contextURL = directory.appendingPathComponent("capture_context.json")
         try encoder.encode(context).write(to: contextURL, options: .atomic)
 
-        if let taskHypothesis = request.metadata.taskHypothesis {
-            let taskHypothesisURL = directory.appendingPathComponent(taskHypothesisFilename)
-            try encoder.encode(taskHypothesis).write(to: taskHypothesisURL, options: .atomic)
-        }
+        let taskHypothesisURL = directory.appendingPathComponent(taskHypothesisFilename)
+        try encoder.encode(taskHypothesis).write(to: taskHypothesisURL, options: .atomic)
 
         let completion = UploadCompletionFile(
             schemaVersion: "v1",
@@ -593,6 +729,12 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         )
         let completionURL = directory.appendingPathComponent(completionMarkerFilename)
         try encoder.encode(completion).write(to: completionURL, options: .atomic)
+    }
+
+    private func synthesizedTaskHypothesis(for request: CaptureUploadRequest) -> CaptureTaskHypothesis {
+        let packet = request.metadata.intakePacket ?? QualificationIntakePacket()
+        let metadata = request.metadata.intakeMetadata ?? CaptureIntakeMetadata(source: .authoritative)
+        return CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
     }
 }
 
@@ -773,5 +915,15 @@ extension CaptureUploadRequest {
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+private extension JSONEncoder {
+    static var snakeCase: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+        return encoder
     }
 }

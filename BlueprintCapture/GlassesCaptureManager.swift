@@ -559,11 +559,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func writeMotionSample(_ motion: CMDeviceMotion) {
-        guard currentArtifacts != nil else { return }
+        guard let artifacts = currentArtifacts else { return }
 
         let sample: [String: Any] = [
             "timestamp": motion.timestamp,
+            "t_capture_sec": max(0.0, Date().timeIntervalSince(artifacts.startedAt)),
             "wallTime": ISO8601DateFormatter().string(from: Date()),
+            "motion_provenance": "phone_imu_diagnostic_only",
             "attitude": [
                 "roll": motion.attitude.roll,
                 "pitch": motion.attitude.pitch,

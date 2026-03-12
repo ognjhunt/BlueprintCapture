@@ -14,6 +14,7 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   intake_packet.json
   capture_context.json
   capture_upload_complete.json
+  task_hypothesis.json
   walkthrough.mov
   motion.jsonl
   arkit/
@@ -39,6 +40,7 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 - Capture-backed scene memory is downstream of the raw bundle.
 - Generated scenes are downstream derived products, not truth.
 - ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.
+- Raw bundle metadata reports only evidence that was actually captured and validated.
 
 ## Main Areas
 

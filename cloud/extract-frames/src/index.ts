@@ -8,12 +8,15 @@ import { spawn } from "child_process";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 import {
+  buildCaptureBundleReferences,
   buildPoseIndex,
   chooseKeyframeCandidate,
+  evaluateClaimedArtifacts,
   evaluateQualityGate,
   findClosestPoseByTime,
   parsePoseRows,
   percentile,
+  type ArtifactAvailability,
   type PoseRow,
   type PoseIndex,
 } from "./bridge.js";
@@ -205,6 +208,48 @@ async function loadJsonObject(
   }
 }
 
+async function prefixHasObjects(bucket: StorageBucket, prefix: string): Promise<boolean> {
+  try {
+    const [files] = await bucket.getFiles({ prefix, maxResults: 1 });
+    return files.some((file) => file.name !== prefix && !file.name.endsWith("/"));
+  } catch (error) {
+    logger.warn("Failed to inspect prefix objects", { prefix, error });
+    return false;
+  }
+}
+
+async function fileHasContent(bucket: StorageBucket, objectName: string): Promise<boolean> {
+  try {
+    const [metadata] = await bucket.file(objectName).getMetadata();
+    const size = Number(metadata.size ?? 0);
+    return Number.isFinite(size) && size > 0;
+  } catch (error) {
+    logger.warn("Failed to inspect file content", { objectName, error });
+    return false;
+  }
+}
+
+function isValidIntrinsicsPayload(value: Record<string, unknown> | null): boolean {
+  const fx = asFiniteNumber(value?.fx);
+  const fy = asFiniteNumber(value?.fy);
+  const cx = asFiniteNumber(value?.cx);
+  const cy = asFiniteNumber(value?.cy);
+  const width = asFiniteNumber(value?.width);
+  const height = asFiniteNumber(value?.height);
+  return (
+    fx !== undefined &&
+    fx > 0 &&
+    fy !== undefined &&
+    fy > 0 &&
+    cx !== undefined &&
+    cy !== undefined &&
+    width !== undefined &&
+    width > 0 &&
+    height !== undefined &&
+    height > 0
+  );
+}
+
 function gsUri(bucketName: string, objectName: string): string {
   return `gs://${bucketName}/${objectName}`;
 }
@@ -249,6 +294,8 @@ function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null):
     operator_notes: hasStringArray(raw?.operator_notes) ? raw?.operator_notes : [],
     inaccessible_areas: hasStringArray(raw?.inaccessible_areas) ? raw?.inaccessible_areas : [],
     world_model_candidate: raw?.world_model_candidate === true,
+    motion_provenance: asString(raw?.motion_provenance) ?? null,
+    motion_timestamps_capture_relative: raw?.motion_timestamps_capture_relative === true,
   };
 }
 
@@ -405,12 +452,22 @@ export const extractFrames = onObjectFinalized(
     mkdirSync(framesDir, { recursive: true });
 
     const manifestObjectName = `${pathInfo.rawPrefix}/manifest.json`;
+    const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
     const walkthroughExists = await waitForObjectExists(bucket, objectName, 3000, 1000);
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const manifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
     const manifestValidation = validateManifest(manifest);
 
     const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
+    const intrinsics = await loadJsonObject(bucket, intrinsicsObjectName, tmp);
+    const actualAvailability: ArtifactAvailability = {
+      arkit_poses: poseIndex.byFrameId.size > 0 || poseIndex.byTime.length > 0,
+      arkit_intrinsics: isValidIntrinsicsPayload(intrinsics),
+      arkit_depth: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/depth/`),
+      arkit_confidence: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/confidence/`),
+      arkit_meshes: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
+      motion: await fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
+    };
     const file = bucket.file(objectName);
 
     await file.download({ destination: localVideo });
@@ -606,16 +663,34 @@ export const extractFrames = onObjectFinalized(
     const sceneMemoryCapture = normalizedSceneMemoryCapture(manifest);
     const captureRights = normalizedCaptureRights(manifest);
     const worldModelCandidate = sceneMemoryCapture.world_model_candidate === true;
-    const sensorAvailability =
+    const claimedSensorRecord =
       typeof sceneMemoryCapture.sensor_availability === "object" && sceneMemoryCapture.sensor_availability
         ? (sceneMemoryCapture.sensor_availability as Record<string, unknown>)
         : {};
+    const claimedAvailability: ArtifactAvailability = {
+      arkit_poses: claimedSensorRecord.arkit_poses === true,
+      arkit_intrinsics: claimedSensorRecord.arkit_intrinsics === true,
+      arkit_depth: claimedSensorRecord.arkit_depth === true,
+      arkit_confidence: claimedSensorRecord.arkit_confidence === true,
+      arkit_meshes: claimedSensorRecord.arkit_meshes === true,
+      motion: claimedSensorRecord.motion === true,
+    };
+    const claimedArtifactEvaluation = evaluateClaimedArtifacts({
+      claimed: claimedAvailability,
+      actual: actualAvailability,
+    });
+    finalWarnings.push(...claimedArtifactEvaluation.warnings);
+    if (claimedArtifactEvaluation.blockers.length > 0) {
+      finalStatus = "blocked";
+      finalReasons.push(...claimedArtifactEvaluation.blockers);
+    }
+    sceneMemoryCapture.sensor_availability = claimedArtifactEvaluation.valid;
     const runtimeBuildBlockers = [
       ...(qualityGate.processingProfile === "pose_assisted" ? [] : ["processing_profile_not_pose_assisted"]),
       ...(captureSource === "iphone" ? [] : ["capture_source_not_iphone"]),
       ...(worldModelCandidate ? [] : ["scene_memory_capture.world_model_candidate=false"]),
-      ...(sensorAvailability.arkit_poses === true ? [] : ["missing_arkit_poses"]),
-      ...(sensorAvailability.arkit_intrinsics === true ? [] : ["missing_arkit_intrinsics"]),
+      ...(claimedArtifactEvaluation.valid.arkit_poses === true ? [] : ["missing_arkit_poses"]),
+      ...(claimedArtifactEvaluation.valid.arkit_intrinsics === true ? [] : ["missing_arkit_intrinsics"]),
       ...(walkthroughExists ? [] : ["missing_walkthrough"]),
       ...(sortedFiles.length > 0 ? [] : ["missing_frames_index"]),
     ];
@@ -637,12 +712,11 @@ export const extractFrames = onObjectFinalized(
         p95_pose_delta_sec: p95PoseDeltaSec,
         frame_count: sortedFiles.length,
       },
-      capture_bundle: {
-        arkit_poses_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/poses.jsonl`),
-        arkit_intrinsics_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/intrinsics.json`),
-        arkit_depth_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/depth`),
-        arkit_confidence_prefix_uri: gsUri(bucketName, `${pathInfo.rawPrefix}/arkit/confidence`),
-      },
+      capture_bundle: buildCaptureBundleReferences({
+        bucketName,
+        rawPrefix: pathInfo.rawPrefix,
+        availability: claimedArtifactEvaluation.valid,
+      }),
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
       neoverse_runtime: {

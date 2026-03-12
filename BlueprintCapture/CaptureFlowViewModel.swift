@@ -375,7 +375,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             intakeMetadata: nil,
             taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
-                scaffoldingUsed: ["arkit_depth", "arkit_pose_log", "arkit_meshes"],
+                scaffoldingUsed: [],
                 coveragePlan: [
                     "Capture primary route plus each workcell boundary.",
                     "Pause at narrow aisles, thresholds, dock turns, and handoff points.",
@@ -386,7 +386,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 checkpointAssets: [],
                 uncertaintyPriors: ["missing_intake": 0.6]
             ),
-            captureModality: "iphone_arkit_lidar",
+            captureModality: nil,
             evidenceTier: nil,
             captureContextHint: [currentTargetInfo?.name, currentAddress].compactMap { $0 }.joined(separator: " | ").nilIfEmpty,
             sceneMemory: SceneMemoryCaptureMetadata(

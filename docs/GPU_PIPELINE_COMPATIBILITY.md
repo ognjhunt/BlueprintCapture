@@ -77,7 +77,9 @@ Required normalized metadata blocks:
     },
     "operator_notes": [],
     "inaccessible_areas": [],
-    "world_model_candidate": false
+    "world_model_candidate": false,
+    "motion_provenance": null,
+    "motion_timestamps_capture_relative": false
   },
   "capture_rights": {
     "derived_scene_generation_allowed": false,
@@ -90,6 +92,26 @@ Required normalized metadata blocks:
   }
 }
 ```
+
+Validated evidence is reported separately:
+
+```json
+{
+  "capture_evidence": {
+    "arkit_frame_rows": 0,
+    "arkit_pose_rows": 0,
+    "arkit_intrinsics_valid": false,
+    "arkit_depth_frames": 0,
+    "arkit_confidence_frames": 0,
+    "arkit_mesh_files": 0,
+    "motion_samples": 0,
+    "motion_provenance": null,
+    "motion_timestamps_capture_relative": false
+  }
+}
+```
+
+Finalized bundles always include `task_hypothesis.json`, even when the task hypothesis is synthesized from authoritative or manual intake.
 
 ## Why The ARKit Data Matters
 
