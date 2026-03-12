@@ -606,6 +606,20 @@ export const extractFrames = onObjectFinalized(
     const sceneMemoryCapture = normalizedSceneMemoryCapture(manifest);
     const captureRights = normalizedCaptureRights(manifest);
     const worldModelCandidate = sceneMemoryCapture.world_model_candidate === true;
+    const sensorAvailability =
+      typeof sceneMemoryCapture.sensor_availability === "object" && sceneMemoryCapture.sensor_availability
+        ? (sceneMemoryCapture.sensor_availability as Record<string, unknown>)
+        : {};
+    const runtimeBuildBlockers = [
+      ...(qualityGate.processingProfile === "pose_assisted" ? [] : ["processing_profile_not_pose_assisted"]),
+      ...(captureSource === "iphone" ? [] : ["capture_source_not_iphone"]),
+      ...(worldModelCandidate ? [] : ["scene_memory_capture.world_model_candidate=false"]),
+      ...(sensorAvailability.arkit_poses === true ? [] : ["missing_arkit_poses"]),
+      ...(sensorAvailability.arkit_intrinsics === true ? [] : ["missing_arkit_intrinsics"]),
+      ...(walkthroughExists ? [] : ["missing_walkthrough"]),
+      ...(sortedFiles.length > 0 ? [] : ["missing_frames_index"]),
+    ];
+    const runtimeBuildEligible = finalStatus === "passed" && runtimeBuildBlockers.length === 0;
 
     const captureDescriptor: Record<string, unknown> = {
       schema_version: "v1",
@@ -631,6 +645,11 @@ export const extractFrames = onObjectFinalized(
       },
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      neoverse_runtime: {
+        launchable_site_world_candidate: runtimeBuildEligible,
+        blockers: runtimeBuildBlockers,
+        required_spatial_conditioning: ["arkit_poses", "arkit_intrinsics"],
+      },
       requested_lanes: ["qualification", "scene_memory"],
       generated_at: new Date().toISOString(),
     };
@@ -672,6 +691,8 @@ export const extractFrames = onObjectFinalized(
         world_model_candidate: worldModelCandidate,
         recommended_lane: finalStatus === "passed" ? "scene_memory" : "qualification",
         derived_only: true,
+        runtime_build_eligible: runtimeBuildEligible,
+        runtime_build_blockers: runtimeBuildBlockers,
       },
       reasons: finalReasons,
       warnings: finalWarnings,
