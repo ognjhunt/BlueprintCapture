@@ -1,172 +1,357 @@
 import SwiftUI
+import Combine
 import FirebaseAuth
 
 struct ProfileTabView: View {
     private let device = DeviceCapabilityService.shared
+    @StateObject private var vm = ProfileTabViewModel()
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    // User info card
-                    userInfoCard
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
 
-                    // Navigation links
-                    VStack(spacing: 0) {
-                        navigationRow(
-                            icon: "person.2.fill",
-                            title: "Referrals",
-                            subtitle: "Earn 10% of friends' captures",
-                            tint: BlueprintTheme.brandTeal
-                        ) {
-                            ReferralDashboardView()
-                        }
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Header
+                        pageHeader
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+                            .padding(.bottom, 24)
 
-                        Divider().padding(.leading, 52)
+                        // Tier badge card
+                        tierBadgeCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
 
-                        navigationRow(
-                            icon: "star.circle.fill",
-                            title: "Level & Achievements",
-                            subtitle: "Track your progress and badges",
-                            tint: .orange
-                        ) {
-                            LevelProgressView()
-                        }
+                        // Statistics grid
+                        sectionLabel("Statistics")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
 
-                        Divider().padding(.leading, 52)
+                        statsGrid
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
 
-                        navigationRow(
-                            icon: "gearshape.fill",
-                            title: "Settings",
-                            subtitle: "Account, payouts, preferences",
-                            tint: .gray
-                        ) {
-                            SettingsView()
-                        }
+                        // Quick nav
+                        sectionLabel("Account")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        navLinksCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
+
+                        // Device
+                        sectionLabel("Device")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        deviceCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 48)
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-
-                    // Device info card
-                    deviceInfoCard
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
-            .navigationTitle("Profile")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationBarHidden(true)
         }
-        .blueprintAppBackground()
+        .task { await vm.load() }
     }
 
-    // MARK: - User Info Card
+    // MARK: - Header
 
-    private var userInfoCard: some View {
-        HStack(spacing: 14) {
-            // Avatar
+    private var pageHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("My Account")
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.white)
+                if let email = Auth.auth().currentUser?.email {
+                    Text(email)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.45))
+                } else {
+                    Text("Not signed in")
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.45))
+                }
+            }
+            Spacer()
+            NavigationLink {
+                SettingsView()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Color(white: 0.6))
+                    .frame(width: 38, height: 38)
+                    .background(Color(white: 0.12), in: Circle())
+            }
+        }
+    }
+
+    // MARK: - Tier Badge (Kled-style hexagonal badge)
+
+    private var tierBadgeCard: some View {
+        HStack(spacing: 0) {
+            // Badge
             ZStack {
-                Circle()
-                    .fill(BlueprintTheme.brandTeal.opacity(0.2))
-                    .frame(width: 56, height: 56)
-                Image(systemName: "person.fill")
-                    .font(.title2)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(white: 0.16), Color(white: 0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 80, height: 80)
+
+                Image(systemName: "hexagon.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(Color(white: 0.22))
+
+                Image(systemName: "b.square.fill")
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(BlueprintTheme.brandTeal)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                if let user = Auth.auth().currentUser {
-                    Text(user.displayName ?? user.email ?? "Capturer")
-                        .font(.headline)
-                    Text(user.email ?? "")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Not signed in")
-                        .font(.headline)
-                    Text("Sign in to track earnings")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("CONTRIBUTOR")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color(white: 0.4))
+                    .tracking(1.5)
+                Text(Auth.auth().currentUser?.displayName ?? Auth.auth().currentUser?.email?.components(separatedBy: "@").first ?? "Capturer")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(vm.tierLabel)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(vm.tierColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(vm.tierColor.opacity(0.14), in: Capsule())
+
+                    if vm.totalCaptures > 0 {
+                        Text("#\(vm.contributorRank)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.5))
+                    }
                 }
             }
+            .padding(.leading, 16)
 
             Spacer()
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color(white: 0.14), lineWidth: 1)
         )
     }
 
-    // MARK: - Device Info Card
+    // MARK: - Stats Grid (2x2 like Kled)
 
-    private var deviceInfoCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Your Device", systemImage: "iphone")
-                .font(.headline)
+    private var statsGrid: some View {
+        let items: [(String, String, String, Color)] = [
+            ("Total Captures", "\(vm.totalCaptures)", "location.viewfinder", BlueprintTheme.brandTeal),
+            ("Earnings", vm.earningsFormatted, "dollarsign.circle.fill", BlueprintTheme.successGreen),
+            ("Referrals", "\(vm.referralCount)", "person.2.fill", Color(red: 0.9, green: 0.55, blue: 0.1)),
+            ("Approved", "\(vm.approvedCaptures)", "checkmark.shield.fill", Color(white: 0.55))
+        ]
 
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(device.deviceModel)
-                        .font(.subheadline.weight(.medium))
-                    Text(device.capabilityDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(device.multiplierLabel)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(items, id: \.0) { item in
+                statCard(title: item.0, value: item.1, icon: item.2, color: item.3)
             }
         }
+    }
+
+    private func statCard(title: String, value: String, icon: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(color)
+
+            Text(value)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(Color(white: 0.45))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .stroke(Color(white: 0.12), lineWidth: 1)
         )
     }
 
-    // MARK: - Navigation Row
+    // MARK: - Nav Links Card
 
-    private func navigationRow<Destination: View>(
+    private var navLinksCard: some View {
+        VStack(spacing: 0) {
+            accountNavRow(icon: "star.circle.fill", iconBg: Color.orange, title: "Level & Achievements", subtitle: "Track progress and badges") {
+                LevelProgressView()
+            }
+
+            rowDivider
+
+            accountNavRow(icon: "person.2.fill", iconBg: BlueprintTheme.brandTeal, title: "Referrals", subtitle: "Earn 10% of friends' captures") {
+                ReferralDashboardView()
+            }
+
+            rowDivider
+
+            accountNavRow(icon: "gearshape.fill", iconBg: Color(white: 0.3), title: "Settings", subtitle: "Account, payouts, preferences") {
+                SettingsView()
+            }
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    private func accountNavRow<Destination: View>(
         icon: String,
+        iconBg: Color,
         title: String,
         subtitle: String,
-        tint: Color,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
+        NavigationLink { destination() } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.body)
-                    .foregroundStyle(tint)
-                    .frame(width: 24)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(iconBg.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
                     Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color(white: 0.4))
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color(white: 0.25))
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
+        .buttonStyle(.plain)
     }
+
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color(white: 0.12))
+            .frame(height: 1)
+            .padding(.leading, 66)
+    }
+
+    // MARK: - Device Card
+
+    private var deviceCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "iphone")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Color(white: 0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(device.deviceModel)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(device.capabilityDescription)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+            }
+
+            Spacer()
+
+            Text(device.multiplierLabel)
+                .font(.headline.weight(.bold))
+                .foregroundStyle(BlueprintTheme.successGreen)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Section Label (Kled "STATISTICS" style)
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(white: 0.35))
+            .tracking(1.0)
+    }
+}
+
+// MARK: - View Model
+
+@MainActor
+final class ProfileTabViewModel: ObservableObject {
+    @Published var totalCaptures: Int = 0
+    @Published var approvedCaptures: Int = 0
+    @Published var referralCount: Int = 0
+    @Published var earningsFormatted: String = "$0.00"
+    @Published var contributorRank: Int = 0
+    @Published var tierLabel: String = "IRON"
+    @Published var tierColor: Color = Color(white: 0.55)
+
+    func load() async {
+        guard let history = try? await APIService.shared.fetchCaptureHistory() else { return }
+        totalCaptures = history.count
+        approvedCaptures = history.filter { $0.status == .approved || $0.status == .paid }.count
+        let totalCents = history.compactMap { $0.estimatedPayout }.reduce(Decimal(0), +)
+        let dollars = NSDecimalNumber(decimal: totalCents)
+        earningsFormatted = NumberFormatter.currency.string(from: dollars) ?? "$0.00"
+        updateTier()
+    }
+
+    private func updateTier() {
+        switch totalCaptures {
+        case 0..<5:
+            tierLabel = "IRON"
+            tierColor = Color(white: 0.55)
+        case 5..<20:
+            tierLabel = "BRONZE"
+            tierColor = Color(red: 0.7, green: 0.45, blue: 0.25)
+        case 20..<50:
+            tierLabel = "SILVER"
+            tierColor = Color(white: 0.7)
+        default:
+            tierLabel = "GOLD"
+            tierColor = Color(red: 0.85, green: 0.72, blue: 0.2)
+        }
+    }
+}
+
+private extension NumberFormatter {
+    static let currency: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .currency
+        f.currencyCode = "USD"
+        return f
+    }()
 }
 
 #Preview {

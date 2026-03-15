@@ -3,71 +3,133 @@ import SwiftUI
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
     @State private var showingStripeOnboarding = false
+    @State private var showingManagePayouts = false
     @State private var showingEditProfile = false
     @State private var showingAuth = false
     @State private var showingGlassesCapture = false
 
+    // Toggle states
+    @AppStorage("upload_wifi_only") private var wifiOnlyUploads = false
+    @AppStorage("upload_auto_clear") private var autoClearCompleted = true
+    @AppStorage("capture_haptics") private var captureHaptics = true
+    @AppStorage("notifications_enabled") private var notificationsEnabled = true
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Profile & Earnings Card
-                    profileEarningsCard
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
 
-                    // Bank Account Card
-                    bankAccountCard
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header
+                    pageHeader
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 28)
 
-                    // Quick Actions
-                    quickActionsCard
+                    // Profile section
+                    sectionLabel("Profile")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    profileCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
 
-                    // Account Settings
-                    accountCard
+                    // Payouts section
+                    sectionLabel("Payouts")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    payoutsCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+
+                    // Capture settings
+                    sectionLabel("Capture")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    captureCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+
+                    // Notifications
+                    sectionLabel("Notifications")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    notificationsCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+
+                    // Useful Links
+                    sectionLabel("Useful Links")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    usefulLinksCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+
+                    // Legal
+                    sectionLabel("Legal")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    legalCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+
+                    // Technical
+                    sectionLabel("Technical Details")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 10)
+                    technicalCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 48)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
             }
-            .navigationTitle("Account")
-            .navigationBarTitleDisplayMode(.large)
-            .blueprintAppBackground()
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
         }
-        .sheet(isPresented: $showingStripeOnboarding) {
-            StripeOnboardingView()
-        }
-        .sheet(isPresented: $showingEditProfile) {
-            EditProfileView(viewModel: viewModel)
-        }
-        .sheet(isPresented: $showingAuth) {
-            AuthView()
-        }
-        .sheet(isPresented: $showingGlassesCapture) {
-            GlassesCaptureView()
-        }
-        .task {
-            await viewModel.loadUserData()
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.black, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .sheet(isPresented: $showingManagePayouts) { ManagePayoutsView() }
+        .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
+        .sheet(isPresented: $showingEditProfile) { EditProfileView(viewModel: viewModel) }
+        .sheet(isPresented: $showingAuth) { AuthView() }
+        .sheet(isPresented: $showingGlassesCapture) { GlassesCaptureView() }
+        .task { await viewModel.loadUserData() }
+    }
+
+    // MARK: - Header
+
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Settings")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(.white)
+            Text("Manage your account and preferences")
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.45))
         }
     }
 
-    // MARK: - Profile & Earnings
+    // MARK: - Profile Card
 
-    private var profileEarningsCard: some View {
-        VStack(spacing: 16) {
-            // Profile header
+    private var profileCard: some View {
+        kledCard {
             HStack(spacing: 14) {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                ZStack {
+                    Circle()
+                        .fill(BlueprintTheme.brandTeal.opacity(0.18))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "person.fill")
+                        .font(.title3)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                }
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(viewModel.profile.fullName.isEmpty ? "Welcome" : viewModel.profile.fullName)
-                        .font(.title3.weight(.semibold))
-
-                    if !viewModel.profile.email.isEmpty {
-                        Text(viewModel.profile.email)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(viewModel.profile.fullName.isEmpty ? "Capturer" : viewModel.profile.fullName)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(viewModel.profile.email.isEmpty ? "Not signed in" : viewModel.profile.email)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
                 }
 
                 Spacer()
@@ -77,231 +139,299 @@ struct SettingsView: View {
                         viewModel.startEditingProfile()
                         showingEditProfile = true
                     } label: {
-                        Image(systemName: "pencil.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "pencil")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.5))
+                            .frame(width: 32, height: 32)
+                            .background(Color(white: 0.15), in: Circle())
                     }
-                }
-            }
-
-            Divider()
-
-            // Earnings summary
-            HStack(spacing: 0) {
-                earningsStat(
-                    value: viewModel.totalEarnings,
-                    label: "Total Earned",
-                    color: BlueprintTheme.successGreen
-                )
-
-                Divider()
-                    .frame(height: 40)
-
-                earningsStat(
-                    value: viewModel.pendingPayout,
-                    label: "Pending",
-                    color: BlueprintTheme.primary
-                )
-
-                Divider()
-                    .frame(height: 40)
-
-                VStack(spacing: 4) {
-                    Text("\(viewModel.scansCompleted)")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.primary)
-                    Text("Scans")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-
-    private func earningsStat(value: Decimal, label: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(value, format: .currency(code: "USD"))
-                .font(.title2.weight(.bold))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Bank Account
-
-    private var bankAccountCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Payouts", systemImage: "creditcard.fill")
-                .font(.headline)
-
-            if let billingInfo = viewModel.billingInfo {
-                HStack(spacing: 12) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(BlueprintTheme.successGreen)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(billingInfo.bankName) ••••\(billingInfo.lastFour)")
-                            .font(.subheadline.weight(.medium))
-                        Text("Weekly payouts enabled")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Button("Change") {
-                        showingStripeOnboarding = true
-                    }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(BlueprintTheme.primary)
-                }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(BlueprintTheme.successGreen.opacity(0.1))
-                )
-            } else {
-                VStack(spacing: 12) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .foregroundStyle(BlueprintTheme.warningOrange)
-                        Text("Connect a bank account to receive payouts")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-
-                    Button {
-                        showingStripeOnboarding = true
-                    } label: {
-                        Text("Connect Bank Account")
-                    }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
-                }
-            }
-        }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-
-    // MARK: - Quick Actions
-
-    private var quickActionsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Capture Modes", systemImage: "camera.fill")
-                .font(.headline)
-
-            Button {
-                showingGlassesCapture = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "eyeglasses")
-                        .font(.title2)
+                } else {
+                    Button("Sign In") { showingAuth = true }
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(BlueprintTheme.brandTeal)
-                        .frame(width: 40)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Meta Glasses")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Text("Hands-free capture with smart glasses")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(BlueprintTheme.brandTeal.opacity(0.12), in: Capsule())
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color(.tertiarySystemBackground))
+            }
+        }
+    }
+
+    // MARK: - Payouts Card
+
+    private var payoutsCard: some View {
+        kledCard {
+            VStack(spacing: 0) {
+                settingsNavRow(
+                    icon: "creditcard.fill",
+                    iconBg: BlueprintTheme.successGreen,
+                    title: "Manage Payouts",
+                    subtitle: "Venmo, PayPal, Crypto, Stripe"
+                ) { showingManagePayouts = true }
+
+                kledRowDivider
+
+                settingsNavRow(
+                    icon: "building.columns.fill",
+                    iconBg: BlueprintTheme.primary,
+                    title: "Connect Bank Account",
+                    subtitle: "Stripe payouts for approved scans"
+                ) { showingStripeOnboarding = true }
+
+                kledRowDivider
+
+                settingsNavRow(
+                    icon: "eyeglasses",
+                    iconBg: BlueprintTheme.brandTeal,
+                    title: "Capture Glasses",
+                    subtitle: "Connect Meta smart glasses"
+                ) { showingGlassesCapture = true }
+            }
+        }
+    }
+
+    // MARK: - Capture Card
+
+    private var captureCard: some View {
+        kledCard {
+            VStack(spacing: 0) {
+                settingsToggleRow(
+                    icon: "wifi",
+                    iconBg: Color(red: 0.2, green: 0.6, blue: 1.0),
+                    title: "Wi-Fi Only Uploads",
+                    subtitle: "Prevent uploads over cellular data",
+                    value: $wifiOnlyUploads
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "checkmark.circle.fill",
+                    iconBg: BlueprintTheme.successGreen,
+                    title: "Auto-Clear Completed",
+                    subtitle: "Remove completed items from queue",
+                    value: $autoClearCompleted
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "waveform",
+                    iconBg: Color.purple,
+                    title: "Capture Haptics",
+                    subtitle: "Vibration feedback during capture",
+                    value: $captureHaptics
                 )
             }
-            .buttonStyle(.plain)
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    // MARK: - Account Settings
+    // MARK: - Notifications Card
 
-    private var accountCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if viewModel.isAuthenticated {
-                settingsRow(icon: "person.crop.circle", title: "Edit Profile") {
-                    viewModel.startEditingProfile()
-                    showingEditProfile = true
-                }
+    private var notificationsCard: some View {
+        kledCard {
+            settingsToggleRow(
+                icon: "bell.fill",
+                iconBg: Color.orange,
+                title: "Push Notifications",
+                subtitle: "Payouts, tasks, and account alerts",
+                value: $notificationsEnabled
+            )
+        }
+    }
 
-                Divider().padding(.leading, 52)
+    // MARK: - Useful Links Card
 
-                settingsRow(icon: "lock.shield", title: "Privacy & Security") {
-                    // Future: Privacy settings
-                }
+    private var usefulLinksCard: some View {
+        kledCard {
+            VStack(spacing: 0) {
+                settingsLinkRow(icon: "globe", iconBg: Color(white: 0.25), title: "Main Website")
+                kledRowDivider
+                settingsLinkRow(icon: "questionmark.circle.fill", iconBg: Color(white: 0.25), title: "Help Center")
+                kledRowDivider
+                settingsLinkRow(icon: "ant.fill", iconBg: Color.red.opacity(0.8), title: "Report a Bug")
+            }
+        }
+    }
 
-                Divider().padding(.leading, 52)
+    // MARK: - Legal Card
 
-                settingsRow(icon: "arrow.right.square", title: "Sign Out", isDestructive: true) {
-                    Task { await viewModel.signOut() }
-                }
-            } else {
-                settingsRow(icon: "person.crop.circle.badge.plus", title: "Sign Up / Log In") {
-                    showingAuth = true
+    private var legalCard: some View {
+        kledCard {
+            VStack(spacing: 0) {
+                settingsLinkRow(icon: "doc.text.fill", iconBg: Color(white: 0.25), title: "Terms of Service")
+                kledRowDivider
+                settingsLinkRow(icon: "hand.raised.fill", iconBg: Color(white: 0.25), title: "Privacy Policy")
+                kledRowDivider
+                settingsLinkRow(icon: "camera.fill", iconBg: Color(white: 0.25), title: "Capture Policy")
+            }
+        }
+    }
+
+    // MARK: - Technical Card
+
+    private var technicalCard: some View {
+        kledCard {
+            VStack(spacing: 0) {
+                infoRow(label: "Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
+                kledRowDivider
+                infoRow(label: "Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—")
+                kledRowDivider
+
+                if viewModel.isAuthenticated {
+                    kledRowDivider
+                    Button {
+                        Task { await viewModel.signOut() }
+                    } label: {
+                        HStack {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .frame(width: 36, height: 36)
+                                .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                            Text("Sign Out")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.red)
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    private func settingsRow(icon: String, title: String, isDestructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.body)
-                    .frame(width: 24)
-                    .foregroundStyle(isDestructive ? BlueprintTheme.errorRed : .secondary)
+    // MARK: - Reusable Row Components
 
-                Text(title)
-                    .font(.body)
-                    .foregroundStyle(isDestructive ? BlueprintTheme.errorRed : .primary)
+    private func settingsNavRow(icon: String, iconBg: Color, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(iconBg.opacity(0.25), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.4))
+                }
 
                 Spacer()
 
-                if !isDestructive {
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.25))
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
     }
+
+    private func settingsToggleRow(icon: String, iconBg: Color, title: String, subtitle: String, value: Binding<Bool>) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(iconBg.opacity(0.25), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+            }
+
+            Spacer()
+
+            Toggle("", isOn: value)
+                .labelsHidden()
+                .tint(BlueprintTheme.brandTeal)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func settingsLinkRow(icon: String, iconBg: Color, title: String) -> some View {
+        Button { } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(iconBg.opacity(0.5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.25))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.6))
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Helpers
+
+    private func kledCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(white: 0.12), lineWidth: 1)
+            )
+    }
+
+    private var kledRowDivider: some View {
+        Rectangle()
+            .fill(Color(white: 0.12))
+            .frame(height: 1)
+            .padding(.leading, 66)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(white: 0.35))
+            .tracking(1.0)
+    }
 }
 
 #Preview {
-    SettingsView()
+    NavigationStack {
+        SettingsView()
+    }
+    .preferredColorScheme(.dark)
 }

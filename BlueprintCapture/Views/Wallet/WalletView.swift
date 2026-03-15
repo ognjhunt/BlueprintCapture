@@ -6,326 +6,455 @@ struct WalletView: View {
 
     @State private var showingStripeOnboarding = false
     @State private var showingAuth = false
+    @State private var selectedLedgerTab = 0
+
+    private let ledgerTabs = ["Payouts", "Cashouts", "History"]
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header
+                    pageHeader
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 20)
+
+                    // Status banner
+                    if let banner = statusBannerInfo {
+                        kledBanner(banner)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+                    }
+
+                    // Dark credit card
                     earningsCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
 
-                    if let qc = viewModel.qcStatus {
-                        qcCard(qc)
-                    }
+                    // Pending + cashout row
+                    pendingRow
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
 
-                    if let state = viewModel.stripeAccountState, !state.isReadyForTransfers {
-                        connectPayoutsCard
-                    } else if viewModel.stripeAccountState == nil {
-                        connectPayoutsCard
-                    }
+                    // Segmented ledger picker
+                    ledgerPicker
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
 
-                    captureHistoryCard
-
-                    payoutLedgerCard
-
-                    devicesCard
-
-                    accountCard
+                    // Ledger content
+                    ledgerContent
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 48)
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
-            .navigationTitle("Wallet")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
             .refreshable { await viewModel.load() }
         }
-        .blueprintAppBackground()
-        .sheet(isPresented: $showingStripeOnboarding) {
-            StripeOnboardingView()
-        }
-        .sheet(isPresented: $showingAuth) {
-            AuthView()
-        }
+        .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
+        .sheet(isPresented: $showingAuth) { AuthView() }
         .task { await viewModel.load() }
-        .alert("Error", isPresented: Binding(get: { viewModel.errorMessage != nil }, set: { if !$0 { viewModel.errorMessage = nil } })) {
+        .alert("Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
             Button("OK", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
     }
 
-    private var earningsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Earnings", systemImage: "dollarsign.circle.fill")
-                    .font(.headline)
-                Spacer()
-                if viewModel.isLoading {
-                    ProgressView().tint(BlueprintTheme.brandTeal)
-                }
-            }
+    // MARK: - Header
 
-            HStack(spacing: 0) {
-                stat(value: viewModel.totalEarnings, label: "Total", color: BlueprintTheme.successGreen)
-                Divider().frame(height: 36)
-                stat(value: viewModel.pendingPayout, label: "Pending", color: BlueprintTheme.primary)
-                Divider().frame(height: 36)
-                VStack(spacing: 4) {
-                    Text("\(viewModel.scansCompleted)")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.primary)
-                    Text("Scans")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
+    private var pageHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Wallet")
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.white)
+                Text("Your earnings and payout history")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(white: 0.5))
+            }
+            Spacer()
+            Button {
+                Task { await viewModel.load() }
+            } label: {
+                Image(systemName: viewModel.isLoading ? "arrow.clockwise" : "arrow.clockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(viewModel.isLoading ? BlueprintTheme.brandTeal : Color(white: 0.5))
+                    .rotationEffect(.degrees(viewModel.isLoading ? 360 : 0))
+                    .animation(viewModel.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: viewModel.isLoading)
+                    .frame(width: 38, height: 38)
+                    .background(Color(white: 0.12), in: Circle())
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    private func stat(value: Decimal, label: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(value, format: .currency(code: "USD"))
-                .font(.title3.weight(.bold))
-                .foregroundStyle(color)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
+    // MARK: - Status Banner
+
+    private struct BannerInfo {
+        let icon: String
+        let title: String
+        let subtitle: String
+        let tone: BannerTone
+        let actionTitle: String?
+        let action: () -> Void
     }
 
-    private func qcCard(_ qc: QualityControlStatus) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Quality Control", systemImage: "checkmark.shield.fill")
-                .font(.headline)
-
-            HStack {
-                qcStat("\(qc.pendingCount)", label: "Pending")
-                qcStat("\(qc.needsFixCount)", label: "Needs Fix")
-                qcStat("\(qc.approvedCount)", label: "Approved")
-            }
-
-            Text("Avg turnaround: \(String(format: "%.0f", qc.averageTurnaroundHours))h")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-
-    private func qcStat(_ value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title3.weight(.bold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var connectPayoutsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Connect payouts", systemImage: "creditcard.fill")
-                .font(.headline)
-
-            Text("Connect your bank account to receive payouts after QC approves your scans.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Button("Connect with Stripe") {
-                showingStripeOnboarding = true
-            }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-
-    private var captureHistoryCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Capture History", systemImage: "clock.arrow.circlepath")
-                .font(.headline)
-
-            if viewModel.captureHistory.isEmpty {
-                Text(viewModel.isAuthenticated ? "No captures yet." : "Log in to see your history.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.captureHistory.prefix(8)) { entry in
-                    NavigationLink {
-                        CaptureDetailView(entry: entry)
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.targetAddress)
-                                    .font(.subheadline.weight(.medium))
-                                    .lineLimit(1)
-                                Text(entry.statusLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if let payout = entry.estimatedPayout {
-                                Text(payout, format: .currency(code: "USD"))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(BlueprintTheme.successGreen)
-                            }
-                            Image(systemName: "chevron.right")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Divider()
-                }
+    private enum BannerTone {
+        case warning, error, info
+        var color: Color {
+            switch self {
+            case .warning: return Color(red: 0.9, green: 0.55, blue: 0.1)
+            case .error: return Color(red: 0.85, green: 0.25, blue: 0.25)
+            case .info: return BlueprintTheme.brandTeal
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    private var payoutLedgerCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Payouts", systemImage: "banknote.fill")
-                .font(.headline)
-
-            if viewModel.payoutLedger.isEmpty {
-                Text(viewModel.isAuthenticated ? "No payouts yet." : "Log in to see payouts.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.payoutLedger.prefix(6)) { entry in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.scheduledFor.formatted(.dateTime.month().day().year()))
-                                .font(.subheadline.weight(.medium))
-                            Text(entry.statusLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Text(entry.amount, format: .currency(code: "USD"))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-                    Divider()
-                }
-            }
+    private var statusBannerInfo: BannerInfo? {
+        if let qc = viewModel.qcStatus, qc.needsFixCount > 0 {
+            return BannerInfo(
+                icon: "exclamationmark.triangle.fill",
+                title: "Quality issues detected",
+                subtitle: "\(qc.needsFixCount) capture\(qc.needsFixCount == 1 ? "" : "s") need attention before payout.",
+                tone: .error,
+                actionTitle: nil,
+                action: {}
+            )
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        if viewModel.stripeAccountState == nil || viewModel.stripeAccountState?.isReadyForTransfers == false {
+            return BannerInfo(
+                icon: "exclamationmark.circle.fill",
+                title: "No payout method connected",
+                subtitle: "Connect a payout method to receive earnings.",
+                tone: .warning,
+                actionTitle: "Connect",
+                action: { showingStripeOnboarding = true }
+            )
+        }
+        return nil
     }
 
-    private var devicesCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Devices", systemImage: "eyeglasses")
-                .font(.headline)
+    private func kledBanner(_ info: BannerInfo) -> some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(info.tone.color)
+                .frame(width: 3)
+                .cornerRadius(2)
 
-            HStack {
+            HStack(spacing: 10) {
+                Image(systemName: info.icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(info.tone.color)
+                    .frame(width: 22)
+
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(deviceTitle)
+                    Text(info.title)
                         .font(.subheadline.weight(.semibold))
-                    Text(deviceSubtitle)
+                        .foregroundStyle(.white)
+                    Text(info.subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .foregroundStyle(Color(white: 0.5))
+                        .lineLimit(2)
                 }
+
                 Spacer()
 
-                if case .connected = glassesManager.connectionState {
-                    Button("Disconnect") { glassesManager.disconnect() }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.primary)
-                } else if glassesManager.lastConnectedDevice != nil {
-                    Button("Reconnect") { glassesManager.reconnectLastDevice() }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.primary)
+                if let actionTitle = info.actionTitle {
+                    Button(actionTitle, action: info.action)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(info.tone.color)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(info.tone.color.opacity(0.14)))
                 }
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(info.tone.color.opacity(0.22), lineWidth: 1)
         )
     }
 
-    private var deviceTitle: String {
-        switch glassesManager.connectionState {
-        case .connected:
-            return "Glasses connected"
-        case .connecting:
-            return "Connecting…"
-        case .scanning:
-            return "Scanning…"
-        case .error:
-            return "Connection error"
-        case .disconnected:
-            return "Not connected"
-        }
-    }
+    // MARK: - Earnings Card (Kled dark credit card style)
 
-    private var deviceSubtitle: String {
-        switch glassesManager.connectionState {
-        case .connected(let name):
-            return name
-        case .error(let message):
-            return message
-        default:
-            return glassesManager.lastConnectedDevice?.name ?? "Meta smart glasses required for scans"
-        }
-    }
+    private var earningsCard: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Card background
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color(white: 0.13), Color(white: 0.08)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color(white: 0.2), lineWidth: 1)
+                )
 
-    private var accountCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Account", systemImage: "person.crop.circle")
-                .font(.headline)
+            // Decorative circle
+            Circle()
+                .fill(BlueprintTheme.brandTeal.opacity(0.07))
+                .frame(width: 220, height: 220)
+                .offset(x: 160, y: -40)
 
-            if viewModel.isAuthenticated {
-                Button(role: .destructive) {
-                    Task { await viewModel.signOut() }
-                } label: {
-                    Text("Sign Out")
-                        .frame(maxWidth: .infinity)
+            Circle()
+                .fill(BlueprintTheme.successGreen.opacity(0.05))
+                .frame(width: 160, height: 160)
+                .offset(x: 200, y: 40)
+
+            // Content
+            VStack(alignment: .leading, spacing: 0) {
+                // Top row: logo + subtitle
+                HStack {
+                    HStack(spacing: 6) {
+                        Image(systemName: "b.square.fill")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                        Text("Blueprint Cash")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.65))
+                    }
+                    Spacer()
                 }
-                .buttonStyle(BlueprintSecondaryButtonStyle())
-            } else {
+                .padding(.bottom, 24)
+
+                // Balance
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(viewModel.totalEarnings, format: .currency(code: "USD"))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+
+                    HStack(spacing: 16) {
+                        balanceStat(label: "Pending", value: viewModel.pendingPayout, color: BlueprintTheme.brandTeal)
+                        balanceStat(label: "Scans", value: nil, intValue: viewModel.scansCompleted, color: Color(white: 0.55))
+                    }
+                }
+            }
+            .padding(22)
+        }
+        .frame(height: 180)
+        .clipped()
+    }
+
+    private func balanceStat(label: String, value: Decimal?, intValue: Int? = nil, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let value {
+                Text(value, format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+            } else if let intValue {
+                Text("\(intValue)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(color)
+            }
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(Color(white: 0.4))
+        }
+    }
+
+    // MARK: - Pending / Cashout Row
+
+    private var pendingRow: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+                Text("\(viewModel.scansCompleted) captures • \(viewModel.captureHistory.filter { $0.status == .underReview || $0.status == .submitted }.count) pending review")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+            }
+
+            Spacer()
+
+            Button {
+                showingStripeOnboarding = true
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "dollarsign.circle.fill")
+                        .font(.caption.weight(.semibold))
+                    Text("Cashout")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(Color(white: 0.7))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Color(white: 0.13), in: Capsule())
+                .overlay(Capsule().stroke(Color(white: 0.2), lineWidth: 1))
+            }
+        }
+    }
+
+    // MARK: - Segmented Picker (Kled-style)
+
+    private var ledgerPicker: some View {
+        HStack(spacing: 2) {
+            ForEach(Array(ledgerTabs.enumerated()), id: \.offset) { idx, tab in
                 Button {
-                    showingAuth = true
+                    withAnimation(.easeInOut(duration: 0.18)) { selectedLedgerTab = idx }
                 } label: {
-                    Text("Sign Up / Log In")
+                    Text(tab)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(selectedLedgerTab == idx ? .white : Color(white: 0.45))
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            selectedLedgerTab == idx
+                                ? Color(white: 0.18)
+                                : Color.clear
+                        )
                 }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
+                .buttonStyle(.plain)
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // MARK: - Ledger Content
+
+    @ViewBuilder
+    private var ledgerContent: some View {
+        switch selectedLedgerTab {
+        case 0:
+            payoutsTab
+        case 1:
+            cashoutsTab
+        default:
+            historyTab
+        }
+    }
+
+    private var payoutsTab: some View {
+        Group {
+            if viewModel.payoutLedger.isEmpty {
+                emptyState(icon: "banknote", message: "No payouts yet", subtitle: "Approved captures will appear here.")
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(viewModel.payoutLedger.prefix(12)) { entry in
+                        ledgerRow(
+                            title: entry.scheduledFor.formatted(.dateTime.month().day().year()),
+                            subtitle: entry.statusLabel,
+                            amount: entry.amount,
+                            isPositive: entry.status == .paid
+                        )
+                    }
+                }
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
+    private var cashoutsTab: some View {
+        emptyState(icon: "arrow.up.circle", message: "No cashouts yet", subtitle: "Cashouts will appear here once processed.")
+    }
+
+    private var historyTab: some View {
+        Group {
+            if viewModel.captureHistory.isEmpty {
+                emptyState(
+                    icon: "clock.arrow.circlepath",
+                    message: viewModel.isAuthenticated ? "No captures yet." : "Log in to see your history.",
+                    subtitle: nil
+                )
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(viewModel.captureHistory.prefix(12)) { entry in
+                        NavigationLink {
+                            CaptureDetailView(entry: entry)
+                        } label: {
+                            ledgerRowContent(
+                                title: entry.targetAddress,
+                                subtitle: entry.statusLabel,
+                                amount: entry.estimatedPayout,
+                                isPositive: entry.status == .paid,
+                                showChevron: true
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+        }
+    }
+
+    // MARK: - Row helpers
+
+    private func ledgerRow(title: String, subtitle: String, amount: Decimal, isPositive: Bool) -> some View {
+        ledgerRowContent(
+            title: title,
+            subtitle: subtitle,
+            amount: amount,
+            isPositive: isPositive,
+            showChevron: false
         )
+    }
+
+    private func ledgerRowContent(title: String, subtitle: String, amount: Decimal?, isPositive: Bool, showChevron: Bool) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.45))
+            }
+
+            Spacer()
+
+            if let amount {
+                Text(amount, format: .currency(code: "USD"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(isPositive ? BlueprintTheme.successGreen : Color(white: 0.7))
+            }
+
+            if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.3))
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func emptyState(icon: String, message: String, subtitle: String?) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 36))
+                .foregroundStyle(Color(white: 0.2))
+
+            Text(message)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color(white: 0.4))
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.3))
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
     }
 }
+
+// MARK: - Extensions
 
 private extension CaptureHistoryEntry {
     var statusLabel: String {

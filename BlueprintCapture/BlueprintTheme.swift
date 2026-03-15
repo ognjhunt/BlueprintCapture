@@ -20,6 +20,16 @@ enum BlueprintTheme {
     static let surface = Color(.secondarySystemBackground)
     static let surfaceElevated = Color(.tertiarySystemBackground)
 
+    // MARK: - Kled Dark UI tokens
+    /// Pure black screen background (matches Kled)
+    static let kledBackground = Color.black
+    /// Dark card surface (~#1A1A1A)
+    static let kledCard = Color(white: 0.1)
+    /// Subtle card border
+    static let kledCardBorder = Color(white: 0.15)
+    /// Dimmed label / secondary text
+    static let kledSecondary = Color(white: 0.5)
+
     // MARK: - Gradients (used sparingly)
     static let onboardingGradient = LinearGradient(
         colors: [bgDarker, Color(red: 0.05, green: 0.10, blue: 0.18)],

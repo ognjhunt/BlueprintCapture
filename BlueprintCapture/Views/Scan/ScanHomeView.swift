@@ -14,6 +14,7 @@ struct ScanHomeView: View {
     @State private var showConnectSheet = false
     @State private var recordingJob: ScanJob?
     @State private var pendingStartJobId: String?
+    @State private var activeCategory: String? = nil
 
     @State private var payoutsReady = false
     @State private var showingStripeOnboarding = false
@@ -27,40 +28,44 @@ struct ScanHomeView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    introHeader
-                    statusBanners
+            ZStack(alignment: .top) {
+                Color.black.ignoresSafeArea()
 
-                    if let ready = viewModel.readyNow {
-                        readyNearbySection(item: ready)
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        pageHeader
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+                            .padding(.bottom, 20)
+
+                        statusBanners
+                            .padding(.bottom, statusBannerCount > 0 ? 24 : 0)
+
+                        featuredSection
+                            .padding(.bottom, 28)
+
+                        categoryFilterRow
+                            .padding(.bottom, 16)
+
+                        allCapturesSection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
+
+                        submissionsRow
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+
+                        submitSpaceRow
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 48)
                     }
-
-                    if !viewModel.nearbyItems.isEmpty {
-                        nearbySection
-                    }
-
-                    if !viewModel.specialItems.isEmpty {
-                        specialCapturesSection
-                    }
-
-                    submissionsSection
-                    reviewSubmissionSection
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
+                .refreshable { await viewModel.refresh() }
             }
-            .navigationTitle("Capture")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .refreshable { await viewModel.refresh() }
+            .navigationBarHidden(true)
         }
-        .blueprintAppBackground()
         .sheet(isPresented: $showConnectSheet) {
-            GlassesConnectSheet(glassesManager: glassesManager) {
-                showConnectSheet = false
-            }
+            GlassesConnectSheet(glassesManager: glassesManager) { showConnectSheet = false }
         }
         .sheet(isPresented: $showingStripeOnboarding) {
             StripeOnboardingView()
@@ -109,365 +114,378 @@ struct ScanHomeView: View {
         .onDisappear { viewModel.onDisappear() }
     }
 
-    private var introHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Managed alpha capture network")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
-                .textCase(.uppercase)
+    // MARK: - Page Header
 
-            Text("Capture approved spaces, discover special opportunities nearby, and keep every submission moving.")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            HStack(spacing: 8) {
-                capsuleTag("Near you")
-                capsuleTag("Special captures")
-                capsuleTag("Review status")
+    private var pageHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Captures")
+                    .font(.largeTitle.weight(.bold))
+                    .foregroundStyle(.white)
+                Text("Scan spaces near you and earn")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(white: 0.5))
+            }
+            Spacer()
+            Button {
+                Task { await viewModel.refresh() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Color(white: 0.6))
+                    .frame(width: 38, height: 38)
+                    .background(Color(white: 0.12), in: Circle())
             }
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(.secondarySystemBackground),
-                            BlueprintTheme.brandTeal.opacity(0.14)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+    }
+
+    // MARK: - Status Banners
+
+    private var statusBannerCount: Int {
+        var count = 0
+        if !isGlassesConnected { count += 1 }
+        if !payoutsReady { count += 1 }
+        return count
     }
 
     @ViewBuilder
     private var statusBanners: some View {
-        VStack(spacing: 10) {
-            slimBanner(
-                title: glassesStatusTitle,
-                subtitle: glassesStatusSubtitle,
-                icon: "eyeglasses",
-                tone: isGlassesConnected ? .good : .neutral,
-                actionTitle: isGlassesConnected ? nil : "Connect"
-            ) {
-                showConnectSheet = true
+        VStack(spacing: 8) {
+            if !isGlassesConnected {
+                kledBanner(
+                    icon: "eyeglasses",
+                    title: glassesStatusTitle,
+                    subtitle: glassesStatusSubtitle,
+                    tone: .neutral,
+                    actionTitle: "Connect"
+                ) { showConnectSheet = true }
+                .padding(.horizontal, 20)
             }
-
             if !payoutsReady {
-                slimBanner(
-                    title: "Connect payouts",
-                    subtitle: "Approved submissions pay out faster once your transfer account is ready.",
+                kledBanner(
                     icon: "creditcard.fill",
+                    title: "No payout method connected",
+                    subtitle: "Connect a payout method to receive earnings.",
                     tone: .warning,
                     actionTitle: "Connect"
-                ) {
-                    showingStripeOnboarding = true
+                ) { showingStripeOnboarding = true }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    // MARK: - Featured Section
+
+    private var featuredItems: [ScanHomeViewModel.JobItem] {
+        let specials = viewModel.specialItems
+        let readyNearby = viewModel.nearbyItems.filter { $0.isReadyNow && $0.permissionTier == .approved }
+        let combined = specials + readyNearby
+        return Array(combined.prefix(10))
+    }
+
+    @ViewBuilder
+    private var featuredSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Featured Captures")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                if !featuredItems.isEmpty {
+                    Text("\(featuredItems.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.5))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(white: 0.15), in: Capsule())
                 }
+                Spacer()
             }
-
-            slimBanner(
-                title: "Capture guardrails",
-                subtitle: trustAndSafetyCopy,
-                icon: "checkmark.shield.fill",
-                tone: .neutral,
-                actionTitle: nil,
-                action: {}
-            )
-        }
-    }
-
-    private func readyNearbySection(item: ScanHomeViewModel.JobItem) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Ready nearby", subtitle: "You can start this capture now.")
-            Button {
-                selectedItem = item
-            } label: {
-                FeatureCaptureCard(item: item, style: .readyNow)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var nearbySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Near you", subtitle: "Approved and review-gated capture opportunities within range.")
+            .padding(.horizontal, 20)
 
             switch viewModel.state {
             case .idle, .loading:
-                loadingCard(message: "Finding nearby captures…")
-            case .error(let message):
-                errorCard(title: "Couldn’t load captures", message: message)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            ShimmerFeaturedCard()
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+            case .error(let msg):
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+                    .padding(.horizontal, 20)
             case .loaded:
-                LazyVStack(spacing: 12) {
-                    ForEach(viewModel.nearbyItems) { item in
-                        Button {
-                            selectedItem = item
-                        } label: {
-                            CaptureOpportunityRow(item: item)
+                if featuredItems.isEmpty {
+                    emptyFeaturedPlaceholder
+                        .padding(.horizontal, 20)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(featuredItems) { item in
+                                Button { selectedItem = item } label: {
+                                    FeaturedCaptureCard(item: item)
+                                        .frame(width: 280)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 2)
                     }
                 }
             }
         }
     }
 
-    private var specialCapturesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Special captures", subtitle: "Higher-context work with stronger buyer intent.")
+    private var emptyFeaturedPlaceholder: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.title2)
+                .foregroundStyle(Color(white: 0.3))
+            Text("No featured captures near you right now.")
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.4))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
 
+    // MARK: - Category Filter
+
+    private var allCategories: [String] {
+        let cats = viewModel.items.compactMap { $0.job.category }
+        let unique = Array(NSOrderedSet(array: cats).array as? [String] ?? cats)
+        return unique
+    }
+
+    @ViewBuilder
+    private var categoryFilterRow: some View {
+        if !allCategories.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(viewModel.specialItems) { item in
-                        Button {
-                            selectedItem = item
-                        } label: {
-                            FeatureCaptureCard(item: item, style: .special)
-                                .frame(width: 292)
+                HStack(spacing: 10) {
+                    CategoryPill(label: "All", isSelected: activeCategory == nil) {
+                        activeCategory = nil
+                    }
+                    ForEach(allCategories, id: \.self) { cat in
+                        CategoryPill(label: cat.uppercased(), isSelected: activeCategory == cat) {
+                            activeCategory = activeCategory == cat ? nil : cat
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    // MARK: - All Captures Section
+
+    private var filteredNearbyItems: [ScanHomeViewModel.JobItem] {
+        let base = viewModel.nearbyItems
+        guard let cat = activeCategory else { return base }
+        return base.filter { $0.job.category == cat }
+    }
+
+    private var filteredSpecialItems: [ScanHomeViewModel.JobItem] {
+        let base = viewModel.specialItems
+        guard let cat = activeCategory else { return base }
+        return base.filter { $0.job.category == cat }
+    }
+
+    @ViewBuilder
+    private var allCapturesSection: some View {
+        let allItems: [ScanHomeViewModel.JobItem] = {
+            var result: [ScanHomeViewModel.JobItem] = []
+            result.append(contentsOf: filteredSpecialItems.filter { item in
+                !featuredItems.contains(where: { $0.id == item.id })
+            })
+            result.append(contentsOf: filteredNearbyItems.filter { item in
+                !featuredItems.contains(where: { $0.id == item.id })
+            })
+            return result
+        }()
+
+        if !allItems.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("All Captures")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("\(allItems.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.5))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(white: 0.15), in: Capsule())
+                    Spacer()
+                }
+
+                LazyVStack(spacing: 12) {
+                    ForEach(allItems) { item in
+                        Button { selectedItem = item } label: {
+                            CaptureListRow(item: item)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.vertical, 4)
             }
         }
     }
 
-    private var submissionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(title: "Your submissions", subtitle: "Track what is in review, what needs another pass, and what already paid.")
+    // MARK: - Submissions Row
 
-            HStack(spacing: 12) {
-                ForEach(viewModel.submissionSummary) { item in
-                    SubmissionStageCard(item: item)
+    @ViewBuilder
+    private var submissionsRow: some View {
+        let summary = viewModel.submissionSummary.filter { $0.count > 0 }
+        if !summary.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("My Submissions")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                HStack(spacing: 10) {
+                    ForEach(summary) { item in
+                        SubmissionPill(item: item)
+                    }
+                    Spacer()
                 }
             }
         }
     }
 
-    private var reviewSubmissionSection: some View {
+    // MARK: - Submit Space Row
+
+    private var submitSpaceRow: some View {
         Button {
             reviewSubmissionSeed = SpaceReviewSeed(title: "Open capture review")
         } label: {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Submit a space for review")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+            HStack(spacing: 14) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(BlueprintTheme.brandTeal)
 
-                        Text("Use this when the space is promising but not already approved. We review the submission before it becomes a reusable capture opportunity.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.leading)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "arrow.up.right.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Submit a space for review")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("Address required · Rights check · Review-gated")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
                 }
 
-                HStack(spacing: 8) {
-                    capsuleTag("Address required")
-                    capsuleTag("Rights check")
-                    capsuleTag("Review-gated")
-                }
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.3))
             }
-            .padding(18)
-            .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(white: 0.14), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
     }
 
-    private func slimBanner(
+    // MARK: - Kled Banner
+
+    private func kledBanner(
+        icon: String,
         title: String,
         subtitle: String,
-        icon: String,
-        tone: BannerTone,
+        tone: KledBannerTone,
         actionTitle: String?,
         action: @escaping () -> Void
     ) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(tone.color)
-                .frame(width: 28, height: 28)
-                .background(tone.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        HStack(spacing: 0) {
+            // Left accent border
+            Rectangle()
+                .fill(tone.accentColor)
+                .frame(width: 3)
+                .cornerRadius(2)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+            HStack(spacing: 12) {
+                Image(systemName: icon)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
+                    .foregroundStyle(tone.accentColor)
+                    .frame(width: 22)
 
-            Spacer()
-
-            if let actionTitle {
-                Button(actionTitle, action: action)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(
-                        Capsule().fill(tone.color)
-                    )
-            }
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(tone.color.opacity(0.16), lineWidth: 1)
-        )
-    }
-
-    private func sectionHeader(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title)
-                    .font(.headline)
-                Spacer()
-                if let ts = viewModel.lastUpdatedAt {
-                    Text(ts.formatted(.dateTime.hour().minute()))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color(white: 0.5))
+                        .lineLimit(2)
+                }
+
+                Spacer()
+
+                if let actionTitle {
+                    Button(actionTitle, action: action)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tone.accentColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule().fill(tone.accentColor.opacity(0.14))
+                        )
                 }
             }
-
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
         }
-    }
-
-    private func loadingCard(message: String) -> some View {
-        HStack(spacing: 12) {
-            ProgressView().tint(BlueprintTheme.brandTeal)
-            Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(tone.accentColor.opacity(0.2), lineWidth: 1)
         )
     }
 
-    private func errorCard(title: String, message: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button("Try again") { Task { await viewModel.refresh() } }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
+    private enum KledBannerTone {
+        case neutral, warning, good
 
-    private func capsuleTag(_ text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(BlueprintTheme.brandTeal)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(BlueprintTheme.brandTeal.opacity(0.14))
-            )
-    }
-
-    private enum BannerTone {
-        case neutral
-        case warning
-        case good
-
-        var color: Color {
+        var accentColor: Color {
             switch self {
-            case .neutral:
-                return BlueprintTheme.brandTeal
-            case .warning:
-                return .orange
-            case .good:
-                return BlueprintTheme.successGreen
+            case .neutral: return BlueprintTheme.brandTeal
+            case .warning: return Color(red: 0.9, green: 0.55, blue: 0.1)
+            case .good: return BlueprintTheme.successGreen
             }
         }
+    }
+
+    // MARK: - Helpers
+
+    private var isGlassesConnected: Bool {
+        if case .connected = glassesManager.connectionState { return true }
+        return false
     }
 
     private var glassesStatusTitle: String {
         switch glassesManager.connectionState {
-        case .connected:
-            return "Capture glasses ready"
-        case .connecting:
-            return "Connecting glasses"
-        case .scanning:
-            return "Scanning for glasses"
-        case .error:
-            return "Connection issue"
-        case .disconnected:
-            return "Connect capture glasses"
+        case .connected: return "Capture glasses ready"
+        case .connecting: return "Connecting glasses"
+        case .scanning: return "Scanning for glasses"
+        case .error: return "Connection issue"
+        case .disconnected: return "Connect capture glasses"
         }
-    }
-
-    private var isGlassesConnected: Bool {
-        if case .connected = glassesManager.connectionState {
-            return true
-        }
-        return false
     }
 
     private var glassesStatusSubtitle: String {
         switch glassesManager.connectionState {
-        case .connected(let name):
-            return name
-        case .connecting:
-            return "Keep the device nearby."
-        case .scanning:
-            return "Looking for paired devices."
-        case .error(let message):
-            return message
-        case .disconnected:
-            return "Required for approved capture opportunities."
+        case .connected(let name): return name
+        case .connecting: return "Keep the device nearby."
+        case .scanning: return "Looking for paired devices."
+        case .error(let message): return message
+        case .disconnected: return "Required for approved capture opportunities."
         }
-    }
-
-    private var trustAndSafetyCopy: String {
-        if viewModel.nearbyPolicyCount(for: .blocked) > 0 {
-            return "Some nearby spaces are blocked. Stick to approved areas, avoid faces and screens, and follow posted restrictions."
-        }
-        if viewModel.nearbyPolicyCount(for: .permissionRequired) > 0 {
-            return "Some nearby spaces need extra care. Stay in common areas, keep private information out of frame, and stop if staff tells you to stop."
-        }
-        return "Stay in common or approved areas, avoid faces/screens, and use review submission when the capture scope is unclear."
     }
 
     private func submissionSeed(for item: ScanHomeViewModel.JobItem) -> SpaceReviewSeed {
@@ -490,9 +508,7 @@ struct ScanHomeView: View {
     }
 
     private func openDirections(to job: ScanJob) {
-        let lat = job.lat
-        let lng = job.lng
-        if let url = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d") {
+        if let url = URL(string: "http://maps.apple.com/?daddr=\(job.lat),\(job.lng)&dirflg=d") {
             UIApplication.shared.open(url)
         }
     }
@@ -504,7 +520,6 @@ struct ScanHomeView: View {
             pendingStartJobId = nil
             return
         }
-
         await viewModel.refresh()
         if let match = viewModel.items.first(where: { $0.job.id == jobId }),
            match.permissionTier == .approved {
@@ -514,10 +529,7 @@ struct ScanHomeView: View {
     }
 
     private func refreshPayoutsReady() async {
-        guard Auth.auth().currentUser != nil else {
-            payoutsReady = false
-            return
-        }
+        guard Auth.auth().currentUser != nil else { payoutsReady = false; return }
         do {
             let state = try await StripeConnectService.shared.fetchAccountState()
             payoutsReady = state.isReadyForTransfers
@@ -527,177 +539,246 @@ struct ScanHomeView: View {
     }
 }
 
-private struct CaptureOpportunityRow: View {
+// MARK: - Featured Capture Card (Kled-style full-bleed)
+
+private struct FeaturedCaptureCard: View {
     let item: ScanHomeViewModel.JobItem
-
-    var body: some View {
-        HStack(spacing: 14) {
-            CaptureArtwork(item: item)
-                .frame(width: 104, height: 104)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.job.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-
-                        Text(item.job.address)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    Spacer(minLength: 8)
-
-                    PermissionBadge(tier: item.permissionTier)
-                }
-
-                HStack(spacing: 10) {
-                    MiniMetric(label: item.payoutLabel, icon: "dollarsign.circle.fill", tint: BlueprintTheme.successGreen)
-                    MiniMetric(label: "\(item.job.estMinutes) min", icon: "clock", tint: .secondary)
-                    MiniMetric(label: item.distanceLabel, icon: "location", tint: item.isReadyNow ? BlueprintTheme.successGreen : .secondary)
-                }
-
-                HStack(spacing: 8) {
-                    if let badge = item.availabilityBadge {
-                        InlineBadge(text: badge, tone: .neutral)
-                    }
-                    Text(item.reviewNote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.white.opacity(0.05), lineWidth: 1)
-        )
-    }
-}
-
-private struct FeatureCaptureCard: View {
-    enum Style {
-        case readyNow
-        case special
-    }
-
-    let item: ScanHomeViewModel.JobItem
-    let style: Style
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            CaptureArtwork(item: item)
-                .frame(height: style == .readyNow ? 260 : 340)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            // Artwork
+            CaptureCardArtwork(item: item)
+                .frame(height: 230)
 
+            // Gradient overlay
             LinearGradient(
-                colors: [
-                    Color.black.opacity(0.08),
-                    Color.black.opacity(0.76)
-                ],
-                startPoint: .top,
+                colors: [Color.black.opacity(0), Color.black.opacity(0.82)],
+                startPoint: .center,
                 endPoint: .bottom
             )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
 
-            VStack(alignment: .leading, spacing: 12) {
+            // Content overlay
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    InlineBadge(text: style == .readyNow ? "Ready nearby" : "Special capture", tone: .teal)
+                    if let cat = item.job.category {
+                        CategoryTag(label: cat.uppercased())
+                    }
                     Spacer()
-                    PermissionBadge(tier: item.permissionTier)
+                    PermissionDot(tier: item.permissionTier)
                 }
 
                 Spacer()
 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(item.job.title)
-                        .font(.title3.weight(.semibold))
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
+                        .lineLimit(2)
 
                     Text(item.job.address)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.75))
-                        .lineLimit(2)
-
-                    HStack(spacing: 10) {
-                        InlineMetric(text: item.payoutLabel, icon: "dollarsign.circle.fill")
-                        InlineMetric(text: "\(item.job.estMinutes) min", icon: "clock")
-                        InlineMetric(text: item.distanceLabel, icon: "location")
-                    }
-
-                    Text(item.reviewNote)
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(2)
+                        .foregroundStyle(Color(white: 0.65))
+                        .lineLimit(1)
+
+                    HStack(spacing: 12) {
+                        CardMetric(text: item.payoutLabel, icon: "dollarsign.circle.fill", color: BlueprintTheme.successGreen)
+                        CardMetric(text: item.distanceLabel, icon: "location.fill", color: item.isReadyNow ? BlueprintTheme.brandTeal : Color(white: 0.55))
+                        CardMetric(text: "\(item.job.estMinutes) min", icon: "clock", color: Color(white: 0.55))
+                    }
+                }
+
+                // View button
+                HStack {
+                    Text("View capture")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(BlueprintTheme.brandTeal)
                 }
             }
-            .padding(18)
+            .padding(16)
         }
+        .frame(height: 230)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color(white: 0.15), lineWidth: 1)
         )
     }
 }
 
-private struct SubmissionStageCard: View {
+// MARK: - Capture List Row (Kled "All Special Tasks" style)
+
+private struct CaptureListRow: View {
+    let item: ScanHomeViewModel.JobItem
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            CaptureCardArtwork(item: item)
+                .frame(height: 120)
+
+            LinearGradient(
+                colors: [Color.black.opacity(0), Color.black.opacity(0.86)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            HStack(alignment: .bottom, spacing: 0) {
+                VStack(alignment: .leading, spacing: 5) {
+                    if let cat = item.job.category {
+                        CategoryTag(label: cat.uppercased())
+                    }
+                    Text(item.job.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(item.job.address)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.6))
+                        .lineLimit(1)
+                }
+                .padding(12)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(item.payoutLabel)
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(BlueprintTheme.successGreen)
+                    Text(item.distanceLabel)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.5))
+                }
+                .padding(.trailing, 14)
+                .padding(.bottom, 12)
+            }
+        }
+        .frame(height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Submission Pill
+
+private struct SubmissionPill: View {
     let item: ScanHomeViewModel.SubmissionSummaryItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 6) {
             Image(systemName: item.stage.icon)
-                .font(.headline)
-                .foregroundStyle(color)
-
-            Text("\(item.count)")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.primary)
-
-            Text(item.stage.title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-
-            Text(item.stage.subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(pillColor)
+            Text("\(item.count) \(item.stage.title)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(color.opacity(0.14), lineWidth: 1)
-        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(white: 0.1), in: Capsule())
+        .overlay(Capsule().stroke(pillColor.opacity(0.3), lineWidth: 1))
     }
 
-    private var color: Color {
+    private var pillColor: Color {
         switch item.stage {
-        case .inReview:
-            return BlueprintTheme.brandTeal
-        case .needsRecapture:
-            return .orange
-        case .paid:
-            return BlueprintTheme.successGreen
+        case .inReview: return BlueprintTheme.brandTeal
+        case .needsRecapture: return .orange
+        case .paid: return BlueprintTheme.successGreen
         }
     }
 }
 
-private struct CaptureArtwork: View {
+// MARK: - Category Filter Pill
+
+private struct CategoryPill: View {
+    let label: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? .black : Color(white: 0.65))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(
+                    Capsule().fill(isSelected ? .white : Color(white: 0.15))
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Category Tag (overlaid on images)
+
+private struct CategoryTag: View {
+    let label: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Color(white: 0.18), in: Capsule())
+    }
+}
+
+// MARK: - Permission Dot
+
+private struct PermissionDot: View {
+    let tier: ScanHomeViewModel.CapturePermissionTier
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(tier.shortLabel)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(Color(white: 0.18), in: Capsule())
+    }
+
+    private var color: Color {
+        switch tier {
+        case .approved: return BlueprintTheme.successGreen
+        case .reviewRequired: return BlueprintTheme.brandTeal
+        case .permissionRequired: return .orange
+        case .blocked: return .red
+        }
+    }
+}
+
+// MARK: - Card Metric
+
+private struct CardMetric: View {
+    let text: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(text)
+                .foregroundStyle(Color(white: 0.8))
+        }
+        .font(.caption.weight(.semibold))
+    }
+}
+
+// MARK: - Capture Card Artwork
+
+private struct CaptureCardArtwork: View {
     let item: ScanHomeViewModel.JobItem
 
     var body: some View {
@@ -706,16 +787,11 @@ private struct CaptureArtwork: View {
                 AsyncImage(url: url) { phase in
                     switch phase {
                     case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure(_):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
                         fallback
                     case .empty:
-                        fallback.overlay(
-                            ProgressView()
-                                .tint(BlueprintTheme.brandTeal)
-                        )
+                        fallback.overlay(ProgressView().tint(.white))
                     @unknown default:
                         fallback
                     }
@@ -724,115 +800,39 @@ private struct CaptureArtwork: View {
                 fallback
             }
         }
-        .overlay(alignment: .bottomLeading) {
-            if item.previewSource == .mapSnapshot {
-                InlineBadge(text: "Map", tone: .neutral)
-                    .padding(8)
-            }
-        }
     }
 
     private var fallback: some View {
-        ZStack {
-            MapSnapshotView(coordinate: item.job.coordinate)
-            LinearGradient(
-                colors: [Color.black.opacity(0), Color.black.opacity(0.18)],
-                startPoint: .top,
-                endPoint: .bottom
+        MapSnapshotView(coordinate: item.job.coordinate)
+    }
+}
+
+// MARK: - Shimmer Placeholder
+
+private struct ShimmerFeaturedCard: View {
+    @State private var shimmerOffset: CGFloat = -1.0
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(Color(white: 0.1))
+            .frame(width: 280, height: 230)
+            .overlay(
+                LinearGradient(
+                    colors: [Color.clear, Color(white: 0.18), Color.clear],
+                    startPoint: .init(x: shimmerOffset, y: 0),
+                    endPoint: .init(x: shimmerOffset + 0.6, y: 0)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             )
-        }
+            .onAppear {
+                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) {
+                    shimmerOffset = 1.5
+                }
+            }
     }
 }
 
-private struct PermissionBadge: View {
-    let tier: ScanHomeViewModel.CapturePermissionTier
-
-    var body: some View {
-        Label(tier.shortLabel, systemImage: tier.icon)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.16))
-            )
-    }
-
-    private var color: Color {
-        switch tier {
-        case .approved:
-            return BlueprintTheme.successGreen
-        case .reviewRequired:
-            return BlueprintTheme.brandTeal
-        case .permissionRequired:
-            return .orange
-        case .blocked:
-            return .red
-        }
-    }
-}
-
-private struct InlineBadge: View {
-    enum Tone {
-        case neutral
-        case teal
-    }
-
-    let text: String
-    let tone: Tone
-
-    var body: some View {
-        Text(text)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.14))
-            )
-    }
-
-    private var color: Color {
-        switch tone {
-        case .neutral:
-            return .secondary
-        case .teal:
-            return BlueprintTheme.brandTeal
-        }
-    }
-}
-
-private struct MiniMetric: View {
-    let label: String
-    let icon: String
-    let tint: Color
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-                .foregroundStyle(tint)
-            Text(label)
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-    }
-}
-
-private struct InlineMetric: View {
-    let text: String
-    let icon: String
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text(text)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.84))
-    }
-}
+// MARK: - String Extension
 
 private extension String {
     var nilIfEmpty: String? {

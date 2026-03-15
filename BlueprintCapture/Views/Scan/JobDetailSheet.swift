@@ -33,287 +33,296 @@ struct JobDetailSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    heroCard
-                    scopeCard
-                    restrictionsCard
-                    reviewImpactCard
-                    checklistCard
-                    actionsCard
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Full-bleed hero
+                    heroBlock
+
+                    // Content below hero
+                    VStack(alignment: .leading, spacing: 0) {
+                        // Category + title block
+                        titleBlock
+                            .padding(.horizontal, 20)
+                            .padding(.top, 20)
+                            .padding(.bottom, 16)
+
+                        // Payout boost banner (like Kled's "Contributing boosts rate" banner)
+                        payoutBanner
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+
+                        // Divider
+                        Divider()
+                            .background(Color(white: 0.15))
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+
+                        // Description / What to capture
+                        detailSection(title: "Description") {
+                            Text(item.job.workflowStepsOrInstructions.first ?? "Capture the primary zone, access routes, and key reference points.")
+                                .font(.subheadline)
+                                .foregroundStyle(Color(white: 0.75))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+
+                        // Task Requirements
+                        detailSection(title: "Capture Requirements") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(Array(item.job.workflowStepsOrInstructions.dropFirst().prefix(4)), id: \.self) { line in
+                                    requirementRow(line)
+                                }
+                                if item.job.workflowStepsOrInstructions.count <= 1 {
+                                    requirementRow("Start with entry and egress routes.")
+                                    requirementRow("Capture every benchmark and handoff point.")
+                                    requirementRow("Avoid faces, screens, and private documents.")
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+
+                        // Restrictions (if any)
+                        if !restrictedAreas.isEmpty {
+                            detailSection(title: "Off-limits areas") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(restrictedAreas.prefix(4), id: \.self) { area in
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: "nosign")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.red.opacity(0.8))
+                                                .frame(width: 18)
+                                            Text(area)
+                                                .font(.subheadline)
+                                                .foregroundStyle(Color(white: 0.7))
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
+                        }
+
+                        // Capture zone / CTA
+                        captureZoneBlock
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 40)
+                    }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
             }
-            .navigationTitle("Capture brief")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+
+            // Floating back button
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Back")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
                 }
+                Spacer()
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 56)
         }
-        .blueprintAppBackground()
+        .preferredColorScheme(.dark)
     }
 
-    private var heroCard: some View {
-        ZStack(alignment: .bottomLeading) {
-            heroArtwork
-                .frame(height: 260)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    // MARK: - Hero Block
 
+    private var heroBlock: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Image
+            Group {
+                if let url = item.previewURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        case .failure:
+                            heroFallback
+                        case .empty:
+                            heroFallback.overlay(
+                                ProgressView().tint(.white)
+                            )
+                        @unknown default:
+                            heroFallback
+                        }
+                    }
+                } else {
+                    heroFallback
+                }
+            }
+            .frame(height: 320)
+            .clipped()
+
+            // Bottom fade
             LinearGradient(
-                colors: [Color.black.opacity(0.1), Color.black.opacity(0.78)],
-                startPoint: .top,
+                colors: [Color.black.opacity(0), Color.black],
+                startPoint: .init(x: 0.5, y: 0.4),
                 endPoint: .bottom
             )
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    DetailPermissionBadge(tier: item.permissionTier)
-                    Spacer()
-                    if let availability = item.availabilityBadge {
-                        Text(availability)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                    }
-                }
-
-                Spacer()
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(item.job.title)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(.white)
-
-                    Text(item.job.address)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.72))
-                        .lineLimit(2)
-
-                    HStack(spacing: 10) {
-                        detailMetric(item.payoutLabel, icon: "dollarsign.circle.fill")
-                        detailMetric("\(item.job.estMinutes) min", icon: "clock")
-                        detailMetric(item.distanceLabel, icon: "location")
-                    }
-                }
-            }
-            .padding(18)
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .frame(height: 320)
     }
 
-    private var heroArtwork: some View {
-        Group {
-            if let url = item.previewURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure(_):
-                        fallbackArtwork
-                    case .empty:
-                        fallbackArtwork.overlay(ProgressView().tint(BlueprintTheme.brandTeal))
-                    @unknown default:
-                        fallbackArtwork
-                    }
-                }
-            } else {
-                fallbackArtwork
-            }
-        }
-    }
-
-    private var fallbackArtwork: some View {
+    private var heroFallback: some View {
         MapSnapshotView(coordinate: item.job.coordinate)
     }
 
-    private var scopeCard: some View {
-        sectionCard(title: "What to capture", icon: "scope") {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(item.job.workflowStepsOrInstructions.prefix(5)), id: \.self) { line in
-                    checklistRow(line, tone: .good)
-                }
-                if item.job.workflowStepsOrInstructions.isEmpty {
-                    checklistRow("Capture the access route, primary zone, and the most important handoff or benchmark point.", tone: .good)
-                }
+    // MARK: - Title Block
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let cat = item.job.category {
+                Text(cat.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(Color(white: 0.5))
+                    .tracking(1.2)
+            }
+
+            Text(item.job.title)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+
+            HStack(spacing: 14) {
+                Label(item.job.address, systemImage: "location.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.5))
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 14) {
+                metricChip(item.payoutLabel, icon: "dollarsign.circle.fill", color: BlueprintTheme.successGreen)
+                metricChip(item.distanceLabel, icon: "location", color: item.isReadyNow ? BlueprintTheme.brandTeal : Color(white: 0.45))
+                metricChip("\(item.job.estMinutes) min", icon: "clock", color: Color(white: 0.45))
             }
         }
     }
 
-    private var restrictionsCard: some View {
-        sectionCard(title: "Where not to capture", icon: "nosign") {
-            VStack(alignment: .leading, spacing: 10) {
-                if restrictedAreas.isEmpty {
-                    checklistRow("No additional restrictions were attached. Stay in visible common areas and avoid private information.", tone: .warning)
-                } else {
-                    ForEach(restrictedAreas, id: \.self) { line in
-                        checklistRow(line, tone: .warning)
-                    }
-                }
-            }
-        }
-    }
+    // MARK: - Payout Banner (Kled "Contributing boosts your payout rate" style)
 
-    private var reviewImpactCard: some View {
-        sectionCard(title: "Review and payout", icon: "chart.bar.xaxis") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(item.reviewNote)
+    private var payoutBanner: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(BlueprintTheme.successGreen)
+                .frame(width: 3)
+                .cornerRadius(2)
+
+            HStack(spacing: 10) {
+                Image(systemName: "dollarsign.circle.fill")
+                    .foregroundStyle(BlueprintTheme.successGreen)
                     .font(.subheadline)
-                    .foregroundStyle(.primary)
 
-                HStack(spacing: 12) {
-                    reviewCallout(title: "Expected review", value: reviewWindow)
-                    reviewCallout(title: "Likely payout", value: item.payoutLabel)
-                }
+                Text("Completing this capture earns \(item.payoutLabel).")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color(white: 0.85))
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
         }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(BlueprintTheme.successGreen.opacity(0.2), lineWidth: 1)
+        )
     }
 
-    private var checklistCard: some View {
-        sectionCard(title: "Before you begin", icon: "checklist") {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(primaryChecklist, id: \.self) { line in
-                    checklistRow(line, tone: .neutral)
+    // MARK: - Capture Zone Block
+
+    private var captureZoneBlock: some View {
+        VStack(spacing: 16) {
+            // Dashed capture zone (like Kled's upload area)
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(
+                        Color(white: 0.2),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
+                    )
+                    .frame(height: 110)
+
+                VStack(spacing: 8) {
+                    Image(systemName: "camera.viewfinder")
+                        .font(.title2)
+                        .foregroundStyle(Color(white: 0.35))
+                    Text("Capture Content to Upload")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color(white: 0.4))
+                    Text("All captures are reviewed. Only submit content that matches the requirements.")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.3))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
                 }
             }
-        }
-    }
 
-    private var actionsCard: some View {
-        VStack(spacing: 12) {
+            // Primary action button
             actionButton
 
-            if !isOnSite {
-                Text("Move within \(item.job.checkinRadiusM)m of the address to start an approved capture from the exact location.")
+            // Disclaimer
+            if !isOnSite && item.permissionTier != .blocked {
+                Text("Move within \(item.job.checkinRadiusM)m of the address to start an approved capture.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color(white: 0.35))
                     .multilineTextAlignment(.center)
-            } else if item.permissionTier == .permissionRequired || item.permissionTier == .blocked {
-                Text(item.permissionTier == .blocked
-                     ? "This capture is blocked. Do not record it."
-                     : "Use care here: stay in public-facing areas, avoid restricted zones, and stop if staff objects.")
+                    .frame(maxWidth: .infinity)
+            } else if item.permissionTier == .blocked {
+                Text("This location is restricted. Do not capture it.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.red.opacity(0.7))
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
             }
         }
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    private func sectionCard(title: String, icon: String, @ViewBuilder content: () -> some View) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(title, systemImage: icon)
-                .font(.headline)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
-    }
-
-    private func checklistRow(_ text: String, tone: ChecklistTone) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: tone.icon)
-                .foregroundStyle(tone.color)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-        }
-    }
+    // MARK: - Action Button
 
     @ViewBuilder
     private var actionButton: some View {
-        if !isOnSite {
-            Button(actionTitle, action: primaryAction)
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-        } else {
-            switch item.permissionTier {
-            case .approved:
-                Button(actionTitle, action: primaryAction)
-                    .buttonStyle(BlueprintSuccessButtonStyle())
-            case .reviewRequired:
-                Button(actionTitle, action: primaryAction)
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
-            case .permissionRequired, .blocked:
-                Button(actionTitle, action: {})
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
-                    .disabled(true)
-            }
-        }
-    }
-
-    private func reviewCallout(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
-    }
-
-    private func detailMetric(_ text: String, icon: String) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: icon)
-            Text(text)
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.white.opacity(0.82))
-    }
-
-    private var reviewWindow: String {
-        switch item.permissionTier {
-        case .approved:
-            return "Usually within 24h"
-        case .reviewRequired:
-            return "Reviewed before approval"
-        case .permissionRequired:
-            return "Depends on scope review"
-        case .blocked:
-            return "Unavailable"
-        }
+        Button(actionTitle, action: primaryAction)
+            .font(.headline)
+            .foregroundStyle(actionTextColor)
+            .padding(.vertical, 16)
+            .frame(maxWidth: .infinity)
+            .background(actionBackgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(item.permissionTier == .blocked)
     }
 
     private var actionTitle: String {
-        if !isOnSite {
-            return "Get closer"
-        }
-
+        if !isOnSite { return "Get Directions" }
         switch item.permissionTier {
-        case .approved:
-            return "Start capture"
-        case .reviewRequired:
-            return "Submit for review"
-        case .permissionRequired:
-            return "Check access first"
-        case .blocked:
-            return "Not allowed"
+        case .approved: return "Start Capture"
+        case .reviewRequired: return "Submit for Review"
+        case .permissionRequired: return "Check Access First"
+        case .blocked: return "Not Allowed"
         }
+    }
+
+    private var actionBackgroundColor: Color {
+        if item.permissionTier == .blocked { return Color(white: 0.12) }
+        if !isOnSite { return Color(white: 0.14) }
+        switch item.permissionTier {
+        case .approved: return BlueprintTheme.successGreen
+        case .reviewRequired: return BlueprintTheme.brandTeal.opacity(0.85)
+        case .permissionRequired: return Color(white: 0.14)
+        case .blocked: return Color(white: 0.12)
+        }
+    }
+
+    private var actionTextColor: Color {
+        item.permissionTier == .blocked ? Color(white: 0.3) : .white
     }
 
     private func primaryAction() {
@@ -322,7 +331,6 @@ struct JobDetailSheet: View {
             dismiss()
             return
         }
-
         switch item.permissionTier {
         case .approved:
             onStartCapture()
@@ -334,60 +342,38 @@ struct JobDetailSheet: View {
         dismiss()
     }
 
-    private enum ChecklistTone {
-        case good
-        case warning
-        case neutral
+    // MARK: - Subviews
 
-        var color: Color {
-            switch self {
-            case .good:
-                return BlueprintTheme.successGreen
-            case .warning:
-                return .orange
-            case .neutral:
-                return BlueprintTheme.brandTeal
-            }
+    private func detailSection(title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+            content()
         }
-
-        var icon: String {
-            switch self {
-            case .good:
-                return "checkmark.circle.fill"
-            case .warning:
-                return "exclamationmark.triangle.fill"
-            case .neutral:
-                return "checkmark.seal.fill"
-            }
-        }
-    }
-}
-
-private struct DetailPermissionBadge: View {
-    let tier: ScanHomeViewModel.CapturePermissionTier
-
-    var body: some View {
-        Label(tier.label, systemImage: tier.icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(color.opacity(0.16))
-            )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var color: Color {
-        switch tier {
-        case .approved:
-            return BlueprintTheme.successGreen
-        case .reviewRequired:
-            return BlueprintTheme.brandTeal
-        case .permissionRequired:
-            return .orange
-        case .blocked:
-            return .red
+    private func requirementRow(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(Color(white: 0.3))
+                .frame(width: 5, height: 5)
+                .padding(.top, 7)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.72))
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func metricChip(_ text: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .foregroundStyle(color)
+            Text(text)
+                .foregroundStyle(Color(white: 0.7))
+        }
+        .font(.caption.weight(.semibold))
     }
 }
