@@ -9,10 +9,12 @@ struct LocationConfirmationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Confirm location")
+                Text(viewModel.isSpaceReviewMode ? "Submit a space for review" : "Confirm location")
                     .font(.largeTitle.weight(.bold))
                     .blueprintGradientText()
-                Text("We use your current position to anchor the walkthrough to an exact address.")
+                Text(viewModel.isSpaceReviewMode
+                     ? "Tell us where the space is, why it matters, and confirm the basic capture guardrails before you record."
+                     : "We use your current position to anchor the walkthrough to an exact address.")
                     .font(.callout)
                     .blueprintSecondaryOnDark()
             }
@@ -128,19 +130,67 @@ struct LocationConfirmationView: View {
                 )
             }
 
+            if viewModel.isSpaceReviewMode {
+                BlueprintGlassCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Why is this space worth reviewing?")
+                            .font(.headline)
+                            .blueprintPrimaryOnDark()
+
+                        TextEditor(text: $viewModel.spaceContextNotes)
+                            .frame(minHeight: 110)
+                            .scrollContentBackground(.hidden)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(BlueprintTheme.surface.opacity(0.9))
+                            )
+
+                        Text("Example: active loading area, repeated congestion, strong coverage potential, or buyer-requested zone.")
+                            .font(.caption)
+                            .blueprintSecondaryOnDark()
+                    }
+                }
+
+                BlueprintGlassCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Before you record")
+                            .font(.headline)
+                            .blueprintPrimaryOnDark()
+
+                        ForEach(viewModel.spaceReviewChecklist, id: \.self) { item in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(BlueprintTheme.brandTeal)
+                                Text(item)
+                                    .font(.subheadline)
+                                    .blueprintSecondaryOnDark()
+                            }
+                        }
+
+                        Toggle(isOn: $viewModel.confirmedCaptureGuidelines) {
+                            Text("I can follow these capture rules for this submission.")
+                                .font(.subheadline.weight(.semibold))
+                                .blueprintPrimaryOnDark()
+                        }
+                        .toggleStyle(.switch)
+                    }
+                }
+            }
+
             Spacer()
 
             Button {
-                if viewModel.currentAddress != nil {
+                if viewModel.canConfirmAddress {
                     viewModel.confirmAddress()
                 } else {
                     viewModel.locationManager.requestLocation()
                 }
             } label: {
-                Text(viewModel.currentAddress == nil ? "Retry location" : "Use this location")
+                Text(viewModel.currentAddress == nil ? "Retry location" : (viewModel.isSpaceReviewMode ? "Continue to capture" : "Use this location"))
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
-            .disabled(viewModel.currentAddress == nil && viewModel.locationError == nil)
+            .disabled((viewModel.currentAddress == nil && viewModel.locationError == nil) || (viewModel.currentAddress != nil && !viewModel.canConfirmAddress))
         }
         .padding()
         .blueprintAppBackground()

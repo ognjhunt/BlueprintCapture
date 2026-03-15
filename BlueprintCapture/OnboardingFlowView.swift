@@ -142,7 +142,7 @@ private struct PermissionsEnableView: View {
                 Text("Enable Permissions")
                     .font(.title2.weight(.bold))
 
-                Text("We use these to find nearby scan jobs and capture spatial data.")
+                Text("We use these to find nearby capture opportunities and record high-quality submission data.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -344,7 +344,7 @@ private struct CompletionView: View {
                 Text("You're All Set")
                     .font(.title.weight(.bold))
 
-                Text("We’ll notify you when curated scan jobs are nearby.")
+                Text("We’ll notify you when approved capture opportunities are nearby.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -353,7 +353,7 @@ private struct CompletionView: View {
 
             Spacer()
 
-            Button("Start Scanning", action: onFinish)
+            Button("Start Capturing", action: onFinish)
                 .buttonStyle(BlueprintPrimaryButtonStyle())
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)

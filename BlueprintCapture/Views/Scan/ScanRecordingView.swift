@@ -161,7 +161,7 @@ struct ScanRecordingView: View {
                     .font(.system(size: 40))
                     .foregroundStyle(BlueprintTheme.warningOrange)
 
-                Text("Couldn’t start scan")
+                Text("Couldn’t start capture")
                     .font(.headline)
                     .foregroundStyle(.white)
 
@@ -191,7 +191,7 @@ struct ScanRecordingView: View {
             Button {
                 dismiss()
             } label: {
-                Text("Back to jobs")
+                Text("Back to capture feed")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
 

@@ -5,6 +5,46 @@ import AVFoundation
 import CoreMotion
 import MapKit
 
+struct SpaceReviewSeed: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let address: String?
+    let payoutRange: ClosedRange<Int>?
+    let captureJobId: String?
+    let buyerRequestId: String?
+    let siteSubmissionId: String?
+    let regionId: String?
+    let rightsProfile: String?
+    let requestedOutputs: [String]
+    let suggestedContext: String?
+
+    init(
+        id: String = UUID().uuidString,
+        title: String,
+        address: String? = nil,
+        payoutRange: ClosedRange<Int>? = nil,
+        captureJobId: String? = nil,
+        buyerRequestId: String? = nil,
+        siteSubmissionId: String? = nil,
+        regionId: String? = nil,
+        rightsProfile: String? = nil,
+        requestedOutputs: [String] = ["qualification", "review_intake"],
+        suggestedContext: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.address = address
+        self.payoutRange = payoutRange
+        self.captureJobId = captureJobId
+        self.buyerRequestId = buyerRequestId
+        self.siteSubmissionId = siteSubmissionId
+        self.regionId = regionId
+        self.rightsProfile = rightsProfile
+        self.requestedOutputs = requestedOutputs
+        self.suggestedContext = suggestedContext
+    }
+}
+
 @MainActor
 final class CaptureFlowViewModel: NSObject, ObservableObject {
     enum Step {
@@ -19,6 +59,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case generatingIntake
         case exporting
         case failed(String)
+    }
+
+    enum FlowMode: Equatable {
+        case standard
+        case spaceReview(seed: SpaceReviewSeed?)
     }
 
     @Published var profile: UserProfile = .placeholder
@@ -39,9 +84,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var finishedCaptureActionState: FinishedCaptureActionState = .idle
     @Published var manualIntakeDraft: CaptureManualIntakeDraft?
     @Published var shareSheetItem: ShareSheetItem?
+    @Published var spaceContextNotes: String = ""
+    @Published var confirmedCaptureGuidelines = false
 
     /// Stores current target info for the active capture session (set before starting capture)
     var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
+    let flowMode: FlowMode
 
     let locationManager = CLLocationManager()
     private let geocoder = CLGeocoder()
@@ -64,10 +112,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var currentSearchQuery: String = ""
     private var pendingPostCaptureAction: PendingPostCaptureAction?
 
-    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+    init(flowMode: FlowMode = .standard,
+         uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
          exportService: CaptureExportServiceProtocol = CaptureExportService()) {
+        self.flowMode = flowMode
         self.uploadService = uploadService
         self.targetStateService = targetStateService
         self.intakeResolutionService = intakeResolutionService
@@ -84,6 +134,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         isOnboarded = UserDefaults.standard.bool(forKey: onboardingKey)
 
         observeUploadEvents()
+
+        if case .spaceReview(let seed) = flowMode {
+            currentAddress = seed?.address
+            spaceContextNotes = seed?.suggestedContext ?? ""
+            if let seed, let payoutRange = seed.payoutRange {
+                currentTargetInfo = (name: seed.title, estimatedPayoutRange: payoutRange)
+            }
+        }
     }
 
     func loadProfile() async {
@@ -101,6 +159,25 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         isOnboarded = true
     }
 
+    var isSpaceReviewMode: Bool {
+        if case .spaceReview = flowMode { return true }
+        return false
+    }
+
+    var canConfirmAddress: Bool {
+        guard currentAddress != nil else { return false }
+        guard isSpaceReviewMode else { return true }
+        return !spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && confirmedCaptureGuidelines
+    }
+
+    var spaceReviewChecklist: [String] {
+        [
+            "Capture only common areas you can visibly access.",
+            "Avoid faces, screens, paperwork, and posted private information.",
+            "Respect restricted zones and any on-site staff direction."
+        ]
+    }
+
     func requestLocation() {
         completeOnboarding()
         guard CLLocationManager.locationServicesEnabled() else {
@@ -115,6 +192,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     func confirmAddress() {
+        guard canConfirmAddress else { return }
         guard cameraAuthorized, microphoneAuthorized, motionAuthorized else {
             step = .requestPermissions
             return
@@ -334,25 +412,32 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
         print("📦 [CaptureFlowViewModel] handleRecordingFinished targetId=\(targetId ?? "nil") reservationId=\(reservationId ?? "nil") package=\(artifacts.packageURL.lastPathComponent)")
-        let jobId = reservationId ?? targetId ?? UUID().uuidString
+        let reviewSeed: SpaceReviewSeed? = {
+            if case .spaceReview(let seed) = flowMode { return seed }
+            return nil
+        }()
+        let jobId = reviewSeed?.captureJobId ?? reservationId ?? targetId ?? UUID().uuidString
+        let requestedOutputs = reviewSeed?.requestedOutputs ?? (isSpaceReviewMode ? ["qualification", "review_intake"] : ["qualification"])
+        let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
+        let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
         let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: targetId,
             reservationId: reservationId,
             jobId: jobId,
-            captureJobId: jobId,
-            buyerRequestId: nil,
-            siteSubmissionId: jobId,
-            regionId: nil,
+            captureJobId: reviewSeed?.captureJobId ?? jobId,
+            buyerRequestId: reviewSeed?.buyerRequestId,
+            siteSubmissionId: reviewSeed?.siteSubmissionId ?? jobId,
+            regionId: reviewSeed?.regionId,
             creatorId: profile.id.uuidString,
             capturedAt: Date(),
             uploadedAt: nil,
             captureSource: .iphoneVideo,
-            specialTaskType: targetId == nil ? .operatorApproved : .curatedNearby,
+            specialTaskType: isSpaceReviewMode ? .openCapture : (targetId == nil ? .operatorApproved : .curatedNearby),
             priorityWeight: 1.0,
             quotedPayoutCents: currentTargetInfo.map { $0.estimatedPayoutRange.upperBound * 100 },
-            rightsProfile: nil,
-            requestedOutputs: ["qualification"],
+            rightsProfile: rightsProfile,
+            requestedOutputs: requestedOutputs,
             intakePacket: nil,
             intakeMetadata: nil,
             taskHypothesis: nil,
@@ -370,29 +455,29 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             ),
             captureModality: nil,
             evidenceTier: nil,
-            captureContextHint: [currentTargetInfo?.name, currentAddress].compactMap { $0 }.joined(separator: " | ").nilIfEmpty,
+            captureContextHint: contextParts.compactMap { $0 }.joined(separator: " | ").nilIfEmpty,
             sceneMemory: SceneMemoryCaptureMetadata(
                 continuityScore: nil,
                 lightingConsistency: "unknown",
                 dynamicObjectDensity: "unknown",
-                operatorNotes: [],
+                operatorNotes: spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { [$0] } ?? [],
                 inaccessibleAreas: []
             ),
             captureRights: CaptureRightsMetadata(
-                derivedSceneGenerationAllowed: false,
-                dataLicensingAllowed: false,
-                payoutEligible: false,
-                consentStatus: .unknown,
+                derivedSceneGenerationAllowed: !isSpaceReviewMode,
+                dataLicensingAllowed: !isSpaceReviewMode,
+                payoutEligible: !isSpaceReviewMode,
+                consentStatus: isSpaceReviewMode ? .policyOnly : .unknown,
                 permissionDocumentURI: nil,
                 consentScope: [],
-                consentNotes: []
+                consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
             )
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 
         pendingCaptureRequest = request
-        pendingCaptureTargetName = currentTargetInfo?.name
-        pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange
+        pendingCaptureTargetName = currentTargetInfo?.name ?? reviewSeed?.title
+        pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
         finishedCaptureActionState = .idle
         currentTargetInfo = nil
         print("📦 [CaptureFlowViewModel] Pending capture ready jobId=\(jobId) id=\(metadata.id)")
@@ -426,6 +511,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         finishedCaptureActionState = .idle
         manualIntakeDraft = nil
         pendingPostCaptureAction = nil
+        if isSpaceReviewMode {
+            confirmedCaptureGuidelines = false
+        }
     }
 
     func updatePendingCaptureNotes(_ notes: String) {

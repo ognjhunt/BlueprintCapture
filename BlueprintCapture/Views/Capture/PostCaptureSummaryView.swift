@@ -15,16 +15,14 @@ struct PostCaptureSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Header
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(BlueprintTheme.successGreen)
-                Text("Capture Complete")
+                Text("Submission ready")
                     .font(.headline)
                 Spacer()
             }
 
-            // Stats grid
             LazyVGrid(columns: [
                 GridItem(.flexible()),
                 GridItem(.flexible()),
@@ -55,24 +53,15 @@ struct PostCaptureSummaryView: View {
                     .fill(BlueprintTheme.brandTeal.opacity(0.1))
             )
 
-            // Estimated earnings
-            HStack {
-                Text("Estimated earnings")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(estimatedEarningsRange)
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
-            }
-
             VStack(alignment: .leading, spacing: 10) {
                 Text("Submission readiness")
                     .font(.subheadline.weight(.semibold))
 
+                readinessRow(label: "Next stage", value: nextStageLabel, tone: estimatedCoveragePercent >= 65 ? .good : .warning)
                 readinessRow(label: "Coverage", value: "\(Int(estimatedCoveragePercent))%", tone: estimatedCoveragePercent >= 70 ? .good : .warning)
                 readinessRow(label: "Device score", value: device.capabilityDescription, tone: hasLiDAR ? .good : .warning)
                 readinessRow(label: "Expected review", value: expectedReviewSLA, tone: .neutral)
+                readinessRow(label: "Likely payout", value: estimatedEarningsRange, tone: .good)
             }
             .padding(12)
             .background(
@@ -80,7 +69,6 @@ struct PostCaptureSummaryView: View {
                     .fill(Color(.tertiarySystemBackground))
             )
 
-            // Notes
             TextField("Add notes about this space (optional)", text: $userNotes, axis: .vertical)
                 .font(.subheadline)
                 .lineLimit(2...4)
@@ -90,16 +78,15 @@ struct PostCaptureSummaryView: View {
                         .fill(Color(.tertiarySystemBackground))
                 )
 
-            // Upload buttons
             VStack(spacing: 8) {
                 Button(action: onUploadNow) {
-                    Text("Upload Now")
+                    Text("Queue for review")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BlueprintPrimaryButtonStyle())
 
                 Button(action: onUploadLater) {
-                    Text("Upload Later (WiFi)")
+                    Text("Upload later (Wi-Fi)")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BlueprintSecondaryButtonStyle())
@@ -170,6 +157,16 @@ struct PostCaptureSummaryView: View {
             return "Review likely within 24-48h"
         }
         return "May require recapture review"
+    }
+
+    private var nextStageLabel: String {
+        if estimatedCoveragePercent >= 80 {
+            return "Queued for review"
+        }
+        if estimatedCoveragePercent >= 60 {
+            return "Awaiting approval"
+        }
+        return "Needs more coverage"
     }
 
     private enum ReadinessTone {

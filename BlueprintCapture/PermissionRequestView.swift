@@ -7,10 +7,12 @@ struct PermissionRequestView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Enable capture sensors")
+                    Text(viewModel.isSpaceReviewMode ? "Enable capture access" : "Enable capture sensors")
                         .font(.largeTitle.weight(.bold))
                         .blueprintGradientText()
-                    Text("We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
+                    Text(viewModel.isSpaceReviewMode
+                         ? "We use these sensors to review the space accurately and decide whether it can become an approved capture opportunity."
+                         : "We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
                         .font(.callout)
                         .blueprintSecondaryOnDark()
                 }
@@ -30,7 +32,7 @@ struct PermissionRequestView: View {
                 Button {
                     viewModel.requestPermissions()
                 } label: {
-                    Text("Grant permissions")
+                    Text(viewModel.isSpaceReviewMode ? "Allow access and continue" : "Grant permissions")
                 }
                 .buttonStyle(BlueprintPrimaryButtonStyle())
             }

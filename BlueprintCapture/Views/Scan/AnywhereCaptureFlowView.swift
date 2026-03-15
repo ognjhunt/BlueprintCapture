@@ -1,15 +1,28 @@
 import SwiftUI
 
 struct AnywhereCaptureFlowView: View {
+    let seed: SpaceReviewSeed?
+
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = CaptureFlowViewModel()
+    @StateObject private var viewModel: CaptureFlowViewModel
+
+    init(seed: SpaceReviewSeed? = nil) {
+        self.seed = seed
+        _viewModel = StateObject(wrappedValue: CaptureFlowViewModel(flowMode: .spaceReview(seed: seed)))
+    }
 
     var body: some View {
         NavigationStack {
             Group {
                 switch viewModel.step {
                 case .collectProfile:
-                    ProfileReviewView(profile: viewModel.profile, onContinue: viewModel.requestLocation)
+                    ProfileReviewView(
+                        profile: viewModel.profile,
+                        onContinue: viewModel.requestLocation,
+                        title: "Before you capture",
+                        subtitle: "We review these submissions before they become approved capture opportunities. Confirm your details, then tell us about the space.",
+                        buttonTitle: "Continue"
+                    )
                 case .confirmLocation:
                     LocationConfirmationView(viewModel: viewModel)
                 case .requestPermissions:
@@ -42,11 +55,11 @@ struct AnywhereCaptureFlowView: View {
     private var navigationTitle: String {
         switch viewModel.step {
         case .collectProfile:
-            return "Capture Anywhere"
+            return seed?.title ?? "Submit a space"
         case .confirmLocation:
-            return "Confirm Location"
+            return "Submit a space"
         case .requestPermissions:
-            return "Enable Sensors"
+            return "Review access"
         case .readyToCapture:
             return ""
         }
@@ -54,5 +67,5 @@ struct AnywhereCaptureFlowView: View {
 }
 
 #Preview {
-    AnywhereCaptureFlowView()
+    AnywhereCaptureFlowView(seed: SpaceReviewSeed(title: "Loading dock review", address: "18 Kent Ave, Brooklyn, NY"))
 }

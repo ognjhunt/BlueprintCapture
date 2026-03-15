@@ -17,6 +17,7 @@ struct CaptureDetailView: View {
         ScrollView {
             VStack(spacing: 16) {
                 statusHeader
+                stageOverviewCard
                 locationCard
 
                 switch loadState {
@@ -55,7 +56,7 @@ struct CaptureDetailView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .navigationTitle("Capture Detail")
+        .navigationTitle("Submission")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -66,24 +67,64 @@ struct CaptureDetailView: View {
     }
 
     private var statusHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.targetAddress)
-                    .font(.headline)
-                    .lineLimit(2)
-                Text(entry.capturedAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(statusHeadline)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(statusSubheadline)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                statusBadge
             }
 
-            Spacer()
-
-            statusBadge
+            HStack(spacing: 12) {
+                Label(entry.capturedAt.formatted(.dateTime.month().day()), systemImage: "calendar")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let payout = entry.estimatedPayout {
+                    HStack(spacing: 4) {
+                        Image(systemName: "dollarsign.circle.fill")
+                        Text(payout, format: .currency(code: "USD"))
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.successGreen)
+                }
+            }
         }
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var stageOverviewCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(stageLabel, systemImage: stageIcon)
+                .font(.headline)
+                .foregroundStyle(stageColor)
+
+            Text(stageMessage)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+
+            if let helper = stageHelper {
+                Text(helper)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(stageColor.opacity(0.1))
         )
     }
 
@@ -105,7 +146,7 @@ struct CaptureDetailView: View {
 
     private var locationCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Location", systemImage: "mappin.circle.fill")
+            Label("Capture location", systemImage: "mappin.circle.fill")
                 .font(.headline)
 
             Text(entry.targetAddress)
@@ -190,7 +231,7 @@ struct CaptureDetailView: View {
 
     private func rejectionCard(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Needs Fix", systemImage: "exclamationmark.triangle.fill")
+            Label(entry.status == .needsRecapture || entry.status == .needsFix ? "Needs recapture" : "Review note", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
                 .foregroundStyle(.red)
 
@@ -208,7 +249,7 @@ struct CaptureDetailView: View {
 
     private func timelineCard(_ events: [CaptureTimelineEvent]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Status Timeline", systemImage: "clock.fill")
+            Label("Submission timeline", systemImage: "clock.fill")
                 .font(.headline)
 
             VStack(alignment: .leading, spacing: 0) {
@@ -272,6 +313,105 @@ struct CaptureDetailView: View {
             return .orange
         default:
             return .red
+        }
+    }
+
+    private var statusHeadline: String {
+        switch entry.status {
+        case .draft, .readyToSubmit:
+            return "Waiting to enter review"
+        case .submitted, .underReview, .processing, .qc:
+            return "Submission in review"
+        case .approved:
+            return "Approved capture"
+        case .needsRecapture, .needsFix:
+            return "Another pass is needed"
+        case .rejected:
+            return "Submission closed"
+        case .paid:
+            return "Paid out"
+        }
+    }
+
+    private var statusSubheadline: String {
+        switch entry.status {
+        case .draft:
+            return "The bundle exists locally but has not been submitted."
+        case .readyToSubmit:
+            return "Everything is prepared and waiting for upload."
+        case .submitted, .underReview, .processing, .qc:
+            return "Blueprint is checking quality, rights, and deployment readiness."
+        case .approved:
+            return "This submission passed review and is queued for payout or buyer delivery."
+        case .needsRecapture, .needsFix:
+            return "A clearer or more complete capture is required."
+        case .rejected:
+            return "The submission could not move forward in its current form."
+        case .paid:
+            return "The submission completed review and payout was issued."
+        }
+    }
+
+    private var stageLabel: String {
+        switch entry.status {
+        case .paid:
+            return "Paid"
+        case .needsRecapture, .needsFix:
+            return "Needs recapture"
+        default:
+            return "In review"
+        }
+    }
+
+    private var stageMessage: String {
+        switch entry.status {
+        case .draft, .readyToSubmit:
+            return "Upload this capture when you are ready to move it into review."
+        case .submitted, .underReview, .processing, .qc:
+            return "No action needed right now. We will update this timeline as review moves forward."
+        case .approved:
+            return "Approved captures stay visible here until payout or downstream buyer delivery finishes."
+        case .needsRecapture, .needsFix:
+            return "Use the review note below to guide the next pass before resubmitting."
+        case .rejected:
+            return "This submission is closed. Review notes explain why it stopped."
+        case .paid:
+            return "This submission is complete and its payout is recorded."
+        }
+    }
+
+    private var stageHelper: String? {
+        switch entry.status {
+        case .approved:
+            return "You do not need to resubmit unless a reviewer requests another pass."
+        case .needsRecapture, .needsFix:
+            return "Focus on stronger coverage, cleaner framing, and restricted-zone boundaries."
+        case .paid:
+            return "See Wallet for payout timing and ledger details."
+        default:
+            return nil
+        }
+    }
+
+    private var stageIcon: String {
+        switch entry.status {
+        case .paid:
+            return "banknote.fill"
+        case .needsRecapture, .needsFix:
+            return "arrow.clockwise.circle.fill"
+        default:
+            return "clock.badge.checkmark"
+        }
+    }
+
+    private var stageColor: Color {
+        switch entry.status {
+        case .paid:
+            return BlueprintTheme.successGreen
+        case .needsRecapture, .needsFix, .rejected:
+            return .orange
+        default:
+            return BlueprintTheme.brandTeal
         }
     }
 

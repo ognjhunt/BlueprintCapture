@@ -85,6 +85,11 @@ final class JobsRepository: JobsRepositoryProtocol {
         (value as? [String]) ?? []
     }
 
+    private func toURL(_ value: Any?) -> URL? {
+        guard let string = value as? String, let url = URL(string: string) else { return nil }
+        return url
+    }
+
     private func decode(docId: String, data: [String: Any]) -> ScanJob? {
         guard
             let title = data["title"] as? String,
@@ -107,10 +112,9 @@ final class JobsRepository: JobsRepositoryProtocol {
             return Date()
         }()
 
-        let permissionURL: URL? = {
-            if let s = data["permission_doc_url"] as? String, let url = URL(string: s) { return url }
-            return nil
-        }()
+        let permissionURL = toURL(data["permission_doc_url"])
+        let thumbnailURL = toURL(data["thumbnail_url"]) ?? toURL(data["thumbnailURL"]) ?? toURL(data["image_url"])
+        let heroImageURL = toURL(data["hero_image_url"]) ?? toURL(data["heroImageURL"])
 
         return ScanJob(
             id: docId,
@@ -122,6 +126,8 @@ final class JobsRepository: JobsRepositoryProtocol {
             estMinutes: estMinutes,
             active: active,
             updatedAt: updatedAt,
+            thumbnailURL: thumbnailURL,
+            heroImageURL: heroImageURL,
             category: data["category"] as? String,
             instructions: toStringArray(data["instructions"]),
             allowedAreas: toStringArray(data["allowed_areas"]),
@@ -180,6 +186,8 @@ final class JobsRepository: JobsRepositoryProtocol {
                 estMinutes: 25,
                 active: true,
                 updatedAt: now,
+                thumbnailURL: URL(string: "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1200&q=80"),
+                heroImageURL: URL(string: "https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1600&q=80"),
                 category: "Warehouse",
                 instructions: ["Walk all aisles", "Include entry/exit", "Avoid faces"],
                 allowedAreas: ["Main floor"],
@@ -231,6 +239,8 @@ final class JobsRepository: JobsRepositoryProtocol {
                 estMinutes: 20,
                 active: true,
                 updatedAt: now,
+                thumbnailURL: URL(string: "https://images.unsplash.com/photo-1517142089942-ba376ce32a2e?auto=format&fit=crop&w=1200&q=80"),
+                heroImageURL: nil,
                 category: "Retail",
                 instructions: ["Capture stock areas", "Include doorways"],
                 allowedAreas: ["Backroom"],

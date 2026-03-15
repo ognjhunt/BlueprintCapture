@@ -15,7 +15,7 @@ struct MainTabView: View {
                     alertsManager: alertsManager
                 )
                     .tabItem {
-                        Label("Scan", systemImage: "mappin.circle.fill")
+                        Label("Capture", systemImage: "mappin.circle.fill")
                     }
                     .tag(0)
 

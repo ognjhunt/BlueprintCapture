@@ -22,6 +22,8 @@ struct ScanJob: Identifiable, Equatable {
     let updatedAt: Date
 
     // Optional fields
+    let thumbnailURL: URL?
+    let heroImageURL: URL?
     let category: String?
     let instructions: [String]
     let allowedAreas: [String]
@@ -69,6 +71,10 @@ struct ScanJob: Identifiable, Equatable {
 
     var payoutDollars: Int {
         max(0, payoutCents / 100)
+    }
+
+    var primaryImageURL: URL? {
+        heroImageURL ?? thumbnailURL
     }
 
     func distanceMeters(from userLocation: CLLocation) -> Double {

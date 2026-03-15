@@ -10,12 +10,12 @@ struct ScanHomeView: View {
     @StateObject private var viewModel: ScanHomeViewModel
 
     @State private var selectedItem: ScanHomeViewModel.JobItem?
+    @State private var reviewSubmissionSeed: SpaceReviewSeed?
     @State private var showConnectSheet = false
     @State private var recordingJob: ScanJob?
-    @State private var showAnywhereCapture = false
     @State private var pendingStartJobId: String?
 
-    @State private var payoutsReady: Bool = false
+    @State private var payoutsReady = false
     @State private var showingStripeOnboarding = false
 
     init(glassesManager: GlassesCaptureManager, uploadQueue: UploadQueueViewModel, alertsManager: NearbyAlertsManager) {
@@ -28,23 +28,29 @@ struct ScanHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    glassesStatusCard
-
-                    setupCards
-
-                    captureAnywhereCard
+                VStack(alignment: .leading, spacing: 22) {
+                    introHeader
+                    statusBanners
 
                     if let ready = viewModel.readyNow {
-                        readyNowCard(item: ready)
+                        readyNearbySection(item: ready)
                     }
 
-                    jobsSection
+                    if !viewModel.nearbyItems.isEmpty {
+                        nearbySection
+                    }
+
+                    if !viewModel.specialItems.isEmpty {
+                        specialCapturesSection
+                    }
+
+                    submissionsSection
+                    reviewSubmissionSection
                 }
                 .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
             }
-            .navigationTitle("Scan")
+            .navigationTitle("Capture")
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
@@ -56,11 +62,15 @@ struct ScanHomeView: View {
                 showConnectSheet = false
             }
         }
+        .sheet(isPresented: $showingStripeOnboarding) {
+            StripeOnboardingView()
+        }
         .sheet(item: $selectedItem) { item in
             JobDetailSheet(
                 item: item,
                 userLocation: viewModel.currentLocation,
-                onStartScan: { recordingJob = item.job },
+                onStartCapture: { recordingJob = item.job },
+                onSubmitForReview: { reviewSubmissionSeed = submissionSeed(for: item) },
                 onDirections: { openDirections(to: item.job) }
             )
         }
@@ -68,8 +78,8 @@ struct ScanHomeView: View {
             ScanRecordingView(job: job, glassesManager: glassesManager, uploadQueue: uploadQueue)
                 .preferredColorScheme(.dark)
         }
-        .fullScreenCover(isPresented: $showAnywhereCapture) {
-            AnywhereCaptureFlowView()
+        .fullScreenCover(item: $reviewSubmissionSeed) { seed in
+            AnywhereCaptureFlowView(seed: seed)
                 .preferredColorScheme(.dark)
         }
         .alert("Error", isPresented: $viewModel.showErrorAlert) {
@@ -99,180 +109,210 @@ struct ScanHomeView: View {
         .onDisappear { viewModel.onDisappear() }
     }
 
-    private var glassesStatusCard: some View {
-        Button {
-            if case .connected = glassesManager.connectionState {
-                // no-op
-            } else {
-                showConnectSheet = true
+    private var introHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Managed alpha capture network")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BlueprintTheme.brandTeal)
+                .textCase(.uppercase)
+
+            Text("Capture approved spaces, discover special opportunities nearby, and keep every submission moving.")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 8) {
+                capsuleTag("Near you")
+                capsuleTag("Special captures")
+                capsuleTag("Review status")
             }
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "eyeglasses")
-                    .foregroundStyle(BlueprintTheme.brandTeal)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(glassesStatusTitle)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(glassesStatusSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                if case .connected = glassesManager.connectionState {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(BlueprintTheme.successGreen)
-                } else {
-                    Text("Connect")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.primary)
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
         }
-        .buttonStyle(.plain)
-    }
-
-    private var glassesStatusTitle: String {
-        switch glassesManager.connectionState {
-        case .connected:
-            return "Glasses connected"
-        case .connecting:
-            return "Connecting…"
-        case .scanning:
-            return "Scanning…"
-        case .error:
-            return "Connection error"
-        case .disconnected:
-            return "Connect your glasses"
-        }
-    }
-
-    private var glassesStatusSubtitle: String {
-        switch glassesManager.connectionState {
-        case .connected(let name):
-            return name
-        case .connecting:
-            return "Keep glasses nearby"
-        case .scanning:
-            return "Looking for devices"
-        case .error(let message):
-            return message
-        case .disconnected:
-            return "Required for scanning"
-        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(.secondarySystemBackground),
+                            BlueprintTheme.brandTeal.opacity(0.14)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
-    private var setupCards: some View {
-        VStack(spacing: 12) {
-            if !alertsManager.isAlwaysAuthorized {
-                setupCard(
-                    title: "Enable Nearby Alerts (Recommended)",
-                    subtitle: "Get notified when you’re near a scan job.",
-                    icon: "bell.badge.fill",
-                    buttonTitle: "Enable",
-                    buttonStyle: .primary
-                ) {
-                    alertsManager.requestAlwaysAuthorization()
-                }
+    private var statusBanners: some View {
+        VStack(spacing: 10) {
+            slimBanner(
+                title: glassesStatusTitle,
+                subtitle: glassesStatusSubtitle,
+                icon: "eyeglasses",
+                tone: isGlassesConnected ? .good : .neutral,
+                actionTitle: isGlassesConnected ? nil : "Connect"
+            ) {
+                showConnectSheet = true
             }
 
             if !payoutsReady {
-                setupCard(
+                slimBanner(
                     title: "Connect payouts",
-                    subtitle: "Get paid after QC approves your scan.",
+                    subtitle: "Approved submissions pay out faster once your transfer account is ready.",
                     icon: "creditcard.fill",
-                    buttonTitle: "Connect",
-                    buttonStyle: .secondary
+                    tone: .warning,
+                    actionTitle: "Connect"
                 ) {
                     showingStripeOnboarding = true
                 }
-                .sheet(isPresented: $showingStripeOnboarding) {
-                    StripeOnboardingView()
+            }
+
+            slimBanner(
+                title: "Capture guardrails",
+                subtitle: trustAndSafetyCopy,
+                icon: "checkmark.shield.fill",
+                tone: .neutral,
+                actionTitle: nil,
+                action: {}
+            )
+        }
+    }
+
+    private func readyNearbySection(item: ScanHomeViewModel.JobItem) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Ready nearby", subtitle: "You can start this capture now.")
+            Button {
+                selectedItem = item
+            } label: {
+                FeatureCaptureCard(item: item, style: .readyNow)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var nearbySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Near you", subtitle: "Approved and review-gated capture opportunities within range.")
+
+            switch viewModel.state {
+            case .idle, .loading:
+                loadingCard(message: "Finding nearby captures…")
+            case .error(let message):
+                errorCard(title: "Couldn’t load captures", message: message)
+            case .loaded:
+                LazyVStack(spacing: 12) {
+                    ForEach(viewModel.nearbyItems) { item in
+                        Button {
+                            selectedItem = item
+                        } label: {
+                            CaptureOpportunityRow(item: item)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
     }
 
-    private var captureAnywhereCard: some View {
-        Button {
-            showAnywhereCapture = true
-        } label: {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Capture anywhere", systemImage: "camera.metering.center.weighted")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+    private var specialCapturesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Special captures", subtitle: "Higher-context work with stronger buyer intent.")
 
-                    Text("Use your iPhone to record the space around you, even when there isn’t a curated job nearby.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-
-                    HStack(spacing: 8) {
-                        tag(text: "iPhone")
-                        tag(text: "Phase 1")
-                        tag(text: "Exportable")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(viewModel.specialItems) { item in
+                        Button {
+                            selectedItem = item
+                        } label: {
+                            FeatureCaptureCard(item: item, style: .special)
+                                .frame(width: 292)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-
-                Spacer()
-
-                Image(systemName: "arrow.up.right.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                .padding(.vertical, 4)
             }
-            .padding(16)
+        }
+    }
+
+    private var submissionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader(title: "Your submissions", subtitle: "Track what is in review, what needs another pass, and what already paid.")
+
+            HStack(spacing: 12) {
+                ForEach(viewModel.submissionSummary) { item in
+                    SubmissionStageCard(item: item)
+                }
+            }
+        }
+    }
+
+    private var reviewSubmissionSection: some View {
+        Button {
+            reviewSubmissionSeed = SpaceReviewSeed(title: "Open capture review")
+        } label: {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Submit a space for review")
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        Text("Use this when the space is promising but not already approved. We review the submission before it becomes a reusable capture opportunity.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "arrow.up.right.circle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                }
+
+                HStack(spacing: 8) {
+                    capsuleTag("Address required")
+                    capsuleTag("Rights check")
+                    capsuleTag("Review-gated")
+                }
+            }
+            .padding(18)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(.secondarySystemBackground), BlueprintTheme.brandTeal.opacity(0.12)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
     }
 
-    private func tag(text: String) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(BlueprintTheme.brandTeal)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(BlueprintTheme.brandTeal.opacity(0.12))
-            )
-    }
-
-    private enum SetupButtonStyle { case primary, secondary }
-
-    private func setupCard(title: String, subtitle: String, icon: String, buttonTitle: String, buttonStyle: SetupButtonStyle, action: @escaping () -> Void) -> some View {
+    private func slimBanner(
+        title: String,
+        subtitle: String,
+        icon: String,
+        tone: BannerTone,
+        actionTitle: String?,
+        action: @escaping () -> Void
+    ) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .foregroundStyle(BlueprintTheme.brandTeal)
-                .frame(width: 28)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(tone.color)
+                .frame(width: 28, height: 28)
+                .background(tone.color.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -281,82 +321,32 @@ struct ScanHomeView: View {
 
             Spacer()
 
-            Button(buttonTitle, action: action)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(buttonStyle == .primary ? .white : BlueprintTheme.primary)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    Capsule().fill(buttonStyle == .primary ? BlueprintTheme.primary : Color(.systemFill))
-                )
+            if let actionTitle {
+                Button(actionTitle, action: action)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule().fill(tone.color)
+                    )
+            }
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(tone.color.opacity(0.16), lineWidth: 1)
         )
     }
 
-    private func readyNowCard(item: ScanHomeViewModel.JobItem) -> some View {
-        Button {
-            recordingJob = item.job
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Ready now")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("$\(item.job.payoutDollars)")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(BlueprintTheme.successGreen)
-                }
-
-                Text(item.job.title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-
-                HStack(spacing: 10) {
-                    Label("\(item.job.estMinutes) min", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Start scan")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Capsule().fill(BlueprintTheme.successGreen))
-                }
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [BlueprintTheme.primary.opacity(0.25), BlueprintTheme.brandTeal.opacity(0.18)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private var jobsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func sectionHeader(title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Nearby jobs")
+                Text(title)
                     .font(.headline)
                 Spacer()
                 if let ts = viewModel.lastUpdatedAt {
@@ -366,65 +356,137 @@ struct ScanHomeView: View {
                 }
             }
 
-            switch viewModel.state {
-            case .idle, .loading:
-                HStack(spacing: 12) {
-                    ProgressView().tint(BlueprintTheme.brandTeal)
-                    Text("Finding jobs…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
+            Text(subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
 
-            case .error(let message):
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Couldn’t load jobs")
-                        .font(.headline)
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Try again") { Task { await viewModel.refresh() } }
-                        .buttonStyle(BlueprintPrimaryButtonStyle())
-                }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color(.secondarySystemBackground))
-                )
+    private func loadingCard(message: String) -> some View {
+        HStack(spacing: 12) {
+            ProgressView().tint(BlueprintTheme.brandTeal)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
 
-            case .loaded:
-                if viewModel.items.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No curated jobs nearby.")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Try again later or change location.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                } else {
-                    LazyVStack(spacing: 10) {
-                        ForEach(viewModel.items) { item in
-                            Button {
-                                selectedItem = item
-                            } label: {
-                                ScanJobRow(item: item)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
+    private func errorCard(title: String, message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Try again") { Task { await viewModel.refresh() } }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private func capsuleTag(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(BlueprintTheme.brandTeal)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(BlueprintTheme.brandTeal.opacity(0.14))
+            )
+    }
+
+    private enum BannerTone {
+        case neutral
+        case warning
+        case good
+
+        var color: Color {
+            switch self {
+            case .neutral:
+                return BlueprintTheme.brandTeal
+            case .warning:
+                return .orange
+            case .good:
+                return BlueprintTheme.successGreen
             }
         }
+    }
+
+    private var glassesStatusTitle: String {
+        switch glassesManager.connectionState {
+        case .connected:
+            return "Capture glasses ready"
+        case .connecting:
+            return "Connecting glasses"
+        case .scanning:
+            return "Scanning for glasses"
+        case .error:
+            return "Connection issue"
+        case .disconnected:
+            return "Connect capture glasses"
+        }
+    }
+
+    private var isGlassesConnected: Bool {
+        if case .connected = glassesManager.connectionState {
+            return true
+        }
+        return false
+    }
+
+    private var glassesStatusSubtitle: String {
+        switch glassesManager.connectionState {
+        case .connected(let name):
+            return name
+        case .connecting:
+            return "Keep the device nearby."
+        case .scanning:
+            return "Looking for paired devices."
+        case .error(let message):
+            return message
+        case .disconnected:
+            return "Required for approved capture opportunities."
+        }
+    }
+
+    private var trustAndSafetyCopy: String {
+        if viewModel.nearbyPolicyCount(for: .blocked) > 0 {
+            return "Some nearby spaces are blocked. Stick to approved areas, avoid faces and screens, and follow posted restrictions."
+        }
+        if viewModel.nearbyPolicyCount(for: .permissionRequired) > 0 {
+            return "Some nearby spaces need extra care. Stay in common areas, keep private information out of frame, and stop if staff tells you to stop."
+        }
+        return "Stay in common or approved areas, avoid faces/screens, and use review submission when the capture scope is unclear."
+    }
+
+    private func submissionSeed(for item: ScanHomeViewModel.JobItem) -> SpaceReviewSeed {
+        let suggestedContext = [item.job.workflowName, item.job.targetKPI, item.job.zone]
+            .compactMap { $0 }
+            .joined(separator: " • ")
+        return SpaceReviewSeed(
+            id: item.job.id,
+            title: item.job.title,
+            address: item.job.address,
+            payoutRange: item.job.quotedPayoutCents.map { max(5, $0 / 100 - 10)...($0 / 100) },
+            captureJobId: item.job.id,
+            buyerRequestId: item.job.buyerRequestId,
+            siteSubmissionId: item.job.siteSubmissionId,
+            regionId: item.job.regionId,
+            rightsProfile: item.job.rightsProfile,
+            requestedOutputs: item.job.requestedOutputs.isEmpty ? ["qualification", "review_intake"] : item.job.requestedOutputs,
+            suggestedContext: suggestedContext.nilIfEmpty
+        )
     }
 
     private func openDirections(to job: ScanJob) {
@@ -436,16 +498,16 @@ struct ScanHomeView: View {
     }
 
     private func startFromNotificationIfPossible(jobId: String) async {
-        // Try immediately from current feed
-        if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
+        if let match = viewModel.items.first(where: { $0.job.id == jobId }),
+           match.permissionTier == .approved {
             recordingJob = match.job
             pendingStartJobId = nil
             return
         }
 
-        // Force refresh once, then retry.
         await viewModel.refresh()
-        if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
+        if let match = viewModel.items.first(where: { $0.job.id == jobId }),
+           match.permissionTier == .approved {
             recordingJob = match.job
             pendingStartJobId = nil
         }
@@ -465,56 +527,316 @@ struct ScanHomeView: View {
     }
 }
 
-private struct ScanJobRow: View {
+private struct CaptureOpportunityRow: View {
     let item: ScanHomeViewModel.JobItem
 
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.job.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+        HStack(spacing: 14) {
+            CaptureArtwork(item: item)
+                .frame(width: 104, height: 104)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.job.title)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(2)
+
+                        Text(item.job.address)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    PermissionBadge(tier: item.permissionTier)
+                }
 
                 HStack(spacing: 10) {
-                    Text("$\(item.job.payoutDollars)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.successGreen)
-                    Text("\(item.job.estMinutes) min")
+                    MiniMetric(label: item.payoutLabel, icon: "dollarsign.circle.fill", tint: BlueprintTheme.successGreen)
+                    MiniMetric(label: "\(item.job.estMinutes) min", icon: "clock", tint: .secondary)
+                    MiniMetric(label: item.distanceLabel, icon: "location", tint: item.isReadyNow ? BlueprintTheme.successGreen : .secondary)
+                }
+
+                HStack(spacing: 8) {
+                    if let badge = item.availabilityBadge {
+                        InlineBadge(text: badge, tone: .neutral)
+                    }
+                    Text(item.reviewNote)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("\(String(format: "%.1f", item.distanceMiles)) mi")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
 
-            Spacer()
-
-            if item.isReadyNow {
-                Text("Now")
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(BlueprintTheme.successGreen.opacity(0.15)))
-                    .foregroundStyle(BlueprintTheme.successGreen)
-            } else if let badge = item.statusBadge {
-                Text(badge)
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color(.systemFill)))
-                    .foregroundStyle(.secondary)
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            Spacer(minLength: 0)
         }
         .padding(14)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.05), lineWidth: 1)
+        )
+    }
+}
+
+private struct FeatureCaptureCard: View {
+    enum Style {
+        case readyNow
+        case special
+    }
+
+    let item: ScanHomeViewModel.JobItem
+    let style: Style
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            CaptureArtwork(item: item)
+                .frame(height: style == .readyNow ? 260 : 340)
+                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.08),
+                    Color.black.opacity(0.76)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    InlineBadge(text: style == .readyNow ? "Ready nearby" : "Special capture", tone: .teal)
+                    Spacer()
+                    PermissionBadge(tier: item.permissionTier)
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.job.title)
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+
+                    Text(item.job.address)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(2)
+
+                    HStack(spacing: 10) {
+                        InlineMetric(text: item.payoutLabel, icon: "dollarsign.circle.fill")
+                        InlineMetric(text: "\(item.job.estMinutes) min", icon: "clock")
+                        InlineMetric(text: item.distanceLabel, icon: "location")
+                    }
+
+                    Text(item.reviewNote)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                        .lineLimit(2)
+                }
+            }
+            .padding(18)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+}
+
+private struct SubmissionStageCard: View {
+    let item: ScanHomeViewModel.SubmissionSummaryItem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: item.stage.icon)
+                .font(.headline)
+                .foregroundStyle(color)
+
+            Text("\(item.count)")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(.primary)
+
+            Text(item.stage.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+
+            Text(item.stage.subtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(color.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private var color: Color {
+        switch item.stage {
+        case .inReview:
+            return BlueprintTheme.brandTeal
+        case .needsRecapture:
+            return .orange
+        case .paid:
+            return BlueprintTheme.successGreen
+        }
+    }
+}
+
+private struct CaptureArtwork: View {
+    let item: ScanHomeViewModel.JobItem
+
+    var body: some View {
+        Group {
+            if let url = item.previewURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure(_):
+                        fallback
+                    case .empty:
+                        fallback.overlay(
+                            ProgressView()
+                                .tint(BlueprintTheme.brandTeal)
+                        )
+                    @unknown default:
+                        fallback
+                    }
+                }
+            } else {
+                fallback
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if item.previewSource == .mapSnapshot {
+                InlineBadge(text: "Map", tone: .neutral)
+                    .padding(8)
+            }
+        }
+    }
+
+    private var fallback: some View {
+        ZStack {
+            MapSnapshotView(coordinate: item.job.coordinate)
+            LinearGradient(
+                colors: [Color.black.opacity(0), Color.black.opacity(0.18)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+    }
+}
+
+private struct PermissionBadge: View {
+    let tier: ScanHomeViewModel.CapturePermissionTier
+
+    var body: some View {
+        Label(tier.shortLabel, systemImage: tier.icon)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.16))
+            )
+    }
+
+    private var color: Color {
+        switch tier {
+        case .approved:
+            return BlueprintTheme.successGreen
+        case .reviewRequired:
+            return BlueprintTheme.brandTeal
+        case .permissionRequired:
+            return .orange
+        case .blocked:
+            return .red
+        }
+    }
+}
+
+private struct InlineBadge: View {
+    enum Tone {
+        case neutral
+        case teal
+    }
+
+    let text: String
+    let tone: Tone
+
+    var body: some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.14))
+            )
+    }
+
+    private var color: Color {
+        switch tone {
+        case .neutral:
+            return .secondary
+        case .teal:
+            return BlueprintTheme.brandTeal
+        }
+    }
+}
+
+private struct MiniMetric: View {
+    let label: String
+    let icon: String
+    let tint: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+            Text(label)
+                .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+    }
+}
+
+private struct InlineMetric: View {
+    let text: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white.opacity(0.84))
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

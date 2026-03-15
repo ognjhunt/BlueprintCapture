@@ -6,7 +6,7 @@ import Testing
 
 struct ScanHomeAndUploadTests {
 
-    @Test func scanHome_filtersJobsByTargetStateOwnershipAndCompletion() async throws {
+    @Test @MainActor func scanHome_filtersJobsByTargetStateOwnershipAndCompletion() async throws {
         let currentUserId = "user_current"
 
         let jobA = makeJob(id: "a", title: "A", address: "A", lat: 0, lng: 0, updatedAt: Date())
@@ -41,7 +41,7 @@ struct ScanHomeAndUploadTests {
         #expect(!visibleIds.contains("e"))
     }
 
-    @Test func scanHome_ranksReadyNowFirst() async throws {
+    @Test @MainActor func scanHome_ranksReadyNowFirst() async throws {
         let user = CLLocation(latitude: 0, longitude: 0)
         let now = Date()
 
@@ -50,6 +50,257 @@ struct ScanHomeAndUploadTests {
 
         let ranked = ScanHomeViewModel.rankJobsForFeed(jobs: [far, ready], userLocation: user, feedRadiusMeters: 10 * 1609.34)
         #expect(ranked.first?.job.id == "ready")
+    }
+
+    @Test @MainActor func scanHome_derivesPermissionTierFromRightsSignals() async throws {
+        let now = Date()
+
+        let approved = makeJob(id: "approved", title: "Approved", address: "A", lat: 0, lng: 0, updatedAt: now)
+        let review = ScanJob(
+            id: "review",
+            title: "Review",
+            address: "B",
+            lat: 0,
+            lng: 0,
+            payoutCents: 1000,
+            estMinutes: 10,
+            active: true,
+            updatedAt: now,
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: nil,
+            instructions: [],
+            allowedAreas: [],
+            restrictedAreas: [],
+            permissionDocURL: nil,
+            checkinRadiusM: 150,
+            alertRadiusM: 200,
+            priority: 0,
+            priorityWeight: 1.0,
+            regionId: nil,
+            jobType: .operatorApprovedOnDemand,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            quotedPayoutCents: nil,
+            dueWindow: nil,
+            approvalRequirements: [],
+            recaptureReason: nil,
+            rightsChecklist: [],
+            rightsProfile: "review_required",
+            requestedOutputs: [],
+            workflowName: nil,
+            workflowSteps: [],
+            targetKPI: nil,
+            zone: nil,
+            shift: nil,
+            owner: nil,
+            facilityTemplate: nil,
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: [],
+            adjacentSystems: [],
+            privacyRestrictions: [],
+            securityRestrictions: [],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: []
+        )
+        let permission = ScanJob(
+            id: "permission",
+            title: "Permission",
+            address: "C",
+            lat: 0,
+            lng: 0,
+            payoutCents: 1000,
+            estMinutes: 10,
+            active: true,
+            updatedAt: now,
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: nil,
+            instructions: [],
+            allowedAreas: ["Lobby"],
+            restrictedAreas: ["Office"],
+            permissionDocURL: nil,
+            checkinRadiusM: 150,
+            alertRadiusM: 200,
+            priority: 0,
+            priorityWeight: 1.0,
+            regionId: nil,
+            jobType: .curatedNearby,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            quotedPayoutCents: nil,
+            dueWindow: nil,
+            approvalRequirements: [],
+            recaptureReason: nil,
+            rightsChecklist: ["Manager approval"],
+            rightsProfile: "policy_only",
+            requestedOutputs: [],
+            workflowName: nil,
+            workflowSteps: [],
+            targetKPI: nil,
+            zone: nil,
+            shift: nil,
+            owner: nil,
+            facilityTemplate: nil,
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: [],
+            adjacentSystems: [],
+            privacyRestrictions: [],
+            securityRestrictions: [],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: []
+        )
+        let blocked = ScanJob(
+            id: "blocked",
+            title: "Blocked",
+            address: "D",
+            lat: 0,
+            lng: 0,
+            payoutCents: 1000,
+            estMinutes: 10,
+            active: true,
+            updatedAt: now,
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: nil,
+            instructions: [],
+            allowedAreas: [],
+            restrictedAreas: ["No capture beyond gate"],
+            permissionDocURL: nil,
+            checkinRadiusM: 150,
+            alertRadiusM: 200,
+            priority: 0,
+            priorityWeight: 1.0,
+            regionId: nil,
+            jobType: .curatedNearby,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            quotedPayoutCents: nil,
+            dueWindow: nil,
+            approvalRequirements: ["strictly prohibited"],
+            recaptureReason: nil,
+            rightsChecklist: [],
+            rightsProfile: "blocked",
+            requestedOutputs: [],
+            workflowName: nil,
+            workflowSteps: [],
+            targetKPI: nil,
+            zone: nil,
+            shift: nil,
+            owner: nil,
+            facilityTemplate: nil,
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: [],
+            adjacentSystems: [],
+            privacyRestrictions: [],
+            securityRestrictions: [],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: []
+        )
+
+        #expect(ScanHomeViewModel.permissionTier(for: approved) == .approved)
+        #expect(ScanHomeViewModel.permissionTier(for: review) == .reviewRequired)
+        #expect(ScanHomeViewModel.permissionTier(for: permission) == .permissionRequired)
+        #expect(ScanHomeViewModel.permissionTier(for: blocked) == .blocked)
+    }
+
+    @Test @MainActor func scanHome_prefersExplicitImageThenStreetViewThenMapFallback() async throws {
+        let now = Date()
+        let explicit = makeJob(id: "explicit", title: "Explicit", address: "A", lat: 0, lng: 0, updatedAt: now)
+        let streetOnly = ScanJob(
+            id: "street",
+            title: "Street",
+            address: "B",
+            lat: 0,
+            lng: 0,
+            payoutCents: 1000,
+            estMinutes: 10,
+            active: true,
+            updatedAt: now,
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: nil,
+            instructions: [],
+            allowedAreas: [],
+            restrictedAreas: [],
+            permissionDocURL: nil,
+            checkinRadiusM: 150,
+            alertRadiusM: 200,
+            priority: 0,
+            priorityWeight: 1.0,
+            regionId: nil,
+            jobType: .curatedNearby,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            quotedPayoutCents: nil,
+            dueWindow: nil,
+            approvalRequirements: [],
+            recaptureReason: nil,
+            rightsChecklist: [],
+            rightsProfile: nil,
+            requestedOutputs: [],
+            workflowName: nil,
+            workflowSteps: [],
+            targetKPI: nil,
+            zone: nil,
+            shift: nil,
+            owner: nil,
+            facilityTemplate: nil,
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: [],
+            adjacentSystems: [],
+            privacyRestrictions: [],
+            securityRestrictions: [],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: []
+        )
+
+        let explicitSelection = ScanHomeViewModel.previewSelection(for: explicit, streetViewURL: URL(string: "https://example.com/street.png"))
+        let streetSelection = ScanHomeViewModel.previewSelection(for: streetOnly, streetViewURL: URL(string: "https://example.com/street.png"))
+        let mapSelection = ScanHomeViewModel.previewSelection(for: streetOnly, streetViewURL: nil)
+
+        #expect(explicitSelection.source == .jobImage)
+        #expect(explicitSelection.url == explicit.primaryImageURL)
+        #expect(streetSelection.source == .streetView)
+        #expect(streetSelection.url == URL(string: "https://example.com/street.png"))
+        #expect(mapSelection.source == .mapSnapshot)
+        #expect(mapSelection.url == nil)
+    }
+
+    @Test @MainActor func scanHome_placesReviewSubmissionAfterLiveSections() async throws {
+        let sections = ScanHomeViewModel.homeSectionKinds(
+            hasReadyNearby: true,
+            nearbyCount: 3,
+            specialCount: 2,
+            submissionCount: 1
+        )
+
+        #expect(sections.last == .reviewSubmission)
+        #expect(sections == [.readyNearby, .nearby, .special, .submissions, .reviewSubmission])
     }
 
     @Test @MainActor func uploadQueue_enqueuesGlassesCaptureAndCompletesTargetOnUploadCompletion() async throws {
@@ -124,6 +375,8 @@ private func makeJob(
         estMinutes: 10,
         active: true,
         updatedAt: updatedAt,
+        thumbnailURL: URL(string: "https://example.com/thumb.png"),
+        heroImageURL: URL(string: "https://example.com/hero.png"),
         category: nil,
         instructions: [],
         allowedAreas: ["Sales floor"],

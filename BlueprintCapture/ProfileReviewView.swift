@@ -3,14 +3,17 @@ import SwiftUI
 struct ProfileReviewView: View {
     let profile: UserProfile
     let onContinue: () -> Void
+    var title: String = "Welcome back"
+    var subtitle: String = "Please confirm your details before we begin the capture walkthrough."
+    var buttonTitle: String = "Looks good — continue"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Welcome back")
+                Text(title)
                     .font(.largeTitle.weight(.bold))
                     .blueprintGradientText()
-                Text("Please confirm your details before we begin the capture walkthrough.")
+                Text(subtitle)
                     .font(.callout)
                     .blueprintSecondaryOnDark()
             }
@@ -30,7 +33,7 @@ struct ProfileReviewView: View {
             Spacer()
 
             Button(action: onContinue) {
-                Text("Looks good — continue")
+                Text(buttonTitle)
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
         }
