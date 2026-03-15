@@ -5,200 +5,420 @@ struct LocationConfirmationView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
     @State private var showManualEntry = false
     @State private var searchQuery = ""
+    @State private var isGeneratingDraft = false
+    @State private var lastGeneratedAddress: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(viewModel.isSpaceReviewMode ? "Submit a space for review" : "Confirm location")
-                    .font(.largeTitle.weight(.bold))
-                    .blueprintGradientText()
-                Text(viewModel.isSpaceReviewMode
-                     ? "Tell us where the space is, why it matters, and confirm the basic capture guardrails before you record."
-                     : "We use your current position to anchor the walkthrough to an exact address.")
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-            }
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
 
-            BlueprintGlassCard {
-                Group {
-                    if let address = viewModel.currentAddress {
-                        Label(address, systemImage: "mappin.and.ellipse")
-                            .font(.body)
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(BlueprintTheme.brandTeal)
-                    } else if let error = viewModel.locationError {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(BlueprintTheme.errorRed)
-                    } else {
-                        ProgressView("Detecting your venue…")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Manual address entry toggle
-            if !showManualEntry {
-                Button {
-                    showManualEntry = true
-                } label: {
-                    HStack {
-                        Image(systemName: "pencil.circle")
-                        Text("Can't find it? Enter address manually")
-                    }
-                }
-                .foregroundStyle(BlueprintTheme.accentAqua)
-                .font(.subheadline)
-            } else {
-                // Manual address entry section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Enter address")
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Title
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(viewModel.isSpaceReviewMode ? "Submit a Space" : "Confirm Location")
+                            .font(.largeTitle.weight(.bold))
+                            .foregroundStyle(.white)
+                        Text(viewModel.isSpaceReviewMode
+                             ? "Tell us where the space is, why it matters, and confirm capture guardrails."
+                             : "We use your current position to anchor the walkthrough to an exact address.")
                             .font(.subheadline)
-                            .fontWeight(.semibold)
-                        Spacer()
-                        Button("Done") {
-                            showManualEntry = false
-                            searchQuery = ""
-                            viewModel.addressSearchResults = []
-                        }
-                        .foregroundStyle(BlueprintTheme.brandTeal)
-                        .font(.caption)
-                        .fontWeight(.semibold)
+                            .foregroundStyle(Color(white: 0.45))
                     }
-                    
-                    TextField("Search address...", text: $searchQuery)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        .textContentType(.addressCityAndState)
-                        .onChange(of: searchQuery) { oldValue, newValue in
-                            if newValue.count > 2 {
-                                Task {
-                                    await viewModel.searchAddresses(query: newValue)
-                                }
-                            } else {
-                                viewModel.addressSearchResults = []
+                    .padding(.horizontal, 20)
+                    .padding(.top, 64)
+                    .padding(.bottom, 28)
+
+                    // Address card
+                    sectionLabel("Location")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+
+                    addressCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
+
+                    if !showManualEntry {
+                        Button {
+                            showManualEntry = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "pencil.circle")
+                                    .font(.caption)
+                                Text("Can't find it? Enter address manually")
+                                    .font(.caption.weight(.medium))
                             }
+                            .foregroundStyle(BlueprintTheme.brandTeal)
                         }
-                    
-                    // Search results
-                    if viewModel.isSearchingAddress {
-                        HStack {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                            Text("Searching addresses...")
-                                .font(.caption)
-                                .blueprintSecondaryOnDark()
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
-                    } else if !viewModel.addressSearchResults.isEmpty {
-                        VStack(spacing: 8) {
-                            ForEach(viewModel.addressSearchResults) { result in
-                                Button {
-                                    viewModel.selectAddress(result)
-                                    showManualEntry = false
-                                    searchQuery = ""
-                                } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(result.title)
-                                            .font(.subheadline)
-                                            .fontWeight(.medium)
-                                            .blueprintPrimaryOnDark()
-                                        
-                                        if !result.subtitle.isEmpty {
-                                            Text(result.subtitle)
-                                                .font(.caption)
-                                                .blueprintSecondaryOnDark()
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal, 12)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(BlueprintTheme.surfaceElevated.opacity(0.7))
-                                    )
-                                }
-                            }
-                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+                    } else {
+                        manualEntryCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
                     }
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(BlueprintTheme.surface.opacity(0.85))
-                )
-            }
 
-            if viewModel.isSpaceReviewMode {
-                BlueprintGlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Why is this space worth reviewing?")
-                            .font(.headline)
-                            .blueprintPrimaryOnDark()
+                    // Space review extras
+                    if viewModel.isSpaceReviewMode {
+                        sectionLabel("Context")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
 
-                        TextEditor(text: $viewModel.spaceContextNotes)
-                            .frame(minHeight: 110)
-                            .scrollContentBackground(.hidden)
-                            .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(BlueprintTheme.surface.opacity(0.9))
-                            )
+                        contextCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
 
-                        Text("Example: active loading area, repeated congestion, strong coverage potential, or buyer-requested zone.")
-                            .font(.caption)
-                            .blueprintSecondaryOnDark()
+                        sectionLabel("Before You Record")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        checklistCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
                     }
-                }
 
-                BlueprintGlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Before you record")
-                            .font(.headline)
-                            .blueprintPrimaryOnDark()
-
-                        ForEach(viewModel.spaceReviewChecklist, id: \.self) { item in
-                            HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(BlueprintTheme.brandTeal)
-                                Text(item)
-                                    .font(.subheadline)
-                                    .blueprintSecondaryOnDark()
-                            }
-                        }
-
-                        Toggle(isOn: $viewModel.confirmedCaptureGuidelines) {
-                            Text("I can follow these capture rules for this submission.")
-                                .font(.subheadline.weight(.semibold))
-                                .blueprintPrimaryOnDark()
-                        }
-                        .toggleStyle(.switch)
-                    }
+                    // CTA
+                    ctaButton
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 48)
                 }
             }
-
-            Spacer()
-
-            Button {
-                if viewModel.canConfirmAddress {
-                    viewModel.confirmAddress()
-                } else {
-                    viewModel.locationManager.requestLocation()
-                }
-            } label: {
-                Text(viewModel.currentAddress == nil ? "Retry location" : (viewModel.isSpaceReviewMode ? "Continue to capture" : "Use this location"))
-            }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
-            .disabled((viewModel.currentAddress == nil && viewModel.locationError == nil) || (viewModel.currentAddress != nil && !viewModel.canConfirmAddress))
         }
-        .padding()
-        .blueprintAppBackground()
         .task {
             if viewModel.currentAddress == nil {
                 viewModel.locationManager.requestLocation()
             }
         }
+        .onChange(of: viewModel.currentAddress) { _, newAddress in
+            guard viewModel.isSpaceReviewMode,
+                  let address = newAddress,
+                  address != lastGeneratedAddress,
+                  viewModel.spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return }
+            lastGeneratedAddress = address
+            Task { await autofillDraft(address: address) }
+        }
+    }
+
+    // MARK: - Address Card
+
+    private var addressCard: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "mappin.and.ellipse")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(BlueprintTheme.brandTeal.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            Group {
+                if let address = viewModel.currentAddress {
+                    Text(address)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                } else if let error = viewModel.locationError {
+                    Text(error)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(red: 0.85, green: 0.3, blue: 0.3))
+                        .lineLimit(2)
+                } else {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(BlueprintTheme.brandTeal)
+                            .scaleEffect(0.8)
+                        Text("Detecting location…")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.4))
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Manual Entry Card
+
+    private var manualEntryCard: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Search address")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Button("Cancel") {
+                    showManualEntry = false
+                    searchQuery = ""
+                    viewModel.addressSearchResults = []
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BlueprintTheme.brandTeal)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            Rectangle()
+                .fill(Color(white: 0.12))
+                .frame(height: 1)
+                .padding(.leading, 16)
+
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.4))
+                TextField("Street address, city…", text: $searchQuery)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .autocorrectionDisabled()
+                    .textContentType(.addressCityAndState)
+                    .onChange(of: searchQuery) { _, newValue in
+                        if newValue.count > 2 {
+                            Task { await viewModel.searchAddresses(query: newValue) }
+                        } else {
+                            viewModel.addressSearchResults = []
+                        }
+                    }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            if viewModel.isSearchingAddress {
+                HStack(spacing: 8) {
+                    ProgressView().tint(BlueprintTheme.brandTeal).scaleEffect(0.75)
+                    Text("Searching…")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.4))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            } else if !viewModel.addressSearchResults.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(viewModel.addressSearchResults) { result in
+                        Button {
+                            viewModel.selectAddress(result)
+                            showManualEntry = false
+                            searchQuery = ""
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(result.title)
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.white)
+                                    if !result.subtitle.isEmpty {
+                                        Text(result.subtitle)
+                                            .font(.caption)
+                                            .foregroundStyle(Color(white: 0.4))
+                                    }
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                                    .foregroundStyle(Color(white: 0.25))
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                        }
+                        .buttonStyle(.plain)
+
+                        Rectangle()
+                            .fill(Color(white: 0.12))
+                            .frame(height: 1)
+                            .padding(.leading, 16)
+                    }
+                }
+            }
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Context Card
+
+    private var contextCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Why is this space worth reviewing?")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                if isGeneratingDraft {
+                    HStack(spacing: 5) {
+                        ProgressView().tint(BlueprintTheme.brandTeal).scaleEffect(0.65)
+                        Text("AI drafting…")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                    }
+                } else if SpaceDraftGenerator.shared.isAvailable && viewModel.spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        guard let address = viewModel.currentAddress else { return }
+                        Task { await autofillDraft(address: address) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkles")
+                                .font(.caption2.weight(.semibold))
+                            Text("Auto-fill")
+                                .font(.caption2.weight(.semibold))
+                        }
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(BlueprintTheme.brandTeal.opacity(0.1), in: Capsule())
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
+
+            ZStack(alignment: .topLeading) {
+                if viewModel.spaceContextNotes.isEmpty && !isGeneratingDraft {
+                    Text("Tell us what makes this space valuable to capture…")
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.3))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: $viewModel.spaceContextNotes)
+                    .frame(minHeight: 100)
+                    .scrollContentBackground(.hidden)
+                    .font(.subheadline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .background(Color.clear)
+                    .opacity(isGeneratingDraft ? 0.4 : 1)
+            }
+
+            Text("Example: active loading area, repeated congestion, strong coverage potential, or buyer-requested zone.")
+                .font(.caption)
+                .foregroundStyle(Color(white: 0.35))
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(isGeneratingDraft ? BlueprintTheme.brandTeal.opacity(0.3) : Color(white: 0.12), lineWidth: 1)
+        )
+        .animation(.easeInOut(duration: 0.2), value: isGeneratingDraft)
+    }
+
+    // MARK: - LLM Auto-fill
+
+    @MainActor
+    private func autofillDraft(address: String) async {
+        guard SpaceDraftGenerator.shared.isAvailable else { return }
+        isGeneratingDraft = true
+        viewModel.spaceContextNotes = ""
+
+        let result = await SpaceDraftGenerator.shared.streamDraft(
+            placeName: address,
+            address: address
+        ) { partial in
+            Task { @MainActor in
+                self.viewModel.spaceContextNotes = partial
+            }
+        }
+
+        if let r = result {
+            viewModel.spaceContextNotes = r.contextNotes
+        }
+        isGeneratingDraft = false
+    }
+
+    // MARK: - Checklist Card
+
+    private var checklistCard: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(viewModel.spaceReviewChecklist.enumerated()), id: \.offset) { idx, item in
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .frame(width: 22)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                Rectangle()
+                    .fill(Color(white: 0.12))
+                    .frame(height: 1)
+                    .padding(.leading, 50)
+            }
+
+            HStack {
+                Text("I can follow these capture rules")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Toggle("", isOn: $viewModel.confirmedCaptureGuidelines)
+                    .labelsHidden()
+                    .tint(BlueprintTheme.brandTeal)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - CTA Button
+
+    private var ctaButton: some View {
+        let canContinue = viewModel.currentAddress != nil && viewModel.canConfirmAddress
+        let label = viewModel.currentAddress == nil
+            ? "Retry Location"
+            : (viewModel.isSpaceReviewMode ? "Continue to Capture" : "Use This Location")
+
+        return Button {
+            if viewModel.canConfirmAddress {
+                viewModel.confirmAddress()
+            } else {
+                viewModel.locationManager.requestLocation()
+            }
+        } label: {
+            Text(label)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(canContinue ? .black : Color(white: 0.4))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    canContinue ? BlueprintTheme.successGreen : Color(white: 0.15),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled((viewModel.currentAddress == nil && viewModel.locationError == nil) ||
+                  (viewModel.currentAddress != nil && !viewModel.canConfirmAddress))
+    }
+
+    // MARK: - Helper
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(white: 0.35))
+            .tracking(1.0)
     }
 }
 

@@ -12,7 +12,10 @@ struct AnywhereCaptureFlowView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            // Step content
             Group {
                 switch viewModel.step {
                 case .collectProfile:
@@ -31,37 +34,28 @@ struct AnywhereCaptureFlowView: View {
                     CaptureSessionView(viewModel: viewModel, targetId: nil, reservationId: nil)
                 }
             }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar(viewModel.step == .readyToCapture ? .hidden : .visible, for: .navigationBar)
-            .toolbar {
-                if viewModel.step != .readyToCapture {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Close") {
-                            dismiss()
-                        }
+
+            // Floating close button — hidden during capture session
+            if viewModel.step != .readyToCapture {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color(white: 0.7))
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial, in: Circle())
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
             }
         }
-        .blueprintAppBackground()
+        .preferredColorScheme(.dark)
         .task {
             await viewModel.loadProfile()
-        }
-    }
-
-    private var navigationTitle: String {
-        switch viewModel.step {
-        case .collectProfile:
-            return seed?.title ?? "Submit a space"
-        case .confirmLocation:
-            return "Submit a space"
-        case .requestPermissions:
-            return "Review access"
-        case .readyToCapture:
-            return ""
         }
     }
 }

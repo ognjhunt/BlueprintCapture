@@ -8,55 +8,88 @@ struct ProfileReviewView: View {
     var buttonTitle: String = "Looks good — continue"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title)
-                    .font(.largeTitle.weight(.bold))
-                    .blueprintGradientText()
-                Text(subtitle)
-                    .font(.callout)
-                    .blueprintSecondaryOnDark()
-            }
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
 
-            BlueprintGlassCard {
-                VStack(alignment: .leading, spacing: 12) {
-                    ProfileRow(title: "Name", value: profile.fullName)
-                    Divider()
-                    ProfileRow(title: "Email", value: profile.email)
-                    Divider()
-                    ProfileRow(title: "Phone", value: profile.phoneNumber)
-                    Divider()
-                    ProfileRow(title: "Company", value: profile.company)
+            VStack(alignment: .leading, spacing: 0) {
+                // Title
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.45))
                 }
-            }
+                .padding(.horizontal, 20)
+                .padding(.top, 64)
+                .padding(.bottom, 28)
 
-            Spacer()
+                // Section label
+                Text("YOUR DETAILS")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color(white: 0.35))
+                    .tracking(1.0)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
 
-            Button(action: onContinue) {
-                Text(buttonTitle)
+                // Profile card
+                VStack(spacing: 0) {
+                    profileRow(label: "Name", value: profile.fullName)
+                    rowDivider
+                    profileRow(label: "Email", value: profile.email)
+                    rowDivider
+                    profileRow(label: "Phone", value: profile.phoneNumber)
+                    rowDivider
+                    profileRow(label: "Company", value: profile.company)
+                }
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color(white: 0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+
+                Spacer()
+
+                // CTA
+                Button(action: onContinue) {
+                    Text(buttonTitle)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(BlueprintTheme.brandTeal, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 48)
             }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
         }
-        .padding()
     }
-}
 
-private struct ProfileRow: View {
-    let title: String
-    let value: String
-
-    var body: some View {
+    private func profileRow(label: String, value: String) -> some View {
         HStack {
-            Text(title)
+            Text(label)
                 .font(.subheadline)
-                .blueprintSecondaryOnDark()
+                .foregroundStyle(Color(white: 0.4))
             Spacer()
             Text(value.isEmpty ? "—" : value)
-                .font(.body)
-                .blueprintPrimaryOnDark()
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(value)")
+        .accessibilityLabel("\(label): \(value)")
+    }
+
+    private var rowDivider: some View {
+        Rectangle()
+            .fill(Color(white: 0.12))
+            .frame(height: 1)
+            .padding(.leading, 16)
     }
 }
 

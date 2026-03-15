@@ -18,6 +18,8 @@ struct ScanHomeView: View {
 
     @State private var payoutsReady = false
     @State private var showingStripeOnboarding = false
+    @State private var selectedDemo: DemoCapture?
+    @State private var showingSearch = false
 
     init(glassesManager: GlassesCaptureManager, uploadQueue: UploadQueueViewModel, alertsManager: NearbyAlertsManager) {
         self.glassesManager = glassesManager
@@ -79,6 +81,22 @@ struct ScanHomeView: View {
                 onDirections: { openDirections(to: item.job) }
             )
         }
+        .sheet(item: $selectedDemo) { demo in
+            DemoDetailSheet(demo: demo)
+        }
+        .sheet(isPresented: $showingSearch) {
+            CaptureSearchSheet(
+                existingItems: viewModel.items,
+                onSelectItem: { item in selectedItem = item },
+                onSubmitAddress: { address, suggestedContext in
+                    reviewSubmissionSeed = SpaceReviewSeed(
+                        title: address,
+                        address: address,
+                        suggestedContext: suggestedContext
+                    )
+                }
+            )
+        }
         .fullScreenCover(item: $recordingJob) { job in
             ScanRecordingView(job: job, glassesManager: glassesManager, uploadQueue: uploadQueue)
                 .preferredColorScheme(.dark)
@@ -127,14 +145,23 @@ struct ScanHomeView: View {
                     .foregroundStyle(Color(white: 0.5))
             }
             Spacer()
-            Button {
-                Task { await viewModel.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color(white: 0.6))
-                    .frame(width: 38, height: 38)
-                    .background(Color(white: 0.12), in: Circle())
+            HStack(spacing: 10) {
+                Button { showingSearch = true } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(white: 0.6))
+                        .frame(width: 38, height: 38)
+                        .background(Color(white: 0.12), in: Circle())
+                }
+                Button {
+                    Task { await viewModel.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color(white: 0.6))
+                        .frame(width: 38, height: 38)
+                        .background(Color(white: 0.12), in: Circle())
+                }
             }
         }
     }
@@ -219,8 +246,20 @@ struct ScanHomeView: View {
                     .padding(.horizontal, 20)
             case .loaded:
                 if featuredItems.isEmpty {
-                    emptyFeaturedPlaceholder
+                    // Show demo placeholder cards so the feed never looks dead
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(DemoCapture.samples) { demo in
+                                Button { selectedDemo = demo } label: {
+                                    DemoFeaturedCard(demo: demo)
+                                        .frame(width: 280)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                         .padding(.horizontal, 20)
+                        .padding(.vertical, 2)
+                    }
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
@@ -240,19 +279,6 @@ struct ScanHomeView: View {
         }
     }
 
-    private var emptyFeaturedPlaceholder: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "mappin.and.ellipse")
-                .font(.title2)
-                .foregroundStyle(Color(white: 0.3))
-            Text("No featured captures near you right now.")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.4))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
 
     // MARK: - Category Filter
 
@@ -536,6 +562,157 @@ struct ScanHomeView: View {
         } catch {
             payoutsReady = false
         }
+    }
+}
+
+// MARK: - Demo Placeholder Data
+
+private struct DemoCapture: Identifiable {
+    let id: String
+    let title: String
+    let address: String
+    let category: String
+    let payout: String
+    let distance: String
+    let estMinutes: Int
+    let gradientColors: [Color]
+    let permission: String
+    let permissionColor: Color
+
+    static let samples: [DemoCapture] = [
+        DemoCapture(
+            id: "demo_1",
+            title: "Downtown Retail Space",
+            address: "123 Main St · Commercial District",
+            category: "RETAIL",
+            payout: "$45",
+            distance: "0.3 mi",
+            estMinutes: 25,
+            gradientColors: [Color(white: 0.18), Color(white: 0.1)],
+            permission: "Approved",
+            permissionColor: BlueprintTheme.successGreen
+        ),
+        DemoCapture(
+            id: "demo_2",
+            title: "Office Building Lobby",
+            address: "456 Business Ave · Midtown",
+            category: "COMMERCIAL",
+            payout: "$60",
+            distance: "0.8 mi",
+            estMinutes: 35,
+            gradientColors: [Color(red: 0.12, green: 0.18, blue: 0.28), Color(white: 0.08)],
+            permission: "Review",
+            permissionColor: BlueprintTheme.brandTeal
+        ),
+        DemoCapture(
+            id: "demo_3",
+            title: "Warehouse Floor — Special",
+            address: "789 Industrial Blvd · East Side",
+            category: "INDUSTRIAL",
+            payout: "$120",
+            distance: "2.1 mi",
+            estMinutes: 60,
+            gradientColors: [Color(red: 0.22, green: 0.14, blue: 0.08), Color(white: 0.08)],
+            permission: "Special",
+            permissionColor: Color(red: 0.9, green: 0.55, blue: 0.1)
+        ),
+    ]
+}
+
+private struct DemoFeaturedCard: View {
+    let demo: DemoCapture
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            // Gradient background (placeholder for real image)
+            LinearGradient(
+                colors: demo.gradientColors,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+
+            // Grid pattern overlay for visual texture
+            Canvas { ctx, size in
+                let step: CGFloat = 28
+                var x: CGFloat = 0
+                while x < size.width {
+                    var y: CGFloat = 0
+                    while y < size.height {
+                        let rect = CGRect(x: x, y: y, width: 1, height: 1)
+                        ctx.fill(Path(rect), with: .color(.white.opacity(0.04)))
+                        y += step
+                    }
+                    x += step
+                }
+            }
+
+            // Bottom gradient
+            LinearGradient(
+                colors: [Color.black.opacity(0), Color.black.opacity(0.88)],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+
+            // Content
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(demo.category)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color(white: 0.22), in: Capsule())
+
+                    Spacer()
+
+                    HStack(spacing: 5) {
+                        Circle().fill(demo.permissionColor).frame(width: 7, height: 7)
+                        Text(demo.permission)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color(white: 0.18), in: Capsule())
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(demo.title)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+
+                    Text(demo.address)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.65))
+                        .lineLimit(1)
+
+                    HStack(spacing: 12) {
+                        CardMetric(text: demo.payout, icon: "dollarsign.circle.fill", color: BlueprintTheme.successGreen)
+                        CardMetric(text: demo.distance, icon: "location.fill", color: Color(white: 0.55))
+                        CardMetric(text: "\(demo.estMinutes) min", icon: "clock", color: Color(white: 0.55))
+                    }
+                }
+
+                HStack {
+                    Text("Coming to your area")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.5))
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.4))
+                }
+            }
+            .padding(16)
+        }
+        .frame(height: 230)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color(white: 0.15), lineWidth: 1)
+        )
     }
 }
 
@@ -829,6 +1006,196 @@ private struct ShimmerFeaturedCard: View {
                     shimmerOffset = 1.5
                 }
             }
+    }
+}
+
+// MARK: - Demo Detail Sheet
+
+private struct DemoDetailSheet: View {
+    let demo: DemoCapture
+    @Environment(\.dismiss) private var dismiss
+
+    private let checklist = [
+        "Stay in common or approved areas only.",
+        "Keep faces, screens, and paperwork out of frame.",
+        "Call out restricted zones before you begin.",
+        "Complete all floors before submitting."
+    ]
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Hero
+                    ZStack(alignment: .top) {
+                        LinearGradient(
+                            colors: demo.gradientColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        .frame(height: 320)
+
+                        Canvas { ctx, size in
+                            let step: CGFloat = 28
+                            var x: CGFloat = 0
+                            while x < size.width {
+                                var y: CGFloat = 0
+                                while y < size.height {
+                                    ctx.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.white.opacity(0.04)))
+                                    y += step
+                                }
+                                x += step
+                            }
+                        }
+                        .frame(height: 320)
+
+                        LinearGradient(
+                            colors: [Color.black.opacity(0), Color.black.opacity(0.7)],
+                            startPoint: .center,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 320)
+
+                        // Back button
+                        HStack {
+                            Button { dismiss() } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text("Close")
+                                        .font(.subheadline.weight(.semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 9)
+                                .background(.ultraThinMaterial, in: Capsule())
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 20)
+                    }
+
+                    // Title block
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(demo.category)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(Color(white: 0.4))
+                            .tracking(1.5)
+
+                        Text(demo.title)
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(.white)
+
+                        HStack(spacing: 12) {
+                            Label(demo.address, systemImage: "mappin")
+                                .font(.caption)
+                                .foregroundStyle(Color(white: 0.5))
+                        }
+
+                        HStack(spacing: 14) {
+                            demoMetric(demo.payout, icon: "dollarsign.circle.fill", color: BlueprintTheme.successGreen)
+                            demoMetric(demo.distance, icon: "location.fill", color: Color(white: 0.55))
+                            demoMetric("\(demo.estMinutes) min", icon: "clock", color: Color(white: 0.55))
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 20)
+
+                    // Payout banner
+                    HStack(spacing: 0) {
+                        Rectangle().fill(BlueprintTheme.successGreen).frame(width: 3).cornerRadius(2)
+                        HStack(spacing: 10) {
+                            Image(systemName: "dollarsign.circle.fill")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(BlueprintTheme.successGreen)
+                                .frame(width: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Completing this capture earns \(demo.payout)")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                Text("Paid after approval review · Usually 3–5 days")
+                                    .font(.caption)
+                                    .foregroundStyle(Color(white: 0.45))
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                    }
+                    .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(BlueprintTheme.successGreen.opacity(0.22), lineWidth: 1))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
+
+                    // Requirements
+                    sectionLabel("Capture Requirements")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(checklist.enumerated()), id: \.offset) { idx, item in
+                            HStack(alignment: .top, spacing: 12) {
+                                Circle()
+                                    .fill(BlueprintTheme.brandTeal)
+                                    .frame(width: 6, height: 6)
+                                    .padding(.top, 6)
+                                Text(item)
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color(white: 0.65))
+                                Spacer()
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+
+                            if idx < checklist.count - 1 {
+                                Rectangle().fill(Color(white: 0.12)).frame(height: 1).padding(.leading, 34)
+                            }
+                        }
+                    }
+                    .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(white: 0.12), lineWidth: 1))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+
+                    // CTA — demo, no action
+                    HStack(spacing: 10) {
+                        Image(systemName: "eye")
+                            .font(.subheadline.weight(.semibold))
+                        Text("Demo Capture — Sign In to Start")
+                            .font(.headline.weight(.semibold))
+                    }
+                    .foregroundStyle(Color(white: 0.4))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 48)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func demoMetric(_ text: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(color)
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(white: 0.35))
+            .tracking(1.0)
     }
 }
 
