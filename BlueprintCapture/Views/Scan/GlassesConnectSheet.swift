@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Minimal device connect UI for Meta smart glasses.
+/// Minimal device connect UI for Meta smart glasses — Kled AI style.
 struct GlassesConnectSheet: View {
     @ObservedObject var glassesManager: GlassesCaptureManager
     let onConnected: (() -> Void)?
@@ -11,61 +11,92 @@ struct GlassesConnectSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                VStack(spacing: 16) {
-                    header
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
 
-                    switch glassesManager.connectionState {
-                    case .connected(let name):
-                        connectedCard(deviceName: name)
-                    case .connecting:
-                        connectingCard
-                    case .scanning:
-                        scanningCard
-                    case .error(let message):
-                        errorCard(message: message)
-                    case .disconnected:
-                        disconnectedCard
-                    }
+            VStack(spacing: 0) {
+                // Drag handle
+                Capsule()
+                    .fill(Color(white: 0.25))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
 
-                    if glassesManager.connectionState == .scanning, !glassesManager.discoveredDevices.isEmpty {
-                        devicesList
-                    }
+                // Icon + title
+                VStack(spacing: 10) {
+                    Image(systemName: "eyeglasses")
+                        .font(.system(size: 48))
+                        .foregroundStyle(BlueprintTheme.brandTeal)
 
-                    Spacer()
+                    Text("Smart Glasses")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    Text("Connect once. Then one-tap scans.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.45))
+                        .multilineTextAlignment(.center)
                 }
+                .padding(.bottom, 32)
                 .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
+
+                // State card
+                stateCard
+                    .padding(.horizontal, 20)
+
+                // Discovered devices (scanning)
+                if glassesManager.connectionState == .scanning,
+                   !glassesManager.discoveredDevices.isEmpty {
+                    devicesList
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                }
+
+                Spacer()
+
+                // Primary action (connected state)
+                if case .connected = glassesManager.connectionState {
+                    Button {
+                        onConnected?()
+                    } label: {
+                        Text("Continue")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 52)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                }
             }
-            .navigationTitle("Connect Glasses")
-            .navigationBarTitleDisplayMode(.inline)
         }
-        .blueprintAppBackground()
+        .preferredColorScheme(.dark)
         .onChange(of: glassesManager.connectionState) { _, newValue in
-            if case .connected = newValue {
-                onConnected?()
-            }
+            if case .connected = newValue { onConnected?() }
         }
     }
 
-    private var header: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "eyeglasses")
-                .font(.system(size: 44))
-                .foregroundStyle(BlueprintTheme.brandTeal)
+    // MARK: - State card
 
-            Text("Meta smart glasses")
-                .font(.title3.weight(.semibold))
-                .blueprintPrimaryOnDark()
-
-            Text("Connect once. Then one-tap scans.")
-                .font(.subheadline)
-                .blueprintSecondaryOnDark()
+    @ViewBuilder
+    private var stateCard: some View {
+        switch glassesManager.connectionState {
+        case .connected(let name):
+            connectedCard(deviceName: name)
+        case .connecting:
+            connectingCard
+        case .scanning:
+            scanningCard
+        case .error(let message):
+            errorCard(message: message)
+        case .disconnected:
+            disconnectedCard
         }
-        .padding(.top, 8)
     }
+
+    // MARK: - Disconnected
 
     private var disconnectedCard: some View {
         VStack(spacing: 12) {
@@ -73,24 +104,35 @@ struct GlassesConnectSheet: View {
                 Button {
                     glassesManager.reconnectLastDevice()
                 } label: {
-                    HStack {
+                    HStack(spacing: 14) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.65))
+                            .frame(width: 36, height: 36)
+                            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Reconnect")
-                                .font(.headline)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.white)
                             Text(last.name)
                                 .font(.caption)
-                                .foregroundStyle(.white.opacity(0.7))
+                                .foregroundStyle(Color(white: 0.45))
+                                .lineLimit(1)
                         }
+
                         Spacer()
-                        Image(systemName: "arrow.clockwise")
-                            .foregroundStyle(.white.opacity(0.8))
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.25))
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(BlueprintTheme.primary)
+                    .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color(white: 0.12), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -100,134 +142,191 @@ struct GlassesConnectSheet: View {
                 glassesManager.startScanning()
             } label: {
                 Text("Scan for Glasses")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .buttonStyle(.plain)
         }
-        .padding(.top, 10)
     }
+
+    // MARK: - Scanning
 
     private var scanningCard: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                ProgressView().tint(BlueprintTheme.brandTeal)
-                Text("Scanning…")
-                    .font(.headline)
-                    .blueprintPrimaryOnDark()
-                Spacer()
-                Button("Cancel") { glassesManager.stopScanning() }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
-        }
-    }
+        HStack(spacing: 14) {
+            ProgressView()
+                .tint(BlueprintTheme.brandTeal)
+                .frame(width: 36, height: 36)
 
-    private var connectingCard: some View {
-        HStack(spacing: 12) {
-            ProgressView().tint(BlueprintTheme.brandTeal)
-            Text("Connecting…")
-                .font(.headline)
-                .blueprintPrimaryOnDark()
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Scanning…")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("Looking for nearby glasses")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.45))
+            }
+
             Spacer()
+
+            Button("Cancel") { glassesManager.stopScanning() }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color(white: 0.5))
         }
-        .padding(16)
-        .background(
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .stroke(Color(white: 0.12), lineWidth: 1)
         )
     }
 
-    private func connectedCard(deviceName: String) -> some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(BlueprintTheme.successGreen)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Connected")
-                        .font(.headline)
-                        .blueprintPrimaryOnDark()
-                    Text(deviceName)
-                        .font(.caption)
-                        .blueprintSecondaryOnDark()
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button("Disconnect") { glassesManager.disconnect() }
+    // MARK: - Connecting
+
+    private var connectingCard: some View {
+        HStack(spacing: 14) {
+            ProgressView()
+                .tint(BlueprintTheme.brandTeal)
+                .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Connecting…")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(.white)
+                Text("Establishing connection")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.45))
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(BlueprintTheme.successGreen.opacity(0.12))
-            )
+
+            Spacer()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
     }
+
+    // MARK: - Connected
+
+    private func connectedCard(deviceName: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BlueprintTheme.successGreen)
+                .frame(width: 36, height: 36)
+                .background(BlueprintTheme.successGreen.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Connected")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(deviceName)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.45))
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button("Disconnect") { glassesManager.disconnect() }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(white: 0.45))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(BlueprintTheme.successGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(BlueprintTheme.successGreen.opacity(0.22), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Error
 
     private func errorCard(message: String) -> some View {
         VStack(spacing: 12) {
-            HStack(spacing: 10) {
+            HStack(spacing: 14) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(BlueprintTheme.warningOrange)
-                Text("Connection error")
-                    .font(.headline)
-                    .blueprintPrimaryOnDark()
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.9, green: 0.55, blue: 0.1))
+                    .frame(width: 36, height: 36)
+                    .background(Color(red: 0.9, green: 0.55, blue: 0.1).opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Connection failed")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Spacer()
             }
-            Text(message)
-                .font(.caption)
-                .blueprintSecondaryOnDark()
-                .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 12) {
-                Button("Try again") { glassesManager.startScanning() }
-                    .buttonStyle(BlueprintPrimaryButtonStyle())
-                Button("Close") { glassesManager.disconnect() }
-                    .buttonStyle(BlueprintSecondaryButtonStyle())
+            Button {
+                glassesManager.startScanning()
+            } label: {
+                Text("Try Again")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            .buttonStyle(.plain)
         }
-        .padding(16)
-        .background(
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(red: 0.9, green: 0.55, blue: 0.1).opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(BlueprintTheme.warningOrange.opacity(0.10))
+                .stroke(Color(red: 0.9, green: 0.55, blue: 0.1).opacity(0.2), lineWidth: 1)
         )
     }
 
-    private var devicesList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Found")
-                .font(.headline)
-                .blueprintPrimaryOnDark()
-                .padding(.top, 10)
+    // MARK: - Devices list
 
+    private var devicesList: some View {
+        VStack(spacing: 1) {
             ForEach(glassesManager.discoveredDevices) { device in
-                Button {
-                    glassesManager.connect(to: device)
-                } label: {
-                    HStack(spacing: 12) {
+                Button { glassesManager.connect(to: device) } label: {
+                    HStack(spacing: 14) {
                         Image(systemName: "eyeglasses")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(BlueprintTheme.brandTeal)
+                            .frame(width: 36, height: 36)
+                            .background(BlueprintTheme.brandTeal.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
                         Text(device.name)
-                            .foregroundStyle(.white.opacity(0.9))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white)
                             .lineLimit(1)
+
                         Spacer()
+
                         Image(systemName: "chevron.right")
-                            .foregroundStyle(.white.opacity(0.5))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(white: 0.25))
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
-                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
                 }
                 .buttonStyle(.plain)
             }
         }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
     }
 }
-

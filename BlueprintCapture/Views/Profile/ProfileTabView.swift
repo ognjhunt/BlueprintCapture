@@ -6,6 +6,9 @@ struct ProfileTabView: View {
     private let device = DeviceCapabilityService.shared
     @StateObject private var vm = ProfileTabViewModel()
 
+    @State private var profileDigest: String? = nil
+    @State private var isLoadingDigest = false
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -22,7 +25,14 @@ struct ProfileTabView: View {
                         // Tier badge card
                         tierBadgeCard
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 28)
+                            .padding(.bottom, 16)
+
+                        // AI Personalized Digest
+                        if isLoadingDigest || profileDigest != nil {
+                            aiDigestCard
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 28)
+                        }
 
                         // Statistics grid
                         sectionLabel("Statistics")
@@ -56,6 +66,68 @@ struct ProfileTabView: View {
             .navigationBarHidden(true)
         }
         .task { await vm.load() }
+        .onChange(of: vm.totalCaptures) { _, count in
+            guard count > 0, profileDigest == nil else { return }
+            Task { await generateDigest() }
+        }
+    }
+
+    @MainActor
+    private func generateDigest() async {
+        guard SpaceDraftGenerator.shared.isAvailable, profileDigest == nil else { return }
+        isLoadingDigest = true
+        let result = await SpaceDraftGenerator.shared.streamProfileDigest(
+            tier: vm.tierLabel,
+            totalCaptures: vm.totalCaptures,
+            approvedCaptures: vm.approvedCaptures
+        ) { partial in
+            Task { @MainActor in self.profileDigest = partial }
+        }
+        if let r = result { profileDigest = r }
+        isLoadingDigest = false
+    }
+
+    // MARK: - AI Digest Card
+
+    private var aiDigestCard: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(BlueprintTheme.brandTeal)
+                .frame(width: 3)
+                .cornerRadius(2)
+
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .frame(width: 22)
+
+                if isLoadingDigest && profileDigest == nil {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.75)
+                            .tint(Color(white: 0.5))
+                        Text("Generating your digest…")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.45))
+                    }
+                } else {
+                    Text(profileDigest ?? "")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color(white: 0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Header

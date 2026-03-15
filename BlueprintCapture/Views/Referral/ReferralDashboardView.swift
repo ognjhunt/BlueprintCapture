@@ -2,221 +2,327 @@ import SwiftUI
 
 struct ReferralDashboardView: View {
     @StateObject private var viewModel = ReferralViewModel()
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                // Hero card
-                heroCard
+        ZStack(alignment: .top) {
+            Color.black.ignoresSafeArea()
 
-                // Stats
-                statsRow
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Header
+                    pageHeader
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 24)
 
-                // Share section
-                shareSection
+                    // Info banner
+                    infoBanner
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
 
-                // Referral list
-                referralListCard
+                    // Share & Earn grid
+                    sectionLabel("Share & Earn 10%")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+
+                    statsGrid
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
+
+                    // Referral History
+                    sectionLabel("Referral History")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+
+                    referralHistory
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 48)
+                }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
+            .refreshable { await viewModel.load() }
         }
-        .navigationTitle("Referrals")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
-        .refreshable { await viewModel.load() }
+        .navigationBarHidden(true)
         .task { await viewModel.load() }
-        .blueprintAppBackground()
+        .preferredColorScheme(.dark)
     }
 
-    // MARK: - Hero Card
+    // MARK: - Header
 
-    private var heroCard: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.2.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(BlueprintTheme.brandTeal)
-
-            Text("Earn 10% of their captures, forever")
-                .font(.headline)
-                .multilineTextAlignment(.center)
-
-            Text("Invite friends to Blueprint Capture. You earn 10% of every capture they get paid for — no cap, no expiry.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(BlueprintTheme.brandTeal.opacity(0.1))
-        )
-    }
-
-    // MARK: - Stats Row
-
-    private var statsRow: some View {
-        HStack(spacing: 0) {
-            statCell(value: "\(viewModel.stats.invitesSent)", label: "Invited")
-            Divider().frame(height: 36)
-            statCell(value: "\(viewModel.stats.signUps)", label: "Signed Up")
-            Divider().frame(height: 36)
-            statCell(value: "\(viewModel.stats.activeCapturers)", label: "Active")
-            Divider().frame(height: 36)
-            VStack(spacing: 4) {
-                Text(viewModel.stats.lifetimeEarnings, format: .currency(code: "USD"))
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
-                Text("Earned")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { dismiss() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Back")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(Color(white: 0.6))
             }
-            .frame(maxWidth: .infinity)
+            .padding(.bottom, 16)
+
+            Text("Affiliate Center")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(.white)
+            Text("Track your referral earnings")
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.45))
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    private func statCell(value: String, label: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title3.weight(.bold))
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-    }
+    // MARK: - Info Banner (Kled left-border style)
 
-    // MARK: - Share Section
+    private var infoBanner: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(Color(white: 0.45))
+                .frame(width: 3)
+                .cornerRadius(2)
 
-    private var shareSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Your Referral Code", systemImage: "qrcode")
-                .font(.headline)
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.55))
+                    .frame(width: 22)
 
-            // Code display + copy
-            HStack {
-                Text(viewModel.referralCode)
-                    .font(.title2.monospacedDigit().weight(.bold))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("10% kickback on referrals")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.85))
+                    Text("Share your code. When friends complete their first payout, you get 10% and they get 10% extra.")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Spacer()
-
-                Button {
-                    UIPasteboard.general.string = viewModel.referralCode
-                } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .font(.caption.weight(.semibold))
-                }
-                .buttonStyle(.bordered)
-                .tint(BlueprintTheme.brandTeal)
             }
-
-            // Share button
-            ShareLink(
-                item: viewModel.shareMessage,
-                subject: Text("Join Blueprint Capture"),
-                message: Text("Scan spaces and earn money!")
-            ) {
-                HStack {
-                    Image(systemName: "square.and.arrow.up")
-                    Text("Share Invite Link")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color(white: 0.14), lineWidth: 1)
         )
     }
 
-    // MARK: - Referral List
+    // MARK: - Stats Grid (2x2 like Kled Affiliate Center)
 
-    private var referralListCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Your Referrals", systemImage: "person.3.fill")
-                .font(.headline)
+    private var statsGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            // Total Commissions
+            statCard(
+                title: "Total Commissions",
+                value: viewModel.stats.lifetimeEarnings.formatted(.currency(code: "USD")),
+                subtitle: "\(viewModel.stats.activeCapturers) active",
+                color: BlueprintTheme.successGreen,
+                highlight: false
+            )
 
-            if viewModel.isLoading && viewModel.referrals.isEmpty {
+            // Total Referrals
+            statCard(
+                title: "Total Referrals",
+                value: "\(viewModel.stats.signUps)",
+                subtitle: "\(viewModel.stats.invitesSent) invited",
+                color: Color(white: 0.55),
+                highlight: false
+            )
+
+            // Invite Code (teal highlight, Kled green card style)
+            inviteCodeCard
+
+            // Invite Friends
+            inviteFriendsCard
+        }
+    }
+
+    private func statCard(title: String, value: String, subtitle: String, color: Color, highlight: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(Color(white: 0.45))
+                .lineLimit(1)
+
+            Text(value)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(highlight ? color : .white)
+
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(Color(white: 0.4))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    private var inviteCodeCard: some View {
+        Button {
+            UIPasteboard.general.string = viewModel.referralCode
+            withAnimation { copied = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                withAnimation { copied = false }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
+                    Text("Invite Code")
+                        .font(.caption)
+                        .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.8))
                     Spacer()
-                    ProgressView().tint(BlueprintTheme.brandTeal)
-                    Spacer()
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.brandTeal)
                 }
-                .padding(.vertical, 20)
-            } else if viewModel.referrals.isEmpty {
-                Text("No referrals yet. Share your code to start earning!")
+
+                Text(viewModel.referralCode.isEmpty ? "Loading…" : viewModel.referralCode)
+                    .font(.title3.weight(.bold).monospaced())
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .lineLimit(1)
+
+                Text(copied ? "Copied!" : "Tap to copy")
+                    .font(.caption2)
+                    .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.7))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(BlueprintTheme.brandTeal.opacity(0.1), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(BlueprintTheme.brandTeal.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var inviteFriendsCard: some View {
+        ShareLink(
+            item: viewModel.shareMessage,
+            subject: Text("Join Blueprint Capture"),
+            message: Text("Scan spaces and earn money!")
+        ) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Invite Friends")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
+                    Spacer()
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.45))
+                }
+
+                Image(systemName: "person.2.fill")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.3))
+
+                Text("Share your code")
+                    .font(.caption2)
+                    .foregroundStyle(Color(white: 0.4))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(white: 0.12), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Referral History
+
+    @ViewBuilder
+    private var referralHistory: some View {
+        if viewModel.isLoading && viewModel.referrals.isEmpty {
+            HStack {
+                Spacer()
+                ProgressView().tint(Color(white: 0.4))
+                Spacer()
+            }
+            .padding(.vertical, 48)
+        } else if viewModel.referrals.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "gift")
+                    .font(.system(size: 36))
+                    .foregroundStyle(Color(white: 0.2))
+                Text("No commissions yet")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.4))
+                Text("Invite friends to earn referral commissions")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 8)
-            } else {
+                    .foregroundStyle(Color(white: 0.3))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 48)
+        } else {
+            VStack(spacing: 1) {
                 ForEach(viewModel.referrals) { referral in
                     referralRow(referral)
-                    if referral.id != viewModel.referrals.last?.id {
-                        Divider()
-                    }
                 }
             }
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
     private func referralRow(_ referral: Referral) -> some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(referral.referredUserName)
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
                 HStack(spacing: 6) {
                     statusBadge(referral.status)
                     Text(referral.referredAt, style: .date)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(Color(white: 0.4))
                 }
             }
-
             Spacer()
-
             if referral.lifetimeEarningsCents > 0 {
                 Text(referral.lifetimeEarnings, format: .currency(code: "USD"))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(BlueprintTheme.successGreen)
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 
     private func statusBadge(_ status: ReferralStatus) -> some View {
         Text(status.rawValue.capitalized)
-            .font(.caption2.weight(.semibold))
+            .font(.caption2.weight(.bold))
             .foregroundStyle(statusColor(status))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                Capsule()
-                    .fill(statusColor(status).opacity(0.15))
-            )
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(statusColor(status).opacity(0.14), in: Capsule())
     }
 
     private func statusColor(_ status: ReferralStatus) -> Color {
         switch status {
-        case .invited: return .secondary
+        case .invited: return Color(white: 0.5)
         case .signedUp: return BlueprintTheme.brandTeal
-        case .firstCapture: return .orange
+        case .firstCapture: return Color(red: 0.9, green: 0.55, blue: 0.1)
         case .active: return BlueprintTheme.successGreen
         }
+    }
+
+    // MARK: - Section Label
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption.weight(.bold))
+            .foregroundStyle(Color(white: 0.35))
+            .tracking(1.0)
     }
 }
 

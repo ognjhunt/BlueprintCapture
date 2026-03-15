@@ -77,6 +77,137 @@ final class SpaceDraftGenerator {
         }
     }
 
+    // MARK: - Job Focus Tip
+
+    func streamFocusTip(
+        jobTitle: String,
+        description: String,
+        requirements: [String],
+        restrictedAreas: [String],
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        guard #available(iOS 26.0, *) else { return nil }
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+
+        let session = LanguageModelSession(
+            instructions: "You give brief, actionable capture guidance to field contributors doing 3D spatial scanning jobs. Be concise and specific. One sentence only."
+        )
+        let reqs = requirements.prefix(3).joined(separator: "; ")
+        let restricted = restrictedAreas.prefix(2).joined(separator: ", ")
+        var prompt = "Job: \"\(jobTitle)\". Description: \(description.prefix(200))."
+        if !reqs.isEmpty { prompt += " Requirements: \(reqs)." }
+        if !restricted.isEmpty { prompt += " Off-limits: \(restricted)." }
+        prompt += " Give one actionable focus tip for the capturer."
+
+        do {
+            let stream = session.streamResponse(to: prompt, generating: JobFocusTip.self)
+            var last = ""
+            for try await partial in stream {
+                let tip = partial.content.tip ?? ""
+                if !tip.isEmpty { last = tip; onPartial(tip) }
+            }
+            return last.isEmpty ? nil : last
+        } catch {
+            print("[SpaceDraftGenerator] ✗ focusTip: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Profile Digest
+
+    func streamProfileDigest(
+        tier: String,
+        totalCaptures: Int,
+        approvedCaptures: Int,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        guard #available(iOS 26.0, *) else { return nil }
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+
+        let session = LanguageModelSession(
+            instructions: "You generate short personalized digests for contributors on a 3D capture platform. Be encouraging, specific, and factual. No filler phrases."
+        )
+        let approvalRate = totalCaptures > 0 ? Int(Double(approvedCaptures) / Double(totalCaptures) * 100) : 0
+        let prompt = "Contributor tier: \(tier). Total captures: \(totalCaptures). Approved: \(approvedCaptures) (\(approvalRate)% approval rate). Write a 1–2 sentence personalized insight."
+
+        do {
+            let stream = session.streamResponse(to: prompt, generating: ProfileDigest.self)
+            var last = ""
+            for try await partial in stream {
+                let text = partial.content.digestText ?? ""
+                if !text.isEmpty { last = text; onPartial(text) }
+            }
+            return last.isEmpty ? nil : last
+        } catch {
+            print("[SpaceDraftGenerator] ✗ profileDigest: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Recording Guidance
+
+    func streamRecordingGuidance(
+        jobTitle: String,
+        requirements: [String],
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        guard #available(iOS 26.0, *) else { return nil }
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+
+        let session = LanguageModelSession(
+            instructions: "You give real-time capture guidance to a field contributor wearing smart glasses and actively recording a space. Be ultra-brief, specific, and action-first. Max 15 words."
+        )
+        let reqs = requirements.prefix(3).joined(separator: "; ")
+        var prompt = "Job: \"\(jobTitle)\"."
+        if !reqs.isEmpty { prompt += " Key requirements: \(reqs)." }
+        prompt += " Give one real-time tip they should act on right now."
+
+        do {
+            let stream = session.streamResponse(to: prompt, generating: RecordingGuidance.self)
+            var last = ""
+            for try await partial in stream {
+                let tip = partial.content.tip ?? ""
+                if !tip.isEmpty { last = tip; onPartial(tip) }
+            }
+            return last.isEmpty ? nil : last
+        } catch {
+            print("[SpaceDraftGenerator] ✗ recordingGuidance: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Earnings Insight
+
+    func streamEarningsInsight(
+        totalCaptures: Int,
+        approvedCaptures: Int,
+        totalEarnings: String,
+        pendingCount: Int,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        guard #available(iOS 26.0, *) else { return nil }
+        guard case .available = SystemLanguageModel.default.availability else { return nil }
+
+        let session = LanguageModelSession(
+            instructions: "You give brief earnings insights to contributors on a 3D spatial capture platform. Be factual, specific to their numbers, and motivating. No filler."
+        )
+        let approvalRate = totalCaptures > 0 ? Int(Double(approvedCaptures) / Double(totalCaptures) * 100) : 0
+        let prompt = "Contributor stats — total captures: \(totalCaptures), approved: \(approvedCaptures) (\(approvalRate)% rate), total earnings: \(totalEarnings), pending review: \(pendingCount). Write a 1–2 sentence earnings insight."
+
+        do {
+            let stream = session.streamResponse(to: prompt, generating: EarningsInsight.self)
+            var last = ""
+            for try await partial in stream {
+                let text = partial.content.insight ?? ""
+                if !text.isEmpty { last = text; onPartial(text) }
+            }
+            return last.isEmpty ? nil : last
+        } catch {
+            print("[SpaceDraftGenerator] ✗ earningsInsight: \(error)")
+            return nil
+        }
+    }
+
     // MARK: - Stream (token-by-token)
 
     func streamDraft(

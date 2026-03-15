@@ -14,6 +14,8 @@ struct ScanRecordingView: View {
     @State private var showConnectSheet = false
     @State private var phase: Phase = .preparing("Preparing…")
     @State private var errorMessage: String?
+    @State private var guidanceTip: String? = nil
+    @State private var isLoadingGuidance = false
 
     enum Phase: Equatable {
         case preparing(String)
@@ -59,6 +61,11 @@ struct ScanRecordingView: View {
         }
         .onAppear {
             Task { await beginIfPossible() }
+        }
+        .onChange(of: phase) { _, newPhase in
+            if newPhase == .recording, guidanceTip == nil, !isLoadingGuidance {
+                Task { await generateGuidance() }
+            }
         }
         .onChange(of: glassesManager.captureState) { _, newValue in
             switch newValue {
@@ -119,7 +126,7 @@ struct ScanRecordingView: View {
             }
 
         case .recording:
-            VStack(spacing: 14) {
+            VStack(spacing: 20) {
                 Text(formatDuration(glassesManager.streamingInfo?.durationSeconds ?? 0))
                     .font(.system(size: 64, weight: .light, design: .monospaced))
                     .foregroundStyle(.white)
@@ -127,6 +134,19 @@ struct ScanRecordingView: View {
                 Text("Recording")
                     .font(.headline)
                     .foregroundStyle(.white.opacity(0.85))
+
+                // AI guidance tip
+                if isLoadingGuidance && guidanceTip == nil {
+                    HStack(spacing: 8) {
+                        ProgressView().scaleEffect(0.7).tint(Color(white: 0.4))
+                        Text("Getting guidance…")
+                            .font(.caption)
+                            .foregroundStyle(Color(white: 0.4))
+                    }
+                    .padding(.top, 4)
+                } else if let tip = guidanceTip {
+                    guidanceTipCard(tip)
+                }
             }
 
         case .uploading:
@@ -215,6 +235,42 @@ struct ScanRecordingView: View {
         default:
             EmptyView()
         }
+    }
+
+    @MainActor
+    private func generateGuidance() async {
+        guard SpaceDraftGenerator.shared.isAvailable, guidanceTip == nil else { return }
+        isLoadingGuidance = true
+        let result = await SpaceDraftGenerator.shared.streamRecordingGuidance(
+            jobTitle: job.title,
+            requirements: job.workflowStepsOrInstructions
+        ) { partial in
+            Task { @MainActor in self.guidanceTip = partial }
+        }
+        if let r = result { guidanceTip = r }
+        isLoadingGuidance = false
+    }
+
+    private func guidanceTipCard(_ tip: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(BlueprintTheme.brandTeal)
+
+            Text(tip)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color(white: 0.85))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(BlueprintTheme.brandTeal.opacity(0.25), lineWidth: 1)
+        )
     }
 
     private func beginIfPossible() async {

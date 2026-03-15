@@ -10,6 +10,9 @@ struct JobDetailSheet: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var focusTip: String? = nil
+    @State private var isLoadingTip = false
+
     private var isOnSite: Bool {
         if AppConfig.allowOffsiteCheckIn() { return true }
         guard let userLocation else { return false }
@@ -52,7 +55,14 @@ struct JobDetailSheet: View {
                         // Payout boost banner (like Kled's "Contributing boosts rate" banner)
                         payoutBanner
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 20)
+                            .padding(.bottom, 12)
+
+                        // AI Focus Tip
+                        if isLoadingTip || focusTip != nil {
+                            aiFocusTipCard
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 20)
+                        }
 
                         // Divider
                         Divider()
@@ -137,6 +147,70 @@ struct JobDetailSheet: View {
             .padding(.top, 56)
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            Task { await generateFocusTip() }
+        }
+    }
+
+    @MainActor
+    private func generateFocusTip() async {
+        guard SpaceDraftGenerator.shared.isAvailable, focusTip == nil else { return }
+        isLoadingTip = true
+        let description = item.job.workflowStepsOrInstructions.first ?? ""
+        let requirements = Array(item.job.workflowStepsOrInstructions.dropFirst())
+        let result = await SpaceDraftGenerator.shared.streamFocusTip(
+            jobTitle: item.job.title,
+            description: description,
+            requirements: requirements,
+            restrictedAreas: restrictedAreas
+        ) { partial in
+            Task { @MainActor in self.focusTip = partial }
+        }
+        if let r = result { focusTip = r }
+        isLoadingTip = false
+    }
+
+    // MARK: - AI Focus Tip Card
+
+    private var aiFocusTipCard: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(BlueprintTheme.brandTeal)
+                .frame(width: 3)
+                .cornerRadius(2)
+
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .frame(width: 22)
+
+                if isLoadingTip && focusTip == nil {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.75)
+                            .tint(Color(white: 0.5))
+                        Text("Generating focus tip…")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.45))
+                    }
+                } else {
+                    Text(focusTip ?? "")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color(white: 0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Hero Block

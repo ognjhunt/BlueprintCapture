@@ -7,6 +7,8 @@ struct WalletView: View {
     @State private var showingStripeOnboarding = false
     @State private var showingAuth = false
     @State private var selectedLedgerTab = 0
+    @State private var earningsInsight: String? = nil
+    @State private var isLoadingInsight = false
 
     private let ledgerTabs = ["Payouts", "Cashouts", "History"]
 
@@ -37,7 +39,14 @@ struct WalletView: View {
                     // Pending + cashout row
                     pendingRow
                         .padding(.horizontal, 20)
-                        .padding(.bottom, 24)
+                        .padding(.bottom, 16)
+
+                    // AI Earnings Insight
+                    if isLoadingInsight || earningsInsight != nil {
+                        aiEarningsInsightCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 24)
+                    }
 
                     // Segmented ledger picker
                     ledgerPicker
@@ -55,6 +64,10 @@ struct WalletView: View {
         .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
         .sheet(isPresented: $showingAuth) { AuthView() }
         .task { await viewModel.load() }
+        .onChange(of: viewModel.scansCompleted) { _, count in
+            guard count > 0, earningsInsight == nil else { return }
+            Task { await generateInsight() }
+        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
@@ -63,6 +76,69 @@ struct WalletView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Unknown error")
         }
+    }
+
+    // MARK: - AI Earnings Insight
+
+    @MainActor
+    private func generateInsight() async {
+        guard SpaceDraftGenerator.shared.isAvailable, earningsInsight == nil else { return }
+        isLoadingInsight = true
+        let approved = viewModel.captureHistory.filter { $0.status == .approved || $0.status == .paid }.count
+        let pending = viewModel.captureHistory.filter { $0.status == .underReview || $0.status == .submitted }.count
+        let fmt = NumberFormatter(); fmt.numberStyle = .currency; fmt.currencyCode = "USD"
+        let earningsString = fmt.string(from: NSDecimalNumber(decimal: viewModel.totalEarnings)) ?? "$0.00"
+        let result = await SpaceDraftGenerator.shared.streamEarningsInsight(
+            totalCaptures: viewModel.scansCompleted,
+            approvedCaptures: approved,
+            totalEarnings: earningsString,
+            pendingCount: pending
+        ) { partial in
+            Task { @MainActor in self.earningsInsight = partial }
+        }
+        if let r = result { earningsInsight = r }
+        isLoadingInsight = false
+    }
+
+    private var aiEarningsInsightCard: some View {
+        HStack(spacing: 0) {
+            Rectangle()
+                .fill(BlueprintTheme.brandTeal)
+                .frame(width: 3)
+                .cornerRadius(2)
+
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .frame(width: 22)
+
+                if isLoadingInsight && earningsInsight == nil {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.75)
+                            .tint(Color(white: 0.5))
+                        Text("Generating earnings insight…")
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.45))
+                    }
+                } else {
+                    Text(earningsInsight ?? "")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color(white: 0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 14)
+        }
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Header

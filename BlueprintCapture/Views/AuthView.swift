@@ -12,219 +12,131 @@ struct AuthView: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                ZStack {
-                    // Compute responsive horizontal paddings so content never clips
-                    let pagePadding: CGFloat = max(12, min(20, geometry.size.width * 0.05))
-                    let cardPadding: CGFloat = max(12, min(24, geometry.size.width * 0.04))
-                    let availableContentWidth: CGFloat = geometry.size.width - 2 * (pagePadding + cardPadding)
-                    // Premium gradient background using Blueprint theme
-                    LinearGradient(
-                        colors: [
-                            BlueprintTheme.primaryDeep.opacity(0.90),
-                            BlueprintTheme.primary.opacity(0.70),
-                            BlueprintTheme.brandTeal.opacity(0.50)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .ignoresSafeArea()
+            ZStack {
+                Color.black.ignoresSafeArea()
 
-                    // Responsive animated brand glows
-                    Circle()
-                        .fill(BlueprintTheme.primary.opacity(0.20))
-                        .frame(width: geometry.size.width * 1.2, height: geometry.size.width * 1.2)
-                        .blur(radius: 100)
-                        .offset(x: geometry.size.width * 0.3, y: -geometry.size.height * 0.15)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        // Header
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Welcome to Blueprint")
+                                .font(.largeTitle.weight(.bold))
+                                .foregroundStyle(.white)
+                            Text("Capture spaces for review. Get paid after approval.")
+                                .font(.subheadline)
+                                .foregroundStyle(Color(white: 0.45))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 20)
+                        .padding(.bottom, 32)
+                        .padding(.horizontal, 20)
 
-                    Circle()
-                        .fill(BlueprintTheme.brandTeal.opacity(0.18))
-                        .frame(width: geometry.size.width * 1.1, height: geometry.size.width * 1.1)
-                        .blur(radius: 100)
-                        .offset(x: -geometry.size.width * 0.3, y: geometry.size.height * 0.3)
-
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Header Section
-                            VStack(spacing: 12) {
-                                Text("Welcome to Blueprint")
-                                    .font(.system(size: min(32, geometry.size.width * 0.085), weight: .bold, design: .default))
-                                    .foregroundStyle(Color.white)
-                                    .minimumScaleFactor(0.8)
-                                    .lineLimit(1)
-
-                                Text("Capture spaces for review. Get paid after approval.")
-                                    .font(.system(size: 16, weight: .regular, design: .default))
-                                    .foregroundStyle(Color.white.opacity(0.85))
-                                    .lineLimit(2)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.top, 20)
-                            .padding(.bottom, 24)
-                            .padding(.horizontal, pagePadding)
-
-                        // Main Content Card
-                        VStack(spacing: 20) {
-                            // Google Sign-In Button
-                            #if canImport(GoogleSignInSwift)
-                            GoogleSignInButton(
-                                viewModel: .init(
-                                    scheme: .light,
-                                    style: availableContentWidth >= 312 ? .wide : .standard,
-                                    state: .normal
-                                )
-                            ) {
-                                Task { await viewModel.signInWithGoogle() }
-                            }
-                            .frame(height: 52)
-                            .frame(maxWidth: .infinity)
-                            #else
-                            Button {
-                                Task { await viewModel.signInWithGoogle() }
-                            } label: {
-                                HStack(spacing: 14) {
-                                    GoogleLogo(size: 20)
-                                    Text("Continue with Google")
-                                        .font(.system(size: 15, weight: .semibold, design: .default))
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 16)
-                                .frame(height: 52)
-                                .frame(maxWidth: .infinity)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .fill(Color.white)
-                                )
-                                .foregroundStyle(Color(red: 0.25, green: 0.25, blue: 0.25))
-                                .shadow(color: Color.black.opacity(0.08), radius: 4, x: 0, y: 2)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            #endif
+                        // Form
+                        VStack(spacing: 14) {
+                            // Social sign-in
+                            socialButtons
 
                             // Divider
                             HStack(spacing: 12) {
                                 Rectangle()
+                                    .fill(Color(white: 0.15))
                                     .frame(height: 1)
-                                    .foregroundStyle(Color.white.opacity(0.20))
                                 Text("or")
-                                    .font(.system(size: 13, weight: .medium, design: .default))
-                                    .foregroundStyle(Color.white.opacity(0.70))
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(Color(white: 0.4))
                                 Rectangle()
+                                    .fill(Color(white: 0.15))
                                     .frame(height: 1)
-                                    .foregroundStyle(Color.white.opacity(0.20))
                             }
                             .padding(.vertical, 4)
 
-                            // Mode Selector
-                            segmentedControl
+                            // Mode toggle
+                            modeToggle
 
-                            // Form Fields
+                            // Fields
                             formFields
 
-                            // Error Message
+                            // Error
                             if let err = viewModel.errorMessage, !err.isEmpty {
                                 HStack(spacing: 8) {
                                     Image(systemName: "exclamationmark.circle.fill")
-                                        .font(.system(size: 14))
+                                        .font(.caption.weight(.semibold))
                                     Text(err)
-                                        .font(.system(size: 13, weight: .regular, design: .default))
+                                        .font(.caption)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(BlueprintTheme.errorRed)
+                                .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.35))
                                 .padding(12)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(BlueprintTheme.errorRed.opacity(0.12))
+                                    Color(red: 0.95, green: 0.35, blue: 0.35).opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 )
                             }
 
-                            // Submit Button
+                            // Submit
                             Button {
                                 Task { await viewModel.submit() }
                             } label: {
-                                if viewModel.isBusy {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                            .tint(.white)
-                                        Text("Processing...")
+                                Group {
+                                    if viewModel.isBusy {
+                                        HStack(spacing: 8) {
+                                            ProgressView().tint(.black).controlSize(.small)
+                                            Text("Processing…").fontWeight(.semibold)
+                                        }
+                                    } else {
+                                        Text(viewModel.mode == .signIn ? "Sign In" : "Create Account")
                                             .fontWeight(.semibold)
                                     }
-                                } else {
-                                    Text(viewModel.mode == .signIn ? "Sign In" : "Create Account")
-                                        .fontWeight(.semibold)
                                 }
-                            }
-                            .buttonStyle(BlueprintPrimaryButtonStyle())
-                            .disabled(!viewModel.canSubmit)
-                            .opacity(viewModel.canSubmit ? 1.0 : 0.6)
-                        }
-                        .padding(.vertical, 24)
-                        .padding(.horizontal, cardPadding)
-                        .background(
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .fill(.ultraThinMaterial)
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 52)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                        .stroke(
-                                            LinearGradient(
-                                                colors: [
-                                                    Color.white.opacity(0.30),
-                                                    Color.white.opacity(0.10)
-                                                ],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            ),
-                                            lineWidth: 1
-                                        )
+                                    viewModel.canSubmit ? Color.white : Color(white: 0.35),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 )
-                        )
-                        .padding(.horizontal, pagePadding)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!viewModel.canSubmit)
+                        }
+                        .padding(.horizontal, 20)
 
                         // Footer
-                        VStack(spacing: 12) {
-                            Text("By continuing, you agree to Blueprint's")
-                                .font(.system(size: 12, weight: .regular, design: .default))
-                            + Text(" Terms of Service")
-                                .font(.system(size: 12, weight: .semibold, design: .default))
+                        VStack(spacing: 8) {
+                            Text("By continuing, you agree to Blueprint's ")
+                                .foregroundStyle(Color(white: 0.4))
+                            + Text("Terms of Service")
+                                .foregroundStyle(Color(white: 0.6))
+                                .underline()
                             + Text(" and ")
-                                .font(.system(size: 12, weight: .regular, design: .default))
+                                .foregroundStyle(Color(white: 0.4))
                             + Text("Privacy Policy")
-                                .font(.system(size: 12, weight: .semibold, design: .default))
+                                .foregroundStyle(Color(white: 0.6))
+                                .underline()
 
                             Text("Questions? Contact support@blueprint.app")
-                                .font(.system(size: 11, weight: .regular, design: .default))
-                                .foregroundStyle(Color.white.opacity(0.60))
+                                .foregroundStyle(Color(white: 0.3))
                         }
-                        .foregroundStyle(Color.white.opacity(0.80))
+                        .font(.caption)
                         .multilineTextAlignment(.center)
-                        .padding(.vertical, 24)
-                        .padding(.horizontal, pagePadding)
+                        .padding(.top, 32)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 40)
                     }
-                    .padding(.bottom, geometry.safeAreaInsets.bottom > 0 ? 0 : 20)
                 }
-                .scrollIndicators(.hidden)
-            }
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { dismiss() }) {
-                        HStack(spacing: 4) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        HStack(spacing: 5) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(size: 13, weight: .semibold))
                             Text("Close")
+                                .font(.subheadline.weight(.semibold))
                         }
-                        .foregroundStyle(Color.white)
-                        .padding(.vertical, 8)
-                        .padding(.horizontal, 12)
-                        .background(
-                            Capsule()
-                                .fill(Color.white.opacity(0.15))
-                        )
+                        .foregroundStyle(Color(white: 0.6))
                     }
                 }
             }
@@ -237,264 +149,258 @@ struct AuthView: View {
                 viewModel.consumePasteboardReferralIfNeeded()
             }
         }
+        .preferredColorScheme(.dark)
     }
 
-    private var segmentedControl: some View {
-        HStack(spacing: 8) {
+    // MARK: - Social buttons
+
+    private var socialButtons: some View {
+        VStack(spacing: 10) {
+            #if canImport(GoogleSignInSwift)
+            GoogleSignInButton(
+                viewModel: .init(scheme: .dark, style: .wide, state: viewModel.isBusy ? .disabled : .normal)
+            ) {
+                Task { await viewModel.signInWithGoogle() }
+            }
+            .frame(height: 52)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            #else
+            Button {
+                Task { await viewModel.signInWithGoogle() }
+            } label: {
+                HStack(spacing: 12) {
+                    GoogleLogo(size: 18)
+                    Text("Continue with Google")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .frame(height: 52)
+                .frame(maxWidth: .infinity)
+                .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color(white: 0.18), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            #endif
+        }
+    }
+
+    // MARK: - Mode toggle
+
+    private var modeToggle: some View {
+        HStack(spacing: 6) {
             ForEach([AuthViewModel.Mode.signIn, .signUp], id: \.self) { mode in
-                Button(action: { 
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        viewModel.mode = mode
-                    }
-                }) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { viewModel.mode = mode }
+                } label: {
                     Text(mode == .signIn ? "Sign In" : "Create Account")
-                        .font(.system(size: 14, weight: .semibold, design: .default))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(viewModel.mode == mode ? .white : Color(white: 0.45))
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
                         .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(
-                                    viewModel.mode == mode
-                                        ? LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.25),
-                                                Color.white.opacity(0.15)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                        : LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.08),
-                                                Color.white.opacity(0.04)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(
-                                            Color.white.opacity(
-                                                viewModel.mode == mode ? 0.30 : 0.10
-                                            ),
-                                            lineWidth: 1
-                                        )
-                                )
+                            viewModel.mode == mode
+                                ? Color(white: 0.18)
+                                : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 11, style: .continuous)
                         )
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white)
             }
         }
+        .padding(4)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
     }
+
+    // MARK: - Form fields
 
     private var formFields: some View {
         VStack(spacing: 12) {
             if viewModel.mode == .signUp {
-                CustomTextField(
+                kledTextField(
                     title: "Full Name",
                     placeholder: "John Doe",
                     text: $viewModel.name,
-                    systemImage: "person.fill",
-                    isFocused: focusedField == .name
+                    icon: "person.fill",
+                    focused: focusedField == .name
                 )
                 .onTapGesture { focusedField = .name }
             }
 
-            CustomTextField(
+            kledTextField(
                 title: "Email Address",
                 placeholder: "you@example.com",
                 text: $viewModel.email,
-                systemImage: "envelope.fill",
+                icon: "envelope.fill",
                 keyboardType: .emailAddress,
-                isFocused: focusedField == .email
+                focused: focusedField == .email
             )
             .onTapGesture { focusedField = .email }
 
-            CustomSecureField(
+            kledSecureField(
                 title: "Password",
                 placeholder: "At least 8 characters",
                 text: $viewModel.password,
-                isFocused: focusedField == .password
+                focused: focusedField == .password
             )
             .onTapGesture { focusedField = .password }
 
             if viewModel.mode == .signUp {
-                CustomSecureField(
+                kledSecureField(
                     title: "Confirm Password",
                     placeholder: "Re-enter your password",
                     text: $viewModel.confirmPassword,
-                    isFocused: focusedField == .confirmPassword
+                    focused: focusedField == .confirmPassword
                 )
                 .onTapGesture { focusedField = .confirmPassword }
             }
         }
     }
-}
 
-// MARK: - Custom Input Components
+    // MARK: - Field builders
 
-struct CustomTextField: View {
-    let title: String
-    let placeholder: String
-    @Binding var text: String
-    let systemImage: String
-    var keyboardType: UIKeyboardType = .default
-    let isFocused: Bool
-
-    var body: some View {
+    private func kledTextField(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        icon: String,
+        keyboardType: UIKeyboardType = .default,
+        focused: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .default))
-                .foregroundStyle(Color.white.opacity(0.90))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(white: 0.6))
 
             HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(isFocused ? 1.0 : 0.60))
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(focused ? BlueprintTheme.brandTeal : Color(white: 0.4))
+                    .frame(width: 20)
 
-                TextField(placeholder, text: $text)
+                TextField(placeholder, text: text)
                     .keyboardType(keyboardType)
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(.white)
                     .tint(BlueprintTheme.brandTeal)
 
-                if !text.isEmpty {
+                if !text.wrappedValue.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(BlueprintTheme.successGreen)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(isFocused ? 0.15 : 0.08))
-            )
+            .padding(.vertical, 13)
+            .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(
-                        isFocused
-                            ? LinearGradient(
-                                colors: [
-                                    BlueprintTheme.brandTeal.opacity(0.60),
-                                    BlueprintTheme.primary.opacity(0.40)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            : LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.20),
-                                    Color.white.opacity(0.10)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                        lineWidth: 1.5
+                        focused ? BlueprintTheme.brandTeal.opacity(0.6) : Color(white: 0.18),
+                        lineWidth: focused ? 1.5 : 1
                     )
             )
         }
     }
+
+    private func kledSecureField(
+        title: String,
+        placeholder: String,
+        text: Binding<String>,
+        focused: Bool
+    ) -> some View {
+        KledSecureFieldView(title: title, placeholder: placeholder, text: text, focused: focused)
+    }
 }
 
-struct CustomSecureField: View {
+// MARK: - Kled Secure Field
+
+private struct KledSecureFieldView: View {
     let title: String
     let placeholder: String
     @Binding var text: String
-    let isFocused: Bool
-    @State private var isVisible = false
+    let focused: Bool
+    @State private var visible = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold, design: .default))
-                .foregroundStyle(Color.white.opacity(0.90))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(white: 0.6))
 
             HStack(spacing: 10) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Color.white.opacity(isFocused ? 1.0 : 0.60))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(focused ? BlueprintTheme.brandTeal : Color(white: 0.4))
+                    .frame(width: 20)
 
-                if isVisible {
+                if visible {
                     TextField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
                 } else {
                     SecureField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
                 }
 
-                Button(action: { isVisible.toggle() }) {
-                    Image(systemName: isVisible ? "eye.slash.fill" : "eye.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.70))
+                Button { visible.toggle() } label: {
+                    Image(systemName: visible ? "eye.slash.fill" : "eye.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color(white: 0.4))
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(isFocused ? 0.15 : 0.08))
-            )
+            .padding(.vertical, 13)
+            .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(
-                        isFocused
-                            ? LinearGradient(
-                                colors: [
-                                    BlueprintTheme.brandTeal.opacity(0.60),
-                                    BlueprintTheme.primary.opacity(0.40)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                            : LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.20),
-                                    Color.white.opacity(0.10)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                        lineWidth: 1.5
+                        focused ? BlueprintTheme.brandTeal.opacity(0.6) : Color(white: 0.18),
+                        lineWidth: focused ? 1.5 : 1
                     )
             )
         }
     }
 }
 
-// MARK: - Google Logo Component
+// MARK: - Google Logo
+
 struct GoogleLogo: View {
     var size: CGFloat = 20
-    
+
     var body: some View {
         ZStack {
-            // Google "G" logo recreation
             Circle()
                 .strokeBorder(lineWidth: size * 0.12)
                 .foregroundStyle(
                     AngularGradient(
                         colors: [
-                            Color(red: 0.26, green: 0.52, blue: 0.96), // Blue
-                            Color(red: 0.20, green: 0.66, blue: 0.33), // Green
-                            Color(red: 0.98, green: 0.74, blue: 0.02), // Yellow
-                            Color(red: 0.92, green: 0.25, blue: 0.21), // Red
-                            Color(red: 0.26, green: 0.52, blue: 0.96)  // Blue (complete circle)
+                            Color(red: 0.26, green: 0.52, blue: 0.96),
+                            Color(red: 0.20, green: 0.66, blue: 0.33),
+                            Color(red: 0.98, green: 0.74, blue: 0.02),
+                            Color(red: 0.92, green: 0.25, blue: 0.21),
+                            Color(red: 0.26, green: 0.52, blue: 0.96)
                         ],
                         center: .center
                     )
                 )
                 .frame(width: size, height: size)
-            
-            // Inner details
+
             Circle()
                 .trim(from: 0.0, to: 0.75)
                 .stroke(lineWidth: size * 0.15)
@@ -504,5 +410,8 @@ struct GoogleLogo: View {
         }
     }
 }
+
+// MARK: - Removed: CustomTextField / CustomSecureField
+// Replaced by kledTextField / KledSecureFieldView above.
 
 #Preview { AuthView() }
