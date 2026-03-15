@@ -168,10 +168,17 @@ struct BillingInfo: Codable, Identifiable {
 }
 
 enum CaptureStatus: CaseIterable {
+    case draft
+    case readyToSubmit
+    case submitted
+    case underReview
     case processing
     case qc
     case approved
+    case needsRecapture
     case needsFix
+    case rejected
+    case paid
 }
 
 extension CaptureStatus: Codable {
@@ -179,9 +186,16 @@ extension CaptureStatus: Codable {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(String.self).lowercased()
         switch raw {
+        case "draft": self = .draft
+        case "ready_to_submit", "ready-to-submit": self = .readyToSubmit
+        case "submitted": self = .submitted
+        case "under_review", "under-review": self = .underReview
         case "qc", "quality_control": self = .qc
         case "approved": self = .approved
+        case "needs_recapture", "needs-recapture": self = .needsRecapture
         case "needs_fix", "needs-fix": self = .needsFix
+        case "rejected": self = .rejected
+        case "paid", "completed": self = .paid
         case "processing": self = .processing
         default: self = .processing
         }
@@ -190,10 +204,17 @@ extension CaptureStatus: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
+        case .draft: try container.encode("draft")
+        case .readyToSubmit: try container.encode("ready_to_submit")
+        case .submitted: try container.encode("submitted")
+        case .underReview: try container.encode("under_review")
         case .processing: try container.encode("processing")
         case .qc: try container.encode("qc")
         case .approved: try container.encode("approved")
+        case .needsRecapture: try container.encode("needs_recapture")
         case .needsFix: try container.encode("needs_fix")
+        case .rejected: try container.encode("rejected")
+        case .paid: try container.encode("paid")
         }
     }
 }
@@ -339,35 +360,60 @@ struct CaptureQualityBreakdown: Codable, Equatable {
 }
 
 struct CaptureEarningsBreakdown: Codable, Equatable {
+    let quotedPayoutCents: Int?
     let basePayoutCents: Int?
     let deviceMultiplier: Double?
+    let qualityBonusCents: Int?
+    let specialTaskBonusCents: Int?
+    let referralBonusCents: Int?
     let bonuses: [CaptureEarningsBonus]
+    let finalApprovedPayoutCents: Int?
     let totalPayoutCents: Int?
 
     enum CodingKeys: String, CodingKey {
+        case quotedPayoutCents = "quoted_payout_cents"
         case basePayoutCents = "base_payout_cents"
         case deviceMultiplier = "device_multiplier"
+        case qualityBonusCents = "quality_bonus_cents"
+        case specialTaskBonusCents = "special_task_bonus_cents"
+        case referralBonusCents = "referral_bonus_cents"
         case bonuses
+        case finalApprovedPayoutCents = "final_approved_payout_cents"
         case totalPayoutCents = "total_payout_cents"
     }
 
     init(
+        quotedPayoutCents: Int? = nil,
         basePayoutCents: Int? = nil,
         deviceMultiplier: Double? = nil,
+        qualityBonusCents: Int? = nil,
+        specialTaskBonusCents: Int? = nil,
+        referralBonusCents: Int? = nil,
         bonuses: [CaptureEarningsBonus] = [],
+        finalApprovedPayoutCents: Int? = nil,
         totalPayoutCents: Int? = nil
     ) {
+        self.quotedPayoutCents = quotedPayoutCents
         self.basePayoutCents = basePayoutCents
         self.deviceMultiplier = deviceMultiplier
+        self.qualityBonusCents = qualityBonusCents
+        self.specialTaskBonusCents = specialTaskBonusCents
+        self.referralBonusCents = referralBonusCents
         self.bonuses = bonuses
+        self.finalApprovedPayoutCents = finalApprovedPayoutCents
         self.totalPayoutCents = totalPayoutCents
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.quotedPayoutCents = try container.decodeIfPresent(Int.self, forKey: .quotedPayoutCents)
         self.basePayoutCents = try container.decodeIfPresent(Int.self, forKey: .basePayoutCents)
         self.deviceMultiplier = try container.decodeIfPresent(Double.self, forKey: .deviceMultiplier)
+        self.qualityBonusCents = try container.decodeIfPresent(Int.self, forKey: .qualityBonusCents)
+        self.specialTaskBonusCents = try container.decodeIfPresent(Int.self, forKey: .specialTaskBonusCents)
+        self.referralBonusCents = try container.decodeIfPresent(Int.self, forKey: .referralBonusCents)
         self.bonuses = try container.decodeIfPresent([CaptureEarningsBonus].self, forKey: .bonuses) ?? []
+        self.finalApprovedPayoutCents = try container.decodeIfPresent(Int.self, forKey: .finalApprovedPayoutCents)
         self.totalPayoutCents = try container.decodeIfPresent(Int.self, forKey: .totalPayoutCents)
     }
 }

@@ -66,6 +66,20 @@ struct PostCaptureSummaryView: View {
                     .foregroundStyle(BlueprintTheme.successGreen)
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Submission readiness")
+                    .font(.subheadline.weight(.semibold))
+
+                readinessRow(label: "Coverage", value: "\(Int(estimatedCoveragePercent))%", tone: estimatedCoveragePercent >= 70 ? .good : .warning)
+                readinessRow(label: "Device score", value: device.capabilityDescription, tone: hasLiDAR ? .good : .warning)
+                readinessRow(label: "Expected review", value: expectedReviewSLA, tone: .neutral)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+
             // Notes
             TextField("Add notes about this space (optional)", text: $userNotes, axis: .vertical)
                 .font(.subheadline)
@@ -146,6 +160,45 @@ struct PostCaptureSummaryView: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(.tertiarySystemBackground))
         )
+    }
+
+    private var expectedReviewSLA: String {
+        if estimatedCoveragePercent >= 80 {
+            return "Usually reviewed within 24h"
+        }
+        if estimatedCoveragePercent >= 60 {
+            return "Review likely within 24-48h"
+        }
+        return "May require recapture review"
+    }
+
+    private enum ReadinessTone {
+        case good
+        case warning
+        case neutral
+    }
+
+    private func readinessRow(label: String, value: String, tone: ReadinessTone) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(readinessColor(tone))
+        }
+    }
+
+    private func readinessColor(_ tone: ReadinessTone) -> Color {
+        switch tone {
+        case .good:
+            return BlueprintTheme.successGreen
+        case .warning:
+            return .orange
+        case .neutral:
+            return .primary
+        }
     }
 }
 

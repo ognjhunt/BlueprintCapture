@@ -201,14 +201,30 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
         case metaGlasses
     }
 
+    enum SpecialTaskType: String, Codable {
+        case curatedNearby = "curated_nearby"
+        case buyerRequested = "buyer_requested_special_task"
+        case operatorApproved = "operator_approved_on_demand"
+        case openCapture = "open_capture"
+    }
+
     let id: UUID
     let targetId: String?
     let reservationId: String?
     let jobId: String
+    let captureJobId: String?
+    let buyerRequestId: String?
+    let siteSubmissionId: String?
+    let regionId: String?
     let creatorId: String
     let capturedAt: Date
     var uploadedAt: Date?
     let captureSource: CaptureSource
+    let specialTaskType: SpecialTaskType?
+    let priorityWeight: Double?
+    let quotedPayoutCents: Int?
+    let rightsProfile: String?
+    let requestedOutputs: [String]
     var intakePacket: QualificationIntakePacket?
     var intakeMetadata: CaptureIntakeMetadata?
     var taskHypothesis: CaptureTaskHypothesis?

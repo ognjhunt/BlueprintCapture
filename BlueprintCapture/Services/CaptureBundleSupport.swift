@@ -350,7 +350,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let sceneId: String
         let captureId: String
         let siteSubmissionId: String
+        let buyerRequestId: String?
+        let captureJobId: String?
+        let regionId: String?
         let captureSource: String
+        let specialTaskType: String?
+        let priorityWeight: Double?
+        let quotedPayoutCents: Int?
+        let rightsProfile: String?
+        let requestedOutputs: [String]
         let captureModality: String
         let evidenceTier: String
         let scaffoldingUsed: [String]
@@ -615,7 +623,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
-        json["site_submission_id"] = request.metadata.jobId
+        json["site_submission_id"] = request.metadata.siteSubmissionId ?? request.metadata.jobId
+        json["buyer_request_id"] = request.metadata.buyerRequestId as Any
+        json["capture_job_id"] = request.metadata.captureJobId as Any
+        json["region_id"] = request.metadata.regionId as Any
+        json["special_task_type"] = request.metadata.specialTaskType?.rawValue as Any
+        json["priority_weight"] = request.metadata.priorityWeight as Any
+        json["quoted_payout_cents"] = request.metadata.quotedPayoutCents as Any
+        json["rights_profile"] = request.metadata.rightsProfile as Any
+        json["requested_outputs"] = request.metadata.requestedOutputs
         json["capture_modality"] = CaptureBundleContext.captureModality(for: request, evidence: evidence)
         json["evidence_tier"] = CaptureBundleContext.evidenceTier(for: request, evidence: evidence)
         json["scaffolding_used"] = derivedScaffolding
@@ -676,8 +692,16 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
             captureId: CaptureBundleContext.captureIdentifier(for: request),
-            siteSubmissionId: request.metadata.jobId,
+            siteSubmissionId: request.metadata.siteSubmissionId ?? request.metadata.jobId,
+            buyerRequestId: request.metadata.buyerRequestId,
+            captureJobId: request.metadata.captureJobId,
+            regionId: request.metadata.regionId,
             captureSource: request.metadata.captureSource.rawValue,
+            specialTaskType: request.metadata.specialTaskType?.rawValue,
+            priorityWeight: request.metadata.priorityWeight,
+            quotedPayoutCents: request.metadata.quotedPayoutCents,
+            rightsProfile: request.metadata.rightsProfile,
+            requestedOutputs: request.metadata.requestedOutputs,
             captureModality: CaptureBundleContext.captureModality(for: request, evidence: evidence),
             evidenceTier: CaptureBundleContext.evidenceTier(for: request, evidence: evidence),
             scaffoldingUsed: derivedScaffolding,

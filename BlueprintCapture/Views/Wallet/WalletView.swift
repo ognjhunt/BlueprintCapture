@@ -330,10 +330,17 @@ struct WalletView: View {
 private extension CaptureHistoryEntry {
     var statusLabel: String {
         switch status {
+        case .draft: return "Draft"
+        case .readyToSubmit: return "Ready to submit"
+        case .submitted: return "Submitted"
+        case .underReview: return "Under review"
         case .processing: return "Processing"
         case .qc: return "Quality check"
         case .approved: return "Approved"
+        case .needsRecapture: return "Needs recapture"
         case .needsFix: return "Needs fix"
+        case .rejected: return "Rejected"
+        case .paid: return "Paid"
         }
     }
 }
@@ -348,4 +355,3 @@ private extension PayoutLedgerEntry {
         }
     }
 }
-

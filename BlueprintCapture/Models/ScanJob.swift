@@ -3,6 +3,12 @@ import CoreLocation
 
 /// A curated scan opportunity defined by the backend (Firestore: `capture_jobs`).
 struct ScanJob: Identifiable, Equatable {
+    enum JobType: String, Equatable {
+        case curatedNearby = "curated_nearby"
+        case buyerRequestedSpecialTask = "buyer_requested_special_task"
+        case operatorApprovedOnDemand = "operator_approved_on_demand"
+    }
+
     let id: String // Firestore doc id (jobId) and pipeline `scene_id`
 
     // Required fields
@@ -24,6 +30,18 @@ struct ScanJob: Identifiable, Equatable {
     let checkinRadiusM: Int
     let alertRadiusM: Int
     let priority: Int
+    let priorityWeight: Double
+    let regionId: String?
+    let jobType: JobType
+    let buyerRequestId: String?
+    let siteSubmissionId: String?
+    let quotedPayoutCents: Int?
+    let dueWindow: String?
+    let approvalRequirements: [String]
+    let recaptureReason: String?
+    let rightsChecklist: [String]
+    let rightsProfile: String?
+    let requestedOutputs: [String]
     let workflowName: String?
     let workflowSteps: [String]
     let targetKPI: String?
@@ -62,6 +80,17 @@ struct ScanJob: Identifiable, Equatable {
             return workflowSteps
         }
         return instructions
+    }
+
+    var captureSpecialTaskType: CaptureUploadMetadata.SpecialTaskType {
+        switch jobType {
+        case .curatedNearby:
+            return .curatedNearby
+        case .buyerRequestedSpecialTask:
+            return .buyerRequested
+        case .operatorApprovedOnDemand:
+            return .operatorApproved
+        }
     }
 
     var inaccessibleAreasForCapture: [String] {

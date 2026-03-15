@@ -277,28 +277,49 @@ struct CaptureDetailView: View {
 
     private var statusLabel: String {
         switch entry.status {
+        case .draft: return "Draft"
+        case .readyToSubmit: return "Ready to submit"
+        case .submitted: return "Submitted"
+        case .underReview: return "Under review"
         case .processing: return "Processing"
         case .qc: return "In Review"
         case .approved: return "Approved"
+        case .needsRecapture: return "Needs recapture"
         case .needsFix: return "Needs Fix"
+        case .rejected: return "Rejected"
+        case .paid: return "Paid"
         }
     }
 
     private var statusIcon: String {
         switch entry.status {
+        case .draft: return "doc.badge.plus"
+        case .readyToSubmit: return "arrow.up.circle.fill"
+        case .submitted: return "paperplane.fill"
+        case .underReview: return "hourglass"
         case .processing: return "arrow.triangle.2.circlepath"
         case .qc: return "clock.fill"
         case .approved: return "checkmark.circle.fill"
+        case .needsRecapture: return "arrow.clockwise.circle.fill"
         case .needsFix: return "xmark.circle.fill"
+        case .rejected: return "slash.circle.fill"
+        case .paid: return "banknote.fill"
         }
     }
 
     private var statusColor: Color {
         switch entry.status {
+        case .draft: return .secondary
+        case .readyToSubmit: return .orange
+        case .submitted: return BlueprintTheme.brandTeal
+        case .underReview: return BlueprintTheme.brandTeal
         case .processing: return .secondary
         case .qc: return BlueprintTheme.brandTeal
         case .approved: return BlueprintTheme.successGreen
+        case .needsRecapture: return .orange
         case .needsFix: return .red
+        case .rejected: return .red
+        case .paid: return BlueprintTheme.successGreen
         }
     }
 }
