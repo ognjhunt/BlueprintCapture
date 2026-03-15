@@ -106,6 +106,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let targetStateService: TargetStateServiceProtocol
     private let intakeResolutionService: IntakeResolutionServiceProtocol
     private let exportService: CaptureExportServiceProtocol
+    private let creatorAPIService: APIService
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var searchDebounceTask: Task<Void, Never>?
@@ -116,12 +117,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
          uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
-         exportService: CaptureExportServiceProtocol = CaptureExportService()) {
+         exportService: CaptureExportServiceProtocol = CaptureExportService(),
+         creatorAPIService: APIService = .shared) {
         self.flowMode = flowMode
         self.uploadService = uploadService
         self.targetStateService = targetStateService
         self.intakeResolutionService = intakeResolutionService
         self.exportService = exportService
+        self.creatorAPIService = creatorAPIService
         self.captureManager = VideoCaptureManager()
         super.init()
         locationManager.delegate = self
@@ -624,6 +627,20 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             status.metadata = request.metadata
             status.state = .completed
             uploadStatusMap[request.metadata.id] = status
+            Task { [weak self] in
+                guard let self else { return }
+                try? await self.creatorAPIService.registerCaptureSubmission(
+                    id: request.metadata.id,
+                    targetAddress: status.targetName ?? self.currentAddress ?? "Submitted space",
+                    capturedAt: request.metadata.capturedAt,
+                    quotedPayoutCents: request.metadata.quotedPayoutCents,
+                    captureJobId: request.metadata.captureJobId,
+                    buyerRequestId: request.metadata.buyerRequestId,
+                    siteSubmissionId: request.metadata.siteSubmissionId,
+                    rightsProfile: request.metadata.rightsProfile,
+                    requestedOutputs: request.metadata.requestedOutputs
+                )
+            }
             // Mark target as completed in Firestore so it no longer appears in Nearby
             if let targetId = request.metadata.targetId, !targetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Task { [weak self] in

@@ -67,6 +67,35 @@ final class APIService {
         return try decoder.decode([CaptureHistoryEntry].self, from: data)
     }
 
+    func registerCaptureSubmission(
+        id: UUID,
+        targetAddress: String,
+        capturedAt: Date,
+        quotedPayoutCents: Int?,
+        captureJobId: String?,
+        buyerRequestId: String?,
+        siteSubmissionId: String?,
+        rightsProfile: String?,
+        requestedOutputs: [String]
+    ) async throws {
+        var request = try makeRequest(path: "v1/creator/captures", method: "POST")
+        let payload = CreatorCaptureRegistrationPayload(
+            id: id.uuidString.lowercased(),
+            creatorId: UserDeviceService.resolvedUserId(),
+            targetAddress: targetAddress,
+            capturedAt: capturedAt,
+            status: "submitted",
+            estimatedPayoutCents: quotedPayoutCents,
+            captureJobId: captureJobId,
+            buyerRequestId: buyerRequestId,
+            siteSubmissionId: siteSubmissionId,
+            rightsProfile: rightsProfile,
+            requestedOutputs: requestedOutputs
+        )
+        request.httpBody = try encoder.encode(payload)
+        _ = try await perform(request: request, expecting: 201)
+    }
+
     func fetchCaptureDetail(id: UUID) async throws -> CaptureDetailResponse? {
         let request = try makeRequest(path: "v1/creator/captures/\(id.uuidString.lowercased())")
         let (data, status) = try await performWithStatus(request: request)
@@ -115,6 +144,7 @@ final class APIService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(UserDeviceService.resolvedUserId(), forHTTPHeaderField: "X-Blueprint-Creator-Id")
         if method == "POST" || method == "PUT" {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -149,6 +179,34 @@ private struct EarningsResponse: Codable {
         case totalEarnedCents = "total_earned_cents"
         case pendingPayoutCents = "pending_payout_cents"
         case scansCompleted = "scans_completed"
+    }
+}
+
+private struct CreatorCaptureRegistrationPayload: Codable {
+    let id: String
+    let creatorId: String
+    let targetAddress: String
+    let capturedAt: Date
+    let status: String
+    let estimatedPayoutCents: Int?
+    let captureJobId: String?
+    let buyerRequestId: String?
+    let siteSubmissionId: String?
+    let rightsProfile: String?
+    let requestedOutputs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case creatorId = "creator_id"
+        case targetAddress = "target_address"
+        case capturedAt = "captured_at"
+        case status
+        case estimatedPayoutCents = "estimated_payout_cents"
+        case captureJobId = "capture_job_id"
+        case buyerRequestId = "buyer_request_id"
+        case siteSubmissionId = "site_submission_id"
+        case rightsProfile = "rights_profile"
+        case requestedOutputs = "requested_outputs"
     }
 }
 

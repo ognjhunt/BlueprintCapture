@@ -90,7 +90,7 @@ struct CaptureDetailView: View {
                 if let payout = entry.estimatedPayout {
                     HStack(spacing: 4) {
                         Image(systemName: "dollarsign.circle.fill")
-                        Text(payout, format: .currency(code: "USD"))
+                        Text("Est. \(payout, format: .currency(code: "USD"))")
                     }
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(BlueprintTheme.successGreen)
@@ -195,8 +195,12 @@ struct CaptureDetailView: View {
 
     private func qualityCard(_ quality: CaptureQualityBreakdown) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("Quality Score", systemImage: "chart.bar.fill")
+            Label("Review Quality Breakdown", systemImage: "chart.bar.fill")
                 .font(.headline)
+
+            Text("These scores come from Blueprint review after upload. They are not decided on-device.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                 qualityMetric(label: "Coverage", value: quality.coverage)

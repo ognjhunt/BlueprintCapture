@@ -2,7 +2,15 @@
 
 BlueprintCapture is the evidence-capture app for Blueprint.
 
-It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream qualification and scene-memory derivation. It does not run reconstruction, world models, or scene generation in-app.
+It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream qualification and scene-memory derivation.
+
+This repo sits on the contributor side of Blueprint's three-sided marketplace:
+
+- capturers gather evidence
+- site operators control access and rights
+- robot teams buy trusted downstream outcomes
+
+The app owns real-time capture coaching only. It does not make final readiness, payout, rights, or buyer-trust decisions in-app, and it does not run reconstruction, world models, or scene generation locally.
 
 ## What This Repo Produces
 
@@ -37,6 +45,7 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 
 - Qualification comes first.
 - This repo is the evidence-capture layer, not the readiness-decision layer.
+- In-app quality, coverage, and earnings cues are advisory and immediate UX only.
 - Capture-backed scene memory is downstream of the raw bundle.
 - Generated scenes are downstream derived products, not truth.
 - ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.

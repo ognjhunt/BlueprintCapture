@@ -102,6 +102,8 @@ struct CaptureSessionView: View {
                         estimatedDataSizeMB: monitor.estimatedDataSizeMB,
                         estimatedCoveragePercent: monitor.estimatedCoveragePercent,
                         hasLiDAR: monitor.hasLiDAR,
+                        capturePolicyLabel: capturePolicyLabel,
+                        rightsSummary: rightsSummary,
                         onUploadNow: {
                             viewModel.updatePendingCaptureNotes(captureNotes)
                             viewModel.startPendingCaptureUpload()
@@ -191,6 +193,32 @@ struct CaptureSessionView: View {
             }
         } message: {
             Text("Your capture is under 10 minutes. Longer, more thorough captures earn significantly more.")
+        }
+    }
+
+    private var capturePolicyLabel: String {
+        switch viewModel.pendingCaptureRequest?.metadata.rightsProfile?.lowercased() {
+        case "documented_permission":
+            return "Approved capture"
+        case "policy_only":
+            return "Permission required"
+        case "blocked":
+            return "Not allowed"
+        default:
+            return "Review required"
+        }
+    }
+
+    private var rightsSummary: String {
+        switch viewModel.pendingCaptureRequest?.metadata.rightsProfile?.lowercased() {
+        case "documented_permission":
+            return "This submission appears to have documented permission for the approved scope. Blueprint will still verify rights and restricted-zone handling."
+        case "policy_only":
+            return "Capture only what site policy clearly allows. Be ready to stop if staff object and keep restricted areas out of frame."
+        case "blocked":
+            return "This space is currently marked not allowed. Do not submit unless Blueprint clears the restriction."
+        default:
+            return "This space will be review-gated before reuse. Capture common areas only and keep faces, screens, paperwork, and restricted zones out of frame."
         }
     }
 

@@ -72,7 +72,7 @@ private struct WelcomeIntroView: View {
                     .font(.system(size: 32, weight: .bold))
                     .multilineTextAlignment(.center)
 
-                Text("Scan indoor spaces with your iPhone, and get paid once quality review approves your capture.")
+                Text("Capture spaces for Blueprint review. We check rights, coverage, and quality before anything moves downstream.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -82,9 +82,9 @@ private struct WelcomeIntroView: View {
             Spacer()
 
             VStack(spacing: 14) {
-                featureRow(icon: "bolt.fill", text: "One-tap scans from nearby alerts")
-                featureRow(icon: "icloud.and.arrow.up", text: "Auto-upload after recording")
-                featureRow(icon: "dollarsign.circle", text: "Paid after quality verification")
+                featureRow(icon: "location.viewfinder", text: "Nearby spaces and approved opportunities")
+                featureRow(icon: "hand.raised.fill", text: "Rights and policy checks before reuse")
+                featureRow(icon: "dollarsign.circle", text: "Payout only after review approval")
             }
             .padding(.horizontal, 28)
 
@@ -142,7 +142,7 @@ private struct PermissionsEnableView: View {
                 Text("Enable Permissions")
                     .font(.title2.weight(.bold))
 
-                Text("We use these to find nearby capture opportunities and record high-quality submission data.")
+                Text("We use these to find nearby spaces, capture stronger evidence, and keep review states up to date.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

@@ -7,6 +7,8 @@ struct PostCaptureSummaryView: View {
     let estimatedDataSizeMB: Double
     let estimatedCoveragePercent: Double
     let hasLiDAR: Bool
+    let capturePolicyLabel: String
+    let rightsSummary: String
     let onUploadNow: () -> Void
     let onUploadLater: () -> Void
     @Binding var userNotes: String
@@ -18,7 +20,7 @@ struct PostCaptureSummaryView: View {
             HStack {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(BlueprintTheme.successGreen)
-                Text("Submission ready")
+                Text("Submission ready for review")
                     .font(.headline)
                 Spacer()
             }
@@ -60,14 +62,32 @@ struct PostCaptureSummaryView: View {
                 readinessRow(label: "Next stage", value: nextStageLabel, tone: estimatedCoveragePercent >= 65 ? .good : .warning)
                 readinessRow(label: "Coverage", value: "\(Int(estimatedCoveragePercent))%", tone: estimatedCoveragePercent >= 70 ? .good : .warning)
                 readinessRow(label: "Device score", value: device.capabilityDescription, tone: hasLiDAR ? .good : .warning)
-                readinessRow(label: "Expected review", value: expectedReviewSLA, tone: .neutral)
-                readinessRow(label: "Likely payout", value: estimatedEarningsRange, tone: .good)
+                readinessRow(label: "Capture policy", value: capturePolicyLabel, tone: .neutral)
+                readinessRow(label: "Review estimate", value: expectedReviewSLA, tone: .neutral)
+                readinessRow(label: "Estimated earnings band", value: estimatedEarningsRange, tone: .good)
             }
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color(.tertiarySystemBackground))
             )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Rights and review")
+                    .font(.subheadline.weight(.semibold))
+                Text(rightsSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+
+            Text("These are local capture estimates only. Final approval, payout, rights status, and buyer readiness come from Blueprint review after upload.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             TextField("Add notes about this space (optional)", text: $userNotes, axis: .vertical)
                 .font(.subheadline)
@@ -161,10 +181,10 @@ struct PostCaptureSummaryView: View {
 
     private var nextStageLabel: String {
         if estimatedCoveragePercent >= 80 {
-            return "Queued for review"
+            return "Upload and review"
         }
         if estimatedCoveragePercent >= 60 {
-            return "Awaiting approval"
+            return "Upload for review"
         }
         return "Needs more coverage"
     }
@@ -207,6 +227,8 @@ struct PostCaptureSummaryView: View {
         estimatedDataSizeMB: 485.3,
         estimatedCoveragePercent: 72,
         hasLiDAR: true,
+        capturePolicyLabel: "Review required",
+        rightsSummary: "Capture common areas only. Keep faces, screens, paperwork, and restricted zones out of frame.",
         onUploadNow: {},
         onUploadLater: {},
         userNotes: .constant("")

@@ -5,12 +5,18 @@
 
 ### System Framing
 
-- `BlueprintCapture` captures raw evidence packages.
-- `BlueprintCapturePipeline` converts evidence plus intake into qualification artifacts, readiness decisions, and handoffs.
-- `Blueprint-WebApp` is the operating and commercial system around qualification records and derived downstream lanes.
-- `BlueprintValidation` performs post-qualification scene derivation, robot evaluation, adaptation, and tuning work.
+- `BlueprintCapture` is the contributor evidence-capture tool inside Blueprint's three-sided marketplace.
+- `BlueprintCapturePipeline` is the authoritative qualification, provenance, and provider-routing service.
+- `Blueprint-WebApp` is the three-sided marketplace and operating system connecting capturers, robot teams, and site operators around qualification records and downstream work.
+- `BlueprintValidation` is optional downstream infrastructure for provider benchmarking, runtime-backed demos, and deeper robot evaluation after qualification.
 
 This platform is qualification-first.
+
+### Three-Sided Marketplace
+
+- **Capturers** supply evidence packages from real sites.
+- **Robot teams** are the primary demand-side buyers of trusted qualification outcomes and downstream technical work.
+- **Site operators** control access, rights, and commercialization boundaries for their facilities.
 
 ### Truth Hierarchy
 
@@ -33,7 +39,7 @@ This platform is qualification-first.
 
 ### Data Rule
 
-- passive site capture and walkthrough evidence are valuable context for scene memory, preview simulation, and downstream conditioning
+- passive site capture and walkthrough evidence are valuable context for qualification, scene memory, preview simulation, and downstream conditioning
 - strong robot adaptation gains usually require action-conditioned robot interaction data such as play, teleop logs, or task rollouts; site video alone is usually not enough for reliable policy training from scratch
 - derived assets may inform routing and downstream work, but they must not mutate qualification state or source-of-truth readiness records
 <!-- SHARED_PLATFORM_CONTEXT_END -->
@@ -43,16 +49,17 @@ This repo is the Blueprint evidence-capture layer.
 ## Local Doctrine
 
 - This repo captures evidence. It does not make readiness decisions.
-- The app should produce world-model-ready evidence when possible.
-- Capture quality is the moat.
+- The app owns real-time capture coaching only: motion, tracking health, coverage cues, package completeness, and permission gating.
+- Lightweight semantic assists in-app are advisory only. They do not decide trust, approval, payout, rights status, or buyer readiness.
+- The app should produce world-model-ready evidence when possible, but qualification remains upstream in `BlueprintCapturePipeline`.
 
 ## What This Repo Owns
 
 - guided capture on iPhone and Meta glasses
+- deterministic capture coaching during recording
 - raw bundle packaging
 - ARKit, intrinsics, depth, timing, meshes, and motion preservation when available
-- scene-memory-readiness metadata
-- rights, consent, and payout-eligibility metadata
+- capture-side rights, consent, and payout-eligibility inputs
 - upload into the canonical raw layout
 
 ## Canonical Layout
@@ -79,6 +86,8 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 
 This repo should not:
 
+- make final approval or payout decisions in-app
+- assign final rights/compliance status
 - run reconstruction in-app
 - run world models
 - run downstream simulation

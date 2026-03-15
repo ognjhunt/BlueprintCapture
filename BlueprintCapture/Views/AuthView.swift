@@ -53,7 +53,7 @@ struct AuthView: View {
                                     .minimumScaleFactor(0.8)
                                     .lineLimit(1)
 
-                                Text("Capture properties. Get paid instantly.")
+                                Text("Capture spaces for review. Get paid after approval.")
                                     .font(.system(size: 16, weight: .regular, design: .default))
                                     .foregroundStyle(Color.white.opacity(0.85))
                                     .lineLimit(2)
@@ -506,4 +506,3 @@ struct GoogleLogo: View {
 }
 
 #Preview { AuthView() }
-

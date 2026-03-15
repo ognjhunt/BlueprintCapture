@@ -72,9 +72,9 @@ final class ScanHomeViewModel: ObservableObject {
         var label: String {
             switch self {
             case .nearby:
-                return "Near you"
+                return "Nearby space"
             case .special:
-                return "Special capture"
+                return "Approved opportunity"
             case .reviewSubmission:
                 return "Submit a space"
             }

@@ -43,6 +43,10 @@ struct ScanHomeView: View {
                         statusBanners
                             .padding(.bottom, statusBannerCount > 0 ? 24 : 0)
 
+                        capturePolicySection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 24)
+
                         featuredSection
                             .padding(.bottom, 28)
 
@@ -140,7 +144,7 @@ struct ScanHomeView: View {
                 Text("Captures")
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(.white)
-                Text("Scan spaces near you and earn")
+                Text("Capture spaces for Blueprint review")
                     .font(.subheadline)
                     .foregroundStyle(Color(white: 0.5))
             }
@@ -214,7 +218,7 @@ struct ScanHomeView: View {
     private var featuredSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Featured Captures")
+                Text("Nearby Spaces")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
                 if !featuredItems.isEmpty {
@@ -279,6 +283,49 @@ struct ScanHomeView: View {
         }
     }
 
+    // MARK: - Capture Policy
+
+    private var capturePolicySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What you may capture")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+            Text("Common areas and approved opportunities are fine. Faces, screens, paperwork, and restricted zones are not.")
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.55))
+
+            HStack(spacing: 10) {
+                policyPill(color: BlueprintTheme.successGreen, title: "Approved", subtitle: "Clear to capture")
+                policyPill(color: BlueprintTheme.brandTeal, title: "Review", subtitle: "Needs Blueprint review")
+            }
+            HStack(spacing: 10) {
+                policyPill(color: .orange, title: "Permission", subtitle: "Check site access")
+                policyPill(color: .red, title: "Blocked", subtitle: "Do not capture")
+            }
+        }
+    }
+
+    private func policyPill(color: Color, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Circle().fill(color).frame(width: 8, height: 8)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(Color(white: 0.55))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(color.opacity(0.2), lineWidth: 1)
+        )
+    }
+
 
     // MARK: - Category Filter
 
@@ -337,7 +384,7 @@ struct ScanHomeView: View {
         if !allItems.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("All Captures")
+                    Text("Capture opportunities")
                         .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
                     Text("\(allItems.count)")
@@ -369,8 +416,8 @@ struct ScanHomeView: View {
         if !summary.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 Text("My Submissions")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
 
                 HStack(spacing: 10) {
                     ForEach(summary) { item in
@@ -394,10 +441,10 @@ struct ScanHomeView: View {
                     .foregroundStyle(BlueprintTheme.brandTeal)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Submit a space for review")
+                    Text("Submit a new space")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text("Address required · Rights check · Review-gated")
+                    Text("Address first · Workflow notes · Review-gated")
                         .font(.caption)
                         .foregroundStyle(Color(white: 0.45))
                 }
@@ -697,7 +744,7 @@ private struct DemoFeaturedCard: View {
                 }
 
                 HStack {
-                    Text("Coming to your area")
+                    Text("Review-only sample")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color(white: 0.5))
                     Image(systemName: "clock.arrow.circlepath")
@@ -766,7 +813,7 @@ private struct FeaturedCaptureCard: View {
 
                 // View button
                 HStack {
-                    Text("View capture")
+                    Text("Review space")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
                     Image(systemName: "arrow.right.circle.fill")
