@@ -23,7 +23,7 @@ final class GoogleAuthService {
     static let shared = GoogleAuthService()
     private init() {}
 
-    func signIn(presenting viewController: UIViewController) async throws {
+    func signIn(presenting viewController: UIViewController) async throws -> AuthDataResult {
         #if canImport(GoogleSignIn)
         guard let clientID = FirebaseApp.app()?.options.clientID else {
             throw GoogleAuthError.failed("Missing Google client ID")
@@ -45,9 +45,15 @@ final class GoogleAuthService {
         let credential = GoogleAuthProvider.credential(withIDToken: idToken, accessToken: accessToken)
 
         // Bridge Firebase Auth sign-in to async/await
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            Auth.auth().signIn(with: credential) { _, err in
-                if let err = err { continuation.resume(throwing: err) } else { continuation.resume(returning: ()) }
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
+            Auth.auth().signIn(with: credential) { result, err in
+                if let err = err {
+                    continuation.resume(throwing: err)
+                } else if let result {
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(throwing: GoogleAuthError.failed("Google Sign-In completed without a Firebase result"))
+                }
             }
         }
         #else
@@ -68,5 +74,4 @@ extension UIApplication {
         return top
     }
 }
-
 

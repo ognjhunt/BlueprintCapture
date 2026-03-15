@@ -78,11 +78,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         cameraAuthorized = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         let audioSession = AVAudioSession.sharedInstance()
         microphoneAuthorized = audioSession.recordPermission == .granted
-        if CMMotionActivityManager.isActivityAvailable() {
-            motionAuthorized = CMMotionActivityManager.authorizationStatus() == .authorized
-        } else {
-            motionAuthorized = true
-        }
+        motionAuthorized = MotionPermissionHelper.isAuthorized
 
         // Check if user has already completed onboarding
         isOnboarded = UserDefaults.standard.bool(forKey: onboardingKey)
@@ -318,32 +314,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     private func requestMotionAccess() async {
-        guard CMMotionActivityManager.isActivityAvailable() else {
-            await MainActor.run { motionAuthorized = true }
-            return
-        }
-
-        switch CMMotionActivityManager.authorizationStatus() {
-        case .authorized:
-            await MainActor.run { motionAuthorized = true }
-        case .denied, .restricted:
-            await MainActor.run { motionAuthorized = false }
-        case .notDetermined:
-            let start = Date().addingTimeInterval(-60)
-            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                motionManager.queryActivityStarting(from: start, to: Date(), to: OperationQueue.main) { _, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
-            await MainActor.run {
-                motionAuthorized = CMMotionActivityManager.authorizationStatus() == .authorized
-            }
-        @unknown default:
-            await MainActor.run { motionAuthorized = false }
+        let authorized = await MotionPermissionHelper.requestAuthorization(activityManager: motionManager)
+        await MainActor.run {
+            motionAuthorized = authorized
         }
     }
 
@@ -444,6 +417,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         finishedCaptureActionState = .idle
         manualIntakeDraft = nil
         pendingPostCaptureAction = nil
+    }
+
+    func updatePendingCaptureNotes(_ notes: String) {
+        guard var request = pendingCaptureRequest else { return }
+        request.metadata = request.metadata.applyingCaptureNotes(notes)
+        pendingCaptureRequest = request
     }
 
     private func resolvePendingCaptureAndContinue(
@@ -644,5 +623,46 @@ struct AddressResult: Identifiable {
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
+    }
+}
+
+private extension CaptureUploadMetadata {
+    func applyingCaptureNotes(_ rawNotes: String) -> CaptureUploadMetadata {
+        let trimmed = rawNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let noteItems = trimmed.isEmpty ? [] : [trimmed]
+        let updatedSceneMemory = SceneMemoryCaptureMetadata(
+            continuityScore: sceneMemory?.continuityScore,
+            lightingConsistency: sceneMemory?.lightingConsistency,
+            dynamicObjectDensity: sceneMemory?.dynamicObjectDensity,
+            operatorNotes: noteItems,
+            inaccessibleAreas: sceneMemory?.inaccessibleAreas ?? []
+        )
+        let baseParts = (captureContextHint ?? "")
+            .split(separator: "|")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("Notes: ") }
+        let updatedHint = (baseParts + (trimmed.isEmpty ? [] : ["Notes: \(trimmed)"]))
+            .joined(separator: " | ")
+            .nilIfEmpty
+
+        return CaptureUploadMetadata(
+            id: id,
+            targetId: targetId,
+            reservationId: reservationId,
+            jobId: jobId,
+            creatorId: creatorId,
+            capturedAt: capturedAt,
+            uploadedAt: uploadedAt,
+            captureSource: captureSource,
+            intakePacket: intakePacket,
+            intakeMetadata: intakeMetadata,
+            taskHypothesis: taskHypothesis,
+            scaffoldingPacket: scaffoldingPacket,
+            captureModality: captureModality,
+            evidenceTier: evidenceTier,
+            captureContextHint: updatedHint,
+            sceneMemory: updatedSceneMemory,
+            captureRights: captureRights
+        )
     }
 }

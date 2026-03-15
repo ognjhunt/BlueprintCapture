@@ -4,10 +4,10 @@ import UserNotifications
 import CoreLocation
 import UIKit
 
-/// Glasses-only onboarding:
-/// 1) Welcome -> 2) Permissions (Camera, Notifications, Location When-In-Use) -> 3) Connect Glasses -> Done
+/// iPhone-first onboarding:
+/// 1) Welcome -> 2) Permissions -> 3) Device Capability -> 4) Tutorial -> 5) Connect Glasses (optional) -> Done
 struct OnboardingFlowView: View {
-    enum Step: Int, CaseIterable { case welcome, permissions, connectGlasses, complete }
+    enum Step: Int, CaseIterable { case welcome, permissions, deviceCapability, tutorial, connectGlasses, complete }
 
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
 
@@ -26,6 +26,14 @@ struct OnboardingFlowView: View {
                     }
                 case .permissions:
                     PermissionsEnableView(alertsManager: alertsManager) {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .deviceCapability }
+                    }
+                case .deviceCapability:
+                    DeviceCapabilityView {
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .tutorial }
+                    }
+                case .tutorial:
+                    CaptureTutorialView {
                         withAnimation(.spring(response: 0.5, dampingFraction: 0.9)) { step = .connectGlasses }
                     }
                 case .connectGlasses:
@@ -56,7 +64,7 @@ private struct WelcomeIntroView: View {
             Spacer()
 
             VStack(spacing: 16) {
-                Image(systemName: "eyeglasses")
+                Image(systemName: "camera.viewfinder")
                     .font(.system(size: 72))
                     .foregroundStyle(BlueprintTheme.brandTeal)
 
@@ -64,7 +72,7 @@ private struct WelcomeIntroView: View {
                     .font(.system(size: 32, weight: .bold))
                     .multilineTextAlignment(.center)
 
-                Text("Connect your Meta smart glasses, capture a short walkthrough, and get paid once QC approves.")
+                Text("Scan indoor spaces with your iPhone, and get paid once quality review approves your capture.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -117,6 +125,7 @@ private struct PermissionsEnableView: View {
         return status == .authorizedWhenInUse || status == .authorizedAlways
     }()
     @State private var notificationsGranted = false
+    @State private var motionGranted = MotionPermissionHelper.isAuthorized
 
     @State private var isRequesting = false
     @State private var showingPermissionAlert = false
@@ -133,7 +142,7 @@ private struct PermissionsEnableView: View {
                 Text("Enable Permissions")
                     .font(.title2.weight(.bold))
 
-                Text("We use these to find nearby scan jobs and record with your glasses.")
+                Text("We use these to find nearby scan jobs and capture spatial data.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -145,6 +154,7 @@ private struct PermissionsEnableView: View {
                 permissionRow(title: "Location", icon: "location.fill", granted: locationGranted)
                 permissionRow(title: "Notifications", icon: "bell.fill", granted: notificationsGranted)
                 permissionRow(title: "Camera", icon: "camera.fill", granted: cameraGranted)
+                permissionRow(title: "Motion", icon: "figure.walk.motion", granted: motionGranted)
             }
             .padding(.horizontal, 24)
 
@@ -176,7 +186,7 @@ private struct PermissionsEnableView: View {
             }
             Button("Continue Anyway") { onContinue() }
         } message: {
-            Text("Location and notifications are recommended for nearby alerts. Camera is required for capture.")
+            Text("Location and notifications are recommended for nearby alerts. Camera and motion access are required for capture.")
         }
     }
 
@@ -204,12 +214,13 @@ private struct PermissionsEnableView: View {
         )
     }
 
-    private var requiredPermissionsGranted: Bool { cameraGranted && locationGranted }
+    private var requiredPermissionsGranted: Bool { cameraGranted && locationGranted && motionGranted }
 
     private func refreshStatuses() {
         cameraGranted = AVCaptureDevice.authorizationStatus(for: .video) == .authorized
         let status = CLLocationManager().authorizationStatus
         locationGranted = status == .authorizedWhenInUse || status == .authorizedAlways
+        motionGranted = MotionPermissionHelper.isAuthorized
 
         alertsManager.refreshNotificationStatus()
         notificationsGranted = alertsManager.notificationsGranted
@@ -223,6 +234,9 @@ private struct PermissionsEnableView: View {
 
             alertsManager.requestWhenInUseAuthorization()
             UserDeviceService.setPermission("location", granted: alertsManager.isLocationAuthorized)
+
+            let motion = await MotionPermissionHelper.requestAuthorization()
+            UserDeviceService.setPermission("motion", granted: motion)
 
             await notificationService.requestAuthorizationIfNeeded()
             alertsManager.refreshNotificationStatus()
@@ -258,10 +272,10 @@ private struct ConnectGlassesStepView: View {
                     .font(.system(size: 56))
                     .foregroundStyle(BlueprintTheme.brandTeal)
 
-                Text("Connect Your Glasses")
+                Text("Connect Smart Glasses")
                     .font(.title2.weight(.bold))
 
-                Text("Required to capture scans in this app.")
+                Text("Optional — pair Meta smart glasses for hands-free capture.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -282,10 +296,9 @@ private struct ConnectGlassesStepView: View {
                     Button("Continue", action: onContinue)
                         .buttonStyle(BlueprintSuccessButtonStyle())
                 } else {
-                    Text("You can connect now and start scanning immediately.")
-                        .font(.caption)
+                    Button("Skip — Use iPhone Only", action: onContinue)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
             }
             .padding(.horizontal, 24)
@@ -363,9 +376,10 @@ private struct ToolbarTitleContent: ToolbarContent {
         switch step {
         case .welcome: return "Welcome"
         case .permissions: return "Permissions"
+        case .deviceCapability: return "Your Device"
+        case .tutorial: return "How It Works"
         case .connectGlasses: return "Glasses"
         case .complete: return "All set"
         }
     }
 }
-

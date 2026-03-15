@@ -9,12 +9,16 @@ struct CaptureSessionView: View {
     @ObservedObject private var captureManager: VideoCaptureManager
     @State private var didAutoStart = false
     @State private var isEnding = false
+    @State private var showShortCaptureAlert = false
+    @State private var captureNotes = ""
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
 
     // Venue permission for this capture (would be set when user selects a location)
     @State private var venuePermission: VenuePermission? = .demo
+
+    private let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     init(viewModel: CaptureFlowViewModel, targetId: String?, reservationId: String?) {
         self.viewModel = viewModel
@@ -34,14 +38,23 @@ struct CaptureSessionView: View {
                     .ignoresSafeArea()
             }
 
-            VStack(spacing: 12) {
-                // Top bar with permission badge
+            VStack(spacing: 8) {
+                // Top bar with permission badge and quality overlay
                 HStack {
                     Spacer()
                     VenuePermissionBadge(permission: venuePermission)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
+
+                // Real-time quality overlay (when recording)
+                if captureManager.captureState.isRecording {
+                    CaptureQualityOverlayView(monitor: captureManager.qualityMonitor)
+                        .padding(.horizontal)
+
+                    CaptureInfoBadgesView(monitor: captureManager.qualityMonitor)
+                        .padding(.horizontal)
+                }
 
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
@@ -50,13 +63,6 @@ struct CaptureSessionView: View {
                 }
 
                 Spacer()
-
-                // Capture guidance overlay (when recording)
-                if captureManager.captureState.isRecording {
-                    CaptureGuidanceView()
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
-                }
 
                 // Error banner + retry control when recording fails
                 if case .error(let reason) = captureManager.captureState {
@@ -86,6 +92,29 @@ struct CaptureSessionView: View {
                     .padding(.horizontal)
                 }
 
+                // Post-capture summary
+                if case .finished = captureManager.captureState {
+                    let monitor = captureManager.qualityMonitor
+                    PostCaptureSummaryView(
+                        duration: monitor.elapsedSeconds,
+                        frameCount: monitor.frameCount,
+                        depthFrameCount: monitor.depthFrameCount,
+                        estimatedDataSizeMB: monitor.estimatedDataSizeMB,
+                        estimatedCoveragePercent: monitor.estimatedCoveragePercent,
+                        hasLiDAR: monitor.hasLiDAR,
+                        onUploadNow: {
+                            viewModel.updatePendingCaptureNotes(captureNotes)
+                            viewModel.startPendingCaptureUpload()
+                        },
+                        onUploadLater: {
+                            viewModel.updatePendingCaptureNotes(captureNotes)
+                            completeAndDismiss()
+                        },
+                        userNotes: $captureNotes
+                    )
+                    .padding(.horizontal)
+                }
+
                 if case .finished = captureManager.captureState,
                    viewModel.pendingCaptureRequest != nil || viewModel.finishedCaptureActionState != .idle {
                     finishedCaptureCard
@@ -95,7 +124,7 @@ struct CaptureSessionView: View {
                 HStack {
                     Spacer()
                     Button {
-                        endSession()
+                        handleEndTapped()
                     } label: {
                         Label(buttonTitle, systemImage: buttonIcon)
                     }
@@ -130,8 +159,20 @@ struct CaptureSessionView: View {
                 break
             }
         }
+        .onChange(of: captureManager.qualityMonitor.steadiness) { oldValue, newValue in
+            if oldValue != newValue {
+                hapticFeedback.impactOccurred()
+            }
+        }
+        .onChange(of: captureNotes) { _, newValue in
+            viewModel.updatePendingCaptureNotes(newValue)
+        }
         .onAppear {
+            UIApplication.shared.isIdleTimerDisabled = true
             autoStartRecordingIfNeeded()
+        }
+        .onDisappear {
+            UIApplication.shared.isIdleTimerDisabled = false
         }
         .sheet(item: $viewModel.manualIntakeDraft) { draft in
             ManualIntakeSheetView(title: draft.reviewTitle, draft: draft) { updatedDraft in
@@ -140,6 +181,31 @@ struct CaptureSessionView: View {
         }
         .sheet(item: $viewModel.shareSheetItem) { shareItem in
             ShareSheet(items: [shareItem.url])
+        }
+        .alert("End capture early?", isPresented: $showShortCaptureAlert) {
+            Button("Keep Recording", role: .cancel) {
+                isEnding = false
+            }
+            Button("End Anyway", role: .destructive) {
+                endSession()
+            }
+        } message: {
+            Text("Your capture is under 10 minutes. Longer, more thorough captures earn significantly more.")
+        }
+    }
+
+    private func handleEndTapped() {
+        guard !isEnding else { return }
+        if case .finished = captureManager.captureState {
+            endSession()
+            return
+        }
+        // Check if capture is under 10 minutes
+        if captureManager.qualityMonitor.elapsedSeconds < 600 && captureManager.captureState.isRecording {
+            isEnding = true
+            showShortCaptureAlert = true
+        } else {
+            endSession()
         }
     }
 

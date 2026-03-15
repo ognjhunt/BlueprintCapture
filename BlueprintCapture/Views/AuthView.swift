@@ -233,6 +233,9 @@ struct AuthView: View {
             .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
                 dismiss()
             }
+            .task {
+                viewModel.consumePasteboardReferralIfNeeded()
+            }
         }
     }
 
@@ -503,5 +506,4 @@ struct GoogleLogo: View {
 }
 
 #Preview { AuthView() }
-
 

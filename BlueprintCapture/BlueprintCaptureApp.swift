@@ -5,6 +5,7 @@ import AVFoundation
 struct BlueprintCaptureApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
+    @AppStorage(PendingReferralStore.storageKey) private var pendingReferralCode: String = ""
     @StateObject private var glassesManager = GlassesCaptureManager()
     @StateObject private var uploadQueue = UploadQueueViewModel()
     @StateObject private var alertsManager = NearbyAlertsManager()
@@ -30,6 +31,11 @@ struct BlueprintCaptureApp: App {
                 UserDeviceService.ensureTemporaryUser()
             }
             .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { _ in }
+            .onOpenURL { url in
+                if let code = ReferralService.referralCode(from: url) {
+                    pendingReferralCode = code
+                }
+            }
             .preferredColorScheme(.dark)
         }
     }

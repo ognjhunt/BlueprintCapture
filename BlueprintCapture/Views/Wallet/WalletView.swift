@@ -166,22 +166,30 @@ struct WalletView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.captureHistory.prefix(8)) { entry in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.targetAddress)
-                                .font(.subheadline.weight(.medium))
-                                .lineLimit(1)
-                            Text(entry.statusLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if let payout = entry.estimatedPayout {
-                            Text(payout, format: .currency(code: "USD"))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(BlueprintTheme.successGreen)
+                    NavigationLink {
+                        CaptureDetailView(entry: entry)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.targetAddress)
+                                    .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                Text(entry.statusLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if let payout = entry.estimatedPayout {
+                                Text(payout, format: .currency(code: "USD"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(BlueprintTheme.successGreen)
+                            }
+                            Image(systemName: "chevron.right")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
                         }
                     }
+                    .buttonStyle(.plain)
                     Divider()
                 }
             }

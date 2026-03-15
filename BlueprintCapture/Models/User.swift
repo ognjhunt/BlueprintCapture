@@ -60,6 +60,11 @@ public class User {
     private(set) var likedAnchorIDs    = [String]()
     // BlueprintCapture counters/preferences used on device until auth
     private(set) var numLocationsScanned: Int = 0
+    // Gamification / leveling
+    private(set) var totalCaptureCount: Int = 0
+    private(set) var avgQualityScore: Double = 0
+    private(set) var captureLevel: String = "novice"
+    private(set) var achievementIds: [String] = []
     private(set) var permissions: [String: Bool] = [:]
     private(set) var deviceModel: String = ""
     private(set) var deviceName: String = ""
@@ -260,6 +265,19 @@ public class User {
         }
         if let numLocationsScanned = userFirDoc["numLocationsScanned"] as? Int {
             self.numLocationsScanned = numLocationsScanned
+        }
+        if let totalCaptureCount = userFirDoc["totalCaptureCount"] as? Int {
+            self.totalCaptureCount = totalCaptureCount
+        }
+        if let avgQualityScore = userFirDoc["avgQualityScore"] as? Double {
+            self.avgQualityScore = avgQualityScore
+        }
+        if let captureLevel = userFirDoc["captureLevel"] as? String {
+            self.captureLevel = captureLevel
+        }
+        let normalizedAchievementIds = Array(Achievement.unlockedDates(from: userFirDoc).keys).sorted()
+        if !normalizedAchievementIds.isEmpty {
+            self.achievementIds = normalizedAchievementIds
         }
         if let permissions = userFirDoc["permissions"] as? [String: Bool] {
             self.permissions = permissions

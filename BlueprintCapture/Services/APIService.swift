@@ -67,6 +67,21 @@ final class APIService {
         return try decoder.decode([CaptureHistoryEntry].self, from: data)
     }
 
+    func fetchCaptureDetail(id: UUID) async throws -> CaptureDetailResponse? {
+        let request = try makeRequest(path: "v1/creator/captures/\(id.uuidString.lowercased())")
+        let (data, status) = try await performWithStatus(request: request)
+
+        switch status {
+        case 200:
+            guard !data.isEmpty else { return nil }
+            return try decoder.decode(CaptureDetailResponse.self, from: data)
+        case 204, 404:
+            return nil
+        default:
+            throw APIError.invalidResponse(statusCode: status)
+        }
+    }
+
     func fetchQualityControlStatus() async throws -> QualityControlStatus? {
         let request = try makeRequest(path: "v1/creator/qc")
         let data = try await perform(request: request, expecting: 200)
@@ -241,6 +256,154 @@ struct CaptureHistoryEntry: Codable, Identifiable {
     }
 }
 
+struct CaptureDetailResponse: Codable, Equatable {
+    let id: UUID?
+    let targetAddress: String?
+    let capturedAt: Date?
+    let status: CaptureStatus?
+    let quality: CaptureQualityBreakdown?
+    let earnings: CaptureEarningsBreakdown?
+    let rejectionReason: String?
+    let timeline: [CaptureTimelineEvent]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case targetAddress = "target_address"
+        case capturedAt = "captured_at"
+        case status
+        case quality
+        case earnings
+        case rejectionReason = "rejection_reason"
+        case timeline
+    }
+
+    init(
+        id: UUID? = nil,
+        targetAddress: String? = nil,
+        capturedAt: Date? = nil,
+        status: CaptureStatus? = nil,
+        quality: CaptureQualityBreakdown? = nil,
+        earnings: CaptureEarningsBreakdown? = nil,
+        rejectionReason: String? = nil,
+        timeline: [CaptureTimelineEvent] = []
+    ) {
+        self.id = id
+        self.targetAddress = targetAddress
+        self.capturedAt = capturedAt
+        self.status = status
+        self.quality = quality
+        self.earnings = earnings
+        self.rejectionReason = rejectionReason
+        self.timeline = timeline
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let uuid = try? container.decode(UUID.self, forKey: .id) {
+            self.id = uuid
+        } else if let string = try? container.decode(String.self, forKey: .id), let uuid = UUID(uuidString: string) {
+            self.id = uuid
+        } else {
+            self.id = nil
+        }
+        self.targetAddress = try container.decodeIfPresent(String.self, forKey: .targetAddress)
+        self.capturedAt = try container.decodeIfPresent(Date.self, forKey: .capturedAt)
+        self.status = try container.decodeIfPresent(CaptureStatus.self, forKey: .status)
+        self.quality = try container.decodeIfPresent(CaptureQualityBreakdown.self, forKey: .quality)
+        self.earnings = try container.decodeIfPresent(CaptureEarningsBreakdown.self, forKey: .earnings)
+        self.rejectionReason = try container.decodeIfPresent(String.self, forKey: .rejectionReason)
+        self.timeline = try container.decodeIfPresent([CaptureTimelineEvent].self, forKey: .timeline) ?? []
+    }
+
+    var hasRenderableDetail: Bool {
+        quality != nil || earnings != nil || rejectionReason != nil || !timeline.isEmpty
+    }
+}
+
+struct CaptureQualityBreakdown: Codable, Equatable {
+    let overall: Int?
+    let coverage: Int?
+    let steadiness: Int?
+    let completeness: Int?
+    let depthQuality: Int?
+    let blurScore: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case overall
+        case coverage
+        case steadiness
+        case completeness
+        case depthQuality = "depth_quality"
+        case blurScore = "blur_score"
+    }
+}
+
+struct CaptureEarningsBreakdown: Codable, Equatable {
+    let basePayoutCents: Int?
+    let deviceMultiplier: Double?
+    let bonuses: [CaptureEarningsBonus]
+    let totalPayoutCents: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case basePayoutCents = "base_payout_cents"
+        case deviceMultiplier = "device_multiplier"
+        case bonuses
+        case totalPayoutCents = "total_payout_cents"
+    }
+
+    init(
+        basePayoutCents: Int? = nil,
+        deviceMultiplier: Double? = nil,
+        bonuses: [CaptureEarningsBonus] = [],
+        totalPayoutCents: Int? = nil
+    ) {
+        self.basePayoutCents = basePayoutCents
+        self.deviceMultiplier = deviceMultiplier
+        self.bonuses = bonuses
+        self.totalPayoutCents = totalPayoutCents
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.basePayoutCents = try container.decodeIfPresent(Int.self, forKey: .basePayoutCents)
+        self.deviceMultiplier = try container.decodeIfPresent(Double.self, forKey: .deviceMultiplier)
+        self.bonuses = try container.decodeIfPresent([CaptureEarningsBonus].self, forKey: .bonuses) ?? []
+        self.totalPayoutCents = try container.decodeIfPresent(Int.self, forKey: .totalPayoutCents)
+    }
+}
+
+struct CaptureEarningsBonus: Codable, Equatable, Identifiable {
+    let label: String
+    let amountCents: Int?
+    let percentage: Double?
+
+    var id: String { label }
+
+    enum CodingKeys: String, CodingKey {
+        case label
+        case amountCents = "amount_cents"
+        case percentage
+    }
+}
+
+struct CaptureTimelineEvent: Codable, Equatable, Identifiable {
+    let label: String
+    let completedAt: Date?
+    let state: String?
+
+    var id: String { [label, completedAt?.ISO8601Format() ?? "pending"].joined(separator: "-") }
+
+    enum CodingKeys: String, CodingKey {
+        case label
+        case completedAt = "completed_at"
+        case state
+    }
+
+    var isCompleted: Bool {
+        completedAt != nil || state?.lowercased() == "completed"
+    }
+}
+
 struct QualityControlStatus: Codable {
     let pendingCount: Int
     let needsFixCount: Int
@@ -342,4 +505,3 @@ struct PayoutLedgerEntry: Codable, Identifiable {
         Decimal(amountCents) / Decimal(100)
     }
 }
-

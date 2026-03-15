@@ -24,6 +24,12 @@ struct MainTabView: View {
                         Label("Wallet", systemImage: "creditcard.fill")
                     }
                     .tag(1)
+
+                ProfileTabView()
+                    .tabItem {
+                        Label("Profile", systemImage: "person.crop.circle.fill")
+                    }
+                    .tag(2)
             }
             .tint(BlueprintTheme.brandTeal)
 

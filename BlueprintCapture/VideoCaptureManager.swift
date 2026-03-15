@@ -92,6 +92,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
+    let qualityMonitor = CaptureQualityMonitor()
 
     let session = AVCaptureSession()
     let arSession = ARSession()
@@ -328,6 +329,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         exportedMeshAnchors.removeAll()
         latestUploadPayload = nil
         exposureSamples = []
+        Task { @MainActor in qualityMonitor.start() }
         if shouldUseScreenRecorder {
             currentCameraIntrinsics = makeScreenIntrinsics()
             currentExposureSettings = nil
@@ -379,6 +381,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
         print("⏹️ [Capture] stopRecording begin")
+        Task { @MainActor in qualityMonitor.stop() }
         if shouldUseScreenRecorder {
             stopScreenRecording()
         } else if usingCustomARSessionRecorder {
@@ -1175,18 +1178,23 @@ extension VideoCaptureManager: ARSessionDelegate {
         arDataQueue.async { [weak self] in
             self?.writeARFrame(frame)
         }
+        qualityMonitor.updateFromARFrame(frame)
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         arDataQueue.async { [weak self] in
             self?.exportMeshAnchors(anchors)
         }
+        let meshCount = session.currentFrame?.anchors.compactMap({ $0 as? ARMeshAnchor }).count ?? 0
+        qualityMonitor.updateMeshAnchorCount(meshCount)
     }
 
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         arDataQueue.async { [weak self] in
             self?.exportMeshAnchors(anchors)
         }
+        let meshCount = session.currentFrame?.anchors.compactMap({ $0 as? ARMeshAnchor }).count ?? 0
+        qualityMonitor.updateMeshAnchorCount(meshCount)
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
