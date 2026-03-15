@@ -195,7 +195,12 @@ private struct InviteCodeStepView: View {
                                     lineWidth: 1
                                 )
                         )
-                        .onChange(of: codeInput) { _, _ in validationError = nil }
+                        .onChange(of: codeInput) { _, newValue in
+                            validationError = nil
+                            if newValue.count > 6 {
+                                codeInput = String(newValue.prefix(6))
+                            }
+                        }
 
                     if let err = validationError {
                         Text(err)
@@ -254,7 +259,7 @@ private struct AuthStepView: View {
     @StateObject private var vm = AuthViewModel()
     @FocusState private var focusedField: AuthFocusField?
 
-    enum AuthFocusField { case name, email, password, confirmPassword }
+    enum AuthFocusField: Hashable { case name, email, password, confirmPassword }
 
     var body: some View {
         ZStack {
@@ -348,21 +353,24 @@ private struct AuthStepView: View {
                         // Fields
                         if vm.mode == .signUp {
                             authTextField("Full Name", placeholder: "John Doe", text: $vm.name,
-                                          icon: "person.fill", focused: focusedField == .name)
-                            .onTapGesture { focusedField = .name }
+                                          icon: "person.fill", focusBinding: $focusedField,
+                                          focusValue: .name, submitLabel: .next) { focusedField = .email }
                         }
                         authTextField("Email Address", placeholder: "you@example.com", text: $vm.email,
-                                      icon: "envelope.fill", keyboardType: .emailAddress, focused: focusedField == .email)
-                        .onTapGesture { focusedField = .email }
+                                      icon: "envelope.fill", keyboardType: .emailAddress,
+                                      focusBinding: $focusedField, focusValue: .email, submitLabel: .next) { focusedField = .password }
 
                         AuthSecureFieldView(title: "Password", placeholder: "At least 8 characters",
-                                            text: $vm.password, focused: focusedField == .password)
-                        .onTapGesture { focusedField = .password }
+                                            text: $vm.password, focusBinding: $focusedField, focusValue: .password,
+                                            submitLabel: vm.mode == .signUp ? .next : .go) {
+                            if vm.mode == .signUp { focusedField = .confirmPassword }
+                            else { Task { await vm.submit() } }
+                        }
 
                         if vm.mode == .signUp {
                             AuthSecureFieldView(title: "Confirm Password", placeholder: "Re-enter your password",
-                                                text: $vm.confirmPassword, focused: focusedField == .confirmPassword)
-                            .onTapGesture { focusedField = .confirmPassword }
+                                                text: $vm.confirmPassword, focusBinding: $focusedField,
+                                                focusValue: .confirmPassword, submitLabel: .go) { Task { await vm.submit() } }
                         }
 
                         // Error
@@ -422,9 +430,13 @@ private struct AuthStepView: View {
         text: Binding<String>,
         icon: String,
         keyboardType: UIKeyboardType = .default,
-        focused: Bool
+        focusBinding: FocusState<AuthFocusField?>.Binding,
+        focusValue: AuthFocusField,
+        submitLabel: SubmitLabel = .next,
+        onSubmit: @escaping () -> Void = {}
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let focused = focusBinding.wrappedValue == focusValue
+        return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color(white: 0.6))
@@ -441,6 +453,9 @@ private struct AuthStepView: View {
                     .disableAutocorrection(true)
                     .foregroundStyle(.white)
                     .tint(BlueprintTheme.brandTeal)
+                    .focused(focusBinding, equals: focusValue)
+                    .submitLabel(submitLabel)
+                    .onSubmit(onSubmit)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
@@ -460,8 +475,13 @@ private struct AuthSecureFieldView: View {
     let title: String
     let placeholder: String
     @Binding var text: String
-    let focused: Bool
+    var focusBinding: FocusState<AuthStepView.AuthFocusField?>.Binding
+    let focusValue: AuthStepView.AuthFocusField
+    let submitLabel: SubmitLabel
+    let onSubmit: () -> Void
     @State private var visible = false
+
+    var focused: Bool { focusBinding.wrappedValue == focusValue }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -481,12 +501,18 @@ private struct AuthSecureFieldView: View {
                         .disableAutocorrection(true)
                         .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
+                        .focused(focusBinding, equals: focusValue)
+                        .submitLabel(submitLabel)
+                        .onSubmit(onSubmit)
                 } else {
                     SecureField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
+                        .focused(focusBinding, equals: focusValue)
+                        .submitLabel(submitLabel)
+                        .onSubmit(onSubmit)
                 }
 
                 Button { visible.toggle() } label: {

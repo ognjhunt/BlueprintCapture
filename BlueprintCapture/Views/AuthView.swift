@@ -231,9 +231,10 @@ struct AuthView: View {
                     placeholder: "John Doe",
                     text: $viewModel.name,
                     icon: "person.fill",
-                    focused: focusedField == .name
-                )
-                .onTapGesture { focusedField = .name }
+                    focusBinding: $focusedField,
+                    focusValue: .name,
+                    submitLabel: .next
+                ) { focusedField = .email }
             }
 
             kledTextField(
@@ -242,26 +243,32 @@ struct AuthView: View {
                 text: $viewModel.email,
                 icon: "envelope.fill",
                 keyboardType: .emailAddress,
-                focused: focusedField == .email
-            )
-            .onTapGesture { focusedField = .email }
+                focusBinding: $focusedField,
+                focusValue: .email,
+                submitLabel: .next
+            ) { focusedField = .password }
 
             kledSecureField(
                 title: "Password",
                 placeholder: "At least 8 characters",
                 text: $viewModel.password,
-                focused: focusedField == .password
-            )
-            .onTapGesture { focusedField = .password }
+                focusBinding: $focusedField,
+                focusValue: .password,
+                submitLabel: viewModel.mode == .signUp ? .next : .go
+            ) {
+                if viewModel.mode == .signUp { focusedField = .confirmPassword }
+                else { Task { await viewModel.submit() } }
+            }
 
             if viewModel.mode == .signUp {
                 kledSecureField(
                     title: "Confirm Password",
                     placeholder: "Re-enter your password",
                     text: $viewModel.confirmPassword,
-                    focused: focusedField == .confirmPassword
-                )
-                .onTapGesture { focusedField = .confirmPassword }
+                    focusBinding: $focusedField,
+                    focusValue: .confirmPassword,
+                    submitLabel: .go
+                ) { Task { await viewModel.submit() } }
             }
         }
     }
@@ -274,9 +281,13 @@ struct AuthView: View {
         text: Binding<String>,
         icon: String,
         keyboardType: UIKeyboardType = .default,
-        focused: Bool
+        focusBinding: FocusState<FocusField?>.Binding,
+        focusValue: FocusField,
+        submitLabel: SubmitLabel = .next,
+        onSubmit: @escaping () -> Void = {}
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let focused = focusBinding.wrappedValue == focusValue
+        return VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Color(white: 0.6))
@@ -293,6 +304,9 @@ struct AuthView: View {
                     .disableAutocorrection(true)
                     .foregroundStyle(.white)
                     .tint(BlueprintTheme.brandTeal)
+                    .focused(focusBinding, equals: focusValue)
+                    .submitLabel(submitLabel)
+                    .onSubmit(onSubmit)
 
                 if !text.wrappedValue.isEmpty {
                     Image(systemName: "checkmark.circle.fill")
@@ -317,20 +331,36 @@ struct AuthView: View {
         title: String,
         placeholder: String,
         text: Binding<String>,
-        focused: Bool
+        focusBinding: FocusState<FocusField?>.Binding,
+        focusValue: FocusField,
+        submitLabel: SubmitLabel = .next,
+        onSubmit: @escaping () -> Void = {}
     ) -> some View {
-        KledSecureFieldView(title: title, placeholder: placeholder, text: text, focused: focused)
+        KledSecureFieldView(
+            title: title,
+            placeholder: placeholder,
+            text: text,
+            focusBinding: focusBinding,
+            focusValue: focusValue,
+            submitLabel: submitLabel,
+            onSubmit: onSubmit
+        )
     }
 }
 
 // MARK: - Kled Secure Field
 
-private struct KledSecureFieldView: View {
+private struct KledSecureFieldView<F: Hashable>: View {
     let title: String
     let placeholder: String
     @Binding var text: String
-    let focused: Bool
+    var focusBinding: FocusState<F?>.Binding
+    let focusValue: F
+    let submitLabel: SubmitLabel
+    let onSubmit: () -> Void
     @State private var visible = false
+
+    var focused: Bool { focusBinding.wrappedValue == focusValue }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -350,12 +380,18 @@ private struct KledSecureFieldView: View {
                         .disableAutocorrection(true)
                         .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
+                        .focused(focusBinding, equals: focusValue)
+                        .submitLabel(submitLabel)
+                        .onSubmit(onSubmit)
                 } else {
                     SecureField(placeholder, text: $text)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .foregroundStyle(.white)
                         .tint(BlueprintTheme.brandTeal)
+                        .focused(focusBinding, equals: focusValue)
+                        .submitLabel(submitLabel)
+                        .onSubmit(onSubmit)
                 }
 
                 Button { visible.toggle() } label: {
