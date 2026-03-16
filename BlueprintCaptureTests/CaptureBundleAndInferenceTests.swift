@@ -98,7 +98,7 @@ struct CaptureBundleAndInferenceTests {
 
         let completionObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_upload_complete.json")))
         let completion = try #require(completionObject as? [String: Any])
-        #expect(completion["rawPrefix"] as? String == "raw")
+        #expect(completion["raw_prefix"] as? String == "raw")
 
         let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
         let context = try #require(contextObject as? [String: Any])
@@ -412,15 +412,25 @@ struct CaptureBundleAndInferenceTests {
                 return (response, Data("model not found".utf8))
             }
             if url.absoluteString.contains("gemini-3-flash-preview") {
-                let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+                let body = String(data: request.bodyData ?? Data(), encoding: .utf8) ?? ""
                 InferenceURLProtocol.capturedBodies.append(body)
                 let isFirstAttempt = InferenceURLProtocol.capturedBodies.count == 1
                 let json = isFirstAttempt
                     ? #"{"workflowName":"Walkthrough","taskSteps":["Step one"],"warnings":["Need zone"],"confidence":0.42}"#
                     : #"{"workflowName":"Walkthrough","taskSteps":["Step one","Step two"],"zone":"Packing","confidence":0.82}"#
-                let responsePayload = #"{"candidates":[{"content":{"parts":[{"text":"\#(json)"}]}}]}"#
+                let responsePayload = try JSONSerialization.data(withJSONObject: [
+                    "candidates": [
+                        [
+                            "content": [
+                                "parts": [
+                                    ["text": json]
+                                ]
+                            ]
+                        ]
+                    ]
+                ])
                 let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
-                return (response, Data(responsePayload.utf8))
+                return (response, responsePayload)
             }
             throw URLError(.badServerResponse)
         }
@@ -458,7 +468,21 @@ struct CaptureBundleAndInferenceTests {
             captureRights: nil
         ))
 
-        let service = CaptureIntakeInferenceService(session: session, apiKeyProvider: { "test-key" })
+        let service = CaptureIntakeInferenceService(
+            session: session,
+            runtimeConfigProvider: {
+                RuntimeConfig(
+                    backendBaseURL: nil,
+                    isUITesting: false,
+                    uiTestScenario: .disabled,
+                    allowOffsiteCheckIn: false,
+                    maxReservationDriveMinutes: 60,
+                    fallbackMaxReservationAirMiles: 35.0,
+                    enableDirectProviderFeatures: true
+                )
+            },
+            apiKeyProvider: { "test-key" }
+        )
         let result = try await service.inferIntake(for: request)
 
         #expect(result.metadata.model == "gemini-3-flash-preview")
@@ -547,4 +571,32 @@ private final class InferenceURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private extension URLRequest {
+    var bodyData: Data? {
+        if let httpBody {
+            return httpBody
+        }
+        guard let stream = httpBodyStream else {
+            return nil
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        var data = Data()
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read <= 0 {
+                break
+            }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
 }

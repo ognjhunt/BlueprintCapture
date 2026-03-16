@@ -15,6 +15,24 @@ final class CorePathUITests: XCTestCase {
     }
 
     @MainActor
+    func testOnboardingScenarioShowsAuthEntryPoints() throws {
+        let app = configuredApp(scenario: "onboarding")
+        app.launch()
+
+        let getStarted = app.buttons["onboarding-get-started"]
+        XCTAssertTrue(getStarted.waitForExistence(timeout: 10))
+        getStarted.tap()
+
+        let skipInvite = app.buttons["Skip for now"]
+        XCTAssertTrue(skipInvite.waitForExistence(timeout: 10))
+        skipInvite.tap()
+
+        XCTAssertTrue(app.buttons["Continue with Google"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Create Account"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["you@example.com"].waitForExistence(timeout: 10))
+    }
+
+    @MainActor
     func testCorePathScenarioStartsCaptureAndShowsUploadOverlay() throws {
         let app = configuredApp(scenario: "corePath")
         app.launch()

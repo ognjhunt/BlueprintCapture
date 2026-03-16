@@ -83,6 +83,7 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
 
     private let session: URLSession
     private let apiKeyProvider: () -> String?
+    private let runtimeConfigProvider: () -> RuntimeConfig
     private let primaryModel = "gemini-3.1-flash-lite-preview"
     private let fallbackModel = "gemini-3-flash-preview"
     private let maxInlineVideoBytes = 70 * 1024 * 1024
@@ -90,17 +91,19 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
 
     init(
         session: URLSession = .shared,
+        runtimeConfigProvider: @escaping () -> RuntimeConfig = { RuntimeConfig.current },
         apiKeyProvider: @escaping () -> String? = {
             guard RuntimeConfig.current.availability(for: .captureIntakeAI).isEnabled else { return nil }
             return DeveloperProviderOverrides.value(for: ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_MAPS_API_KEY"])
         }
     ) {
         self.session = session
+        self.runtimeConfigProvider = runtimeConfigProvider
         self.apiKeyProvider = apiKeyProvider
     }
 
     func inferIntake(for request: CaptureUploadRequest) async throws -> CaptureIntakeInferenceResult {
-        guard RuntimeConfig.current.availability(for: .captureIntakeAI).isEnabled else {
+        guard runtimeConfigProvider().availability(for: .captureIntakeAI).isEnabled else {
             throw ServiceError.featureDisabled
         }
         guard let apiKey = apiKeyProvider() else {
