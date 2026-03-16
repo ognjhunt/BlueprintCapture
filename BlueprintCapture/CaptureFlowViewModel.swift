@@ -180,6 +180,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         return false
     }
 
+    /// True when the address was pre-filled from a search result (not GPS).
+    var hasSeedAddress: Bool {
+        if case .spaceReview(let seed) = flowMode { return seed?.address != nil }
+        return false
+    }
+
     var canConfirmAddress: Bool {
         guard currentAddress != nil else { return false }
         guard isSpaceReviewMode else { return true }
@@ -700,6 +706,8 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
+        // Don't overwrite an address the user explicitly searched for
+        if hasSeedAddress { return }
         Task {
             let placemarks = try? await geocoder.reverseGeocodeLocation(location)
             await MainActor.run {

@@ -43,9 +43,9 @@ struct LocationConfirmationView: View {
                             showManualEntry = true
                         } label: {
                             HStack(spacing: 6) {
-                                Image(systemName: "pencil.circle")
+                                Image(systemName: viewModel.hasSeedAddress ? "arrow.triangle.2.circlepath" : "pencil.circle")
                                     .font(.caption)
-                                Text("Can't find it? Enter address manually")
+                                Text(viewModel.hasSeedAddress ? "Change location" : "Can't find it? Enter address manually")
                                     .font(.caption.weight(.medium))
                             }
                             .foregroundStyle(BlueprintTheme.brandTeal)
@@ -86,7 +86,7 @@ struct LocationConfirmationView: View {
             }
         }
         .task {
-            if viewModel.currentAddress == nil {
+            if viewModel.currentAddress == nil && !viewModel.hasSeedAddress {
                 viewModel.locationManager.requestLocation()
             }
         }
@@ -105,18 +105,26 @@ struct LocationConfirmationView: View {
 
     private var addressCard: some View {
         HStack(spacing: 14) {
-            Image(systemName: "mappin.and.ellipse")
+            Image(systemName: viewModel.hasSeedAddress ? "mappin.circle.fill" : "mappin.and.ellipse")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(viewModel.hasSeedAddress ? BlueprintTheme.brandTeal : .white)
                 .frame(width: 36, height: 36)
-                .background(BlueprintTheme.brandTeal.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .background(
+                    (viewModel.hasSeedAddress ? BlueprintTheme.brandTeal : Color.white).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
 
-            Group {
+            VStack(alignment: .leading, spacing: 3) {
                 if let address = viewModel.currentAddress {
                     Text(address)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
+                    if viewModel.hasSeedAddress {
+                        Text("From your search")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.8))
+                    }
                 } else if let error = viewModel.locationError {
                     Text(error)
                         .font(.subheadline)
@@ -141,7 +149,10 @@ struct LocationConfirmationView: View {
         .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
+                .stroke(
+                    viewModel.hasSeedAddress ? BlueprintTheme.brandTeal.opacity(0.3) : Color(white: 0.12),
+                    lineWidth: 1
+                )
         )
     }
 

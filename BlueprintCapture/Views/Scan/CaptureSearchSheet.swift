@@ -402,7 +402,10 @@ struct CaptureSearchSheet: View {
 
     private var submitCard: some View {
         Button {
-            onSubmitAddress(selectedAddressLabel, generatedDraftContext)
+            let fullAddress = selectedAddressSubtitle.isEmpty
+                ? selectedAddressLabel
+                : "\(selectedAddressLabel), \(selectedAddressSubtitle)"
+            onSubmitAddress(fullAddress, generatedDraftContext)
             dismiss()
         } label: {
             HStack(spacing: 0) {
