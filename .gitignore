@@ -72,3 +72,7 @@ Secrets.plist
 .env
 .env.*
 !.env.example
+
+# Cloud Functions
+cloud/**/node_modules/
+cloud/**/dist/
