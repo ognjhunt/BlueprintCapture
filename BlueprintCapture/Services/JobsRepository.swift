@@ -47,6 +47,12 @@ final class JobsRepository: JobsRepositoryProtocol {
                 .getDocuments()
             return snap.documents.compactMap { decode(docId: $0.documentID, data: $0.data()) }
         } catch {
+            // Permission denied (unauthenticated/guest) — return placeholder cards so
+            // the feed stays useful rather than showing a blank error state.
+            let ns = error as NSError
+            if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 7 {
+                return Self.mockJobs()
+            }
             throw error
         }
         #else
