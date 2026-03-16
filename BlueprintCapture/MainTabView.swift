@@ -1,10 +1,31 @@
 import SwiftUI
 
 struct MainTabView: View {
-    @State private var selectedTab = 0
+    @State private var selectedTab: Int
     @ObservedObject var glassesManager: GlassesCaptureManager
     @ObservedObject var uploadQueue: UploadQueueViewModel
     @ObservedObject var alertsManager: NearbyAlertsManager
+    private let scanHomeViewModel: ScanHomeViewModel?
+    private let walletViewModel: WalletViewModel?
+    private let walletShouldAutoload: Bool
+
+    init(
+        glassesManager: GlassesCaptureManager,
+        uploadQueue: UploadQueueViewModel,
+        alertsManager: NearbyAlertsManager,
+        initialSelectedTab: Int = 0,
+        scanHomeViewModel: ScanHomeViewModel? = nil,
+        walletViewModel: WalletViewModel? = nil,
+        walletShouldAutoload: Bool = true
+    ) {
+        self.glassesManager = glassesManager
+        self.uploadQueue = uploadQueue
+        self.alertsManager = alertsManager
+        self.scanHomeViewModel = scanHomeViewModel
+        self.walletViewModel = walletViewModel
+        self.walletShouldAutoload = walletShouldAutoload
+        _selectedTab = State(initialValue: initialSelectedTab)
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -14,11 +35,12 @@ struct MainTabView: View {
                 ScanHomeView(
                     glassesManager: glassesManager,
                     uploadQueue: uploadQueue,
-                    alertsManager: alertsManager
+                    alertsManager: alertsManager,
+                    viewModel: scanHomeViewModel
                 )
                 .tag(0)
 
-                WalletView(glassesManager: glassesManager)
+                WalletView(glassesManager: glassesManager, viewModel: walletViewModel, shouldAutoload: walletShouldAutoload)
                     .tag(1)
 
                 ProfileTabView()
@@ -90,6 +112,9 @@ struct MainTabView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
+        .accessibilityIdentifier(
+            index == 0 ? "tab-scan" : (index == 1 ? "tab-wallet" : "tab-profile")
+        )
     }
 }
 

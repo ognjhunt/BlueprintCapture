@@ -372,6 +372,7 @@ struct JobDetailSheet: View {
             .frame(maxWidth: .infinity)
             .background(actionBackgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .disabled(item.permissionTier == .blocked)
+            .accessibilityIdentifier("job-detail-primary-action")
     }
 
     private var actionTitle: String {

@@ -66,6 +66,7 @@ fastlane/test_output
 BlueprintCapture/Support/Secrets.plist
 BlueprintCapture/Support/Secrets.local.plist
 Secrets.plist
+*.local.xcconfig
 *.pem
 *.p12
 .env

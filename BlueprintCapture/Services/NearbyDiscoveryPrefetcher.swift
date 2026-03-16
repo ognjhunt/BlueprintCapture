@@ -32,7 +32,7 @@ struct NearbyDiscoveryPrefetcher {
     }
 
     func runOnceIfPossible(userLocation: CLLocationCoordinate2D, radiusMeters: Int = 1609, limit: Int = 25) {
-        guard AppConfig.geminiAPIKey() != nil, AppConfig.placesAPIKey() != nil else { return }
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return }
         Task.detached(priority: .utility) {
             do {
                 let candidates = try await discovery.discoverCandidates(
@@ -56,5 +56,4 @@ struct NearbyDiscoveryPrefetcher {
         }
     }
 }
-
 

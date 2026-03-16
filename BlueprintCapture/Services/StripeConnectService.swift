@@ -45,11 +45,24 @@ struct StripeAccountState: Codable {
 }
 
 final class StripeConnectService {
-    enum StripeConnectError: Error {
+    enum StripeConnectError: LocalizedError {
         case missingConfiguration
         case invalidResponse(status: Int)
         case decodingError(Error)
         case networkError(Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingConfiguration:
+                return RuntimeConfig.current.availability(for: .payouts).message ?? "Payout setup is not enabled for this build."
+            case .invalidResponse(let status):
+                return "Payout service returned HTTP \(status)."
+            case .decodingError:
+                return "Payout service returned an unexpected response."
+            case .networkError(let error):
+                return error.localizedDescription
+            }
+        }
     }
 
     static let shared = StripeConnectService()
@@ -68,32 +81,20 @@ final class StripeConnectService {
 
     func createOnboardingLink() async throws -> URL {
         print("[Stripe] Creating onboarding link...")
-        
-        if let base = AppConfig.backendBaseURL() {
-            print("[Stripe] Using backend URL: \(base)")
-            do {
-                var request = try makeRequest(base: base, path: "v1/stripe/account/onboarding_link", method: "POST")
-                print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
-                let data = try await perform(request: request)
-                let links = try decoder.decode(StripeAccountLinks.self, from: data)
-                print("[Stripe] ✓ Onboarding link created successfully")
-                return links.onboardingURL
-            } catch let error as StripeConnectError {
-                print("[Stripe] ✗ Stripe error creating onboarding link: \(error)")
-                throw error
-            } catch {
-                print("[Stripe] ✗ Error creating onboarding link: \(error)")
-                throw StripeConnectError.networkError(error)
-            }
+        do {
+            let request = try makeRequest(path: "v1/stripe/account/onboarding_link", method: "POST")
+            print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
+            let data = try await perform(request: request)
+            let links = try decoder.decode(StripeAccountLinks.self, from: data)
+            print("[Stripe] ✓ Onboarding link created successfully")
+            return links.onboardingURL
+        } catch let error as StripeConnectError {
+            print("[Stripe] ✗ Stripe error creating onboarding link: \(error)")
+            throw error
+        } catch {
+            print("[Stripe] ✗ Error creating onboarding link: \(error)")
+            throw StripeConnectError.networkError(error)
         }
-
-        if let url = AppConfig.stripeOnboardingURL() {
-            print("[Stripe] Using fallback onboarding URL from config: \(url)")
-            return url
-        }
-
-        print("[Stripe] ✗ Missing configuration: No backend URL or fallback onboarding URL")
-        throw StripeConnectError.missingConfiguration
     }
 
     func fetchAccountState() async throws -> StripeAccountState {
@@ -137,34 +138,10 @@ final class StripeConnectService {
         
         let payload = try encoder.encode(UpdateScheduleRequest(schedule: schedule.rawValue))
 
-        if let base = AppConfig.backendBaseURL() {
-            print("[Stripe] Using backend URL: \(base)")
-            do {
-                var request = try makeRequest(base: base, path: "v1/stripe/account/payout_schedule", method: "PUT")
-                request.httpBody = payload
-                print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
-                _ = try await perform(request: request)
-                print("[Stripe] ✓ Payout schedule updated successfully")
-                return
-            } catch {
-                print("[Stripe] ✗ Error updating schedule: \(error)")
-                throw error
-            }
-        }
-
-        guard let url = AppConfig.stripePayoutScheduleURL() else {
-            print("[Stripe] ✗ Missing configuration for payout schedule URL")
-            throw StripeConnectError.missingConfiguration
-        }
-
-        print("[Stripe] Using fallback URL: \(url)")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = payload
-        
         do {
+            var request = try makeRequest(path: "v1/stripe/account/payout_schedule", method: "PUT")
+            request.httpBody = payload
+            print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
             _ = try await perform(request: request)
             print("[Stripe] ✓ Payout schedule updated successfully")
         } catch {
@@ -178,34 +155,10 @@ final class StripeConnectService {
         
         let payload = try encoder.encode(InstantPayoutRequest(amountCents: amountCents))
 
-        if let base = AppConfig.backendBaseURL() {
-            print("[Stripe] Using backend URL: \(base)")
-            do {
-                var request = try makeRequest(base: base, path: "v1/stripe/account/instant_payout", method: "POST")
-                request.httpBody = payload
-                print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
-                _ = try await perform(request: request)
-                print("[Stripe] ✓ Instant payout triggered successfully")
-                return
-            } catch {
-                print("[Stripe] ✗ Error triggering instant payout: \(error)")
-                throw error
-            }
-        }
-
-        guard let url = AppConfig.stripeInstantPayoutURL() else {
-            print("[Stripe] ✗ Missing configuration for instant payout URL")
-            throw StripeConnectError.missingConfiguration
-        }
-
-        print("[Stripe] Using fallback URL: \(url)")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.httpBody = payload
-        
         do {
+            var request = try makeRequest(path: "v1/stripe/account/instant_payout", method: "POST")
+            request.httpBody = payload
+            print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
             _ = try await perform(request: request)
             print("[Stripe] ✓ Instant payout triggered successfully")
         } catch {
@@ -291,5 +244,3 @@ extension PayoutSchedule {
         }
     }
 }
-
-

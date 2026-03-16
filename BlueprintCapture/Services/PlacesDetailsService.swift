@@ -18,16 +18,25 @@ final class PlacesDetailsService: PlacesDetailsServiceProtocol {
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
-    init(session: URLSession = .shared, apiKeyProvider: @escaping () -> String? = { AppConfig.placesAPIKey() }) {
+    init(
+        session: URLSession = .shared,
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["PLACES_API_KEY", "GOOGLE_PLACES_API_KEY"])
+        }
+    ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
 
-    enum ServiceError: Error { case missingAPIKey, badResponse }
+    enum ServiceError: Error { case featureDisabled, missingAPIKey, badResponse }
 
     /// Batch Place Details (New) with minimal field mask
     func fetchDetails(placeIds: [String]) async throws -> [PlaceDetailsLite] {
         guard !placeIds.isEmpty else { return [] }
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else {
+            throw ServiceError.featureDisabled
+        }
         guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
 
         // Places API (New) Place Details: GET per place, but we can parallelize on client.
@@ -90,5 +99,4 @@ final class MockPlacesDetailsService: PlacesDetailsServiceProtocol {
         }
     }
 }
-
 

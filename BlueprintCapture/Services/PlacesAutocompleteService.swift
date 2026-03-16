@@ -22,12 +22,19 @@ final class PlacesAutocompleteService: PlacesAutocompleteServiceProtocol {
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
-    init(session: URLSession = .shared, apiKeyProvider: @escaping () -> String? = { AppConfig.placesAPIKey() }) {
+    init(
+        session: URLSession = .shared,
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["PLACES_API_KEY", "GOOGLE_PLACES_API_KEY"])
+        }
+    ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
 
     enum ServiceError: Error { 
+        case featureDisabled
         case missingAPIKey
         case badResponse
         case noResults
@@ -41,6 +48,9 @@ final class PlacesAutocompleteService: PlacesAutocompleteServiceProtocol {
         origin: CLLocationCoordinate2D?,
         radiusMeters: Int?
     ) async throws -> [AutocompleteSuggestion] {
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else {
+            throw ServiceError.featureDisabled
+        }
         guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
         let url = URL(string: "https://places.googleapis.com/v1/places:autocomplete")!
         var request = URLRequest(url: url)

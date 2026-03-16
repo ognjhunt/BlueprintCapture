@@ -1,0 +1,5 @@
+// Copy to a local-only *.local.xcconfig file and keep it out of source control.
+// Public runtime config only. Do not put third-party API keys in shipped app resources.
+
+BLUEPRINT_BACKEND_BASE_URL = https://your-backend.example.com
+

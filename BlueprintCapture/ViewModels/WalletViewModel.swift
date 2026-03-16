@@ -52,8 +52,6 @@ final class WalletViewModel: ObservableObject {
             async let qcTask = apiService.fetchQualityControlStatus()
             async let capturesTask = apiService.fetchCaptureHistory()
             async let ledgerTask = apiService.fetchPayoutLedger()
-            async let billingTask = apiService.fetchBillingInfo()
-            async let stripeTask = stripeService.fetchAccountState()
 
             let earnings = try await earningsTask
             totalEarnings = earnings.total
@@ -63,8 +61,16 @@ final class WalletViewModel: ObservableObject {
             qcStatus = try await qcTask
             captureHistory = try await capturesTask
             payoutLedger = try await ledgerTask
-            billingInfo = try await billingTask
-            stripeAccountState = try await stripeTask
+
+            if RuntimeConfig.current.availability(for: .payouts).isEnabled {
+                async let billingTask = apiService.fetchBillingInfo()
+                async let stripeTask = stripeService.fetchAccountState()
+                billingInfo = try await billingTask
+                stripeAccountState = try await stripeTask
+            } else {
+                billingInfo = nil
+                stripeAccountState = nil
+            }
         } catch {
             errorMessage = "Unable to load wallet."
         }

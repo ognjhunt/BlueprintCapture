@@ -25,6 +25,10 @@ struct ScanRecordingView: View {
         case error
     }
 
+    private var isUITesting: Bool {
+        RuntimeConfig.current.isUITesting
+    }
+
     init(job: ScanJob,
          glassesManager: GlassesCaptureManager,
          uploadQueue: UploadQueueViewModel,
@@ -198,7 +202,12 @@ struct ScanRecordingView: View {
         switch phase {
         case .recording:
             Button {
-                glassesManager.stopCapture()
+                if isUITesting {
+                    uploadQueue.simulateUITestUpload(for: job)
+                    phase = .uploading
+                } else {
+                    glassesManager.stopCapture()
+                }
             } label: {
                 Image(systemName: "stop.fill")
                     .font(.title2.weight(.bold))
@@ -206,6 +215,7 @@ struct ScanRecordingView: View {
                     .frame(width: 84, height: 84)
                     .background(Circle().fill(Color.red))
             }
+            .accessibilityIdentifier("scan-recording-stop")
 
         case .uploading:
             Button {
@@ -214,6 +224,7 @@ struct ScanRecordingView: View {
                 Text("Back to capture feed")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
+            .accessibilityIdentifier("scan-recording-back")
 
         case .error:
             VStack(spacing: 10) {
@@ -274,6 +285,12 @@ struct ScanRecordingView: View {
     }
 
     private func beginIfPossible() async {
+        if isUITesting {
+            guidanceTip = "Walk entry to exit and pause briefly at each boundary."
+            phase = .recording
+            return
+        }
+
         // Ensure connected
         if case .connected = glassesManager.connectionState {
             // continue

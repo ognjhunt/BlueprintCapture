@@ -92,7 +92,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     init(locationService: LocationServiceProtocol = LocationService(),
          targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
          pricingAPI: PricingAPIProtocol = MockPricingAPI(),
-         streetService: StreetViewServiceProtocol = StreetViewService(apiKeyProvider: { AppConfig.streetViewAPIKey() }),
+         streetService: StreetViewServiceProtocol = StreetViewService(),
          geocoding: GeocodingServiceProtocol = GeocodingService(),
          reservationService: ReservationServiceProtocol = ReservationService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
@@ -172,17 +172,17 @@ final class NearbyTargetsViewModel: ObservableObject {
     // MARK: - Logging
 
     private func logAPIStatus() {
-        let placesKey = AppConfig.placesAPIKey()
-        let streetViewKey = AppConfig.streetViewAPIKey()
+        let discoveryAvailability = RuntimeConfig.current.availability(for: .nearbyDiscovery)
+        let streetViewAvailability = RuntimeConfig.current.availability(for: .streetView)
 
         print("🔍 [Blueprint Nearby] API Configuration Status:")
-        print("  ✅ Places API Key: \(placesKey != nil ? "✓ Present" : "✗ Missing")")
-        print("  ✅ Street View API Key: \(streetViewKey != nil ? "✓ Present" : "✗ Missing")")
+        print("  ✅ Nearby discovery: \(discoveryAvailability.isEnabled ? "Enabled" : discoveryAvailability.message ?? "Disabled")")
+        print("  ✅ Street View: \(streetViewAvailability.isEnabled ? "Enabled" : streetViewAvailability.message ?? "Disabled")")
 
-        if placesKey != nil {
+        if discoveryAvailability.isEnabled {
             print("  🚀 Places Nearby pipeline ENABLED (Gemini temporarily disabled)")
         } else {
-            print("  ⚠️  No Google APIs configured; using Legacy TargetsAPI only")
+            print("  ⚠️  Direct provider discovery disabled; using curated job feeds and MapKit fallback")
         }
     }
 
@@ -309,7 +309,7 @@ final class NearbyTargetsViewModel: ObservableObject {
             let limit = selectedLimit.rawValue
             var targets: [Target] = []
             // Use Places Nearby pipeline (Gemini disabled)
-            if AppConfig.placesAPIKey() != nil {
+            if RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled {
                 if let places = try? await loadUsingHybridPipeline(loc: loc, radiusMeters: meters, limit: limit) { // function now uses Places only
                     targets = places
                 }
@@ -998,7 +998,7 @@ extension NearbyTargetsViewModel {
         }
 
         // Prefer Google Places Autocomplete if configured; otherwise fall back to MapKit
-        if AppConfig.placesAPIKey() != nil {
+        if RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled {
             do {
                 let origin = currentSearchLocation()?.coordinate
                 let radius = Int(selectedRadius.rawValue * 1609.34)

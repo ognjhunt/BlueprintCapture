@@ -269,7 +269,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             } 
         }
         
-        if AppConfig.placesAPIKey() != nil {
+        if RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled {
             do {
                 let suggestions = try await placesAutocomplete.autocomplete(
                     input: query,

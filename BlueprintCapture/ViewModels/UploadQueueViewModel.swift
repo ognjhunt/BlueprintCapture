@@ -103,6 +103,64 @@ final class UploadQueueViewModel: ObservableObject {
         return try await exportService.exportCapture(request: request)
     }
 
+    func simulateUITestUpload(for job: ScanJob) {
+        let now = Date()
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: job.id,
+            reservationId: nil,
+            jobId: job.id,
+            captureJobId: job.id,
+            buyerRequestId: job.buyerRequestId,
+            siteSubmissionId: job.siteSubmissionId ?? job.id,
+            regionId: job.regionId,
+            creatorId: UserDeviceService.resolvedUserId(),
+            capturedAt: now,
+            uploadedAt: nil,
+            captureSource: .metaGlasses,
+            specialTaskType: job.captureSpecialTaskType,
+            priorityWeight: job.priorityWeight,
+            quotedPayoutCents: job.quotedPayoutCents ?? job.payoutCents,
+            rightsProfile: job.rightsProfile,
+            requestedOutputs: job.requestedOutputs,
+            intakePacket: job.qualificationIntakePacket,
+            intakeMetadata: CaptureIntakeMetadata(source: .authoritative),
+            taskHypothesis: nil,
+            scaffoldingPacket: job.defaultScaffoldingPacket,
+            captureModality: "glasses_video_only",
+            evidenceTier: "pre_screen_video",
+            captureContextHint: "\(job.title) at \(job.address)",
+            sceneMemory: SceneMemoryCaptureMetadata(),
+            captureRights: CaptureRightsMetadata(
+                derivedSceneGenerationAllowed: false,
+                dataLicensingAllowed: false,
+                payoutEligible: true,
+                consentStatus: .policyOnly,
+                permissionDocumentURI: job.permissionDocURL?.absoluteString,
+                consentScope: job.allowedAreas,
+                consentNotes: ["UI test simulated upload"]
+            )
+        )
+
+        let status = UploadStatus(
+            metadata: metadata,
+            packageURL: FileManager.default.temporaryDirectory.appendingPathComponent("ui-test-\(metadata.id.uuidString)", isDirectory: true),
+            state: .uploading(progress: 0.42),
+            targetName: job.title,
+            estimatedPayoutRange: job.payoutDollars...job.payoutDollars
+        )
+        uploadStatusMap[metadata.id] = status
+        refreshUploadStatuses()
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            guard let self, var updated = self.uploadStatusMap[metadata.id] else { return }
+            updated.state = .completed
+            self.uploadStatusMap[metadata.id] = updated
+            self.refreshUploadStatuses()
+        }
+    }
+
     func dismissUpload(id: UUID) {
         uploadStatusMap.removeValue(forKey: id)
         persist()

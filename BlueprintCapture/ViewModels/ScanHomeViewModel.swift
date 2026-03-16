@@ -249,7 +249,7 @@ final class ScanHomeViewModel: ObservableObject {
         locationService: LocationServiceProtocol = LocationService(),
         alertsManager: NearbyAlertsManager,
         captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared,
-        streetViewService: StreetViewServiceProtocol = StreetViewService(apiKeyProvider: { AppConfig.streetViewAPIKey() })
+        streetViewService: StreetViewServiceProtocol = StreetViewService()
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService

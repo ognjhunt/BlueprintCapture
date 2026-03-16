@@ -124,6 +124,7 @@ struct UploadProgressOverlayView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("upload-overlay-compact")
     }
 
     // MARK: - Expanded View (Card)
@@ -197,6 +198,7 @@ struct UploadProgressOverlayView: View {
                     }
                 }
         )
+        .accessibilityIdentifier("upload-overlay-expanded")
     }
 
     // MARK: - State Content

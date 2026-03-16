@@ -17,8 +17,14 @@ final class RecordingPolicyAIService {
 
     init(
         session: URLSession = .shared,
-        geminiKeyProvider: @escaping () -> String? = { AppConfig.geminiAPIKey() },
-        perplexityKeyProvider: @escaping () -> String? = { AppConfig.perplexityAPIKey() }
+        geminiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .recordingPolicyAI).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_MAPS_API_KEY"])
+        },
+        perplexityKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .recordingPolicyAI).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["PERPLEXITY_API_KEY"])
+        }
     ) {
         self.session = session
         self.geminiKeyProvider = geminiKeyProvider
@@ -41,6 +47,7 @@ final class RecordingPolicyAIService {
     }
 
     enum VerificationError: Error {
+        case featureDisabled
         case noAPIKeyAvailable
         case requestFailed(String)
         case parseFailed
@@ -62,6 +69,9 @@ final class RecordingPolicyAIService {
         types: [String] = [],
         forceRefresh: Bool = false
     ) async throws -> AIVerificationResult {
+        guard RuntimeConfig.current.availability(for: .recordingPolicyAI).isEnabled else {
+            throw VerificationError.featureDisabled
+        }
         let cacheKey = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Check cache first

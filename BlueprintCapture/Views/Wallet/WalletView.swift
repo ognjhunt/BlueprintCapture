@@ -7,7 +7,8 @@ struct WalletView: View {
     }
 
     @ObservedObject var glassesManager: GlassesCaptureManager
-    @StateObject private var viewModel = WalletViewModel()
+    @StateObject private var viewModel: WalletViewModel
+    private let shouldAutoload: Bool
 
     @State private var showingStripeOnboarding = false
     @State private var showingAuth = false
@@ -19,6 +20,12 @@ struct WalletView: View {
     @State private var routeBanner: String?
 
     private let ledgerTabs = ["Payouts", "Cashouts", "History"]
+
+    init(glassesManager: GlassesCaptureManager, viewModel: WalletViewModel? = nil, shouldAutoload: Bool = true) {
+        self.glassesManager = glassesManager
+        self.shouldAutoload = shouldAutoload
+        _viewModel = StateObject(wrappedValue: viewModel ?? WalletViewModel())
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -87,7 +94,11 @@ struct WalletView: View {
         .sheet(item: $selectedCaptureRoute) { selection in
             CaptureDetailView(captureId: selection.captureId)
         }
-        .task { await viewModel.load() }
+        .task {
+            if shouldAutoload {
+                await viewModel.load()
+            }
+        }
         .onChange(of: viewModel.scansCompleted) { _, count in
             guard count > 0, earningsInsight == nil else { return }
             Task { await generateInsight() }
@@ -242,6 +253,17 @@ struct WalletView: View {
                 title: "Quality issues detected",
                 subtitle: "\(qc.needsFixCount) capture\(qc.needsFixCount == 1 ? "" : "s") need attention before payout.",
                 tone: .error,
+                actionTitle: nil,
+                action: {}
+            )
+        }
+        let payoutsAvailability = RuntimeConfig.current.availability(for: .payouts)
+        if payoutsAvailability.isEnabled == false, let message = payoutsAvailability.message {
+            return BannerInfo(
+                icon: "lock.shield.fill",
+                title: "Payout setup unavailable",
+                subtitle: message,
+                tone: .info,
                 actionTitle: nil,
                 action: {}
             )

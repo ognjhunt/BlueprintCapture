@@ -17,6 +17,7 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
     }
 
     enum ServiceError: LocalizedError {
+        case featureDisabled
         case missingAPIKey
         case missingVideo
         case unsupportedModel(String)
@@ -28,6 +29,8 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
 
         var errorDescription: String? {
             switch self {
+            case .featureDisabled:
+                return "AI intake generation is disabled for this alpha build."
             case .missingAPIKey:
                 return "Gemini API key is not configured."
             case .missingVideo:
@@ -87,13 +90,19 @@ final class CaptureIntakeInferenceService: CaptureIntakeInferenceServiceProtocol
 
     init(
         session: URLSession = .shared,
-        apiKeyProvider: @escaping () -> String? = { AppConfig.geminiAPIKey() }
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .captureIntakeAI).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_MAPS_API_KEY"])
+        }
     ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
 
     func inferIntake(for request: CaptureUploadRequest) async throws -> CaptureIntakeInferenceResult {
+        guard RuntimeConfig.current.availability(for: .captureIntakeAI).isEnabled else {
+            throw ServiceError.featureDisabled
+        }
         guard let apiKey = apiKeyProvider() else {
             throw ServiceError.missingAPIKey
         }

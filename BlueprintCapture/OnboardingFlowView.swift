@@ -107,6 +107,7 @@ private struct OnboardingWelcomeView: View {
                 Spacer()
 
                 kledPrimaryButton("Get Started", action: onContinue)
+                    .accessibilityIdentifier("onboarding-get-started")
                     .padding(.horizontal, 24)
                     .padding(.bottom, 32)
             }

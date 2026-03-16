@@ -71,11 +71,9 @@ class SettingsViewModel: ObservableObject {
             }
             async let profileTask = apiService.fetchUserProfile()
             async let earningsTask = apiService.fetchEarnings()
-            async let billingTask = apiService.fetchBillingInfo()
             async let capturesTask = apiService.fetchCaptureHistory()
             async let qcTask = apiService.fetchQualityControlStatus()
             async let ledgerTask = apiService.fetchPayoutLedger()
-            async let stripeTask = stripeService.fetchAccountState()
 
             let fetchedProfile = try await profileTask
             self.profile = fetchedProfile
@@ -86,16 +84,23 @@ class SettingsViewModel: ObservableObject {
             self.pendingPayout = earnings.pending
             self.scansCompleted = earnings.scansCompleted
 
-            if let billing = try await billingTask {
-                self.billingInfo = billing
+            if RuntimeConfig.current.availability(for: .payouts).isEnabled {
+                async let billingTask = apiService.fetchBillingInfo()
+                async let stripeTask = stripeService.fetchAccountState()
+                if let billing = try await billingTask {
+                    self.billingInfo = billing
+                } else {
+                    self.billingInfo = nil
+                }
+                self.stripeAccountState = try await stripeTask
             } else {
                 self.billingInfo = nil
+                self.stripeAccountState = nil
             }
 
             self.captureHistory = try await capturesTask
             self.qcStatus = try await qcTask
             self.payoutLedger = try await ledgerTask
-            self.stripeAccountState = try await stripeTask
         } catch {
             self.error = error as? SettingsError ?? .networkError
             self.showError = true
@@ -150,7 +155,8 @@ class SettingsViewModel: ObservableObject {
         do {
             try await apiService.disconnectBankAccount(stripeAccountId: billingInfo.stripeAccountId)
             self.billingInfo = nil
-            if let state = try? await stripeService.fetchAccountState() {
+            if RuntimeConfig.current.availability(for: .payouts).isEnabled,
+               let state = try? await stripeService.fetchAccountState() {
                 self.stripeAccountState = state
             } else {
                 self.stripeAccountState = nil

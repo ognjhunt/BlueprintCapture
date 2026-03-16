@@ -11,7 +11,13 @@ final class StreetViewService: StreetViewServiceProtocol {
     private var availabilityCache: [String: Bool] = [:]
     private let session: URLSession
 
-    init(session: URLSession = .shared, apiKeyProvider: @escaping () -> String?) {
+    init(
+        session: URLSession = .shared,
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .streetView).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["STREET_VIEW_API_KEY"])
+        }
+    ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
@@ -57,5 +63,4 @@ private extension Double {
         return (self * pow10).rounded() / pow10
     }
 }
-
 

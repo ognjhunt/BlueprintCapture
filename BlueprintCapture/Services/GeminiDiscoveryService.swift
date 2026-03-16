@@ -23,12 +23,18 @@ final class GeminiDiscoveryService: GeminiDiscoveryServiceProtocol {
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
-    init(session: URLSession = .shared, apiKeyProvider: @escaping () -> String? = { AppConfig.geminiAPIKey() }) {
+    init(
+        session: URLSession = .shared,
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["GEMINI_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_MAPS_API_KEY"])
+        }
+    ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
 
-    enum ServiceError: Error { case missingAPIKey, badResponse, parseFailed }
+    enum ServiceError: Error { case featureDisabled, missingAPIKey, badResponse, parseFailed }
 
     func discoverCandidates(
         userLocation: CLLocationCoordinate2D,
@@ -38,6 +44,9 @@ final class GeminiDiscoveryService: GeminiDiscoveryServiceProtocol {
         sku: SKU,
         geohashHint: String?
     ) async throws -> [GeminiPlaceCandidate] {
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else {
+            throw ServiceError.featureDisabled
+        }
         guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
 
         // Use Gemini 2.5 with Grounding with Google Maps enabled
@@ -137,5 +146,4 @@ private extension GeminiDiscoveryService {
         return nil
     }
 }
-
 

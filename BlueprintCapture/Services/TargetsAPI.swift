@@ -40,14 +40,23 @@ final class GooglePlacesNearby: PlacesNearbyProtocol {
     private let session: URLSession
     private let apiKeyProvider: () -> String?
 
-    init(session: URLSession = .shared, apiKeyProvider: @escaping () -> String? = { AppConfig.placesAPIKey() }) {
+    init(
+        session: URLSession = .shared,
+        apiKeyProvider: @escaping () -> String? = {
+            guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return nil }
+            return DeveloperProviderOverrides.value(for: ["PLACES_API_KEY", "GOOGLE_PLACES_API_KEY"])
+        }
+    ) {
         self.session = session
         self.apiKeyProvider = apiKeyProvider
     }
 
-    enum ServiceError: Error { case missingAPIKey, badResponse }
+    enum ServiceError: Error { case featureDisabled, missingAPIKey, badResponse }
 
         func nearby(lat: Double, lng: Double, radiusMeters: Int, limit: Int, types: [String]) async throws -> [PlaceDetailsLite] {
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else {
+            throw ServiceError.featureDisabled
+        }
         guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
             let url = URL(string: "https://places.googleapis.com/v1/places:searchNearby")!
             var request = URLRequest(url: url)
@@ -162,5 +171,4 @@ final class MockTargetsAPI: TargetsAPIProtocol {
         return results
     }
 }
-
 

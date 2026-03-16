@@ -20,11 +20,16 @@ struct ScanHomeView: View {
     @State private var selectedDemo: DemoCapture?
     @State private var showingSearch = false
 
-    init(glassesManager: GlassesCaptureManager, uploadQueue: UploadQueueViewModel, alertsManager: NearbyAlertsManager) {
+    init(
+        glassesManager: GlassesCaptureManager,
+        uploadQueue: UploadQueueViewModel,
+        alertsManager: NearbyAlertsManager,
+        viewModel: ScanHomeViewModel? = nil
+    ) {
         self.glassesManager = glassesManager
         self.uploadQueue = uploadQueue
         self.alertsManager = alertsManager
-        _viewModel = StateObject(wrappedValue: ScanHomeViewModel(alertsManager: alertsManager))
+        _viewModel = StateObject(wrappedValue: viewModel ?? ScanHomeViewModel(alertsManager: alertsManager))
     }
 
     var body: some View {
@@ -181,12 +186,13 @@ struct ScanHomeView: View {
                 .padding(.horizontal, 20)
             }
             if !payoutsReady {
+                let payoutsAvailability = RuntimeConfig.current.availability(for: .payouts)
                 kledBanner(
-                    icon: "creditcard.fill",
-                    title: "No payout method connected",
-                    subtitle: "Connect a payout method to receive earnings.",
-                    tone: .warning,
-                    actionTitle: "Connect"
+                    icon: payoutsAvailability.isEnabled ? "creditcard.fill" : "lock.shield.fill",
+                    title: payoutsAvailability.isEnabled ? "No payout method connected" : "Payout setup unavailable",
+                    subtitle: payoutsAvailability.message ?? "Connect a payout method to receive earnings.",
+                    tone: payoutsAvailability.isEnabled ? .warning : .neutral,
+                    actionTitle: payoutsAvailability.isEnabled ? "Connect" : nil
                 ) { showingStripeOnboarding = true }
                 .padding(.horizontal, 20)
             }
@@ -255,12 +261,13 @@ struct ScanHomeView: View {
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
-                            ForEach(featuredItems) { item in
+                            ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
                                 Button { selectedItem = item } label: {
                                     FeaturedCaptureCard(item: item)
                                         .frame(width: 280)
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier("scan-home-featured-\(index)")
                             }
                         }
                         .padding(.horizontal, 20)
@@ -385,11 +392,12 @@ struct ScanHomeView: View {
                 }
 
                 LazyVStack(spacing: 12) {
-                    ForEach(allItems) { item in
+                    ForEach(Array(allItems.enumerated()), id: \.element.id) { index, item in
                         Button { selectedItem = item } label: {
                             CaptureListRow(item: item)
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("scan-home-list-item-\(index)")
                     }
                 }
             }
@@ -586,6 +594,10 @@ struct ScanHomeView: View {
     }
 
     private func refreshPayoutsReady() async {
+        guard RuntimeConfig.current.availability(for: .payouts).isEnabled else {
+            payoutsReady = false
+            return
+        }
         guard Auth.auth().currentUser != nil else { payoutsReady = false; return }
         do {
             let state = try await StripeConnectService.shared.fetchAccountState()

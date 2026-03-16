@@ -14,7 +14,9 @@ struct BlueprintCaptureApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if isOnboarded {
+                if RuntimeConfig.current.isUITesting {
+                    UITestRootView()
+                } else if isOnboarded {
                     MainTabView(
                         glassesManager: glassesManager,
                         uploadQueue: uploadQueue,

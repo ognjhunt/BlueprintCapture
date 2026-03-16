@@ -8,6 +8,7 @@ struct StripeOnboardingView: View {
     @State private var showConfirmation = false
     @State private var errorMessage: String?
     @State private var accountState: StripeAccountState?
+    private let payoutAvailability = RuntimeConfig.current.availability(for: .payouts)
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -42,7 +43,16 @@ struct StripeOnboardingView: View {
                     .padding(.bottom, 28)
 
                     // Account status banner (if needed)
-                    if let state = accountState {
+                    if payoutAvailability.isEnabled == false, let message = payoutAvailability.message {
+                        statusBanner(
+                            icon: "lock.shield.fill",
+                            title: "Payout setup unavailable",
+                            subtitle: message,
+                            tone: BlueprintTheme.brandTeal
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                    } else if let state = accountState {
                         if !state.isReadyForTransfers {
                             statusBanner(
                                 icon: "exclamationmark.triangle.fill",
@@ -388,7 +398,7 @@ struct StripeOnboardingView: View {
     }
 
     private var canCashOut: Bool {
-        accountState?.instantPayoutEligible == true && Int(instantAmount) != nil && !isLoading
+        payoutAvailability.isEnabled && accountState?.instantPayoutEligible == true && Int(instantAmount) != nil && !isLoading
     }
 
     // MARK: - Helpers
@@ -410,6 +420,7 @@ struct StripeOnboardingView: View {
     // MARK: - Actions
 
     private func loadAccountState() async {
+        guard payoutAvailability.isEnabled else { return }
         do {
             let state = try await StripeConnectService.shared.fetchAccountState()
             await MainActor.run { self.accountState = state }
@@ -419,6 +430,10 @@ struct StripeOnboardingView: View {
     }
 
     private func openStripeOnboarding() {
+        guard payoutAvailability.isEnabled else {
+            errorMessage = payoutAvailability.message
+            return
+        }
         isLoading = true
         Task {
             do {
@@ -431,6 +446,10 @@ struct StripeOnboardingView: View {
     }
 
     private func triggerInstantPayout() {
+        guard payoutAvailability.isEnabled else {
+            errorMessage = payoutAvailability.message
+            return
+        }
         guard let dollars = Int(instantAmount) else { return }
         isLoading = true
         Task {
