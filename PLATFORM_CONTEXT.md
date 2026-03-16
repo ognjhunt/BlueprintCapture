@@ -6,63 +6,49 @@
 ### System Framing
 
 - `BlueprintCapture` is the contributor evidence-capture tool inside Blueprint's three-sided marketplace.
-- `BlueprintCapturePipeline` is the authoritative qualification, provenance, and provider-routing service.
-- `Blueprint-WebApp` is the three-sided marketplace and operating system connecting capturers, robot teams, and site operators around qualification records and downstream work.
-- `BlueprintValidation` is optional downstream infrastructure for provider benchmarking, runtime-backed demos, and deeper robot evaluation after qualification.
+- `BlueprintCapturePipeline` is the authoritative qualification, privacy, provenance, and downstream-routing service.
+- `Blueprint-WebApp` is the marketplace and operating system that ingests pipeline outputs and exposes buyer, ops, preview, and hosted-session surfaces.
+- `BlueprintValidation` remains optional downstream infrastructure for benchmarking, runtime-backed demos, and deeper robot evaluation after qualification.
 
 This platform is qualification-first.
 
 ### Three-Sided Marketplace
 
-- **Capturers** supply evidence packages from real sites.
-- **Robot teams** are the primary demand-side buyers of trusted qualification outcomes and downstream technical work.
-- **Site operators** control access, rights, and commercialization boundaries for their facilities.
+- **Capturers** gather evidence packages from real sites.
+- **Robot teams** are the primary buyers of trusted qualification outputs, previews, and deeper downstream work.
+- **Site operators** control access, consent, rights, and commercialization boundaries for their facilities.
 
 ### Truth Hierarchy
 
-- qualification records, readiness decisions, and supporting evidence links are authoritative
-- capture-backed scene memory is the preferred downstream substrate when deeper technical work is justified
-- preview simulations, world-model outputs, and world-model-trained policies are derived downstream assets; they do not rewrite qualification truth
+- qualification records, readiness decisions, provenance, and rights/compliance outputs are authoritative
+- privacy-safe derived media, World Labs previews, scene-memory bundles, and hosted/runtime artifacts are downstream products
+- downstream products do not rewrite qualification truth
 
 ### Product Stack
 
-1. primary product: site qualification / readiness pack
-2. secondary product: qualified opportunity exchange for robot teams
-3. third product: scene memory / preview simulation / robot eval package
-4. fourth product: world-model-based adaptation, managed tuning, training data, licensing
-
-### Downstream Training Rule
-
-- world-model RL and world-model-based post-training are first-class downstream paths for site adaptation, checkpoint ranking, synthetic rollout generation, and bounded robot-team evaluation
-- those paths sit behind qualification and do not by themselves replace stricter validation for contact-critical, safety-critical, or contractual deployment claims
-- Isaac-backed, physics-backed, or otherwise stricter validation remains the higher-trust lane when reproducibility, contact fidelity, or formal signoff matters
-
-### Data Rule
-
-- passive site capture and walkthrough evidence are valuable context for qualification, scene memory, preview simulation, and downstream conditioning
-- strong robot adaptation gains usually require action-conditioned robot interaction data such as play, teleop logs, or task rollouts; site video alone is usually not enough for reliable policy training from scratch
-- derived assets may inform routing and downstream work, but they must not mutate qualification state or source-of-truth readiness records
+1. primary product: qualification record / readiness decision / buyer-safe evidence bundle
+2. secondary product: privacy-safe preview generation and marketplace routing
+3. third product: scene memory / hosted runtime prep / deeper evaluation packages
+4. fourth product: managed tuning, training data, licensing, and deployment support
 <!-- SHARED_PLATFORM_CONTEXT_END -->
 
-This repo is the Blueprint evidence-capture layer.
-
-## Local Doctrine
-
-- This repo captures evidence. It does not make readiness decisions.
-- The app owns real-time capture coaching only: motion, tracking health, coverage cues, package completeness, and permission gating.
-- Lightweight semantic assists in-app are advisory only. They do not decide trust, approval, payout, rights status, or buyer readiness.
-- The app should produce world-model-ready evidence when possible, but qualification remains upstream in `BlueprintCapturePipeline`.
+This repo is the capture-layer producer of the raw evidence contract.
 
 ## What This Repo Owns
 
-- guided capture on iPhone and Meta glasses
-- deterministic capture coaching during recording
-- raw bundle packaging
-- ARKit, intrinsics, depth, timing, meshes, and motion preservation when available
-- capture-side rights, consent, and payout-eligibility inputs
-- upload into the canonical raw layout
+`BlueprintCapture` owns:
 
-## Canonical Layout
+- guided capture on iPhone and Meta glasses
+- capture coaching during recording
+- bundle finalization and upload
+- preservation of ARKit, motion, timing, and depth evidence when available
+- capture-side intake, task context, rights, and payout eligibility inputs
+
+This repo does not decide qualification, readiness, rights approval, or hosted runtime launchability.
+
+## Canonical Output
+
+The app uploads the canonical raw bundle:
 
 ```text
 scenes/{scene_id}/captures/{capture_id}/raw/
@@ -70,12 +56,13 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   intake_packet.json
   capture_context.json
   capture_upload_complete.json
+  task_hypothesis.json
   walkthrough.mov
   motion.jsonl
   arkit/...
 ```
 
-Bridge outputs:
+The cloud bridge then materializes:
 
 ```text
 scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
@@ -83,17 +70,47 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 ```
 
-## Boundaries
+and publishes the handoff to Pub/Sub.
 
-This repo should not:
+## Current Default Product Behavior
 
-- make final approval or payout decisions in-app
-- assign final rights/compliance status
-- run reconstruction in-app
-- run world models
-- run downstream simulation
-- turn generated scenes into source truth
+The current phone and glasses flows default to requesting:
 
-The handoff out of this repo is the raw evidence bundle plus bridge descriptor, QA, and
-pipeline handoff outputs, with the final handoff also published to
-`blueprint-capture-pipeline-handoff`.
+- `qualification`
+- `preview_simulation`
+
+That means the default product intent today is:
+
+- upload evidence for qualification
+- prepare for privacy-safe World Labs preview generation downstream
+
+It does not, by default, request the deeper hosted-runtime lane.
+
+## Important Boundary
+
+This repo should be understood as:
+
+- the producer of evidence and capture-side metadata
+- not the producer of hosted runtime artifacts
+- not the producer of `evaluation_prep/site_world_spec.json`
+- not the source of truth for readiness or buyer-visible launch state
+
+## Upload And Trigger Model
+
+The upload service finalizes the bundle and writes the completion marker as part of the raw upload layout.
+
+Downstream systems then pick up the capture through:
+
+- raw upload completion
+- capture descriptor materialization
+- bridge-produced handoff payloads
+
+## Practical Rule For Agents In This Repo
+
+When changing this repo, optimize for:
+
+1. correct raw-bundle structure
+2. conservative rights and consent defaults
+3. preserving real sensor evidence instead of inferring it
+4. ensuring upload completion means the raw contract is truly ready
+5. keeping preview/runtime expectations out of the capture UX unless those downstream lanes are actually requested
