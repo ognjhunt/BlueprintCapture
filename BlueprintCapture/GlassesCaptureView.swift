@@ -756,7 +756,7 @@ final class GlassesUploadViewModel: ObservableObject {
             priorityWeight: 1.0,
             quotedPayoutCents: nil,
             rightsProfile: nil,
-            requestedOutputs: ["qualification"],
+            requestedOutputs: ["qualification", "preview_simulation"],
             intakePacket: nil,
             intakeMetadata: nil,
             taskHypothesis: nil,

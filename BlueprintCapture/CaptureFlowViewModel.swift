@@ -420,7 +420,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             return nil
         }()
         let jobId = reviewSeed?.captureJobId ?? reservationId ?? targetId ?? UUID().uuidString
-        let requestedOutputs = reviewSeed?.requestedOutputs ?? (isSpaceReviewMode ? ["qualification", "review_intake"] : ["qualification"])
+        let requestedOutputs = reviewSeed?.requestedOutputs ?? (isSpaceReviewMode ? ["qualification", "review_intake", "preview_simulation"] : ["qualification", "preview_simulation"])
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
         let metadata = CaptureUploadMetadata(
