@@ -1,11 +1,12 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import Combine
 
 // MARK: - MapKit autocomplete coordinator
 
 /// Wraps MKLocalSearchCompleter so SwiftUI can observe completions reactively.
-/// Uses `.pointsOfInterest` + `.address` result types so both named commercial
+/// Uses `.pointOfInterest` + `.address` result types so both named commercial
 /// spaces (malls, warehouses, stores) and raw street addresses come through.
 /// The `region` is centred on the user's GPS position for local bias.
 private final class LocationCompleter: NSObject, MKLocalSearchCompleterDelegate, ObservableObject {
@@ -17,7 +18,7 @@ private final class LocationCompleter: NSObject, MKLocalSearchCompleterDelegate,
     override init() {
         super.init()
         completer.delegate = self
-        completer.resultTypes = [.pointsOfInterest, .address]
+        completer.resultTypes = [.pointOfInterest, .address]
         // No tight POI category filter — we want any physical space that can be walked.
         // Region bias is set from user GPS via updateRegion().
     }
