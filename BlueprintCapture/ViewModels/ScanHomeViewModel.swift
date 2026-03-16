@@ -319,10 +319,29 @@ final class ScanHomeViewModel: ObservableObject {
                 reservedJobIds: reservedIds
             )
         } catch {
-            state = .error(error.localizedDescription)
-            errorMessage = error.localizedDescription
+            let msg = Self.humanizedError(error)
+            state = .error(msg)
+            errorMessage = msg
             showErrorAlert = true
         }
+    }
+
+    /// Translates low-level Firestore/network errors into actionable copy.
+    private static func humanizedError(_ error: Error) -> String {
+        let ns = error as NSError
+        // Firestore permission denied (code 7 = PERMISSION_DENIED)
+        if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 7 {
+            return "Sign-in required to load captures. Finish setting up your account in the Profile tab, then pull down to refresh."
+        }
+        // Firestore unavailable / no network (code 14 = UNAVAILABLE)
+        if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 14 {
+            return "Can't reach the server. Check your connection and pull down to refresh."
+        }
+        // Generic network error
+        if ns.domain == NSURLErrorDomain {
+            return "Network error. Check your connection and pull down to refresh."
+        }
+        return error.localizedDescription
     }
 
     func nearbyPolicyCount(for tier: CapturePermissionTier) -> Int {
