@@ -131,6 +131,33 @@ final class APIService {
         _ = try await perform(request: request, expecting: 200)
     }
 
+    func registerNotificationDevice(_ registration: NotificationDeviceRegistration) async throws {
+        var request = try makeRequest(path: "v1/creator/devices/current", method: "PUT")
+        request.httpBody = try encoder.encode(registration)
+        _ = try await perform(request: request, expecting: 200)
+    }
+
+    func fetchNotificationPreferences() async throws -> NotificationPreferences? {
+        let request = try makeRequest(path: "v1/creator/notifications/preferences")
+        let (data, status) = try await performWithStatus(request: request)
+
+        switch status {
+        case 200:
+            guard !data.isEmpty else { return nil }
+            return try decoder.decode(NotificationPreferences.self, from: data)
+        case 204, 404:
+            return nil
+        default:
+            throw APIError.invalidResponse(statusCode: status)
+        }
+    }
+
+    func updateNotificationPreferences(_ preferences: NotificationPreferences) async throws {
+        var request = try makeRequest(path: "v1/creator/notifications/preferences", method: "PUT")
+        request.httpBody = try encoder.encode(preferences)
+        _ = try await perform(request: request, expecting: 200)
+    }
+
     // MARK: Helpers
     private func baseURL() throws -> URL {
         guard let url = AppConfig.backendBaseURL() else {

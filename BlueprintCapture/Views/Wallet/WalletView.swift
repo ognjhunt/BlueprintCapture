@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct WalletView: View {
+    private struct CaptureRouteSelection: Identifiable {
+        let id = UUID()
+        let captureId: UUID
+    }
+
     @ObservedObject var glassesManager: GlassesCaptureManager
     @StateObject private var viewModel = WalletViewModel()
 
@@ -9,6 +14,9 @@ struct WalletView: View {
     @State private var selectedLedgerTab = 0
     @State private var earningsInsight: String? = nil
     @State private var isLoadingInsight = false
+    @State private var selectedCaptureRoute: CaptureRouteSelection?
+    @State private var highlightedPayoutId: UUID?
+    @State private var routeBanner: String?
 
     private let ledgerTabs = ["Payouts", "Cashouts", "History"]
 
@@ -29,6 +37,19 @@ struct WalletView: View {
                         kledBanner(banner)
                             .padding(.horizontal, 20)
                             .padding(.bottom, 20)
+                    } else if let routeBanner {
+                        kledBanner(
+                            BannerInfo(
+                                icon: "bell.badge.fill",
+                                title: "Notification",
+                                subtitle: routeBanner,
+                                tone: .info,
+                                actionTitle: nil,
+                                action: {}
+                            )
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
                     }
 
                     // Dark credit card
@@ -63,10 +84,34 @@ struct WalletView: View {
         }
         .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
         .sheet(isPresented: $showingAuth) { AuthView() }
+        .sheet(item: $selectedCaptureRoute) { selection in
+            CaptureDetailView(captureId: selection.captureId)
+        }
         .task { await viewModel.load() }
         .onChange(of: viewModel.scansCompleted) { _, count in
             guard count > 0, earningsInsight == nil else { return }
             Task { await generateInsight() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenCaptureDetail)) { note in
+            guard let rawId = note.userInfo?["captureId"] as? String,
+                  let captureId = UUID(uuidString: rawId) else { return }
+            selectedLedgerTab = 2
+            routeBanner = nil
+            selectedCaptureRoute = CaptureRouteSelection(captureId: captureId)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutEntry)) { note in
+            guard let rawId = note.userInfo?["ledgerEntryId"] as? String,
+                  let payoutId = UUID(uuidString: rawId) else { return }
+            selectedLedgerTab = 0
+            highlightedPayoutId = payoutId
+            routeBanner = "Showing payout update"
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutSetup)) { note in
+            selectedLedgerTab = 0
+            showingStripeOnboarding = true
+            if let payload = note.userInfo?["payload"] as? BlueprintNotificationPayload, !payload.body.isEmpty {
+                routeBanner = payload.body
+            }
         }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
@@ -411,24 +456,31 @@ struct WalletView: View {
         }
     }
 
+    @ViewBuilder
     private var payoutsTab: some View {
-        Group {
-            if viewModel.payoutLedger.isEmpty {
-                emptyState(icon: "banknote", message: "No payouts yet", subtitle: "Approved captures will appear here.")
-            } else {
-                VStack(spacing: 1) {
-                    ForEach(viewModel.payoutLedger.prefix(12)) { entry in
-                        ledgerRow(
-                            title: entry.scheduledFor.formatted(.dateTime.month().day().year()),
-                            subtitle: entry.statusLabel,
-                            amount: entry.amount,
-                            isPositive: entry.status == .paid
-                        )
-                    }
+        if payoutEntries.isEmpty {
+            emptyState(icon: "banknote", message: "No payouts yet", subtitle: "Approved captures will appear here.")
+        } else {
+            VStack(spacing: 1) {
+                ForEach(payoutEntries.prefix(12)) { entry in
+                    ledgerRow(
+                        title: entry.scheduledFor.formatted(.dateTime.month().day().year()),
+                        subtitle: entry.statusLabel,
+                        amount: entry.amount,
+                        isPositive: entry.status == .paid
+                    )
                 }
-                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
+    }
+
+    private var payoutEntries: [PayoutLedgerEntry] {
+        if let highlightedPayoutId {
+            let filtered = viewModel.payoutLedger.filter { $0.id == highlightedPayoutId }
+            return filtered.isEmpty ? viewModel.payoutLedger : filtered
+        }
+        return viewModel.payoutLedger
     }
 
     private var cashoutsTab: some View {

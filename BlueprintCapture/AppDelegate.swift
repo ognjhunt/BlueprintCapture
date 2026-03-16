@@ -16,11 +16,14 @@ import GoogleSignIn
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     private let notificationService = NotificationService()
+    private let pushManager = PushNotificationManager.shared
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
         // Present notifications while app is foregrounded
         UNUserNotificationCenter.current().delegate = self
         notificationService.registerCategories()
+        pushManager.configure()
         // Ensure SwiftUI List (UITableView) backgrounds are transparent so our gradient shows through
         let tableAppearance = UITableView.appearance()
         tableAppearance.backgroundColor = .clear
@@ -43,6 +46,14 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func applicationDidEnterBackground(_ application: UIApplication) {
         AppSessionService.shared.end(reasonCrash: false)
     }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        pushManager.didRegisterForRemoteNotifications(deviceToken: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        pushManager.didFailToRegisterForRemoteNotifications(error)
+    }
 }
 
 extension AppDelegate: UNUserNotificationCenterDelegate {
@@ -62,19 +73,20 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                let url = URL(string: "http://maps.apple.com/?daddr=\(lat),\(lng)&dirflg=d") {
                 UIApplication.shared.open(url)
             }
-        case NotificationService.actionStartScan:
-            if let jobId = userInfo["jobId"] as? String {
-                // Persist the action for cold-start delivery (NotificationCenter can be missed before views attach).
-                UserDefaults.standard.set(jobId, forKey: AppConfig.pendingStartScanJobIdKey)
-                NotificationCenter.default.post(name: .blueprintNotificationAction, object: nil, userInfo: [
-                    "action": "start_scan",
-                    "jobId": jobId
-                ])
-            }
+        case NotificationService.actionStartScan, UNNotificationDefaultActionIdentifier:
+            NotificationRouter.shared.handle(
+                userInfo: userInfo,
+                persistIfNeeded: applicationStateNeedsPersistence()
+            )
         default:
             break
         }
         completionHandler()
+    }
+
+    private func applicationStateNeedsPersistence() -> Bool {
+        let state = UIApplication.shared.applicationState
+        return state == .inactive || state == .background
     }
 }
 

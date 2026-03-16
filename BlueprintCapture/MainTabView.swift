@@ -34,13 +34,21 @@ struct MainTabView: View {
             kledTabBar
         }
         .ignoresSafeArea(edges: .bottom)
-        .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
-            guard
-                let info = note.userInfo as? [String: Any],
-                let action = info["action"] as? String,
-                action == "start_scan"
-            else { return }
-            selectedTab = 0
+        .onAppear {
+            NotificationRouter.shared.consumePendingRouteIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenTab)) { note in
+            guard let tab = note.userInfo?["tab"] as? String else { return }
+            switch tab {
+            case "scan":
+                selectedTab = 0
+            case "wallet":
+                selectedTab = 1
+            case "profile":
+                selectedTab = 2
+            default:
+                break
+            }
         }
     }
 

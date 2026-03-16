@@ -8,10 +8,21 @@ struct CaptureDetailView: View {
         case failed(String)
     }
 
-    let entry: CaptureHistoryEntry
+    private let captureId: UUID
+    private let seedEntry: CaptureHistoryEntry?
 
     @State private var loadState: LoadState = .loading
     private let apiService = APIService.shared
+
+    init(entry: CaptureHistoryEntry) {
+        self.captureId = entry.id
+        self.seedEntry = entry
+    }
+
+    init(captureId: UUID) {
+        self.captureId = captureId
+        self.seedEntry = nil
+    }
 
     var body: some View {
         ScrollView {
@@ -61,7 +72,7 @@ struct CaptureDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .blueprintAppBackground()
-        .task(id: entry.id) {
+        .task(id: captureId) {
             await loadDetail()
         }
     }
@@ -84,10 +95,10 @@ struct CaptureDetailView: View {
             }
 
             HStack(spacing: 12) {
-                Label(entry.capturedAt.formatted(.dateTime.month().day()), systemImage: "calendar")
+                Label(capturedAt.formatted(.dateTime.month().day()), systemImage: "calendar")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if let payout = entry.estimatedPayout {
+                if let payout = estimatedPayout {
                     HStack(spacing: 4) {
                         Image(systemName: "dollarsign.circle.fill")
                         Text("Est. \(payout, format: .currency(code: "USD"))")
@@ -149,7 +160,7 @@ struct CaptureDetailView: View {
             Label("Capture location", systemImage: "mappin.circle.fill")
                 .font(.headline)
 
-            Text(entry.targetAddress)
+            Text(targetAddress)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -235,7 +246,7 @@ struct CaptureDetailView: View {
 
     private func rejectionCard(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(entry.status == .needsRecapture || entry.status == .needsFix ? "Needs recapture" : "Review note", systemImage: "exclamationmark.triangle.fill")
+            Label((effectiveStatus == .needsRecapture || effectiveStatus == .needsFix) ? "Needs recapture" : "Review note", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
                 .foregroundStyle(.red)
 
@@ -298,7 +309,7 @@ struct CaptureDetailView: View {
     private func loadDetail() async {
         loadState = .loading
         do {
-            if let detail = try await apiService.fetchCaptureDetail(id: entry.id), detail.hasRenderableDetail {
+            if let detail = try await apiService.fetchCaptureDetail(id: captureId), detail.hasRenderableDetail {
                 loadState = .loaded(detail)
             } else {
                 loadState = .unavailable
@@ -321,7 +332,7 @@ struct CaptureDetailView: View {
     }
 
     private var statusHeadline: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft, .readyToSubmit:
             return "Waiting to enter review"
         case .submitted, .underReview, .processing, .qc:
@@ -338,7 +349,7 @@ struct CaptureDetailView: View {
     }
 
     private var statusSubheadline: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft:
             return "The bundle exists locally but has not been submitted."
         case .readyToSubmit:
@@ -357,7 +368,7 @@ struct CaptureDetailView: View {
     }
 
     private var stageLabel: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .paid:
             return "Paid"
         case .needsRecapture, .needsFix:
@@ -368,7 +379,7 @@ struct CaptureDetailView: View {
     }
 
     private var stageMessage: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft, .readyToSubmit:
             return "Upload this capture when you are ready to move it into review."
         case .submitted, .underReview, .processing, .qc:
@@ -385,7 +396,7 @@ struct CaptureDetailView: View {
     }
 
     private var stageHelper: String? {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .approved:
             return "You do not need to resubmit unless a reviewer requests another pass."
         case .needsRecapture, .needsFix:
@@ -398,7 +409,7 @@ struct CaptureDetailView: View {
     }
 
     private var stageIcon: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .paid:
             return "banknote.fill"
         case .needsRecapture, .needsFix:
@@ -409,7 +420,7 @@ struct CaptureDetailView: View {
     }
 
     private var stageColor: Color {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .paid:
             return BlueprintTheme.successGreen
         case .needsRecapture, .needsFix, .rejected:
@@ -420,7 +431,7 @@ struct CaptureDetailView: View {
     }
 
     private var statusLabel: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft: return "Draft"
         case .readyToSubmit: return "Ready to submit"
         case .submitted: return "Submitted"
@@ -436,7 +447,7 @@ struct CaptureDetailView: View {
     }
 
     private var statusIcon: String {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft: return "doc.badge.plus"
         case .readyToSubmit: return "arrow.up.circle.fill"
         case .submitted: return "paperplane.fill"
@@ -452,7 +463,7 @@ struct CaptureDetailView: View {
     }
 
     private var statusColor: Color {
-        switch entry.status {
+        switch effectiveStatus ?? .processing {
         case .draft: return .secondary
         case .readyToSubmit: return .orange
         case .submitted: return BlueprintTheme.brandTeal
@@ -465,6 +476,47 @@ struct CaptureDetailView: View {
         case .rejected: return .red
         case .paid: return BlueprintTheme.successGreen
         }
+    }
+
+    private var targetAddress: String {
+        if let address = seedEntry?.targetAddress, !address.isEmpty {
+            return address
+        }
+        if case .loaded(let detail) = loadState, let address = detail.targetAddress, !address.isEmpty {
+            return address
+        }
+        return "Capture"
+    }
+
+    private var capturedAt: Date {
+        if let date = seedEntry?.capturedAt {
+            return date
+        }
+        if case .loaded(let detail) = loadState, let date = detail.capturedAt {
+            return date
+        }
+        return Date()
+    }
+
+    private var estimatedPayout: Decimal? {
+        if let payout = seedEntry?.estimatedPayout {
+            return payout
+        }
+        if case .loaded(let detail) = loadState,
+           let cents = detail.earnings?.quotedPayoutCents ?? detail.earnings?.totalPayoutCents {
+            return Decimal(cents) / Decimal(100)
+        }
+        return nil
+    }
+
+    private var effectiveStatus: CaptureStatus? {
+        if let status = seedEntry?.status {
+            return status
+        }
+        if case .loaded(let detail) = loadState {
+            return detail.status
+        }
+        return nil
     }
 }
 

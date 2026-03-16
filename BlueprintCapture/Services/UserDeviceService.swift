@@ -50,7 +50,7 @@ final class UserDeviceService {
             "email": "",
             "username": "",
             "planType": "guest",
-            "deviceToken": "",
+            "fcmToken": "",
             "createdDate": now,
             "lastSessionDate": now,
             "lastLoginDate": now,
@@ -131,5 +131,4 @@ final class UserDeviceService {
         UserDefaults.standard.set(current, forKey: temporaryUserDefaultsKey)
     }
 }
-
 

@@ -44,8 +44,8 @@ protocol NotificationServiceProtocol: AnyObject {
 
 final class NotificationService: NSObject, NotificationServiceProtocol {
     private let center: UNUserNotificationCenter
-    private let authorizationAskedKey = "notifications.authorization.asked"
     private let proximityPrefix = "proximity_"
+    private let reminderPrefix = "reservation_reminder_"
     private let expiryPrefix = "reservation_expiry_"
     static let categoryId = "SCAN_JOB_PROXIMITY"
     static let actionStartScan = "ACTION_START_SCAN"
@@ -64,19 +64,7 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     }
 
     func requestAuthorizationIfNeeded() async {
-        let alreadyAsked = UserDefaults.standard.bool(forKey: authorizationAskedKey)
-        if !alreadyAsked {
-            let options: UNAuthorizationOptions = [.alert, .sound, .badge]
-            do {
-                let granted = try await center.requestAuthorization(options: options)
-                UserDefaults.standard.set(true, forKey: authorizationAskedKey)
-                if !granted {
-                    // No-op; user can enable later in Settings
-                }
-            } catch {
-                // Ignore errors; user can enable later
-            }
-        }
+        await PushNotificationManager.shared.requestAuthorizationIfNeeded()
     }
 
     func registerCategories() {
@@ -102,6 +90,7 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int = 10, radiusMeters: CLLocationDistance = 200) {
         // iOS limits total monitored regions per app (~20). Keep ours conservative.
         clearProximityNotifications()
+        guard NotificationPreferencesStore.shared.isEnabled(.nearbyJobs) else { return }
 
         guard !targets.isEmpty else { return }
 
@@ -131,6 +120,7 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
 
         for entry in finalTargets {
             let target = entry.target
+            let route = BlueprintRoute.scanJob(jobId: target.id)
             let content = UNMutableNotificationContent()
             if entry.isReserved {
                 content.title = "Reserved scan job nearby"
@@ -145,31 +135,41 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
             }
             content.sound = .default
             content.categoryIdentifier = Self.categoryId
-            var userInfo: [String: Any] = [
+            var metadata: [String: String] = [
                 "targetId": target.id,
                 "jobId": target.id,
-                "title": target.displayName,
-                "lat": target.lat,
-                "lng": target.lng
+                "lat": String(target.lat),
+                "lng": String(target.lng)
             ]
             if let payout = entry.estimatedPayoutUsd {
-                userInfo["estimatedPayoutUsd"] = payout
+                metadata["estimatedPayoutUsd"] = String(payout)
             }
-            content.userInfo = userInfo
+            let identifier = proximityPrefix + target.id
+            content.userInfo = BlueprintNotificationPayload(
+                notificationId: identifier,
+                type: entry.isReserved ? .reservedJobEntered : .nearbyJobEntered,
+                entityType: .job,
+                entityId: target.id,
+                route: route.url.absoluteString,
+                title: content.title,
+                body: content.body,
+                metadata: metadata
+            ).userInfo
 
             let centerCoord = CLLocationCoordinate2D(latitude: target.lat, longitude: target.lng)
-            let region = CLCircularRegion(center: centerCoord, radius: regionRadius, identifier: proximityPrefix + target.id)
+            let region = CLCircularRegion(center: centerCoord, radius: regionRadius, identifier: identifier)
             region.notifyOnEntry = true
             region.notifyOnExit = false
 
             let trigger = UNLocationNotificationTrigger(region: region, repeats: false)
-            let request = UNNotificationRequest(identifier: proximityPrefix + target.id, content: content, trigger: trigger)
+            let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
             center.add(request)
         }
     }
 
     func scheduleProximityNotifications(for jobs: [ProximityScanJobTarget], maxRegions: Int = 10) {
         clearProximityNotifications()
+        guard NotificationPreferencesStore.shared.isEnabled(.nearbyJobs) else { return }
         guard !jobs.isEmpty else { return }
 
         var final: [ProximityScanJobTarget] = []
@@ -191,6 +191,7 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
 
         for entry in final {
             let job = entry.job
+            let route = BlueprintRoute.scanJob(jobId: job.id)
             let content = UNMutableNotificationContent()
             content.title = entry.isReserved ? "Reserved scan job nearby" : "You're near a scan job"
 
@@ -202,22 +203,31 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
 
             content.sound = .default
             content.categoryIdentifier = Self.categoryId
-            content.userInfo = [
-                "jobId": job.id,
-                "title": job.title,
-                "lat": job.lat,
-                "lng": job.lng,
-                "estimatedPayoutUsd": job.payoutDollars
-            ]
+            let identifier = proximityPrefix + job.id
+            content.userInfo = BlueprintNotificationPayload(
+                notificationId: identifier,
+                type: entry.isReserved ? .reservedJobEntered : .nearbyJobEntered,
+                entityType: .job,
+                entityId: job.id,
+                route: route.url.absoluteString,
+                title: content.title,
+                body: content.body,
+                metadata: [
+                    "jobId": job.id,
+                    "lat": String(job.lat),
+                    "lng": String(job.lng),
+                    "estimatedPayoutUsd": String(job.payoutDollars)
+                ]
+            ).userInfo
 
             let centerCoord = CLLocationCoordinate2D(latitude: job.lat, longitude: job.lng)
             let radius = max(50, CLLocationDistance(job.alertRadiusM))
-            let region = CLCircularRegion(center: centerCoord, radius: radius, identifier: proximityPrefix + job.id)
+            let region = CLCircularRegion(center: centerCoord, radius: radius, identifier: identifier)
             region.notifyOnEntry = true
             region.notifyOnExit = false
 
             let trigger = UNLocationNotificationTrigger(region: region, repeats: false)
-            let request = UNNotificationRequest(identifier: proximityPrefix + job.id, content: content, trigger: trigger)
+            let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
             center.add(request)
         }
     }
@@ -235,27 +245,84 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     // MARK: - Reservation Expiry Notifications
 
     func scheduleReservationExpiryNotification(target: Target, at date: Date) {
-        let seconds = max(1, Int(date.timeIntervalSinceNow))
-        // If already scheduled for this target, cancel and reschedule to avoid duplicates
+        guard NotificationPreferencesStore.shared.isEnabled(.reservations) else {
+            cancelReservationExpiryNotification(for: target.id)
+            return
+        }
+
         cancelReservationExpiryNotification(for: target.id)
 
-        let content = UNMutableNotificationContent()
-        content.title = "Reservation expired"
-        content.body = "We auto-cancelled your reservation at \(target.displayName) because mapping didn’t start within 1 hour."
-        content.sound = .default
-        content.userInfo = [
-            "targetId": target.id,
-            "title": target.displayName,
-            "lat": target.lat,
-            "lng": target.lng
-        ]
+        let route = BlueprintRoute.scanJob(jobId: target.id)
+        let reminderDate = date.addingTimeInterval(-10 * 60)
 
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(seconds), repeats: false)
-        let request = UNNotificationRequest(identifier: expiryPrefix + target.id, content: content, trigger: trigger)
-        center.add(request)
+        if reminderDate.timeIntervalSinceNow > 1 {
+            let reminderContent = UNMutableNotificationContent()
+            reminderContent.title = "Reservation ending soon"
+            reminderContent.body = "Your reservation at \(target.displayName) expires in 10 minutes."
+            reminderContent.sound = .default
+            reminderContent.interruptionLevel = .timeSensitive
+            reminderContent.userInfo = BlueprintNotificationPayload(
+                notificationId: reminderPrefix + target.id,
+                type: .reservationReminder,
+                entityType: .job,
+                entityId: target.id,
+                route: route.url.absoluteString,
+                title: reminderContent.title,
+                body: reminderContent.body,
+                metadata: [
+                    "targetId": target.id,
+                    "lat": String(target.lat),
+                    "lng": String(target.lng)
+                ]
+            ).userInfo
+
+            let reminderTrigger = UNTimeIntervalNotificationTrigger(
+                timeInterval: reminderDate.timeIntervalSinceNow,
+                repeats: false
+            )
+            let reminderRequest = UNNotificationRequest(
+                identifier: reminderPrefix + target.id,
+                content: reminderContent,
+                trigger: reminderTrigger
+            )
+            center.add(reminderRequest)
+        }
+
+        let expiryContent = UNMutableNotificationContent()
+        expiryContent.title = "Reservation expired"
+        expiryContent.body = "We auto-cancelled your reservation at \(target.displayName) because mapping didn’t start within 1 hour."
+        expiryContent.sound = .default
+        expiryContent.userInfo = BlueprintNotificationPayload(
+            notificationId: expiryPrefix + target.id,
+            type: .reservationExpired,
+            entityType: .job,
+            entityId: target.id,
+            route: route.url.absoluteString,
+            title: expiryContent.title,
+            body: expiryContent.body,
+            metadata: [
+                "targetId": target.id,
+                "lat": String(target.lat),
+                "lng": String(target.lng)
+            ]
+        ).userInfo
+
+        let expiryTrigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: max(1, date.timeIntervalSinceNow),
+            repeats: false
+        )
+        let expiryRequest = UNNotificationRequest(
+            identifier: expiryPrefix + target.id,
+            content: expiryContent,
+            trigger: expiryTrigger
+        )
+        center.add(expiryRequest)
     }
 
     func cancelReservationExpiryNotification(for targetId: String) {
-        center.removePendingNotificationRequests(withIdentifiers: [expiryPrefix + targetId])
+        center.removePendingNotificationRequests(withIdentifiers: [
+            reminderPrefix + targetId,
+            expiryPrefix + targetId
+        ])
     }
 }

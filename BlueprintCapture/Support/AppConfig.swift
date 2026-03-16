@@ -8,6 +8,7 @@ enum MapProvider: String {
 enum AppConfig {
     static let mapProvider: MapProvider = .appleSnapshot
     static let pendingStartScanJobIdKey = "com.blueprint.pendingStartScanJobId"
+    static let pendingNotificationRouteKey = "com.blueprint.pendingNotificationRoute"
 
     private static func plist(named name: String) -> [String: Any]? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "plist"),
@@ -123,4 +124,9 @@ enum AppConfig {
 extension Notification.Name {
     static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
     static let AuthStateDidChange = Notification.Name("Blueprint.AuthStateDidChange")
+    static let blueprintOpenTab = Notification.Name("Blueprint.OpenTab")
+    static let blueprintOpenScanJobDetail = Notification.Name("Blueprint.OpenScanJobDetail")
+    static let blueprintOpenCaptureDetail = Notification.Name("Blueprint.OpenCaptureDetail")
+    static let blueprintOpenPayoutEntry = Notification.Name("Blueprint.OpenPayoutEntry")
+    static let blueprintOpenPayoutSetup = Notification.Name("Blueprint.OpenPayoutSetup")
 }

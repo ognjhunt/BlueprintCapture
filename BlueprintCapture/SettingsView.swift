@@ -2,17 +2,19 @@ import SwiftUI
 
 struct SettingsView: View {
     @StateObject private var viewModel = SettingsViewModel()
+    @EnvironmentObject private var notificationPreferences: NotificationPreferencesStore
+    @StateObject private var alertsManager = NearbyAlertsManager()
     @State private var showingStripeOnboarding = false
     @State private var showingManagePayouts = false
     @State private var showingEditProfile = false
     @State private var showingAuth = false
     @State private var showingGlassesCapture = false
+    @State private var showNearbyAlertInfo = false
 
     // Toggle states
     @AppStorage("upload_wifi_only") private var wifiOnlyUploads = false
     @AppStorage("upload_auto_clear") private var autoClearCompleted = true
     @AppStorage("capture_haptics") private var captureHaptics = true
-    @AppStorage("notifications_enabled") private var notificationsEnabled = true
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -93,7 +95,15 @@ struct SettingsView: View {
         .sheet(isPresented: $showingEditProfile) { EditProfileView(viewModel: viewModel) }
         .sheet(isPresented: $showingAuth) { AuthView() }
         .sheet(isPresented: $showingGlassesCapture) { GlassesCaptureView() }
-        .task { await viewModel.loadUserData() }
+        .task {
+            await viewModel.loadUserData()
+            await notificationPreferences.refreshFromBackendIfPossible()
+        }
+        .alert("Nearby job alerts use Always Location", isPresented: $showNearbyAlertInfo) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("To alert you when you approach an approved capture opportunity, iOS needs Always Location permission for nearby job alerts.")
+        }
     }
 
     // MARK: - Header
@@ -230,13 +240,55 @@ struct SettingsView: View {
 
     private var notificationsCard: some View {
         kledCard {
-            settingsToggleRow(
-                icon: "bell.fill",
-                iconBg: Color.orange,
-                title: "Push Notifications",
-                subtitle: "Payouts, tasks, and account alerts",
-                value: $notificationsEnabled
-            )
+            VStack(spacing: 0) {
+                settingsToggleRow(
+                    icon: "location.fill",
+                    iconBg: BlueprintTheme.brandTeal,
+                    title: NotificationPreferenceKey.nearbyJobs.title,
+                    subtitle: NotificationPreferenceKey.nearbyJobs.subtitle,
+                    value: binding(for: .nearbyJobs)
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "timer",
+                    iconBg: Color.orange,
+                    title: NotificationPreferenceKey.reservations.title,
+                    subtitle: NotificationPreferenceKey.reservations.subtitle,
+                    value: binding(for: .reservations)
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "checkmark.seal.fill",
+                    iconBg: BlueprintTheme.successGreen,
+                    title: NotificationPreferenceKey.captureStatus.title,
+                    subtitle: NotificationPreferenceKey.captureStatus.subtitle,
+                    value: binding(for: .captureStatus)
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "banknote.fill",
+                    iconBg: Color(red: 0.2, green: 0.6, blue: 1.0),
+                    title: NotificationPreferenceKey.payouts.title,
+                    subtitle: NotificationPreferenceKey.payouts.subtitle,
+                    value: binding(for: .payouts)
+                )
+
+                kledRowDivider
+
+                settingsToggleRow(
+                    icon: "exclamationmark.circle.fill",
+                    iconBg: Color(red: 0.85, green: 0.45, blue: 0.2),
+                    title: NotificationPreferenceKey.account.title,
+                    subtitle: NotificationPreferenceKey.account.subtitle,
+                    value: binding(for: .account)
+                )
+            }
         }
     }
 
@@ -362,6 +414,24 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+    }
+
+    private func binding(for key: NotificationPreferenceKey) -> Binding<Bool> {
+        Binding(
+            get: { notificationPreferences.isEnabled(key) },
+            set: { newValue in
+                notificationPreferences.set(key, enabled: newValue)
+                Task {
+                    if newValue {
+                        await PushNotificationManager.shared.requestAuthorizationIfNeeded()
+                    }
+                }
+                if key == .nearbyJobs && newValue && !alertsManager.isAlwaysAuthorized {
+                    showNearbyAlertInfo = true
+                    alertsManager.requestAlwaysAuthorization()
+                }
+            }
+        )
     }
 
     private func settingsLinkRow(icon: String, iconBg: Color, title: String) -> some View {

@@ -9,6 +9,7 @@ struct BlueprintCaptureApp: App {
     @StateObject private var glassesManager = GlassesCaptureManager()
     @StateObject private var uploadQueue = UploadQueueViewModel()
     @StateObject private var alertsManager = NearbyAlertsManager()
+    @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
 
     var body: some Scene {
         WindowGroup {
@@ -29,13 +30,17 @@ struct BlueprintCaptureApp: App {
             .onAppear {
                 // Guarantee a local user exists even if user bypasses onboarding in dev
                 UserDeviceService.ensureTemporaryUser()
+                NotificationRouter.shared.consumePendingRouteIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { _ in }
             .onOpenURL { url in
                 if let code = ReferralService.referralCode(from: url) {
                     pendingReferralCode = code
+                } else {
+                    NotificationRouter.shared.handle(url: url)
                 }
             }
+            .environmentObject(notificationPreferences)
             .preferredColorScheme(.dark)
         }
     }

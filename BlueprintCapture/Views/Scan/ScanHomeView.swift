@@ -13,7 +13,6 @@ struct ScanHomeView: View {
     @State private var reviewSubmissionSeed: SpaceReviewSeed?
     @State private var showConnectSheet = false
     @State private var recordingJob: ScanJob?
-    @State private var pendingStartJobId: String?
     @State private var activeCategory: String? = nil
 
     @State private var payoutsReady = false
@@ -114,24 +113,13 @@ struct ScanHomeView: View {
         } message: {
             Text(viewModel.errorMessage ?? "Something went wrong.")
         }
-        .onReceive(NotificationCenter.default.publisher(for: .blueprintNotificationAction)) { note in
-            guard
-                let info = note.userInfo as? [String: Any],
-                let action = info["action"] as? String,
-                action == "start_scan",
-                let jobId = info["jobId"] as? String
-            else { return }
-            pendingStartJobId = jobId
-            Task { await startFromNotificationIfPossible(jobId: jobId) }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenScanJobDetail)) { note in
+            guard let jobId = note.userInfo?["jobId"] as? String else { return }
+            Task { await openJobDetail(jobId: jobId) }
         }
         .task {
             viewModel.onAppear()
             await refreshPayoutsReady()
-            if let jobId = UserDefaults.standard.string(forKey: AppConfig.pendingStartScanJobIdKey) {
-                UserDefaults.standard.removeObject(forKey: AppConfig.pendingStartScanJobIdKey)
-                pendingStartJobId = jobId
-                await startFromNotificationIfPossible(jobId: jobId)
-            }
         }
         .onDisappear { viewModel.onDisappear() }
     }
@@ -586,18 +574,14 @@ struct ScanHomeView: View {
         }
     }
 
-    private func startFromNotificationIfPossible(jobId: String) async {
-        if let match = viewModel.items.first(where: { $0.job.id == jobId }),
-           match.permissionTier == .approved {
-            recordingJob = match.job
-            pendingStartJobId = nil
+    private func openJobDetail(jobId: String) async {
+        if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
+            selectedItem = match
             return
         }
         await viewModel.refresh()
-        if let match = viewModel.items.first(where: { $0.job.id == jobId }),
-           match.permissionTier == .approved {
-            recordingJob = match.job
-            pendingStartJobId = nil
+        if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
+            selectedItem = match
         }
     }
 

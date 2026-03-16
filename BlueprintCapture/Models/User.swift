@@ -17,7 +17,7 @@ public class User {
     private(set) var email        : String = ""
     private(set) var username     : String = ""
     private(set) var planType     : String = ""
-    private(set) var deviceToken     : String = ""
+    private(set) var fcmToken     : String = ""
     private(set) var referralCode     : String = ""
     private(set) var currentConnectedNetworkID     : String = ""
     private(set) var numSessions     : Int = 0
@@ -177,8 +177,10 @@ public class User {
             self.planType = planType
         }
         
-        if let deviceToken = userFirDoc["deviceToken"] as? String {
-            self.deviceToken = deviceToken
+        if let fcmToken = userFirDoc["fcmToken"] as? String {
+            self.fcmToken = fcmToken
+        } else if let legacyDeviceToken = userFirDoc["deviceToken"] as? String {
+            self.fcmToken = legacyDeviceToken
         }
         
         if let referralCode = userFirDoc["referralCode"] as? String {

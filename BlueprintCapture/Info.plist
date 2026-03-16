@@ -70,6 +70,16 @@
 				<string>com.googleusercontent.apps.744608654760-24h47506rj2ljqt5ghb7utamkb21nvt8</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLName</key>
+			<string>blueprint</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>blueprint</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>
