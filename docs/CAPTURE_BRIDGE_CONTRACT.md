@@ -120,6 +120,7 @@ task_hypothesis.json
 scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl
 scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
 scenes/{scene_id}/captures/{capture_id}/qa_report.json
+scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 scenes/{scene_id}/images/{capture_id}_keyframe.jpg
 ```
 
@@ -158,11 +159,24 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
       "motion": true
     }
   },
+  "site_submission_id": "string|null",
+  "buyer_request_id": "string|null",
+  "capture_job_id": "string|null",
+  "region_id": "string|null",
+  "rights_profile": "string|null",
+  "requested_outputs": ["qualification", "preview_simulation"],
   "scene_memory_capture": {},
   "capture_rights": {},
-  "requested_lanes": ["qualification", "scene_memory"],
+  "task_site_context": {},
+  "identity": {},
+  "requested_lanes": ["qualification", "scene_memory", "preview_simulation"],
+  "preview_simulation_requested": true,
+  "worldlabs_request_manifest_uri": "gs://...",
+  "worldlabs_input_manifest_uri": "gs://...",
+  "worldlabs_input_video_uri": "gs://...",
   "qa_status": "passed|blocked",
   "qa_report_uri": "gs://...",
+  "pipeline_handoff_uri": "gs://...",
   "generated_at": "ISO-8601"
 }
 ```
@@ -199,14 +213,29 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
     "recommended_lane": "qualification|scene_memory",
     "derived_only": true
   },
+  "identity": {},
   "reasons": [],
   "warnings": [],
   "generated_at": "ISO-8601"
 }
 ```
 
+## pipeline_handoff.json
+
+This payload is written to shared storage and published to Pub/Sub topic
+`blueprint-capture-pipeline-handoff` (or `BLUEPRINT_CAPTURE_PIPELINE_TOPIC` when overridden).
+
+It includes:
+
+- raw, descriptor, and QA URIs
+- `requested_outputs` and normalized `requested_lanes`
+- business identifiers such as `site_submission_id`, `buyer_request_id`, and `capture_job_id`
+- task/site context lifted from capture intake
+- rights and scene-memory blocks
+- World Labs preview intent and reserved URIs when `preview_simulation` is requested
+
 ## Notes
 
-- The bridge writes descriptor and QA outputs only.
-- It does not write a downstream generation request payload.
+- The bridge now triggers downstream pipeline orchestration by publishing `pipeline_handoff.json`
+  to Pub/Sub after upload completion and QA materialization.
 - Generated scenes, if any, belong to downstream systems.

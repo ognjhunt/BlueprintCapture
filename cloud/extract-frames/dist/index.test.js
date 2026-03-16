@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 process.env.FIREBASE_CONFIG = JSON.stringify({ storageBucket: "test-bucket" });
 process.env.GCLOUD_PROJECT = "test-project";
-const { parseCapturePath, validateManifest } = await import("./index.js");
+const { buildTaskSiteContext, buildWorldlabsPreviewFields, deriveRequestedRouting, parseCapturePath, validateManifest, } = await import("./index.js");
 test("parseCapturePath supports canonical scenes capture layout", () => {
     const parsed = parseCapturePath("scenes/scene-123/captures/capture-456/raw/walkthrough.mov", "0");
     assert.ok(parsed);
@@ -84,4 +84,59 @@ test("validateManifest accepts normalized scene memory and rights metadata", () 
     assert.ok(!validation.warnings.includes("missing_capture_rights"));
     assert.ok(!validation.warnings.includes("malformed_scene_memory_capture"));
     assert.ok(!validation.warnings.includes("malformed_capture_rights"));
+});
+test("deriveRequestedRouting preserves outputs and expands preview simulation lane", () => {
+    const routing = deriveRequestedRouting({
+        requested_outputs: ["qualification", "preview_simulation"],
+    });
+    assert.deepEqual(routing.requestedOutputs, ["qualification", "preview_simulation"]);
+    assert.equal(routing.previewSimulationRequested, true);
+    assert.deepEqual(routing.requestedLanes, ["qualification", "scene_memory", "preview_simulation"]);
+});
+test("buildTaskSiteContext lifts task and site metadata from manifest", () => {
+    const context = buildTaskSiteContext({
+        task_text_hint: "Dock-to-staging tote handoff",
+        task_steps: ["Dock entry", "Outbound handoff"],
+        target_kpi: "handoff throughput",
+        zone: "dock_a",
+        shift: "day",
+        owner: "warehouse_supervisor",
+        capture_profile: {
+            facility_template: "warehouse_dock_handoff",
+            required_coverage_areas: ["Ingress route"],
+            benchmark_stations: ["Dock threshold"],
+            adjacent_systems: ["WMS"],
+            privacy_security_limits: ["No faces"],
+            known_blockers: ["Forklift congestion"],
+            non_routine_modes: ["jam clearing"],
+            people_traffic_notes: ["Shared aisle"],
+            capture_restrictions: ["Avoid office corridor"],
+        },
+        environment_variability: {
+            lighting_windows: ["08:00-11:00"],
+            shift_traffic_windows: ["Morning rush"],
+            movable_obstacles: ["Pallets"],
+            floor_condition_notes: ["Smooth concrete"],
+            reflective_surface_notes: ["Dock strip curtain"],
+            access_rules: ["Escort required"],
+        },
+    });
+    assert.equal(context.workflow_name, "Dock-to-staging tote handoff");
+    assert.deepEqual(context.task_steps, ["Dock entry", "Outbound handoff"]);
+    assert.equal(context.target_kpi, "handoff throughput");
+    assert.equal(context.zone, "dock_a");
+    assert.equal(context.shift, "day");
+    assert.equal(context.owner, "warehouse_supervisor");
+    assert.equal(context.facility_template, "warehouse_dock_handoff");
+    assert.deepEqual(context.benchmark_stations, ["Dock threshold"]);
+    assert.deepEqual(context.access_rules, ["Escort required"]);
+});
+test("buildWorldlabsPreviewFields reserves worldlabs uris when preview is requested", () => {
+    const pathInfo = parseCapturePath("scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json", "0");
+    assert.ok(pathInfo);
+    const fields = buildWorldlabsPreviewFields("test-bucket", pathInfo, true);
+    assert.equal(fields.preview_simulation_requested, true);
+    assert.equal(fields.worldlabs_request_manifest_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/worldlabs/request_manifest.json");
+    assert.equal(fields.worldlabs_input_manifest_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/worldlabs/input_manifest.json");
+    assert.equal(fields.worldlabs_input_video_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov");
 });

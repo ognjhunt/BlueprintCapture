@@ -39,7 +39,12 @@ The bridge then emits:
 ```text
 scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
 scenes/{scene_id}/captures/{capture_id}/qa_report.json
+scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 ```
+
+After `capture_upload_complete.json` lands, the cloud bridge publishes the handoff payload to
+Pub/Sub topic `blueprint-capture-pipeline-handoff` so `BlueprintCapturePipeline` can pick up the
+capture automatically.
 
 ## Core Rules
 

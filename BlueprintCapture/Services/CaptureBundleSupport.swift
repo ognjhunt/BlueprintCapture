@@ -654,12 +654,23 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         json["capture_evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(evidence))
         json["task_text_hint"] = request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName
         json["task_steps"] = request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? []
-        json["capture_profile"] = [
+        json["target_kpi"] = request.metadata.taskHypothesis?.targetKPI ?? request.metadata.intakePacket?.targetKPI
+        json["zone"] = request.metadata.intakePacket?.zone as Any
+        json["shift"] = request.metadata.intakePacket?.shift as Any
+        json["owner"] = request.metadata.intakePacket?.owner as Any
+        let captureProfile: [String: Any] = [
             "facility_template": request.metadata.intakePacket?.facilityTemplate as Any,
             "required_coverage_areas": request.metadata.intakePacket?.requiredCoverageAreas ?? [],
-            "benchmark_stations": request.metadata.intakePacket?.benchmarkStations ?? []
+            "benchmark_stations": request.metadata.intakePacket?.benchmarkStations ?? [],
+            "adjacent_systems": request.metadata.intakePacket?.adjacentSystems ?? [],
+            "privacy_security_limits": request.metadata.intakePacket?.privacySecurityLimits ?? [],
+            "known_blockers": request.metadata.intakePacket?.knownBlockers ?? [],
+            "non_routine_modes": request.metadata.intakePacket?.nonRoutineModes ?? [],
+            "people_traffic_notes": request.metadata.intakePacket?.peopleTrafficNotes ?? [],
+            "capture_restrictions": request.metadata.intakePacket?.captureRestrictions ?? []
         ]
-        json["environment_variability"] = [
+        json["capture_profile"] = captureProfile
+        let environmentVariability: [String: Any] = [
             "lighting_windows": request.metadata.intakePacket?.lightingWindows ?? [],
             "shift_traffic_windows": request.metadata.intakePacket?.shiftTrafficWindows ?? [],
             "movable_obstacles": request.metadata.intakePacket?.movableObstacles ?? [],
@@ -667,6 +678,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "reflective_surface_notes": request.metadata.intakePacket?.reflectiveSurfaceNotes ?? [],
             "access_rules": request.metadata.intakePacket?.accessRules ?? []
         ]
+        json["environment_variability"] = environmentVariability
         json["capture_rights"] = manifestCaptureRights(normalizedRights)
         json["video_uri"] = mode.videoURI
 

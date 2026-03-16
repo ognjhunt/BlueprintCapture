@@ -1,6 +1,7 @@
 import { onObjectFinalized } from "firebase-functions/v2/storage";
 import * as logger from "firebase-functions/logger";
 import { Storage } from "@google-cloud/storage";
+import { PubSub } from "@google-cloud/pubsub";
 import { tmpdir } from "os";
 import { join, basename } from "path";
 import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync } from "fs";
@@ -22,10 +23,15 @@ import {
 } from "./bridge.js";
 
 const storage = new Storage();
+const pubsub = new PubSub();
+
+const PIPELINE_HANDOFF_TOPIC =
+  process.env.BLUEPRINT_CAPTURE_PIPELINE_TOPIC ?? "blueprint-capture-pipeline-handoff";
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
 type PoseMatchType = "frame_id" | "time";
+type CaptureObjectKind = "walkthrough" | "completion_marker" | "other";
 
 function zeroPad(n: number, width: number): string {
   const s = String(n);
@@ -272,8 +278,191 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return parsed.length > 0 ? parsed : [];
+}
+
 function hasStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function captureObjectKind(objectName: string): CaptureObjectKind {
+  const fileName = basename(objectName);
+  if (fileName === "walkthrough.mov") return "walkthrough";
+  if (fileName === "capture_upload_complete.json") return "completion_marker";
+  return "other";
+}
+
+export function deriveRequestedRouting(manifest: Record<string, unknown> | null): {
+  requestedOutputs: string[];
+  requestedLanes: string[];
+  previewSimulationRequested: boolean;
+} {
+  const requestedOutputs = asStringArray(manifest?.requested_outputs) ?? [];
+  const requestedLanes = new Set<string>();
+
+  for (const output of requestedOutputs) {
+    switch (output) {
+      case "qualification":
+        requestedLanes.add("qualification");
+        break;
+      case "review_intake":
+        requestedLanes.add("qualification");
+        requestedLanes.add("review_intake");
+        break;
+      case "scene_memory":
+        requestedLanes.add("scene_memory");
+        break;
+      case "preview_simulation":
+        requestedLanes.add("scene_memory");
+        requestedLanes.add("preview_simulation");
+        break;
+      default:
+        requestedLanes.add(output);
+        break;
+    }
+  }
+
+  if (requestedLanes.size === 0) {
+    requestedLanes.add("qualification");
+    requestedLanes.add("scene_memory");
+  }
+
+  return {
+    requestedOutputs,
+    requestedLanes: Array.from(requestedLanes),
+    previewSimulationRequested: requestedOutputs.includes("preview_simulation"),
+  };
+}
+
+export function buildWorldlabsPreviewFields(
+  bucketName: string,
+  pathInfo: CapturePathInfo,
+  previewSimulationRequested: boolean
+): Record<string, unknown> {
+  return {
+    preview_simulation_requested: previewSimulationRequested,
+    worldlabs_request_manifest_uri: previewSimulationRequested
+      ? gsUri(bucketName, `${pathInfo.capturesPrefix}/worldlabs/request_manifest.json`)
+      : null,
+    worldlabs_input_manifest_uri: previewSimulationRequested
+      ? gsUri(bucketName, `${pathInfo.capturesPrefix}/worldlabs/input_manifest.json`)
+      : null,
+    worldlabs_input_video_uri: previewSimulationRequested
+      ? gsUri(bucketName, `${pathInfo.rawPrefix}/walkthrough.mov`)
+      : null,
+  };
+}
+
+export function buildTaskSiteContext(manifest: Record<string, unknown> | null): Record<string, unknown> {
+  const captureProfile = asRecord(manifest?.capture_profile);
+  const environmentVariability = asRecord(manifest?.environment_variability);
+  return {
+    workflow_name: asString(manifest?.task_text_hint) ?? null,
+    task_steps: asStringArray(manifest?.task_steps) ?? [],
+    target_kpi: asString(manifest?.target_kpi) ?? null,
+    zone: asString(manifest?.zone) ?? null,
+    shift: asString(manifest?.shift) ?? null,
+    owner: asString(manifest?.owner) ?? null,
+    facility_template: asString(captureProfile?.facility_template) ?? null,
+    required_coverage_areas: asStringArray(captureProfile?.required_coverage_areas) ?? [],
+    benchmark_stations: asStringArray(captureProfile?.benchmark_stations) ?? [],
+    adjacent_systems: asStringArray(captureProfile?.adjacent_systems) ?? [],
+    privacy_security_limits: asStringArray(captureProfile?.privacy_security_limits) ?? [],
+    known_blockers: asStringArray(captureProfile?.known_blockers) ?? [],
+    non_routine_modes: asStringArray(captureProfile?.non_routine_modes) ?? [],
+    people_traffic_notes: asStringArray(captureProfile?.people_traffic_notes) ?? [],
+    capture_restrictions: asStringArray(captureProfile?.capture_restrictions) ?? [],
+    lighting_windows: asStringArray(environmentVariability?.lighting_windows) ?? [],
+    shift_traffic_windows: asStringArray(environmentVariability?.shift_traffic_windows) ?? [],
+    movable_obstacles: asStringArray(environmentVariability?.movable_obstacles) ?? [],
+    floor_condition_notes: asStringArray(environmentVariability?.floor_condition_notes) ?? [],
+    reflective_surface_notes: asStringArray(environmentVariability?.reflective_surface_notes) ?? [],
+    access_rules: asStringArray(environmentVariability?.access_rules) ?? [],
+  };
+}
+
+function validateIdentityMapping(input: {
+  manifest: Record<string, unknown> | null;
+  completionMarker: Record<string, unknown> | null;
+  pathInfo: CapturePathInfo;
+}): {
+  blockReasons: string[];
+  warnings: string[];
+  identity: Record<string, unknown>;
+} {
+  const { manifest, completionMarker, pathInfo } = input;
+  const manifestSceneId = asString(manifest?.scene_id) ?? null;
+  const manifestCaptureId = asString(manifest?.capture_id) ?? null;
+  const completionSceneId = asString(completionMarker?.scene_id) ?? null;
+  const completionCaptureId = asString(completionMarker?.capture_id) ?? null;
+  const completionRawPrefix = asString(completionMarker?.raw_prefix) ?? null;
+  const siteSubmissionId = asString(manifest?.site_submission_id) ?? null;
+  const buyerRequestId = asString(manifest?.buyer_request_id) ?? null;
+  const captureJobId = asString(manifest?.capture_job_id) ?? null;
+
+  const blockReasons: string[] = [];
+  const warnings: string[] = [];
+
+  if (manifestSceneId !== null && manifestSceneId !== pathInfo.sceneId) {
+    blockReasons.push("manifest_scene_id_mismatch");
+  }
+  if (manifestCaptureId !== null && manifestCaptureId !== pathInfo.captureId) {
+    blockReasons.push("manifest_capture_id_mismatch");
+  }
+  if (completionSceneId !== null && completionSceneId !== pathInfo.sceneId) {
+    blockReasons.push("completion_scene_id_mismatch");
+  }
+  if (completionCaptureId !== null && completionCaptureId !== pathInfo.captureId) {
+    blockReasons.push("completion_capture_id_mismatch");
+  }
+  if (completionRawPrefix !== null && completionRawPrefix !== pathInfo.rawPrefix) {
+    blockReasons.push("completion_raw_prefix_mismatch");
+  }
+  if (!siteSubmissionId) {
+    warnings.push("missing_site_submission_id");
+  }
+  if (!buyerRequestId && !captureJobId) {
+    warnings.push("missing_business_request_identifier");
+  }
+
+  return {
+    blockReasons,
+    warnings,
+    identity: {
+      scene_id: pathInfo.sceneId,
+      capture_id: pathInfo.captureId,
+      manifest_scene_id: manifestSceneId,
+      manifest_capture_id: manifestCaptureId,
+      completion_scene_id: completionSceneId,
+      completion_capture_id: completionCaptureId,
+      site_submission_id: siteSubmissionId,
+      buyer_request_id: buyerRequestId,
+      capture_job_id: captureJobId,
+      completion_raw_prefix: completionRawPrefix,
+    },
+  };
+}
+
+async function publishPipelineHandoff(payload: Record<string, unknown>): Promise<string> {
+  const topic = pubsub.topic(PIPELINE_HANDOFF_TOPIC);
+  const messageBuffer = Buffer.from(JSON.stringify(payload));
+  const messageId = await topic.publishMessage({
+    data: messageBuffer,
+    attributes: {
+      scene_id: String(payload.scene_id ?? ""),
+      capture_id: String(payload.capture_id ?? ""),
+      qa_status: String(payload.qa_status ?? ""),
+      preview_simulation_requested:
+        payload.preview_simulation_requested === true ? "true" : "false",
+    },
+  });
+  return messageId;
 }
 
 function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null): Record<string, unknown> {
@@ -426,20 +615,31 @@ export const extractFrames = onObjectFinalized(
         ? String(event.data.generation)
         : "0";
 
-    if (!objectName.endsWith("/raw/walkthrough.mov")) {
-      logger.info("Skipping object (not a walkthrough.mov upload)", { objectName, contentType });
+    const objectKind = captureObjectKind(objectName);
+    if (objectKind === "other") {
+      logger.info("Skipping object (not a supported capture trigger)", { objectName, contentType });
       return;
     }
 
     const pathInfo = parseCapturePath(objectName, objectGeneration);
     if (!pathInfo) {
-      logger.info("Skipping object (unsupported walkthrough.mov path)", { objectName });
+      logger.info("Skipping object (unsupported raw capture path)", { objectName });
+      return;
+    }
+
+    if (objectKind === "walkthrough" && pathInfo.mode !== "targets") {
+      logger.info("Skipping walkthrough trigger until upload completion marker arrives", {
+        objectName,
+        sceneId: pathInfo.sceneId,
+        captureId: pathInfo.captureId,
+      });
       return;
     }
 
     logger.info("Starting frame extraction", {
       bucketName,
       objectName,
+      objectKind,
       sceneId: pathInfo.sceneId,
       captureId: pathInfo.captureId,
       mode: pathInfo.mode,
@@ -452,10 +652,16 @@ export const extractFrames = onObjectFinalized(
     mkdirSync(framesDir, { recursive: true });
 
     const manifestObjectName = `${pathInfo.rawPrefix}/manifest.json`;
+    const completionMarkerObjectName = `${pathInfo.rawPrefix}/capture_upload_complete.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
-    const walkthroughExists = await waitForObjectExists(bucket, objectName, 3000, 1000);
+    const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
+    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const manifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
+    const completionMarker =
+      objectKind === "completion_marker"
+        ? await loadJsonObject(bucket, completionMarkerObjectName, tmp)
+        : null;
     const manifestValidation = validateManifest(manifest);
 
     const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
@@ -468,7 +674,7 @@ export const extractFrames = onObjectFinalized(
       arkit_meshes: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
       motion: await fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
     };
-    const file = bucket.file(objectName);
+    const file = bucket.file(walkthroughObjectName);
 
     await file.download({ destination: localVideo });
     logger.info("Downloaded video to temp", { localVideo });
@@ -660,9 +866,21 @@ export const extractFrames = onObjectFinalized(
     const rawPrefixUri = gsUri(bucketName, pathInfo.rawPrefix);
     const framesIndexUri = gsUri(bucketName, `${pathInfo.framesPrefix}/index.jsonl`);
     const qaReportUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/qa_report.json`);
+    const captureDescriptorUri = gsUri(
+      bucketName,
+      `${pathInfo.capturesPrefix}/capture_descriptor.json`
+    );
+    const pipelineHandoffUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/pipeline_handoff.json`);
     const sceneMemoryCapture = normalizedSceneMemoryCapture(manifest);
     const captureRights = normalizedCaptureRights(manifest);
     const worldModelCandidate = sceneMemoryCapture.world_model_candidate === true;
+    const routing = deriveRequestedRouting(manifest);
+    const taskSiteContext = buildTaskSiteContext(manifest);
+    const worldlabsPreview = buildWorldlabsPreviewFields(
+      bucketName,
+      pathInfo,
+      routing.previewSimulationRequested
+    );
     const claimedSensorRecord =
       typeof sceneMemoryCapture.sensor_availability === "object" && sceneMemoryCapture.sensor_availability
         ? (sceneMemoryCapture.sensor_availability as Record<string, unknown>)
@@ -684,6 +902,16 @@ export const extractFrames = onObjectFinalized(
       finalStatus = "blocked";
       finalReasons.push(...claimedArtifactEvaluation.blockers);
     }
+    const identityValidation = validateIdentityMapping({
+      manifest,
+      completionMarker,
+      pathInfo,
+    });
+    if (identityValidation.blockReasons.length > 0) {
+      finalStatus = "blocked";
+      finalReasons.push(...identityValidation.blockReasons);
+    }
+    finalWarnings.push(...identityValidation.warnings);
     sceneMemoryCapture.sensor_availability = claimedArtifactEvaluation.valid;
     const runtimeBuildBlockers = [
       ...(qualityGate.processingProfile === "pose_assisted" ? [] : ["processing_profile_not_pose_assisted"]),
@@ -717,14 +945,23 @@ export const extractFrames = onObjectFinalized(
         rawPrefix: pathInfo.rawPrefix,
         availability: claimedArtifactEvaluation.valid,
       }),
+      site_submission_id: asString(manifest?.site_submission_id) ?? null,
+      buyer_request_id: asString(manifest?.buyer_request_id) ?? null,
+      capture_job_id: asString(manifest?.capture_job_id) ?? null,
+      region_id: asString(manifest?.region_id) ?? null,
+      rights_profile: asString(manifest?.rights_profile) ?? null,
+      requested_outputs: routing.requestedOutputs,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      task_site_context: taskSiteContext,
+      identity: identityValidation.identity,
       neoverse_runtime: {
         launchable_site_world_candidate: runtimeBuildEligible,
         blockers: runtimeBuildBlockers,
         required_spatial_conditioning: ["arkit_poses", "arkit_intrinsics"],
       },
-      requested_lanes: ["qualification", "scene_memory"],
+      requested_lanes: routing.requestedLanes,
+      ...worldlabsPreview,
       generated_at: new Date().toISOString(),
     };
 
@@ -768,6 +1005,7 @@ export const extractFrames = onObjectFinalized(
         runtime_build_eligible: runtimeBuildEligible,
         runtime_build_blockers: runtimeBuildBlockers,
       },
+      identity: identityValidation.identity,
       reasons: finalReasons,
       warnings: finalWarnings,
       generated_at: new Date().toISOString(),
@@ -775,6 +1013,7 @@ export const extractFrames = onObjectFinalized(
 
     captureDescriptor.qa_status = finalStatus;
     captureDescriptor.qa_report_uri = qaReportUri;
+    captureDescriptor.pipeline_handoff_uri = pipelineHandoffUri;
 
     await bucket
       .file(`${pathInfo.capturesPrefix}/capture_descriptor.json`)
@@ -787,12 +1026,51 @@ export const extractFrames = onObjectFinalized(
         contentType: "application/json",
       });
 
-    logger.info("Uploaded frames, descriptor, and QA report", {
+    const pipelineHandoffPayload: Record<string, unknown> = {
+      schema_version: "v1",
+      handoff_source: "BlueprintCapture.extractFrames",
+      handoff_topic: PIPELINE_HANDOFF_TOPIC,
+      handoff_trigger_object: objectName,
+      handoff_trigger_kind: objectKind,
+      scene_id: pathInfo.sceneId,
+      capture_id: pathInfo.captureId,
+      site_submission_id: asString(manifest?.site_submission_id) ?? null,
+      buyer_request_id: asString(manifest?.buyer_request_id) ?? null,
+      capture_job_id: asString(manifest?.capture_job_id) ?? null,
+      region_id: asString(manifest?.region_id) ?? null,
+      rights_profile: asString(manifest?.rights_profile) ?? null,
+      capture_source: captureSource,
+      qa_status: finalStatus,
+      requested_outputs: routing.requestedOutputs,
+      requested_lanes: routing.requestedLanes,
+      raw_prefix_uri: rawPrefixUri,
+      frames_index_uri: framesIndexUri,
+      capture_descriptor_uri: captureDescriptorUri,
+      qa_report_uri: qaReportUri,
+      keyframe_uri: keyframeUri,
+      task_site_context: taskSiteContext,
+      scene_memory_capture: sceneMemoryCapture,
+      capture_rights: captureRights,
+      identity: identityValidation.identity,
+      ...worldlabsPreview,
+      generated_at: new Date().toISOString(),
+    };
+
+    await bucket
+      .file(`${pathInfo.capturesPrefix}/pipeline_handoff.json`)
+      .save(JSON.stringify(pipelineHandoffPayload, null, 2), {
+        contentType: "application/json",
+      });
+    const handoffMessageId = await publishPipelineHandoff(pipelineHandoffPayload);
+
+    logger.info("Uploaded frames, descriptor, QA report, and pipeline handoff", {
       framesPrefix: pathInfo.framesPrefix,
       frameCount: sortedFiles.length,
       captureId: pathInfo.captureId,
       sceneId: pathInfo.sceneId,
       qaStatus: finalStatus,
+      handoffTopic: PIPELINE_HANDOFF_TOPIC,
+      handoffMessageId,
     });
   }
 );

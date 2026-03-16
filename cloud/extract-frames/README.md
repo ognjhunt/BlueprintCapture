@@ -3,6 +3,7 @@
 This function turns uploaded walkthrough evidence into bridge outputs.
 
 It does not generate scenes. It does not run downstream model derivation requests.
+It does publish a downstream handoff payload once upload completion is observed.
 
 ## Supported Input Paths
 
@@ -21,6 +22,7 @@ Compatibility:
 - `frames/index.jsonl`
 - `captures/{capture_id}/capture_descriptor.json`
 - `captures/{capture_id}/qa_report.json`
+- `captures/{capture_id}/pipeline_handoff.json`
 - `images/{capture_id}_keyframe.jpg`
 
 ## What It Does
@@ -29,6 +31,7 @@ Compatibility:
 - aligns ARKit poses when present
 - computes QA metrics
 - writes an evidence descriptor and QA report
+- publishes the finalized capture handoff to Pub/Sub topic `blueprint-capture-pipeline-handoff`
 
 ## Tests
 

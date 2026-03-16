@@ -16,6 +16,7 @@
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@google-cloud/pubsub": "^4.8.0",
     "@google-cloud/storage": "^7.12.1",
     "adm-zip": "^0.5.16",
     "archiver": "^7.0.1",

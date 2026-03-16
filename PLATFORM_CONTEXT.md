@@ -80,6 +80,7 @@ Bridge outputs:
 ```text
 scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
 scenes/{scene_id}/captures/{capture_id}/qa_report.json
+scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 ```
 
 ## Boundaries
@@ -93,4 +94,6 @@ This repo should not:
 - run downstream simulation
 - turn generated scenes into source truth
 
-The handoff out of this repo is the raw evidence bundle plus bridge descriptor and QA outputs.
+The handoff out of this repo is the raw evidence bundle plus bridge descriptor, QA, and
+pipeline handoff outputs, with the final handoff also published to
+`blueprint-capture-pipeline-handoff`.
