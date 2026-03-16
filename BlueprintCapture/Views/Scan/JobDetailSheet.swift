@@ -217,27 +217,7 @@ struct JobDetailSheet: View {
 
     private var heroBlock: some View {
         ZStack(alignment: .bottomLeading) {
-            // Image
-            Group {
-                if let url = item.previewURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        case .failure:
-                            heroFallback
-                        case .empty:
-                            heroFallback.overlay(
-                                ProgressView().tint(.white)
-                            )
-                        @unknown default:
-                            heroFallback
-                        }
-                    }
-                } else {
-                    heroFallback
-                }
-            }
+            CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
             .frame(height: 320)
             .clipped()
 
@@ -250,11 +230,6 @@ struct JobDetailSheet: View {
         }
         .frame(height: 320)
     }
-
-    private var heroFallback: some View {
-        MapSnapshotView(coordinate: item.job.coordinate)
-    }
-
     // MARK: - Title Block
 
     private var titleBlock: some View {

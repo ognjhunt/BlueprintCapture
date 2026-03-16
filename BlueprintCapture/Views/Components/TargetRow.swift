@@ -75,33 +75,8 @@ struct TargetRow: View {
     }
 
     @ViewBuilder private var thumbnail: some View {
-        if let url = item.streetImageURL, item.hasStreetView {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().aspectRatio(contentMode: .fill)
-                case .failure(_):
-                    placeholder
-                case .empty:
-                    placeholder.overlay(ProgressView().controlSize(.small))
-                @unknown default:
-                    placeholder
-                }
-            }
-        } else {
-            MapSnapshotView(coordinate: item.target.coordinate)
-        }
+        CapturePreviewView(coordinate: item.target.coordinate, remoteImageURL: nil)
     }
-
-    private var placeholder: some View {
-        ZStack {
-            Color(.tertiarySystemBackground)
-            Image(systemName: "building.2")
-                .font(.title2)
-                .foregroundStyle(.tertiary)
-        }
-    }
-
     private func formatCountdown(_ totalSeconds: Int) -> String {
         let mins = totalSeconds / 60
         let secs = totalSeconds % 60

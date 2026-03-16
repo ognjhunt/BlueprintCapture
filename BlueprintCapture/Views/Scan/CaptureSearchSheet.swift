@@ -315,21 +315,9 @@ struct CaptureSearchSheet: View {
                     .fill(Color(white: 0.13))
                     .frame(width: 52, height: 52)
 
-                if let url = item.previewURL {
-                    AsyncImage(url: url) { img in
-                        img.resizable().scaledToFill()
-                            .frame(width: 52, height: 52)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    } placeholder: {
-                        Image(systemName: "camera.viewfinder")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.5))
-                    }
-                } else {
-                    Image(systemName: "camera.viewfinder")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.5))
-                }
+                CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
+                    .frame(width: 52, height: 52)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 4) {

@@ -112,11 +112,6 @@ final class UITestTargetStateService: TargetStateServiceProtocol {
     }
 }
 
-final class UITestStreetViewService: StreetViewServiceProtocol {
-    func hasStreetView(lat: Double, lng: Double) async throws -> Bool { false }
-    func imageURL(lat: Double, lng: Double, size: CGSize) -> URL? { nil }
-}
-
 final class UITestCaptureHistoryService: CaptureHistoryServiceProtocol {
     func fetchCaptureHistory() async throws -> [CaptureHistoryEntry] {
         UITestFixtures.captureHistory
@@ -275,8 +270,7 @@ enum UITestFixtures {
             targetStateService: UITestTargetStateService(),
             locationService: UITestLocationService(location: location),
             alertsManager: alertsManager,
-            captureHistoryService: UITestCaptureHistoryService(),
-            streetViewService: UITestStreetViewService()
+            captureHistoryService: UITestCaptureHistoryService()
         )
     }
 

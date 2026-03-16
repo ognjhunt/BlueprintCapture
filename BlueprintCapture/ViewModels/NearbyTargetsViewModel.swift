@@ -33,8 +33,6 @@ final class NearbyTargetsViewModel: ObservableObject {
         let target: Target
         let distanceMiles: Double
         let estimatedPayoutUsd: Int
-        let streetImageURL: URL?
-        let hasStreetView: Bool
         let recordingPolicy: RecordingPolicyResult
         var accessibilityLabel: String {
             "\(target.displayName), SKU \(target.sku.rawValue), payout $\(estimatedPayoutUsd), distance \(String(format: "%.1f", distanceMiles)) miles"
@@ -45,8 +43,6 @@ final class NearbyTargetsViewModel: ObservableObject {
             lhs.target == rhs.target &&
             lhs.distanceMiles == rhs.distanceMiles &&
             lhs.estimatedPayoutUsd == rhs.estimatedPayoutUsd &&
-            lhs.streetImageURL == rhs.streetImageURL &&
-            lhs.hasStreetView == rhs.hasStreetView &&
             lhs.recordingPolicy.risk == rhs.recordingPolicy.risk
         }
     }
@@ -65,7 +61,6 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let locationService: LocationServiceProtocol
     private let targetsAPI: TargetsAPIProtocol
     private let pricingAPI: PricingAPIProtocol
-    private let streetService: StreetViewServiceProtocol
     private let geocoding: GeocodingServiceProtocol
     private let reservationService: ReservationServiceProtocol
     private let targetStateService: TargetStateServiceProtocol
@@ -78,7 +73,6 @@ final class NearbyTargetsViewModel: ObservableObject {
     // Data
     private var pricing: [SKU: SkuPricing] = defaultPricing
     private var userLocation: CLLocation?
-    private var streetViewCache: [String: (has: Bool, url: URL?)] = [:]
     @Published private(set) var reservations: [String: ReservationStatus] = [:]
     private var reservationObservers: [String: ReservationObservation] = [:]
     @Published private(set) var targetStates: [String: TargetState] = [:]
@@ -92,7 +86,6 @@ final class NearbyTargetsViewModel: ObservableObject {
     init(locationService: LocationServiceProtocol = LocationService(),
          targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
          pricingAPI: PricingAPIProtocol = MockPricingAPI(),
-         streetService: StreetViewServiceProtocol = StreetViewService(),
          geocoding: GeocodingServiceProtocol = GeocodingService(),
          reservationService: ReservationServiceProtocol = ReservationService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
@@ -104,7 +97,6 @@ final class NearbyTargetsViewModel: ObservableObject {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
-        self.streetService = streetService
         self.geocoding = geocoding
         self.reservationService = reservationService
         self.targetStateService = targetStateService
@@ -173,16 +165,14 @@ final class NearbyTargetsViewModel: ObservableObject {
 
     private func logAPIStatus() {
         let discoveryAvailability = RuntimeConfig.current.availability(for: .nearbyDiscovery)
-        let streetViewAvailability = RuntimeConfig.current.availability(for: .streetView)
 
         print("🔍 [Blueprint Nearby] API Configuration Status:")
         print("  ✅ Nearby discovery: \(discoveryAvailability.isEnabled ? "Enabled" : discoveryAvailability.message ?? "Disabled")")
-        print("  ✅ Street View: \(streetViewAvailability.isEnabled ? "Enabled" : streetViewAvailability.message ?? "Disabled")")
 
         if discoveryAvailability.isEnabled {
             print("  🚀 Places Nearby pipeline ENABLED (Gemini temporarily disabled)")
         } else {
-            print("  ⚠️  Direct provider discovery disabled; using curated job feeds and MapKit fallback")
+            print("  ⚠️  Direct provider discovery disabled; using curated job feeds and Apple Maps previews")
         }
     }
 
@@ -365,7 +355,6 @@ final class NearbyTargetsViewModel: ObservableObject {
 
             let origin = CLLocation(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
             let currentPricing = pricing
-            let streetService = self.streetService
             let policyService = self.recordingPolicyService
             let currentPolicyFilter = self.policyFilter
             let mapped: [NearbyItem] = try await withThrowingTaskGroup(of: (NearbyItem, Double)?.self) { group in
@@ -386,21 +375,10 @@ final class NearbyTargetsViewModel: ObservableObject {
                         let distanceMeters = origin.distance(from: CLLocation(latitude: t.lat, longitude: t.lng))
                         let miles = distanceMeters / 1609.34
                         let payout = estimatedPayout(for: t, pricing: currentPricing)
-                        let cacheKey = "\(t.lat.rounded(to: 5)),\(t.lng.rounded(to: 5))"
-                        var hasSV = false
-                        var url: URL? = nil
-                        if let cached = self?.streetViewCache[cacheKey] {
-                            hasSV = cached.has
-                            url = cached.url
-                        } else if let service = streetService as? StreetViewServiceProtocol {
-                            hasSV = (try? await service.hasStreetView(lat: t.lat, lng: t.lng)) ?? false
-                            url = hasSV ? service.imageURL(lat: t.lat, lng: t.lng, size: CGSize(width: 600, height: 400)) : nil
-                            self?.streetViewCache[cacheKey] = (hasSV, url)
-                        }
                         // Hybrid score: payout × demand × proximity × coverage × policy safety
                         let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
-                        let coverage = hasSV ? 1.0 : 0.7
+                        let coverage = 1.0
                         // Boost score for safer venues (safe=1.0, unknown=0.9, caution=0.7, restricted=0.3)
                         let safetyMultiplier: Double = {
                             switch policy.risk {
@@ -411,7 +389,7 @@ final class NearbyTargetsViewModel: ObservableObject {
                             }
                         }()
                         let score = Double(payout) * demand * proximity * coverage * safetyMultiplier
-                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
+                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, recordingPolicy: policy)
                         return (item, score)
                     }
                 }
@@ -499,7 +477,6 @@ final class NearbyTargetsViewModel: ObservableObject {
     private func applyTargetsImmediate(_ targets: [Target]) async {
         let origin = currentSearchLocation() ?? CLLocation(latitude: userLocation?.coordinate.latitude ?? 0, longitude: userLocation?.coordinate.longitude ?? 0)
         let currentPricing = pricing
-        let streetService = self.streetService
         let policyService = self.recordingPolicyService
         let currentPolicyFilter = self.policyFilter
         do {
@@ -521,22 +498,11 @@ final class NearbyTargetsViewModel: ObservableObject {
                         let distanceMeters = origin.distance(from: CLLocation(latitude: t.lat, longitude: t.lng))
                         let miles = distanceMeters / 1609.34
                         let payout = estimatedPayout(for: t, pricing: currentPricing)
-                        let cacheKey = "\(t.lat.rounded(to: 5)),\(t.lng.rounded(to: 5))"
-                        var hasSV = false
-                        var url: URL? = nil
-                        if let cached = self?.streetViewCache[cacheKey] {
-                            hasSV = cached.has
-                            url = cached.url
-                        } else if let service = streetService as? StreetViewServiceProtocol {
-                            hasSV = (try? await service.hasStreetView(lat: t.lat, lng: t.lng)) ?? false
-                            url = hasSV ? service.imageURL(lat: t.lat, lng: t.lng, size: CGSize(width: 600, height: 400)) : nil
-                            self?.streetViewCache[cacheKey] = (hasSV, url)
-                        }
                         let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
-                        let coverage = hasSV ? 1.0 : 0.7
+                        let coverage = 1.0
                         let score = Double(payout) * demand * proximity * coverage
-                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
+                        let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, recordingPolicy: policy)
                         return (item, score)
                     }
                 }
@@ -603,19 +569,6 @@ final class NearbyTargetsViewModel: ObservableObject {
         )
         let payout = estimatedPayout(for: target, pricing: pricing)
 
-        // Street View availability (optional)
-        var hasSV = false
-        var url: URL? = nil
-        let cacheKey = "\(latVal.rounded(to: 5)),\(lngVal.rounded(to: 5))"
-        if let cached = streetViewCache[cacheKey] {
-            hasSV = cached.has
-            url = cached.url
-        } else if let service = streetService as? StreetViewServiceProtocol {
-            hasSV = (try? await service.hasStreetView(lat: latVal, lng: lngVal)) ?? false
-            url = hasSV ? service.imageURL(lat: latVal, lng: lngVal, size: CGSize(width: 600, height: 400)) : nil
-            streetViewCache[cacheKey] = (hasSV, url)
-        }
-
         // Evaluate recording policy
         let policy = recordingPolicyService.evaluatePolicy(
             name: displayName ?? "Unknown",
@@ -623,7 +576,7 @@ final class NearbyTargetsViewModel: ObservableObject {
             placeId: targetId
         )
 
-        return NearbyItem(id: targetId, target: target, distanceMiles: miles, estimatedPayoutUsd: payout, streetImageURL: url, hasStreetView: hasSV, recordingPolicy: policy)
+        return NearbyItem(id: targetId, target: target, distanceMiles: miles, estimatedPayoutUsd: payout, recordingPolicy: policy)
     }
 
     /// Estimates driving minutes using MapKit; returns nil if unable to compute quickly
@@ -894,13 +847,6 @@ extension NearbyTargetsViewModel {
         let lngStr = String(format: "%.3f", longitude)
         return "\(latStr),\(lngStr)"
         #endif
-    }
-}
-
-private extension Double {
-    func rounded(to places: Int) -> Double {
-        let pow10 = pow(10.0, Double(places))
-        return (self * pow10).rounded() / pow10
     }
 }
 

@@ -1,66 +1,154 @@
 import Foundation
 import CoreGraphics
+import CoreLocation
+import MapKit
+import UIKit
 
-protocol StreetViewServiceProtocol {
-    func hasStreetView(lat: Double, lng: Double) async throws -> Bool
-    func imageURL(lat: Double, lng: Double, size: CGSize) -> URL?
+enum LocationPreviewSource: Equatable {
+    case lookAround
+    case mapSnapshot
+    case unavailable
 }
 
-final class StreetViewService: StreetViewServiceProtocol {
-    private let apiKeyProvider: () -> String?
-    private var availabilityCache: [String: Bool] = [:]
-    private let session: URLSession
+struct LocationPreviewResult: Equatable {
+    let image: UIImage?
+    let source: LocationPreviewSource
+}
 
-    init(
-        session: URLSession = .shared,
-        apiKeyProvider: @escaping () -> String? = {
-            guard RuntimeConfig.current.availability(for: .streetView).isEnabled else { return nil }
-            return DeveloperProviderOverrides.value(for: ["STREET_VIEW_API_KEY"])
+@MainActor
+protocol LocationPreviewServiceProtocol {
+    func preview(
+        for coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> LocationPreviewResult
+
+    func mapSnapshot(
+        for coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> UIImage?
+}
+
+@MainActor
+final class AppleLocationPreviewService: LocationPreviewServiceProtocol {
+    static let shared = AppleLocationPreviewService()
+
+    private var previewCache: [String: LocationPreviewResult] = [:]
+    private var mapCache: [String: UIImage] = [:]
+
+    func preview(
+        for coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> LocationPreviewResult {
+        let normalized = normalizedSize(size)
+        guard normalized.width > 0, normalized.height > 0 else {
+            return LocationPreviewResult(image: nil, source: .unavailable)
         }
-    ) {
-        self.session = session
-        self.apiKeyProvider = apiKeyProvider
-    }
 
-    func hasStreetView(lat: Double, lng: Double) async throws -> Bool {
-        let key = cacheKey(lat: lat, lng: lng)
-        if let cached = availabilityCache[key] { return cached }
-        guard let apiKey = apiKeyProvider() else { return false }
-        var components = URLComponents(string: "https://maps.googleapis.com/maps/api/streetview/metadata")!
-        components.queryItems = [
-            URLQueryItem(name: "location", value: "\(lat),\(lng)"),
-            URLQueryItem(name: "key", value: apiKey)
-        ]
-        let url = components.url!
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        let key = cacheKey(prefix: "preview", coordinate: coordinate, size: normalized, scale: scale)
+        if let cached = previewCache[key] {
+            return cached
         }
-        struct Metadata: Decodable { let status: String }
-        let status = try JSONDecoder().decode(Metadata.self, from: data).status
-        let ok = status == "OK"
-        availabilityCache[key] = ok
-        return ok
+
+        if let image = await lookAroundSnapshot(for: coordinate, size: normalized, scale: scale) {
+            let result = LocationPreviewResult(image: image, source: .lookAround)
+            previewCache[key] = result
+            return result
+        }
+
+        if let image = await mapSnapshot(for: coordinate, size: normalized, scale: scale) {
+            let result = LocationPreviewResult(image: image, source: .mapSnapshot)
+            previewCache[key] = result
+            return result
+        }
+
+        let result = LocationPreviewResult(image: nil, source: .unavailable)
+        previewCache[key] = result
+        return result
     }
 
-    func imageURL(lat: Double, lng: Double, size: CGSize) -> URL? {
-        guard let apiKey = apiKeyProvider() else { return nil }
-        var components = URLComponents(string: "https://maps.googleapis.com/maps/api/streetview")!
-        components.queryItems = [
-            URLQueryItem(name: "size", value: "\(Int(size.width))x\(Int(size.height))"),
-            URLQueryItem(name: "location", value: "\(lat),\(lng)"),
-            URLQueryItem(name: "key", value: apiKey)
-        ]
-        return components.url
+    func mapSnapshot(
+        for coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> UIImage? {
+        let normalized = normalizedSize(size)
+        guard normalized.width > 0, normalized.height > 0 else { return nil }
+
+        let key = cacheKey(prefix: "map", coordinate: coordinate, size: normalized, scale: scale)
+        if let cached = mapCache[key] {
+            return cached
+        }
+
+        let options = MKMapSnapshotter.Options()
+        options.region = MKCoordinateRegion(
+            center: coordinate,
+            span: MKCoordinateSpan(latitudeDelta: 0.0035, longitudeDelta: 0.0035)
+        )
+        options.size = normalized
+        options.scale = scale
+        options.showsBuildings = true
+        options.pointOfInterestFilter = .excludingAll
+
+        let snapshotter = MKMapSnapshotter(options: options)
+        do {
+            let snapshot = try await withCheckedThrowingContinuation { continuation in
+                snapshotter.start { snapshot, error in
+                    if let snapshot {
+                        continuation.resume(returning: snapshot)
+                    } else {
+                        continuation.resume(throwing: error ?? URLError(.cannotDecodeContentData))
+                    }
+                }
+            }
+            mapCache[key] = snapshot.image
+            return snapshot.image
+        } catch {
+            return nil
+        }
     }
 
-    private func cacheKey(lat: Double, lng: Double) -> String { "\(lat.rounded(to: 5)),\(lng.rounded(to: 5))" }
+    private func lookAroundSnapshot(
+        for coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> UIImage? {
+        guard #available(iOS 16.0, *) else { return nil }
+
+        let request = MKLookAroundSceneRequest(coordinate: coordinate)
+        do {
+            guard let scene = try await request.scene else { return nil }
+
+            let options = MKLookAroundSnapshotter.Options()
+            options.size = size
+            options.traitCollection = UITraitCollection(displayScale: scale)
+
+            let snapshotter = MKLookAroundSnapshotter(scene: scene, options: options)
+            let snapshot = try await snapshotter.snapshot
+            return snapshot.image
+        } catch {
+            return nil
+        }
+    }
+
+    private func normalizedSize(_ size: CGSize) -> CGSize {
+        CGSize(width: max(1, Int(size.width.rounded())), height: max(1, Int(size.height.rounded())))
+    }
+
+    private func cacheKey(
+        prefix: String,
+        coordinate: CLLocationCoordinate2D,
+        size: CGSize,
+        scale: CGFloat
+    ) -> String {
+        [
+            prefix,
+            String(format: "%.5f", coordinate.latitude),
+            String(format: "%.5f", coordinate.longitude),
+            "\(Int(size.width))x\(Int(size.height))",
+            String(format: "%.2f", scale)
+        ].joined(separator: "|")
+    }
 }
-
-private extension Double {
-    func rounded(to places: Int) -> Double {
-        let pow10 = pow(10.0, Double(places))
-        return (self * pow10).rounded() / pow10
-    }
-}
-

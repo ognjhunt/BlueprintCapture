@@ -83,7 +83,6 @@ final class ScanHomeViewModel: ObservableObject {
 
     enum PreviewSource: Equatable {
         case jobImage
-        case streetView
         case mapSnapshot
     }
 
@@ -238,25 +237,21 @@ final class ScanHomeViewModel: ObservableObject {
     private let locationService: LocationServiceProtocol
     private let alertsManager: NearbyAlertsManager
     private let captureHistoryService: CaptureHistoryServiceProtocol
-    private let streetViewService: StreetViewServiceProtocol
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
-    private var previewCache: [String: PreviewSelection] = [:]
 
     init(
         jobsRepository: JobsRepositoryProtocol = JobsRepository(),
         targetStateService: TargetStateServiceProtocol = TargetStateService(),
         locationService: LocationServiceProtocol = LocationService(),
         alertsManager: NearbyAlertsManager,
-        captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared,
-        streetViewService: StreetViewServiceProtocol = StreetViewService()
+        captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService
         self.locationService = locationService
         self.alertsManager = alertsManager
         self.captureHistoryService = captureHistoryService
-        self.streetViewService = streetViewService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -343,7 +338,7 @@ final class ScanHomeViewModel: ObservableObject {
                 let preview = await previewSelection(for: item.job)
                 hydrated.append(item.withPreview(preview))
             } else {
-                hydrated.append(item.withPreview(Self.previewSelection(for: item.job, streetViewURL: nil)))
+                hydrated.append(item.withPreview(Self.previewSelection(for: item.job)))
             }
         }
 
@@ -351,29 +346,11 @@ final class ScanHomeViewModel: ObservableObject {
     }
 
     private func previewSelection(for job: ScanJob) async -> PreviewSelection {
-        let key = "\(job.lat.rounded(to: 5)),\(job.lng.rounded(to: 5))"
-        if let cached = previewCache[key] {
-            return cached
-        }
-
         if let explicit = job.primaryImageURL {
-            let selection = PreviewSelection(url: explicit, source: .jobImage)
-            previewCache[key] = selection
-            return selection
+            return PreviewSelection(url: explicit, source: .jobImage)
         }
 
-        if let url = streetViewService.imageURL(lat: job.lat, lng: job.lng, size: CGSize(width: 1200, height: 800)) {
-            let hasStreetView = (try? await streetViewService.hasStreetView(lat: job.lat, lng: job.lng)) ?? false
-            if hasStreetView {
-                let selection = PreviewSelection(url: url, source: .streetView)
-                previewCache[key] = selection
-                return selection
-            }
-        }
-
-        let selection = PreviewSelection(url: nil, source: .mapSnapshot)
-        previewCache[key] = selection
-        return selection
+        return PreviewSelection(url: nil, source: .mapSnapshot)
     }
 
     private func loadSubmissionSummary() async -> [SubmissionSummaryItem] {
@@ -481,12 +458,9 @@ extension ScanHomeViewModel {
         }
     }
 
-    static func previewSelection(for job: ScanJob, streetViewURL: URL?) -> PreviewSelection {
+    static func previewSelection(for job: ScanJob) -> PreviewSelection {
         if let explicit = job.primaryImageURL {
             return PreviewSelection(url: explicit, source: .jobImage)
-        }
-        if let streetViewURL {
-            return PreviewSelection(url: streetViewURL, source: .streetView)
         }
         return PreviewSelection(url: nil, source: .mapSnapshot)
     }
@@ -523,13 +497,6 @@ extension ScanHomeViewModel {
         }
         sections.append(.reviewSubmission)
         return sections
-    }
-}
-
-private extension Double {
-    func rounded(to places: Int) -> Double {
-        let pow10 = Foundation.pow(10.0, Double(places))
-        return (self * pow10).rounded() / pow10
     }
 }
 

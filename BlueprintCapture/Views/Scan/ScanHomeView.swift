@@ -1002,28 +1002,7 @@ private struct CaptureCardArtwork: View {
     let item: ScanHomeViewModel.JobItem
 
     var body: some View {
-        Group {
-            if let url = item.previewURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    case .failure:
-                        fallback
-                    case .empty:
-                        fallback.overlay(ProgressView().tint(.white))
-                    @unknown default:
-                        fallback
-                    }
-                }
-            } else {
-                fallback
-            }
-        }
-    }
-
-    private var fallback: some View {
-        MapSnapshotView(coordinate: item.job.coordinate)
+        CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
     }
 }
 
