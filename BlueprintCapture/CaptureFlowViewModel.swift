@@ -45,6 +45,19 @@ struct SpaceReviewSeed: Identifiable, Equatable {
     }
 }
 
+private func normalizeRequestedOutputs(_ outputs: [String]) -> [String] {
+    var normalized: [String] = []
+    for output in outputs {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !normalized.contains(trimmed) else { continue }
+        normalized.append(trimmed)
+    }
+    if normalized.contains("preview_simulation") && !normalized.contains("deeper_evaluation") {
+        normalized.append("deeper_evaluation")
+    }
+    return normalized
+}
+
 @MainActor
 final class CaptureFlowViewModel: NSObject, ObservableObject {
     enum Step {
@@ -420,7 +433,12 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             return nil
         }()
         let jobId = reviewSeed?.captureJobId ?? reservationId ?? targetId ?? UUID().uuidString
-        let requestedOutputs = reviewSeed?.requestedOutputs ?? (isSpaceReviewMode ? ["qualification", "review_intake", "preview_simulation"] : ["qualification", "preview_simulation"])
+        let requestedOutputs = normalizeRequestedOutputs(
+            reviewSeed?.requestedOutputs
+                ?? (isSpaceReviewMode
+                    ? ["qualification", "review_intake", "preview_simulation", "deeper_evaluation"]
+                    : ["qualification", "preview_simulation", "deeper_evaluation"])
+        )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
         let metadata = CaptureUploadMetadata(

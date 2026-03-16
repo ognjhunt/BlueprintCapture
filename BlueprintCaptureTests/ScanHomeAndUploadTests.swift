@@ -279,14 +279,11 @@ struct ScanHomeAndUploadTests {
             captureRestrictions: []
         )
 
-        let explicitSelection = ScanHomeViewModel.previewSelection(for: explicit, streetViewURL: URL(string: "https://example.com/street.png"))
-        let streetSelection = ScanHomeViewModel.previewSelection(for: streetOnly, streetViewURL: URL(string: "https://example.com/street.png"))
-        let mapSelection = ScanHomeViewModel.previewSelection(for: streetOnly, streetViewURL: nil)
+        let explicitSelection = ScanHomeViewModel.previewSelection(for: explicit)
+        let mapSelection = ScanHomeViewModel.previewSelection(for: streetOnly)
 
         #expect(explicitSelection.source == .jobImage)
         #expect(explicitSelection.url == explicit.primaryImageURL)
-        #expect(streetSelection.source == .streetView)
-        #expect(streetSelection.url == URL(string: "https://example.com/street.png"))
         #expect(mapSelection.source == .mapSnapshot)
         #expect(mapSelection.url == nil)
     }
