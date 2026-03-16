@@ -70,6 +70,8 @@ struct CaptureSearchSheet: View {
     @State private var isSearchingJobs = false
     @State private var isGeneratingDraft = false
     @State private var generatedDraftContext: String? = nil
+    @State private var nearbyExamples: [(title: String, subtitle: String)] = []
+    @State private var isLoadingExamples = false
     @FocusState private var fieldFocused: Bool
 
     private var isSearchingAddresses: Bool { locationCompleter.isSearching || isResolvingAddress }
@@ -206,6 +208,7 @@ struct CaptureSearchSheet: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 fieldFocused = true
             }
+            Task { await loadNearbyExamples() }
         }
     }
 
@@ -229,39 +232,63 @@ struct CaptureSearchSheet: View {
                     .multilineTextAlignment(.center)
             }
 
-            // Quick examples
+            // Dynamic nearby suggestions from MapKit POI search
             VStack(spacing: 8) {
-                exampleChip("South Park Mall")
-                exampleChip("Whole Foods Market")
-                exampleChip("123 Main St, Charlotte")
+                if isLoadingExamples {
+                    // Skeleton shimmer while loading
+                    ForEach(0..<3, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color(white: 0.08))
+                            .frame(height: 44)
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(white: 0.12), lineWidth: 1))
+                    }
+                } else if nearbyExamples.isEmpty {
+                    // No location or no results — generic fallback
+                    exampleChip(title: "South Park Mall", subtitle: "")
+                    exampleChip(title: "Whole Foods Market", subtitle: "")
+                    exampleChip(title: "123 Main St", subtitle: "")
+                } else {
+                    ForEach(nearbyExamples, id: \.title) { place in
+                        exampleChip(title: place.title, subtitle: place.subtitle)
+                    }
+                }
             }
             .padding(.top, 8)
         }
         .frame(maxWidth: .infinity)
     }
 
-    private func exampleChip(_ text: String) -> some View {
+    private func exampleChip(title: String, subtitle: String) -> some View {
         Button {
-            query = text
+            query = title
             phase = .addresses
-            locationCompleter.search(text)
+            locationCompleter.search(title)
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.caption)
                     .foregroundStyle(Color(white: 0.4))
-                Text(text)
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.55))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.55))
+                        .lineLimit(1)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.caption2)
+                            .foregroundStyle(Color(white: 0.3))
+                            .lineLimit(1)
+                    }
+                }
                 Spacer()
                 Image(systemName: "arrow.up.left")
                     .font(.caption2)
                     .foregroundStyle(Color(white: 0.25))
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, subtitle.isEmpty ? 12 : 10)
             .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color(white: 0.12), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(white: 0.12), lineWidth: 1))
         }
         .buttonStyle(.plain)
     }
@@ -524,6 +551,58 @@ struct CaptureSearchSheet: View {
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.2), value: isGeneratingDraft)
         .animation(.easeInOut(duration: 0.2), value: generatedDraftContext != nil)
+    }
+
+    // MARK: - Nearby examples
+
+    /// Fetches real nearby commercial spaces from MapKit POI search to populate
+    /// the idle-state suggestion chips. Three parallel queries cover different
+    /// space types (retail, food market, restaurant/café) so chips are diverse
+    /// rather than all the same category.
+    private func loadNearbyExamples() async {
+        guard let coord = userLocation?.coordinate else { return }
+        await MainActor.run { isLoadingExamples = true }
+
+        async let retail  = searchNearbyPOIs(coord: coord, categories: [.store],       limit: 2)
+        async let grocery = searchNearbyPOIs(coord: coord, categories: [.foodMarket],  limit: 1)
+        async let dining  = searchNearbyPOIs(coord: coord, categories: [.restaurant, .cafe], limit: 1)
+
+        let (r, g, d) = await (retail, grocery, dining)
+
+        // Build a diverse set: prefer one of each category, fill remainder with retail
+        var merged: [(title: String, subtitle: String)] = []
+        if let first = r.first  { merged.append(first) }
+        if let first = g.first  { merged.append(first) }
+        if let first = d.first  { merged.append(first) }
+        // If we still have fewer than 3, backfill with any remaining retail hits
+        for item in r.dropFirst() where merged.count < 3 { merged.append(item) }
+
+        await MainActor.run {
+            nearbyExamples = Array(merged.prefix(3))
+            isLoadingExamples = false
+        }
+    }
+
+    private func searchNearbyPOIs(
+        coord: CLLocationCoordinate2D,
+        categories: [MKPointOfInterestCategory],
+        limit: Int
+    ) async -> [(title: String, subtitle: String)] {
+        let request = MKLocalSearch.Request()
+        request.resultTypes = .pointOfInterest
+        request.region = MKCoordinateRegion(
+            center: coord,
+            latitudinalMeters: 3000,
+            longitudinalMeters: 3000
+        )
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: categories)
+        guard let response = try? await MKLocalSearch(request: request).start() else { return [] }
+        return response.mapItems.prefix(limit).compactMap { item in
+            guard let name = item.name, !name.isEmpty else { return nil }
+            let parts: [String?] = [item.placemark.locality, item.placemark.administrativeArea]
+            let subtitle = parts.compactMap { $0 }.joined(separator: ", ")
+            return (title: name, subtitle: subtitle)
+        }
     }
 
     // MARK: - Logic
