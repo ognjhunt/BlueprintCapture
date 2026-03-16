@@ -96,6 +96,7 @@ struct ScanHomeView: View {
         .sheet(isPresented: $showingSearch) {
             CaptureSearchSheet(
                 existingItems: viewModel.items,
+                userLocation: viewModel.currentLocation,
                 onSelectItem: { item in selectedItem = item },
                 onSubmitAddress: { address, suggestedContext in
                     reviewSubmissionSeed = SpaceReviewSeed(

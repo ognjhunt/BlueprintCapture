@@ -2,24 +2,76 @@ import SwiftUI
 import MapKit
 import CoreLocation
 
+// MARK: - MapKit autocomplete coordinator
+
+/// Wraps MKLocalSearchCompleter so SwiftUI can observe completions reactively.
+/// Uses `.pointsOfInterest` + `.address` result types so both named commercial
+/// spaces (malls, warehouses, stores) and raw street addresses come through.
+/// The `region` is centred on the user's GPS position for local bias.
+private final class LocationCompleter: NSObject, MKLocalSearchCompleterDelegate, ObservableObject {
+    @Published var completions: [MKLocalSearchCompletion] = []
+    @Published var isSearching = false
+
+    private let completer = MKLocalSearchCompleter()
+
+    override init() {
+        super.init()
+        completer.delegate = self
+        completer.resultTypes = [.pointsOfInterest, .address]
+        // No tight POI category filter — we want any physical space that can be walked.
+        // Region bias is set from user GPS via updateRegion().
+    }
+
+    func updateRegion(center: CLLocationCoordinate2D) {
+        completer.region = MKCoordinateRegion(
+            center: center,
+            latitudinalMeters: 50_000,
+            longitudinalMeters: 50_000
+        )
+    }
+
+    func search(_ query: String) {
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            completions = []
+            isSearching = false
+            return
+        }
+        isSearching = true
+        completer.queryFragment = query
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        completions = completer.results
+        isSearching = false
+    }
+
+    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
+        isSearching = false
+    }
+}
+
+// MARK: - Sheet
+
 struct CaptureSearchSheet: View {
     let existingItems: [ScanHomeViewModel.JobItem]
+    let userLocation: CLLocation?
     let onSelectItem: (ScanHomeViewModel.JobItem) -> Void
     let onSubmitAddress: (String, String?) -> Void  // (address, suggestedContext)
 
+    @StateObject private var locationCompleter = LocationCompleter()
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var phase: Phase = .idle
-    @State private var addressResults: [AddressResult] = []
     @State private var jobResults: [SearchResult] = []
     @State private var selectedAddressLabel = ""
     @State private var selectedAddressSubtitle = ""
-    @State private var isSearchingAddresses = false
+    @State private var isResolvingAddress = false   // resolving completion → coordinate
     @State private var isSearchingJobs = false
     @State private var isGeneratingDraft = false
     @State private var generatedDraftContext: String? = nil
     @FocusState private var fieldFocused: Bool
 
+    private var isSearchingAddresses: Bool { locationCompleter.isSearching || isResolvingAddress }
     private let searchRadiusMeters: Double = 1609.34 * 2 // 2 miles
 
     // MARK: - Types
@@ -78,20 +130,21 @@ struct CaptureSearchSheet: View {
                         .focused($fieldFocused)
                         .autocorrectionDisabled()
                         .submitLabel(.search)
-                        .onSubmit { triggerAddressSearch() }
+                        .onSubmit { locationCompleter.search(query) }
                         .onChange(of: query) { _, newVal in
                             if newVal.isEmpty {
-                                addressResults = []
+                                locationCompleter.completions = []
                                 phase = .idle
-                            } else if newVal.count >= 2 {
-                                triggerAddressSearch()
+                            } else {
+                                phase = .addresses
+                                locationCompleter.search(newVal)
                             }
                         }
 
                     if !query.isEmpty {
                         Button {
                             query = ""
-                            addressResults = []
+                            locationCompleter.completions = []
                             jobResults = []
                             selectedAddressLabel = ""
                             phase = .idle
@@ -146,6 +199,9 @@ struct CaptureSearchSheet: View {
         }
         .preferredColorScheme(.dark)
         .onAppear {
+            if let coord = userLocation?.coordinate {
+                locationCompleter.updateRegion(center: coord)
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 fieldFocused = true
             }
@@ -186,7 +242,8 @@ struct CaptureSearchSheet: View {
     private func exampleChip(_ text: String) -> some View {
         Button {
             query = text
-            triggerAddressSearch()
+            phase = .addresses
+            locationCompleter.search(text)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -215,15 +272,15 @@ struct CaptureSearchSheet: View {
             sectionLabel("Suggested Locations")
                 .padding(.bottom, 12)
 
-            if addressResults.isEmpty && !isSearchingAddresses {
+            if locationCompleter.completions.isEmpty && !isSearchingAddresses {
                 Text("No results found")
                     .font(.subheadline)
                     .foregroundStyle(Color(white: 0.3))
                     .padding(.vertical, 16)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(addressResults) { result in
-                        Button { selectAddress(result) } label: {
+                    ForEach(locationCompleter.completions, id: \.self) { completion in
+                        Button { resolveAndSelect(completion) } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: "mappin.circle.fill")
                                     .font(.subheadline.weight(.semibold))
@@ -232,12 +289,12 @@ struct CaptureSearchSheet: View {
                                     .background(BlueprintTheme.brandTeal.opacity(0.2), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(result.title)
+                                    Text(completion.title)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(.white)
                                         .lineLimit(1)
-                                    if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
+                                    if !completion.subtitle.isEmpty {
+                                        Text(completion.subtitle)
                                             .font(.caption)
                                             .foregroundStyle(Color(white: 0.4))
                                             .lineLimit(1)
@@ -255,7 +312,7 @@ struct CaptureSearchSheet: View {
                         }
                         .buttonStyle(.plain)
 
-                        if result.id != addressResults.last?.id {
+                        if completion != locationCompleter.completions.last {
                             Rectangle().fill(Color(white: 0.12)).frame(height: 1).padding(.leading, 66)
                         }
                     }
@@ -477,34 +534,28 @@ struct CaptureSearchSheet: View {
             .tracking(1.0)
     }
 
-    private func triggerAddressSearch() {
-        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        isSearchingAddresses = true
-
+    /// Resolves an MKLocalSearchCompletion to real coordinates, then passes it
+    /// downstream. MKLocalSearchCompleter gives us name + subtitle instantly but
+    /// no coordinates; MKLocalSearch.Request(completion:) resolves those on tap.
+    private func resolveAndSelect(_ completion: MKLocalSearchCompletion) {
+        isResolvingAddress = true
         Task {
-            let request = MKLocalSearch.Request()
-            request.naturalLanguageQuery = query
-            let search = MKLocalSearch(request: request)
-
-            do {
-                let response = try await search.start()
-                let results: [AddressResult] = response.mapItems.prefix(7).compactMap { item in
-                    guard let coord = item.placemark.location?.coordinate else { return nil }
-                    let title = item.name ?? item.placemark.name ?? "Unknown"
-                    let parts: [String?] = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea]
-                    let subtitle = parts.compactMap { $0 }.joined(separator: ", ")
-                    return AddressResult(title: title, subtitle: subtitle, coordinate: coord)
-                }
+            let request = MKLocalSearch.Request(completion: completion)
+            if let item = try? await MKLocalSearch(request: request).start().mapItems.first {
+                let coord = item.placemark.coordinate
+                let parts: [String?] = [item.placemark.thoroughfare, item.placemark.locality, item.placemark.administrativeArea]
+                let resolvedSubtitle = parts.compactMap { $0 }.joined(separator: ", ")
+                let result = AddressResult(
+                    title: completion.title,
+                    subtitle: resolvedSubtitle.isEmpty ? completion.subtitle : resolvedSubtitle,
+                    coordinate: coord
+                )
                 await MainActor.run {
-                    addressResults = results
-                    phase = .addresses
-                    isSearchingAddresses = false
+                    isResolvingAddress = false
+                    selectAddress(result)
                 }
-            } catch {
-                await MainActor.run {
-                    isSearchingAddresses = false
-                    if addressResults.isEmpty { phase = .addresses }
-                }
+            } else {
+                await MainActor.run { isResolvingAddress = false }
             }
         }
     }
