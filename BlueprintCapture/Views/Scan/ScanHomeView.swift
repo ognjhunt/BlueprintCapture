@@ -1,6 +1,7 @@
 import SwiftUI
 import FirebaseAuth
 import UIKit
+import CoreLocation
 
 struct ScanHomeView: View {
     @ObservedObject var glassesManager: GlassesCaptureManager
@@ -618,6 +619,7 @@ private struct DemoCapture: Identifiable {
     let payout: String
     let distance: String
     let estMinutes: Int
+    let coordinate: CLLocationCoordinate2D
     let gradientColors: [Color]
     let permission: String
     let permissionColor: Color
@@ -631,6 +633,7 @@ private struct DemoCapture: Identifiable {
             payout: "$45",
             distance: "0.3 mi",
             estMinutes: 25,
+            coordinate: CLLocationCoordinate2D(latitude: 37.7937, longitude: -122.3965),
             gradientColors: [Color(white: 0.18), Color(white: 0.1)],
             permission: "Approved",
             permissionColor: BlueprintTheme.successGreen
@@ -643,6 +646,7 @@ private struct DemoCapture: Identifiable {
             payout: "$60",
             distance: "0.8 mi",
             estMinutes: 35,
+            coordinate: CLLocationCoordinate2D(latitude: 37.7899, longitude: -122.4014),
             gradientColors: [Color(red: 0.12, green: 0.18, blue: 0.28), Color(white: 0.08)],
             permission: "Review",
             permissionColor: BlueprintTheme.brandTeal
@@ -655,6 +659,7 @@ private struct DemoCapture: Identifiable {
             payout: "$120",
             distance: "2.1 mi",
             estMinutes: 60,
+            coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.3886),
             gradientColors: [Color(red: 0.22, green: 0.14, blue: 0.08), Color(white: 0.08)],
             permission: "Special",
             permissionColor: Color(red: 0.9, green: 0.55, blue: 0.1)
@@ -667,27 +672,7 @@ private struct DemoFeaturedCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            // Gradient background (placeholder for real image)
-            LinearGradient(
-                colors: demo.gradientColors,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            // Grid pattern overlay for visual texture
-            Canvas { ctx, size in
-                let step: CGFloat = 28
-                var x: CGFloat = 0
-                while x < size.width {
-                    var y: CGFloat = 0
-                    while y < size.height {
-                        let rect = CGRect(x: x, y: y, width: 1, height: 1)
-                        ctx.fill(Path(rect), with: .color(.white.opacity(0.04)))
-                        y += step
-                    }
-                    x += step
-                }
-            }
+            CapturePreviewView(coordinate: demo.coordinate, remoteImageURL: nil)
 
             // Bottom gradient
             LinearGradient(
@@ -1052,25 +1037,7 @@ private struct DemoDetailSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero
                     ZStack(alignment: .top) {
-                        LinearGradient(
-                            colors: demo.gradientColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .frame(height: 320)
-
-                        Canvas { ctx, size in
-                            let step: CGFloat = 28
-                            var x: CGFloat = 0
-                            while x < size.width {
-                                var y: CGFloat = 0
-                                while y < size.height {
-                                    ctx.fill(Path(CGRect(x: x, y: y, width: 1, height: 1)), with: .color(.white.opacity(0.04)))
-                                    y += step
-                                }
-                                x += step
-                            }
-                        }
+                        CapturePreviewView(coordinate: demo.coordinate, remoteImageURL: nil)
                         .frame(height: 320)
 
                         LinearGradient(
