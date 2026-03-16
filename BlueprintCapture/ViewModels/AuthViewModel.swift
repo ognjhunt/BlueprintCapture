@@ -147,11 +147,17 @@ final class AuthViewModel: ObservableObject {
                 "approvedCaptures": 0,
                 "avgQuality": 0,
                 "totalEarnings": 0,
-                "availableBalance": 0
+                "availableBalance": 0,
+                "referralEarningsCents": 0,
+                "referralBonusCents": 0
             ]
         }
 
         try await userRef.setData(payload, merge: true)
+
+        // Guarantee every user has a referral code immediately after sign-up so they
+        // can share it right away without needing to open the referral dashboard first.
+        try? await ReferralService.shared.ensureReferralCode(userId: user.uid)
     }
 }
 

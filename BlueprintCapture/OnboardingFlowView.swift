@@ -5,11 +5,13 @@ import CoreLocation
 import UIKit
 import FirebaseAuth
 
-/// Onboarding flow — Kled AI style:
-/// Welcome → Invite Code → Auth → Permissions → Device → Tutorial → Connect Glasses → Done
+/// Onboarding flow:
+/// Welcome → Auth → Invite Code → Permissions → Device → Tutorial → Connect Glasses → Done
+/// Auth comes before invite code so the code lookup can require authentication,
+/// and the referral can be attributed immediately with the real user ID.
 struct OnboardingFlowView: View {
     enum Step: Int, CaseIterable {
-        case welcome, inviteCode, auth, permissions, deviceCapability, tutorial, connectGlasses, complete
+        case welcome, auth, inviteCode, permissions, deviceCapability, tutorial, connectGlasses, complete
     }
 
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
@@ -34,11 +36,11 @@ struct OnboardingFlowView: View {
             case .welcome:
                 OnboardingWelcomeView(onContinue: advance)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
-            case .inviteCode:
-                InviteCodeStepView(onContinue: advance)
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             case .auth:
                 AuthStepView(onContinue: advance)
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+            case .inviteCode:
+                InviteCodeStepView(onContinue: advance)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             case .permissions:
                 OnboardingPermissionsView(alertsManager: alertsManager, onContinue: advance)
@@ -130,7 +132,7 @@ private struct OnboardingWelcomeView: View {
     }
 }
 
-// MARK: - Step 2: Invite Code
+// MARK: - Step 3: Invite Code (shown after auth)
 
 private struct InviteCodeStepView: View {
     let onContinue: () -> Void
@@ -202,6 +204,13 @@ private struct InviteCodeStepView: View {
                                 codeInput = String(newValue.prefix(6))
                             }
                         }
+                        .onAppear {
+                            // Pre-fill from a deep link (?ref=CODE) that was captured before auth.
+                            let pending = pendingReferralCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !pending.isEmpty, codeInput.isEmpty {
+                                codeInput = pending
+                            }
+                        }
 
                     if let err = validationError {
                         Text(err)
@@ -247,8 +256,55 @@ private struct InviteCodeStepView: View {
             validationError = "Invalid code — must be 6 characters (A-Z, 0-9)."
             return
         }
-        pendingReferralCode = normalized
-        onContinue()
+        isValidating = true
+        Task {
+            do {
+                // Auth comes before this step, so we can attribute the referral
+                // immediately rather than deferring to sign-up.
+                if let currentUser = FirebaseAuth.Auth.auth().currentUser {
+                    let name = currentUser.displayName ?? currentUser.email ?? "Capturer"
+                    let result = try await ReferralService.shared.attributeReferral(
+                        code: normalized,
+                        newUserId: currentUser.uid,
+                        newUserName: name
+                    )
+                    await MainActor.run {
+                        isValidating = false
+                        switch result {
+                        case .attributed:
+                            pendingReferralCode = ""
+                            onContinue()
+                        case .invalidCode:
+                            validationError = "Code not found. Double-check with your friend and try again."
+                        case .selfReferral:
+                            validationError = "You can't use your own invite code."
+                        case .alreadyAttributed:
+                            // Already referred — just advance
+                            pendingReferralCode = ""
+                            onContinue()
+                        }
+                    }
+                } else {
+                    // Fallback: user somehow not signed in yet — validate code exists
+                    // and store for attribution after sign-up.
+                    let ownerId = try await ReferralService.shared.findUserByReferralCode(normalized)
+                    await MainActor.run {
+                        isValidating = false
+                        if ownerId != nil {
+                            pendingReferralCode = normalized
+                            onContinue()
+                        } else {
+                            validationError = "Code not found. Double-check with your friend and try again."
+                        }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isValidating = false
+                    validationError = "Couldn't verify code. Check your connection and try again."
+                }
+            }
+        }
     }
 }
 

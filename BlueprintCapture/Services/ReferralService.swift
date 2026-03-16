@@ -20,19 +20,29 @@ final class ReferralService {
     // MARK: - Referral Code
 
     /// Generates a referral code if the user doesn't have one.
+    /// Also writes to the `referralCodes/{code}` lookup collection for O(1) validation.
     func ensureReferralCode(userId: String) async throws -> String {
         let userRef = db.collection("users").document(userId)
         let snapshot = try await userRef.getDocument()
 
         if let existing = snapshot.data()?["referralCode"] as? String, !existing.isEmpty {
+            // Backfill lookup entry if missing (handles existing users pre-migration)
+            let lookupRef = db.collection("referralCodes").document(existing)
+            let lookupSnap = try await lookupRef.getDocument()
+            if !lookupSnap.exists {
+                try await lookupRef.setData(["ownerId": userId])
+            }
             return existing
         }
 
         let code = generateCode()
-        try await userRef.setData([
+        let batch = db.batch()
+        batch.setData([
             "referralCode": code,
             "updatedAt": FieldValue.serverTimestamp()
-        ], merge: true)
+        ], forDocument: userRef, merge: true)
+        batch.setData(["ownerId": userId], forDocument: db.collection("referralCodes").document(code))
+        try await batch.commit()
         return code
     }
 
@@ -154,13 +164,27 @@ final class ReferralService {
     }
 
     /// Looks up which user owns a given referral code.
+    /// Uses the `referralCodes/{code}` lookup collection for O(1) direct reads.
+    /// Falls back to a users query for codes created before the lookup collection was introduced.
     func findUserByReferralCode(_ code: String) async throws -> String? {
+        let lookupSnap = try await db.collection("referralCodes").document(code).getDocument()
+        if let ownerId = lookupSnap.data()?["ownerId"] as? String {
+            return ownerId
+        }
+
+        // Fallback: query users collection (handles pre-migration codes)
         let snapshot = try await db.collection("users")
             .whereField("referralCode", isEqualTo: code)
             .limit(to: 1)
             .getDocuments()
 
-        return snapshot.documents.first?.documentID
+        if let userId = snapshot.documents.first?.documentID {
+            // Backfill the lookup entry so future lookups are fast
+            try? await db.collection("referralCodes").document(code).setData(["ownerId": userId])
+            return userId
+        }
+
+        return nil
     }
 
     // MARK: - Private

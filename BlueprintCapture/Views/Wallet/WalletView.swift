@@ -377,8 +377,16 @@ struct WalletView: View {
                         .foregroundStyle(.white)
 
                     HStack(spacing: 16) {
-                        balanceStat(label: "Pending", value: viewModel.pendingPayout, color: BlueprintTheme.brandTeal)
+                        balanceStat(label: "Pending", value: viewModel.totalPending, color: BlueprintTheme.brandTeal)
                         balanceStat(label: "Scans", value: nil, intValue: viewModel.scansCompleted, color: Color(white: 0.55))
+                        if viewModel.referralEarningsCents > 0 || viewModel.referralBonusCents > 0 {
+                            let totalReferralCents = viewModel.referralEarningsCents + viewModel.referralBonusCents
+                            balanceStat(
+                                label: "Referrals",
+                                value: Decimal(totalReferralCents) / 100,
+                                color: BlueprintTheme.successGreen
+                            )
+                        }
                     }
                 }
             }

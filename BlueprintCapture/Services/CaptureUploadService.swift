@@ -6,6 +6,9 @@ import FirebaseStorage
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+#if canImport(FirebaseFirestore)
+import FirebaseFirestore
+#endif
 
 struct QualificationIntakePacket: Equatable, Codable {
     let schemaVersion: String
@@ -417,6 +420,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                         self.uploads[id] = latestRecord
                         self.subject.send(.progress(id: id, progress: 1.0))
                         self.subject.send(.completed(latestRecord.request))
+                        self.writeSubmissionRecord(for: latestRecord.request)
                         print("✅ [UploadService] Upload finished id=\(id)")
                     }
                     continuation.resume()
@@ -585,8 +589,41 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.uploads[id] = latestRecord
             self.subject.send(.progress(id: id, progress: 1.0))
             self.subject.send(.completed(latestRecord.request))
+            self.writeSubmissionRecord(for: latestRecord.request)
         }
         return true
+    }
+
+    /// Writes a `capture_submissions/{captureId}` document to Firestore when a capture
+    /// is successfully uploaded. This is the record the `onCaptureApproved` Cloud Function
+    /// watches — status starts as "submitted" and is updated to "approved"/"paid" by the
+    /// backend via the `updateCaptureStatus` Cloud Function.
+    private func writeSubmissionRecord(for request: CaptureUploadRequest) {
+        #if canImport(FirebaseFirestore)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        let db = Firestore.firestore()
+        let docRef = db.collection("capture_submissions").document(captureId)
+
+        let payload: [String: Any] = [
+            "capture_id": captureId,
+            "scene_id": sceneId,
+            "creator_id": request.metadata.creatorId,
+            "job_id": request.metadata.jobId,
+            "status": "submitted",
+            "payout_cents": request.metadata.quotedPayoutCents ?? 0,
+            "capture_source": request.metadata.captureSource.rawValue,
+            "submitted_at": Timestamp(date: request.metadata.uploadedAt ?? Date()),
+            "created_at": Timestamp(date: Date())
+        ]
+        docRef.setData(payload, merge: true) { error in
+            if let error = error {
+                print("⚠️ [UploadService] Failed to write capture_submissions record: \(error.localizedDescription)")
+            } else {
+                print("✅ [UploadService] capture_submissions/\(captureId) written")
+            }
+        }
+        #endif
     }
 
     private func contentType(for url: URL) -> String {

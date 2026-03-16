@@ -1,0 +1,81 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ─── Users ──────────────────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      // Clients may update their own non-financial fields.
+      // Financial fields (stats.availableBalance, stats.totalEarnings, etc.)
+      // are written only by Cloud Functions via the Admin SDK, which bypasses
+      // these rules entirely.
+      allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+            .hasAny(['stats']);
+
+      // Referral sub-collection: owner reads only; writes are server-side only.
+      match /referrals/{referredUserId} {
+        allow read: if isOwner(userId);
+        allow write: if false;
+      }
+    }
+
+    // ─── Referral code lookup ────────────────────────────────────────────────
+    // Auth comes before the invite code step, so any authenticated user can
+    // look up whether a code is valid. Unauthenticated enumeration is blocked.
+    match /referralCodes/{code} {
+      allow read: if isSignedIn();
+      allow write: if false; // written only by server (Admin SDK)
+    }
+
+    // ─── Capture jobs (curated opportunities) ───────────────────────────────
+    match /capture_jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ─── Capture submissions ─────────────────────────────────────────────────
+    // Clients may create their own submissions and read their own.
+    // Status transitions (approved, paid, etc.) and payout fields are
+    // written only by backend services via the Admin SDK.
+    match /capture_submissions/{captureId} {
+      allow read: if isSignedIn()
+        && resource.data.creator_id == request.auth.uid;
+      allow create: if isOwner(request.resource.data.creator_id)
+        && !request.resource.data.keys().hasAny([
+          'status', 'payout_cents', 'referralBonusProcessedAt'
+        ]);
+      allow update: if false; // backend only
+    }
+
+    // ─── Reservations ───────────────────────────────────────────────────────
+    match /reservations/{targetId} {
+      allow read, write: if isOwner(resource.data.userId)
+        || isOwner(request.resource.data.userId);
+    }
+
+    // ─── Target state ───────────────────────────────────────────────────────
+    match /target_state/{targetId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ─── Sessions ───────────────────────────────────────────────────────────
+    match /sessions/{sessionId} {
+      allow read, write: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+    }
+  }
+}

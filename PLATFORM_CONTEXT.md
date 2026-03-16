@@ -70,21 +70,23 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 ```
 
-and publishes the handoff to Pub/Sub.
+and publishes the handoff to the `blueprint-capture-pipeline-handoff` Pub/Sub topic, which triggers the pipeline Cloud Run job.
 
 ## Current Default Product Behavior
 
-The current phone and glasses flows default to requesting:
+The current phone and glasses flows request:
 
 - `qualification`
 - `preview_simulation`
+- `deeper_evaluation` (automatically co-requested whenever `preview_simulation` is present)
 
 That means the default product intent today is:
 
 - upload evidence for qualification
-- prepare for privacy-safe World Labs preview generation downstream
+- trigger privacy redaction (SAM3/VIP) and World Labs Marble world generation
+- prepare evaluation artifacts for hosted-runtime readiness
 
-It does not, by default, request the deeper hosted-runtime lane.
+Every capture from either device goes through the full pipeline end-to-end: qualification → GPU privacy → World Labs → automatic web app surfacing.
 
 ## Important Boundary
 
@@ -99,11 +101,7 @@ This repo should be understood as:
 
 The upload service finalizes the bundle and writes the completion marker as part of the raw upload layout.
 
-Downstream systems then pick up the capture through:
-
-- raw upload completion
-- capture descriptor materialization
-- bridge-produced handoff payloads
+Downstream systems pick up the capture through the bridge-produced handoff on `blueprint-capture-pipeline-handoff` (primary). The storage trigger also routes raw upload completions to the same topic as a secondary path, so both flows converge on the same pipeline dispatcher.
 
 ## Practical Rule For Agents In This Repo
 
