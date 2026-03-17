@@ -2,6 +2,7 @@ import SwiftUI
 import FirebaseAuth
 import UIKit
 import CoreLocation
+import MapKit
 
 struct ScanHomeView: View {
     @ObservedObject var glassesManager: GlassesCaptureManager
@@ -20,6 +21,7 @@ struct ScanHomeView: View {
     @State private var showingStripeOnboarding = false
     @State private var selectedDemo: DemoCapture?
     @State private var showingSearch = false
+    @State private var nearbyPOIs: [DemoCapture] = []
 
     init(
         glassesManager: GlassesCaptureManager,
@@ -127,6 +129,10 @@ struct ScanHomeView: View {
         .task {
             viewModel.onAppear()
             await refreshPayoutsReady()
+        }
+        .onChange(of: viewModel.currentLocation) { _, loc in
+            guard let loc, nearbyPOIs.isEmpty else { return }
+            Task { await loadNearbyPOIs(near: loc) }
         }
         .onDisappear { viewModel.onDisappear() }
     }
@@ -246,10 +252,11 @@ struct ScanHomeView: View {
                     .padding(.horizontal, 20)
             case .loaded:
                 if featuredItems.isEmpty {
-                    // Show demo placeholder cards so the feed never looks dead
+                    // Show nearby POI cards (real locations) or static fallback
+                    let placeholders = nearbyPOIs.isEmpty ? DemoCapture.samples : nearbyPOIs
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
-                            ForEach(DemoCapture.samples) { demo in
+                            ForEach(placeholders) { demo in
                                 Button { selectedDemo = demo } label: {
                                     DemoFeaturedCard(demo: demo)
                                         .frame(width: 280)
@@ -608,6 +615,82 @@ struct ScanHomeView: View {
             payoutsReady = false
         }
     }
+
+    // MARK: - Nearby POI Loading
+
+    private func loadNearbyPOIs(near userLocation: CLLocation) async {
+        let region = MKCoordinateRegion(
+            center: userLocation.coordinate,
+            latitudinalMeters: 4000,
+            longitudinalMeters: 4000
+        )
+        let categories: [MKPointOfInterestCategory] = [
+            .store, .hotel, .parking,
+            .fitnessCenter, .museum, .stadium, .publicTransport,
+            .library, .theater, .movieTheater, .university
+        ]
+        let request = MKLocalSearch.Request()
+        request.region = region
+        request.resultTypes = .pointOfInterest
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: categories)
+
+        guard let response = try? await MKLocalSearch(request: request).start() else { return }
+
+        let results: [DemoCapture] = response.mapItems.prefix(8).compactMap { item in
+            guard let name = item.name else { return nil }
+            let coord = item.placemark.coordinate
+            let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
+            let distMiles = userLocation.distance(from: itemLoc) / 1609.34
+
+            let street = item.placemark.thoroughfare.map { "\($0) · " } ?? ""
+            let city = item.placemark.locality ?? item.placemark.administrativeArea ?? ""
+            let addressLine = "\(street)\(city)".trimmingCharacters(in: .whitespaces)
+
+            let (category, payout, minutes, colors) = poiMetadata(for: item.pointOfInterestCategory)
+
+            return DemoCapture(
+                id: "poi_\(coord.latitude)_\(coord.longitude)",
+                title: name,
+                address: addressLine.isEmpty ? (item.placemark.title ?? name) : addressLine,
+                category: category,
+                payout: payout,
+                distance: String(format: "%.1f mi", distMiles),
+                estMinutes: minutes,
+                coordinate: coord,
+                gradientColors: colors,
+                permission: "Review",
+                permissionColor: BlueprintTheme.brandTeal
+            )
+        }
+        nearbyPOIs = results
+    }
+
+    private func poiMetadata(for category: MKPointOfInterestCategory?) -> (String, String, Int, [Color]) {
+        switch category {
+        case .store:
+            return ("RETAIL", "$40", 25, [Color(red: 0.1, green: 0.18, blue: 0.28), Color(white: 0.08)])
+        case .hotel:
+            return ("HOSPITALITY", "$80", 40, [Color(red: 0.08, green: 0.16, blue: 0.2), Color(white: 0.08)])
+        case .parking:
+            return ("PARKING", "$30", 20, [Color(red: 0.18, green: 0.16, blue: 0.1), Color(white: 0.08)])
+        case .fitnessCenter:
+            return ("FITNESS", "$45", 30, [Color(red: 0.12, green: 0.2, blue: 0.14), Color(white: 0.08)])
+        case .museum:
+            return ("CULTURAL", "$65", 40, [Color(red: 0.18, green: 0.12, blue: 0.2), Color(white: 0.08)])
+        case .stadium:
+            return ("VENUE", "$120", 60, [Color(red: 0.2, green: 0.14, blue: 0.08), Color(white: 0.08)])
+        case .publicTransport:
+            return ("TRANSIT", "$50", 30, [Color(red: 0.08, green: 0.18, blue: 0.16), Color(white: 0.08)])
+        case .library:
+            return ("LIBRARY", "$35", 25, [Color(red: 0.12, green: 0.14, blue: 0.2), Color(white: 0.08)])
+        case .theater, .movieTheater:
+            return ("THEATER", "$90", 50, [Color(red: 0.2, green: 0.08, blue: 0.14), Color(white: 0.08)])
+        case .university:
+            return ("CAMPUS", "$55", 35, [Color(red: 0.1, green: 0.16, blue: 0.12), Color(white: 0.08)])
+        default:
+            return ("COMMERCIAL", "$45", 30, [Color(white: 0.18), Color(white: 0.1)])
+        }
+    }
 }
 
 // MARK: - Demo Placeholder Data
@@ -726,10 +809,10 @@ private struct DemoFeaturedCard: View {
                 }
 
                 HStack {
-                    Text("Review-only sample")
+                    Text(demo.id.hasPrefix("poi_") ? "Nearby · Tap to submit" : "Review-only sample")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color(white: 0.5))
-                    Image(systemName: "clock.arrow.circlepath")
+                    Image(systemName: demo.id.hasPrefix("poi_") ? "arrow.up.circle" : "clock.arrow.circlepath")
                         .font(.caption)
                         .foregroundStyle(Color(white: 0.4))
                 }

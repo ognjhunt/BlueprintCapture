@@ -24,22 +24,26 @@ import app.blueprint.capture.ui.theme.BlueprintTextMuted
 
 @Composable
 fun OnboardingScreen(
+    hasBackend: Boolean,
+    hasStripe: Boolean,
+    hasPlaces: Boolean,
     onContinue: () -> Unit,
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BlueprintBlack)
-            .padding(20.dp),
+            .padding(horizontal = 24.dp, vertical = 28.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Text("Blueprint Capture")
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("Get paid to\nscan spaces")
             Text(
-                "Android foundation for the same evidence-capture workflow: onboarding, auth, scan, wallet, profile, Android phone capture, and later Meta glasses parity.",
+                "Capture spaces for Blueprint review. We check rights, coverage, and quality before anything moves downstream.",
                 color = BlueprintTextMuted,
             )
             Column(
@@ -47,13 +51,25 @@ fun OnboardingScreen(
                     .fillMaxWidth()
                     .background(BlueprintSurfaceRaised, RoundedCornerShape(24.dp))
                     .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Port status")
-                Text("Firebase registered")
-                Text("Compose shell live")
-                Text("Android phone capture bundle contract live")
-                Text("Glasses support queued behind physical-device testing", color = BlueprintTextMuted)
+                Text("What this Android build already matches")
+                FeatureLine("Nearby spaces and approved opportunities")
+                FeatureLine("Rights and policy checks before reuse")
+                FeatureLine("Payouts only after review approval")
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(BlueprintSurfaceRaised, RoundedCornerShape(24.dp))
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text("Current device readiness")
+                StatusLine("Firebase auth", true)
+                StatusLine("Backend config", hasBackend)
+                StatusLine("Stripe config", hasStripe)
+                StatusLine("Places config", hasPlaces)
             }
             Spacer(modifier = Modifier.height(8.dp))
             Button(
@@ -64,8 +80,24 @@ fun OnboardingScreen(
                 ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Continue")
+                Text("Get Started")
             }
         }
     }
+}
+
+@Composable
+private fun FeatureLine(text: String) {
+    Text(text, color = BlueprintTextMuted)
+}
+
+@Composable
+private fun StatusLine(
+    label: String,
+    ready: Boolean,
+) {
+    Text(
+        text = "$label · ${if (ready) "Ready" else "Still local-only"}",
+        color = BlueprintTextMuted,
+    )
 }

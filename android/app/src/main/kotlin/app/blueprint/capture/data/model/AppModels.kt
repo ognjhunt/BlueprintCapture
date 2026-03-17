@@ -1,5 +1,17 @@
 package app.blueprint.capture.data.model
 
+enum class RootStage {
+    Onboarding,
+    Auth,
+    App,
+}
+
+enum class MainTab {
+    Scan,
+    Wallet,
+    Profile,
+}
+
 data class ScanTarget(
     val id: String,
     val title: String,
@@ -13,6 +25,29 @@ data class UploadQueueItem(
     val id: String,
     val label: String,
     val progress: Float,
+)
+
+data class ContributorStats(
+    val totalCaptures: Int,
+    val approvedCaptures: Int,
+    val averageQuality: Int,
+    val totalEarningsCents: Int,
+    val availableBalanceCents: Int,
+    val referralEarningsCents: Int,
+    val referralBonusCents: Int,
+) {
+    val approvalRatePercent: Int =
+        if (totalCaptures == 0) 0 else ((approvedCaptures.toFloat() / totalCaptures.toFloat()) * 100).toInt()
+}
+
+data class ContributorProfile(
+    val uid: String,
+    val name: String,
+    val email: String,
+    val phoneNumber: String,
+    val company: String,
+    val role: String,
+    val stats: ContributorStats,
 )
 
 object DemoData {
@@ -49,5 +84,23 @@ object DemoData {
             label = "North Beach Grocery",
             progress = 0.58f,
         )
+    )
+
+    val contributorProfile = ContributorProfile(
+        uid = "demo-user",
+        name = "Jordan Smith",
+        email = "jordan@example.com",
+        phoneNumber = "",
+        company = "Blueprint Capture",
+        role = "capturer",
+        stats = ContributorStats(
+            totalCaptures = 12,
+            approvedCaptures = 10,
+            averageQuality = 87,
+            totalEarningsCents = 58200,
+            availableBalanceCents = 14800,
+            referralEarningsCents = 2400,
+            referralBonusCents = 1000,
+        ),
     )
 }

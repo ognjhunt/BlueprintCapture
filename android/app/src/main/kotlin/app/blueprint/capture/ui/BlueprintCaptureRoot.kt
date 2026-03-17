@@ -21,16 +21,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.config.LocalConfigProvider
-import app.blueprint.capture.data.model.DemoData
+import app.blueprint.capture.data.model.MainTab
+import app.blueprint.capture.data.model.RootStage
 import app.blueprint.capture.ui.components.UploadQueueOverlay
 import app.blueprint.capture.ui.screens.AuthScreen
 import app.blueprint.capture.ui.screens.OnboardingScreen
@@ -40,40 +38,35 @@ import app.blueprint.capture.ui.screens.WalletScreen
 import app.blueprint.capture.ui.theme.BlueprintBlack
 import app.blueprint.capture.ui.theme.BlueprintSurface
 
-private enum class RootStage {
-    Onboarding,
-    Auth,
-    App,
-}
-
-private enum class MainTab {
-    Scan,
-    Wallet,
-    Profile,
-}
-
 @Composable
 fun BlueprintCaptureRoot(
     configProvider: LocalConfigProvider = LocalConfigProvider(),
+    rootViewModel: BlueprintCaptureRootViewModel = hiltViewModel(),
 ) {
-    val config = remember { configProvider.current() }
-    var rootStage by rememberSaveable { mutableStateOf(RootStage.Onboarding) }
-    var selectedTab by rememberSaveable { mutableStateOf(MainTab.Scan) }
-    val uploads = remember { mutableStateListOf(*DemoData.uploadQueue.toTypedArray()) }
+    val config = configProvider.current()
+    val rootState by rootViewModel.uiState.collectAsState()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = BlueprintBlack,
     ) {
-        Crossfade(targetState = rootStage, label = "root-stage") { stage ->
+        Crossfade(targetState = rootState.stage, label = "root-stage") { stage ->
             when (stage) {
                 RootStage.Onboarding -> OnboardingScreen(
-                    onContinue = { rootStage = RootStage.Auth },
+                    hasBackend = config.hasBackend,
+                    hasStripe = config.hasStripe,
+                    hasPlaces = config.hasPlaces,
+                    onContinue = rootViewModel::completeOnboarding,
                 )
+
                 RootStage.Auth -> AuthScreen(
-                    configSummary = "Firebase ${if (config.hasBackend) "and backend ready" else "ready; backend URL still empty"}",
-                    onAuthenticated = { rootStage = RootStage.App },
+                    configSummary = if (config.hasBackend) {
+                        "Firebase auth is live and backend config is present for creator APIs."
+                    } else {
+                        "Firebase auth is live. Add backend config to unlock creator APIs and payouts."
+                    },
                 )
+
                 RootStage.App -> {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
@@ -84,8 +77,8 @@ fun BlueprintCaptureRoot(
                                 tonalElevation = 0.dp,
                             ) {
                                 NavigationBarItem(
-                                    selected = selectedTab == MainTab.Scan,
-                                    onClick = { selectedTab = MainTab.Scan },
+                                    selected = rootState.selectedTab == MainTab.Scan,
+                                    onClick = { rootViewModel.selectTab(MainTab.Scan) },
                                     icon = {
                                         Icon(
                                             imageVector = Icons.Rounded.MyLocation,
@@ -96,8 +89,8 @@ fun BlueprintCaptureRoot(
                                     label = { Text("Scan") },
                                 )
                                 NavigationBarItem(
-                                    selected = selectedTab == MainTab.Wallet,
-                                    onClick = { selectedTab = MainTab.Wallet },
+                                    selected = rootState.selectedTab == MainTab.Wallet,
+                                    onClick = { rootViewModel.selectTab(MainTab.Wallet) },
                                     icon = {
                                         Icon(
                                             imageVector = Icons.Rounded.CreditCard,
@@ -108,8 +101,8 @@ fun BlueprintCaptureRoot(
                                     label = { Text("Wallet") },
                                 )
                                 NavigationBarItem(
-                                    selected = selectedTab == MainTab.Profile,
-                                    onClick = { selectedTab = MainTab.Profile },
+                                    selected = rootState.selectedTab == MainTab.Profile,
+                                    onClick = { rootViewModel.selectTab(MainTab.Profile) },
                                     icon = {
                                         Icon(
                                             imageVector = Icons.Rounded.AccountCircle,
@@ -128,29 +121,16 @@ fun BlueprintCaptureRoot(
                                 .padding(padding)
                                 .background(BlueprintBlack),
                         ) {
-                            AnimatedContent(targetState = selectedTab, label = "tab-content") { tab ->
+                            AnimatedContent(targetState = rootState.selectedTab, label = "tab-content") { tab ->
                                 when (tab) {
                                     MainTab.Scan -> ScanScreen(
-                                        targets = DemoData.scanTargets,
-                                        configSummary = config.backendBaseUrl.ifBlank { "Backend URL not set yet" },
-                                        onStartCapture = {
-                                            if (uploads.none { item -> item.id == "upload-new" }) {
-                                                uploads.add(
-                                                    0,
-                                                    DemoData.uploadQueue.first().copy(
-                                                        id = "upload-new",
-                                                        label = "Android phone capture",
-                                                        progress = 0.12f,
-                                                    ),
-                                                )
-                                            }
+                                        onStartCapture = { label ->
+                                            rootViewModel.queueCapture(label)
                                         },
                                     )
-                                    MainTab.Wallet -> WalletScreen(hasBackend = config.hasBackend)
-                                    MainTab.Profile -> ProfileScreen(
-                                        packageName = "Public.BlueprintCapture.Android",
-                                        firebaseProject = "blueprint-8c1ca",
-                                    )
+
+                                    MainTab.Wallet -> WalletScreen()
+                                    MainTab.Profile -> ProfileScreen()
                                 }
                             }
 
@@ -160,13 +140,7 @@ fun BlueprintCaptureRoot(
                                     .padding(horizontal = 20.dp, vertical = 16.dp),
                                 verticalArrangement = Arrangement.Bottom,
                             ) {
-                                UploadQueueOverlay(items = uploads)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 12.dp)
-                                        .background(BlueprintSurface),
-                                )
+                                UploadQueueOverlay(items = rootState.uploads)
                             }
                         }
                     }

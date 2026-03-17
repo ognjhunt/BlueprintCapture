@@ -15,8 +15,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -26,10 +29,11 @@ import app.blueprint.capture.ui.theme.BlueprintTextMuted
 
 @Composable
 fun ScanScreen(
-    targets: List<ScanTarget>,
-    configSummary: String,
-    onStartCapture: () -> Unit,
+    onStartCapture: (String) -> Unit,
+    viewModel: ScanViewModel = hiltViewModel(),
 ) {
+    val state by viewModel.uiState.collectAsState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -39,22 +43,32 @@ fun ScanScreen(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Captures")
-            Text("Android phone capture ships valid video-first while backend tiering stays video-only.", color = BlueprintTextMuted)
+            Text(
+                "Capture spaces for Blueprint review. Android now reads curated opportunities and contributor context from Firebase like the iOS home feed.",
+                color = BlueprintTextMuted,
+            )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             BannerCard(
                 modifier = Modifier.weight(1f),
-                title = "Backend",
-                body = configSummary,
+                title = "Creator",
+                body = state.userName.ifBlank { "Signed-in contributor" },
             )
             BannerCard(
                 modifier = Modifier.weight(1f),
-                title = "Capture source",
-                body = "android_phone",
+                title = "Backend",
+                body = state.configSummary,
             )
         }
+        BannerCard(
+            title = "Feed status",
+            body = state.feedSummary,
+        )
         Button(
-            onClick = onStartCapture,
+            onClick = {
+                val label = state.targets.firstOrNull()?.title ?: "Android phone capture"
+                onStartCapture(label)
+            },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(
                 containerColor = BlueprintAccent,
@@ -66,7 +80,7 @@ fun ScanScreen(
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(targets) { target ->
+            items(state.targets, key = ScanTarget::id) { target ->
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -74,14 +88,23 @@ fun ScanScreen(
                         .padding(16.dp),
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
                             Text(target.title)
                             Text(target.payoutText)
                         }
                         Text(target.subtitle, color = BlueprintTextMuted)
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
                             Text(target.distanceText, color = BlueprintTextMuted)
-                            Text(if (target.readyNow) "Ready now" else "Needs review", color = BlueprintTextMuted)
+                            Text(
+                                if (target.readyNow) "Ready now" else "Needs review",
+                                color = BlueprintTextMuted,
+                            )
                         }
                     }
                 }
