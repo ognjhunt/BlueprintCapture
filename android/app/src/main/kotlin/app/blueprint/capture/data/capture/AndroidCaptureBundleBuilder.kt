@@ -68,12 +68,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             owner = request.intakePacket?.owner ?: request.owner,
             operatorNotes = request.operatorNotes,
         )
-        val hypothesis = TaskHypothesis(
-            workflowName = request.intakePacket?.workflowName ?: request.workflowName,
-            taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
-            zone = request.intakePacket?.zone ?: request.zone,
-            owner = request.intakePacket?.owner ?: request.owner,
-        )
+        val hypothesis = request.taskHypothesis ?: request.synthesizedTaskHypothesis()
         val completion = UploadComplete(
             sceneId = request.sceneId,
             captureId = request.captureId,

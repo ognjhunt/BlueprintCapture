@@ -2,6 +2,7 @@ package app.blueprint.capture.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.blueprint.capture.data.model.CaptureLaunch
@@ -77,6 +79,7 @@ fun CaptureSessionScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
     val reviewDraft = uiState.reviewDraft
+    val isBusy = uiState.actionState != FinishedCaptureActionState.Idle
 
     var permissionsGranted by remember { mutableStateOf(hasCapturePermissions(context)) }
     var cameraError by remember { mutableStateOf<String?>(null) }
@@ -106,7 +109,7 @@ fun CaptureSessionScreen(
     }
 
     BackHandler {
-        if (!isRecording && !uiState.isPackaging) {
+        if (!isRecording && !isBusy) {
             closeSession()
         }
     }
@@ -128,6 +131,12 @@ fun CaptureSessionScreen(
         if (uiState.queuedUploadId != null || uiState.savedUploadId != null) {
             onClose()
         }
+    }
+
+    LaunchedEffect(uiState.exportSharePath) {
+        val exportSharePath = uiState.exportSharePath ?: return@LaunchedEffect
+        shareExportArtifact(context, File(exportSharePath))
+        viewModel.consumeExportShare()
     }
 
     DisposableEffect(permissionsGranted, lifecycleOwner, previewView) {
@@ -203,9 +212,15 @@ fun CaptureSessionScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("Phone Capture")
-                    if (!isRecording && !uiState.isPackaging) {
+                    if (!isRecording && !isBusy) {
                         OutlinedButton(onClick = ::closeSession) {
-                            Text(if (reviewDraft != null) "Discard" else "Close")
+                            Text(
+                                when {
+                                    uiState.exportMessage != null -> "Done"
+                                    reviewDraft != null -> "Discard"
+                                    else -> "Close"
+                                },
+                            )
                         }
                     }
                 }
@@ -219,11 +234,11 @@ fun CaptureSessionScreen(
                             }
 
                             reviewDraft != null -> {
-                                "Review the finished capture, confirm structured intake, then choose whether to upload now or save the bundle for later."
+                                "Review the finished capture, run intake resolution, then decide whether to export, upload now, or save for later."
                             }
 
                             else -> {
-                                "Record the walkthrough first. Android now stops in a real post-capture review stage instead of jumping straight into queueing."
+                                "Record the walkthrough first. Android now holds the finished capture in-session instead of dropping straight into queueing."
                             }
                         },
                         color = BlueprintTextMuted,
@@ -244,6 +259,13 @@ fun CaptureSessionScreen(
                         OutlinedButton(onClick = viewModel::clearError) {
                             Text("Dismiss")
                         }
+                    }
+                }
+
+                uiState.exportMessage?.let { message ->
+                    SurfaceCard {
+                        Text("Export ready")
+                        Text(message, color = BlueprintTextMuted)
                     }
                 }
             }
@@ -275,14 +297,16 @@ fun CaptureSessionScreen(
                     reviewDraft != null -> {
                         ReviewPanel(
                             draft = reviewDraft,
-                            isPackaging = uiState.isPackaging,
+                            actionState = uiState.actionState,
+                            exportMessage = uiState.exportMessage,
                             onWorkflowNameChanged = viewModel::updateWorkflowName,
                             onTaskStepsChanged = viewModel::updateTaskSteps,
                             onZoneChanged = viewModel::updateZone,
                             onOwnerChanged = viewModel::updateOwner,
                             onNotesChanged = viewModel::updateReviewNotes,
-                            onUploadNow = { viewModel.packageCapture(startImmediately = true) },
-                            onSaveForLater = { viewModel.packageCapture(startImmediately = false) },
+                            onUploadNow = viewModel::queueUploadNow,
+                            onSaveForLater = viewModel::saveForLater,
+                            onExportForTesting = viewModel::exportForTesting,
                         )
                     }
 
@@ -330,7 +354,7 @@ fun CaptureSessionScreen(
                                     }
                                 }
                             },
-                            enabled = videoCapture != null && !uiState.isPackaging,
+                            enabled = videoCapture != null && !isBusy,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BlueprintAccent,
@@ -344,7 +368,7 @@ fun CaptureSessionScreen(
                     else -> {
                         Button(
                             onClick = { recording?.stop() },
-                            enabled = !uiState.isPackaging,
+                            enabled = !isBusy,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BlueprintAccent,
@@ -383,18 +407,11 @@ private fun SessionStatusCard(
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (permissionsGranted) "Permissions ready" else "Permissions missing")
-                Text(
-                    when {
-                        uiState.isPackaging -> "Packaging bundle"
-                        uiState.reviewDraft != null -> "Structured intake required"
-                        else -> "Review and queueing happens after recording"
-                    },
-                    color = BlueprintTextMuted,
-                )
+                Text(statusLabel(uiState), color = BlueprintTextMuted)
             }
         }
 
-        if (uiState.isPackaging) {
+        if (uiState.actionState != FinishedCaptureActionState.Idle) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -408,7 +425,8 @@ private fun SessionStatusCard(
 @Composable
 private fun ReviewPanel(
     draft: CaptureReviewDraft,
-    isPackaging: Boolean,
+    actionState: FinishedCaptureActionState,
+    exportMessage: String?,
     onWorkflowNameChanged: (String) -> Unit,
     onTaskStepsChanged: (String) -> Unit,
     onZoneChanged: (String) -> Unit,
@@ -416,7 +434,10 @@ private fun ReviewPanel(
     onNotesChanged: (String) -> Unit,
     onUploadNow: () -> Unit,
     onSaveForLater: () -> Unit,
+    onExportForTesting: () -> Unit,
 ) {
+    val isBusy = actionState != FinishedCaptureActionState.Idle
+
     SurfaceCard {
         Column(
             modifier = Modifier
@@ -424,11 +445,8 @@ private fun ReviewPanel(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("Post-Capture Review")
-            Text(
-                "Confirm the workflow details before Android packages this bundle. This mirrors the iOS rule that structured intake must exist before submission.",
-                color = BlueprintTextMuted,
-            )
+            Text(draft.reviewTitle)
+            Text(draft.helperText, color = BlueprintTextMuted)
 
             DetailRow("Duration", formatDurationMs(draft.captureDurationMs))
             DetailRow("Resolution", "${draft.width} x ${draft.height}")
@@ -443,6 +461,12 @@ private fun ReviewPanel(
             draft.capture.rightsProfile?.takeIf(String::isNotBlank)?.let { rightsProfile ->
                 DetailRow("Rights profile", rightsProfile.replace('_', ' '))
             }
+            draft.intakeMetadata?.let { metadata ->
+                DetailRow("Intake source", metadata.source.name.lowercase(Locale.US).replace('_', ' '))
+                metadata.confidence?.let { confidence ->
+                    DetailRow("Inference confidence", "${(confidence * 100).roundToInt()}%")
+                }
+            }
 
             OutlinedTextField(
                 value = draft.workflowName,
@@ -450,7 +474,7 @@ private fun ReviewPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Workflow name") },
                 singleLine = true,
-                enabled = !isPackaging,
+                enabled = !isBusy,
             )
             OutlinedTextField(
                 value = draft.taskStepsText,
@@ -458,7 +482,7 @@ private fun ReviewPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Task steps") },
                 minLines = 3,
-                enabled = !isPackaging,
+                enabled = !isBusy,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -470,7 +494,7 @@ private fun ReviewPanel(
                     modifier = Modifier.weight(1f),
                     label = { Text("Zone") },
                     singleLine = true,
-                    enabled = !isPackaging,
+                    enabled = !isBusy,
                 )
                 OutlinedTextField(
                     value = draft.owner,
@@ -478,7 +502,7 @@ private fun ReviewPanel(
                     modifier = Modifier.weight(1f),
                     label = { Text("Owner") },
                     singleLine = true,
-                    enabled = !isPackaging,
+                    enabled = !isBusy,
                 )
             }
             OutlinedTextField(
@@ -487,14 +511,14 @@ private fun ReviewPanel(
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Capture notes") },
                 minLines = 3,
-                enabled = !isPackaging,
+                enabled = !isBusy,
             )
 
             Text(
-                if (draft.isStructuredIntakeComplete) {
-                    "Structured intake complete. You can queue the upload now or save the bundle on-device."
-                } else {
-                    "Enter workflow details, at least one task step, and either a zone or owner to continue."
+                when {
+                    exportMessage != null -> exportMessage
+                    draft.isStructuredIntakeComplete -> "Structured intake is ready. You can export this bundle for testing or send it into the Android upload queue."
+                    else -> "If intake is incomplete, Android will try to infer it from capture context and ask you to confirm anything uncertain."
                 },
                 color = BlueprintTextMuted,
             )
@@ -506,7 +530,7 @@ private fun ReviewPanel(
                 Button(
                     onClick = onUploadNow,
                     modifier = Modifier.weight(1f),
-                    enabled = draft.isStructuredIntakeComplete && !isPackaging,
+                    enabled = !isBusy,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BlueprintAccent,
                         contentColor = BlueprintBlack,
@@ -517,10 +541,17 @@ private fun ReviewPanel(
                 OutlinedButton(
                     onClick = onSaveForLater,
                     modifier = Modifier.weight(1f),
-                    enabled = draft.isStructuredIntakeComplete && !isPackaging,
+                    enabled = !isBusy,
                 ) {
                     Text("Upload later")
                 }
+            }
+            OutlinedButton(
+                onClick = onExportForTesting,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isBusy,
+            ) {
+                Text("Export for testing")
             }
         }
     }
@@ -579,6 +610,42 @@ private fun formatPayout(cents: Int): String {
     val dollars = cents / 100
     val remainder = cents % 100
     return "$$dollars.${remainder.toString().padStart(2, '0')}"
+}
+
+private fun statusLabel(uiState: CaptureSessionUiState): String {
+    return when (uiState.actionState) {
+        FinishedCaptureActionState.Idle -> {
+            when {
+                uiState.reviewDraft != null -> "Ready for intake, export, or submission"
+                else -> "Review and queueing happens after recording"
+            }
+        }
+
+        FinishedCaptureActionState.GeneratingIntake -> "Generating intake"
+        FinishedCaptureActionState.QueueingUpload -> "Queueing upload"
+        FinishedCaptureActionState.SavingForLater -> "Saving bundle locally"
+        FinishedCaptureActionState.Exporting -> "Preparing export bundle"
+    }
+}
+
+private fun shareExportArtifact(
+    context: Context,
+    artifact: File,
+) {
+    if (!artifact.exists()) return
+    val uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        artifact,
+    )
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/zip"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(
+        Intent.createChooser(intent, "Share capture export").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+    )
 }
 
 private val REQUIRED_CAPTURE_PERMISSIONS = arrayOf(

@@ -15,12 +15,15 @@ import androidx.work.workDataOf
 import app.blueprint.capture.data.model.UploadQueueItem
 import app.blueprint.capture.data.model.UploadQueueStatus
 import app.blueprint.capture.data.util.awaitResult
+import com.google.firebase.FirebaseException
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageMetadata
 import com.google.firebase.storage.StorageReference
+import com.google.firebase.storage.StorageException
 import java.io.File
 import java.util.Date
 import java.util.concurrent.TimeUnit
@@ -231,7 +234,13 @@ class CaptureUploadRepository @Inject constructor(
                 queueAutomaticRetry(id, runAttemptCount, "Upload interrupted.")
             }
         } catch (error: Exception) {
-            queueAutomaticRetry(id, runAttemptCount, error.message ?: "Upload failed.")
+            val permanentMessage = permanentFailureMessage(error)
+            if (permanentMessage != null) {
+                markFailed(id, permanentMessage)
+                CaptureUploadWorkOutcome.Failure
+            } else {
+                queueAutomaticRetry(id, runAttemptCount, error.message ?: "Upload failed.")
+            }
         }
     }
 
@@ -623,6 +632,38 @@ class CaptureUploadRepository @Inject constructor(
     }
 
     private fun uniqueWorkName(id: String): String = "$WORK_TAG-$id"
+
+    private fun permanentFailureMessage(error: Exception): String? {
+        return when (error) {
+            is FirebaseFirestoreException -> {
+                if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    "Upload reached submission registration, but this account does not have permission to create capture submissions."
+                } else {
+                    null
+                }
+            }
+
+            is StorageException -> {
+                when (error.errorCode) {
+                    StorageException.ERROR_NOT_AUTHENTICATED,
+                    StorageException.ERROR_NOT_AUTHORIZED,
+                    -> "Upload is not authorized for the current account."
+
+                    else -> null
+                }
+            }
+
+            is FirebaseException -> {
+                if ((error.message ?: "").contains("Missing or insufficient permissions", ignoreCase = true)) {
+                    "Upload is blocked by Firebase permissions for the current account."
+                } else {
+                    null
+                }
+            }
+
+            else -> null
+        }
+    }
 
     private class PermanentUploadException(
         override val message: String,

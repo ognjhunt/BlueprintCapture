@@ -4,6 +4,30 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+enum class CaptureIntakeSource {
+    @SerialName("authoritative")
+    Authoritative,
+
+    @SerialName("human_manual")
+    HumanManual,
+
+    @SerialName("ai_inferred")
+    AiInferred,
+}
+
+@Serializable
+enum class CaptureTaskHypothesisStatus {
+    @SerialName("accepted")
+    Accepted,
+
+    @SerialName("needs_confirmation")
+    NeedsConfirmation,
+
+    @SerialName("rejected")
+    Rejected,
+}
+
+@Serializable
 data class AndroidCaptureBundleRequest(
     @SerialName("scene_id") val sceneId: String,
     @SerialName("capture_id") val captureId: String,
@@ -26,6 +50,7 @@ data class AndroidCaptureBundleRequest(
     @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
     @SerialName("intake_packet") val intakePacket: QualificationIntakePacket? = null,
     @SerialName("intake_metadata") val intakeMetadata: CaptureIntakeMetadata? = null,
+    @SerialName("task_hypothesis") val taskHypothesis: TaskHypothesis? = null,
     @SerialName("quoted_payout_cents") val quotedPayoutCents: Int? = null,
     @SerialName("rights_profile") val rightsProfile: String? = null,
     @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
@@ -50,7 +75,9 @@ val QualificationIntakePacket.isComplete: Boolean
 
 @Serializable
 data class CaptureIntakeMetadata(
-    val source: String = "human_manual",
+    val source: CaptureIntakeSource,
+    val model: String? = null,
+    val fps: Int? = null,
     val confidence: Double? = null,
     val warnings: List<String> = emptyList(),
 )
@@ -145,11 +172,15 @@ data class CaptureContext(
 data class TaskHypothesis(
     @SerialName("schema_version") val schemaVersion: String = "v1",
     @SerialName("workflow_name") val workflowName: String? = null,
-    @SerialName("task_steps") val taskSteps: List<String>,
+    @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
     val zone: String? = null,
     val owner: String? = null,
-    val source: String = "human_manual",
-    val status: String = "accepted",
+    val confidence: Double? = null,
+    val source: CaptureIntakeSource = CaptureIntakeSource.HumanManual,
+    val model: String? = null,
+    val fps: Int? = null,
+    val warnings: List<String> = emptyList(),
+    val status: CaptureTaskHypothesisStatus = CaptureTaskHypothesisStatus.Accepted,
 )
 
 @Serializable
