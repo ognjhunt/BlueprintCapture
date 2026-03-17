@@ -188,7 +188,11 @@ export function evaluateQualityGate(input) {
     if (reasons.length > 0) {
         return {
             status: "blocked",
-            captureTier: input.captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses",
+            captureTier: input.captureSource === "iphone"
+                ? "tier1_iphone"
+                : input.captureSource === "android_phone"
+                    ? "tier2_android_phone"
+                    : "tier2_glasses",
             processingProfile: input.captureSource === "iphone" ? "pose_assisted" : "video_only",
             reasons,
             warnings,
@@ -222,7 +226,7 @@ export function evaluateQualityGate(input) {
     }
     return {
         status: "passed",
-        captureTier: "tier2_glasses",
+        captureTier: input.captureSource === "android_phone" ? "tier2_android_phone" : "tier2_glasses",
         processingProfile: "video_only",
         reasons,
         warnings,

@@ -45,8 +45,8 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   "capture_start_epoch_ms": 1702137045123,
   "has_lidar": true,
   "capture_schema_version": "2.0.0",
-  "capture_source": "iphone|glasses",
-  "capture_tier_hint": "tier1_iphone|tier2_glasses"
+  "capture_source": "iphone|android_phone|glasses",
+  "capture_tier_hint": "tier1_iphone|tier2_android_phone|tier2_glasses"
 }
 ```
 
@@ -131,8 +131,8 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
   "schema_version": "v1",
   "scene_id": "string",
   "capture_id": "string",
-  "capture_source": "iphone|glasses|unknown",
-  "capture_tier": "tier1_iphone|tier2_glasses",
+  "capture_source": "iphone|android_phone|glasses|unknown",
+  "capture_tier": "tier1_iphone|tier2_android_phone|tier2_glasses",
   "processing_profile": "pose_assisted|video_only",
   "raw_prefix_uri": "gs://...",
   "frames_index_uri": "gs://...",
@@ -188,9 +188,9 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
   "schema_version": "v1",
   "scene_id": "string",
   "capture_id": "string",
-  "capture_source": "iphone|glasses|unknown",
-  "capture_tier_initial": "tier1_iphone|tier2_glasses",
-  "capture_tier_final": "tier1_iphone|tier2_glasses",
+  "capture_source": "iphone|android_phone|glasses|unknown",
+  "capture_tier_initial": "tier1_iphone|tier2_android_phone|tier2_glasses",
+  "capture_tier_final": "tier1_iphone|tier2_android_phone|tier2_glasses",
   "processing_profile": "pose_assisted|video_only",
   "status": "passed|blocked",
   "required_files": {

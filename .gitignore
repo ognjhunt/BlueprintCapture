@@ -69,9 +69,16 @@ Secrets.plist
 *.local.xcconfig
 *.pem
 *.p12
+*.jks
 .env
 .env.*
 !.env.example
+
+# Android
+android/.gradle/
+android/local.properties
+android/**/build/
+android/.idea/
 
 # Cloud Functions
 cloud/**/node_modules/

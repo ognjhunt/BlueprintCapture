@@ -692,9 +692,11 @@ export const extractFrames = onObjectFinalized({
             : "unknown");
     const captureSource = captureSourceRaw === "iphone"
         ? "iphone"
-        : captureSourceRaw === "glasses"
-            ? "glasses"
-            : "unknown";
+        : captureSourceRaw === "android_phone"
+            ? "android_phone"
+            : captureSourceRaw === "glasses"
+                ? "glasses"
+                : "unknown";
     const poseMatchRate = sortedFiles.length > 0 ? Number((matchedPoseCount / sortedFiles.length).toFixed(6)) : 0;
     const p95PoseDeltaRaw = percentile(poseDeltaSecValues, 95);
     const p95PoseDeltaSec = p95PoseDeltaRaw === null ? null : Number(p95PoseDeltaRaw.toFixed(6));
@@ -817,7 +819,11 @@ export const extractFrames = onObjectFinalized({
         capture_id: pathInfo.captureId,
         capture_source: captureSource,
         capture_tier_initial: asString(manifest?.capture_tier_hint) ??
-            (captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses"),
+            (captureSource === "iphone"
+                ? "tier1_iphone"
+                : captureSource === "android_phone"
+                    ? "tier2_android_phone"
+                    : "tier2_glasses"),
         capture_tier_final: qualityGate.captureTier,
         processing_profile: qualityGate.processingProfile,
         status: finalStatus,

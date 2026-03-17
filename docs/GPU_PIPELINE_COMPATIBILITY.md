@@ -54,8 +54,8 @@ Required root fields:
   "capture_start_epoch_ms": 1702137045123,
   "has_lidar": true,
   "capture_schema_version": "2.0.0",
-  "capture_source": "iphone|glasses",
-  "capture_tier_hint": "tier1_iphone|tier2_glasses"
+  "capture_source": "iphone|android_phone|glasses",
+  "capture_tier_hint": "tier1_iphone|tier2_android_phone|tier2_glasses"
 }
 ```
 

@@ -1,0 +1,119 @@
+{
+  "project_info": {
+    "project_number": "744608654760",
+    "firebase_url": "https://blueprint-8c1ca-default-rtdb.firebaseio.com",
+    "project_id": "blueprint-8c1ca",
+    "storage_bucket": "blueprint-8c1ca.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:744608654760:android:3fdac70665e8cf73f4a99d",
+        "android_client_info": {
+          "package_name": "Public.BlueprintCapture.Android"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "744608654760-issaidpo2j33bq7ntol8e898de75ab6b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMPuMk4QrDlb_O32cO3xHdGHVG22_RnFo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "744608654760-0r9pn5daj7k279k8i3bvmglslpkcao3t.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "744608654760-0bf3da8q1nlfm3t0sgnk344oqvt0r0d2.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.nianticspatial.ardk.ardksamples"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:744608654760:android:c6330f6dfc8a757ff4a99d",
+        "android_client_info": {
+          "package_name": "com.Blueprint.BlueprintQuest"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "744608654760-issaidpo2j33bq7ntol8e898de75ab6b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMPuMk4QrDlb_O32cO3xHdGHVG22_RnFo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "744608654760-0r9pn5daj7k279k8i3bvmglslpkcao3t.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "744608654760-0bf3da8q1nlfm3t0sgnk344oqvt0r0d2.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.nianticspatial.ardk.ardksamples"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:744608654760:android:894015cfb1b4fcddf4a99d",
+        "android_client_info": {
+          "package_name": "com.example.blueprintvision"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "744608654760-issaidpo2j33bq7ntol8e898de75ab6b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMPuMk4QrDlb_O32cO3xHdGHVG22_RnFo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "744608654760-0r9pn5daj7k279k8i3bvmglslpkcao3t.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "744608654760-0bf3da8q1nlfm3t0sgnk344oqvt0r0d2.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.nianticspatial.ardk.ardksamples"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

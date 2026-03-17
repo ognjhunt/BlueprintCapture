@@ -835,9 +835,11 @@ export const extractFrames = onObjectFinalized(
       (pathInfo.captureSourcePath === "iphone" || pathInfo.captureSourcePath === "glasses"
         ? pathInfo.captureSourcePath
         : "unknown");
-    const captureSource: "iphone" | "glasses" | "unknown" =
+    const captureSource: "iphone" | "android_phone" | "glasses" | "unknown" =
       captureSourceRaw === "iphone"
         ? "iphone"
+        : captureSourceRaw === "android_phone"
+        ? "android_phone"
         : captureSourceRaw === "glasses"
         ? "glasses"
         : "unknown";
@@ -979,7 +981,13 @@ export const extractFrames = onObjectFinalized(
       capture_source: captureSource,
       capture_tier_initial:
         asString(manifest?.capture_tier_hint) ??
-        (captureSource === "iphone" ? "tier1_iphone" : "tier2_glasses"),
+        (
+          captureSource === "iphone"
+            ? "tier1_iphone"
+            : captureSource === "android_phone"
+            ? "tier2_android_phone"
+            : "tier2_glasses"
+        ),
       capture_tier_final: qualityGate.captureTier,
       processing_profile: qualityGate.processingProfile,
       status: finalStatus,
