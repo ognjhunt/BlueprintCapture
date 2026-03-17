@@ -9,6 +9,7 @@ import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.capture.AndroidCaptureBundleBuilder
 import app.blueprint.capture.data.capture.AndroidCaptureBundleRequest
 import app.blueprint.capture.data.capture.CaptureUploadRepository
+import app.blueprint.capture.data.model.CaptureLaunch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -39,10 +40,10 @@ class CaptureSessionViewModel @Inject constructor(
     val uiState: StateFlow<CaptureSessionUiState> = _uiState.asStateFlow()
 
     fun queueRecordedCapture(
-        label: String,
-        targetId: String?,
+        capture: CaptureLaunch,
         recordingFile: File,
         captureStartEpochMs: Long,
+        captureDurationMs: Long,
     ) {
         viewModelScope.launch {
             _uiState.value = CaptureSessionUiState(isPackaging = true)
@@ -52,19 +53,28 @@ class CaptureSessionViewModel @Inject constructor(
                     val metadata = readVideoMetadata(recordingFile)
                     val creatorId = authRepository.currentUserId()
                     val captureId = UUID.randomUUID().toString()
+                    val taskSteps = capture.workflowSteps.ifEmpty { defaultTaskSteps(capture.label) }
                     val request = AndroidCaptureBundleRequest(
-                        sceneId = targetId ?: fallbackSceneId(label),
+                        sceneId = capture.jobId ?: capture.targetId ?: fallbackSceneId(capture.label),
                         captureId = captureId,
                         creatorId = creatorId ?: "anonymous",
+                        jobId = capture.jobId ?: capture.targetId,
+                        siteSubmissionId = capture.siteSubmissionId,
                         deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
                         osVersion = "Android ${Build.VERSION.RELEASE ?: Build.VERSION.SDK_INT}",
                         fpsSource = metadata.frameRate,
                         width = metadata.width,
                         height = metadata.height,
                         captureStartEpochMs = captureStartEpochMs,
-                        captureContextHint = label,
-                        workflowName = label,
-                        taskSteps = defaultTaskSteps(label),
+                        captureDurationMs = captureDurationMs,
+                        captureContextHint = capture.label,
+                        workflowName = capture.workflowName ?: capture.label,
+                        taskSteps = taskSteps,
+                        zone = capture.zone,
+                        owner = capture.owner,
+                        quotedPayoutCents = capture.quotedPayoutCents,
+                        rightsProfile = capture.rightsProfile,
+                        requestedOutputs = capture.requestedOutputs,
                     )
                     val outputRoot = context.filesDir.resolve("capture_bundles").also { it.mkdirs() }
                     val bundle = bundleBuilder.writeBundle(
@@ -74,9 +84,9 @@ class CaptureSessionViewModel @Inject constructor(
                     )
                     recordingFile.delete()
                     uploadRepository.enqueueBundleUpload(
-                        label = label,
+                        label = capture.label,
                         bundleRoot = bundle.captureRoot,
-                        creatorId = creatorId,
+                        request = request,
                     )
                 }
             }.onSuccess { uploadId ->

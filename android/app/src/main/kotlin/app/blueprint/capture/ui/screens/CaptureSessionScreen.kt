@@ -303,10 +303,10 @@ fun CaptureSessionScreen(
                                             cameraError = event.cause?.message ?: "Recording failed before the file finalized."
                                         } else {
                                             viewModel.queueRecordedCapture(
-                                                label = capture.label,
-                                                targetId = capture.targetId,
+                                                capture = capture,
                                                 recordingFile = outputFile,
                                                 captureStartEpochMs = captureStartEpochMs,
+                                                captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
                                             )
                                         }
                                     }

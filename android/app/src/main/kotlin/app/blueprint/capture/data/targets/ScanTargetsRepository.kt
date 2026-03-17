@@ -30,10 +30,11 @@ class ScanTargetsRepository @Inject constructor(
                             ?: doc.number("payout_cents")
                             ?: return@mapNotNull null
                         val durationMinutes = doc.number("est_minutes") ?: 20
-                        val instructions = doc.get("workflow_steps") as? List<*>
+                        val workflowSteps = doc.stringList("workflow_steps")
+                            .ifEmpty { doc.stringList("instructions") }
                         val address = doc.getString("address").orEmpty()
                         val subtitle = when {
-                            !instructions.isNullOrEmpty() -> instructions.firstOrNull()?.toString().orEmpty()
+                            workflowSteps.isNotEmpty() -> workflowSteps.first()
                             address.isNotBlank() -> address
                             else -> "Curated capture opportunity"
                         }
@@ -46,6 +47,15 @@ class ScanTargetsRepository @Inject constructor(
                             distanceText = "${durationMinutes} min",
                             readyNow = (doc.number("priority") ?: 0) > 0 ||
                                 recentlyUpdated(doc.get("updated_at")),
+                            workflowName = doc.getString("workflow_name") ?: title,
+                            workflowSteps = workflowSteps,
+                            zone = doc.getString("zone"),
+                            owner = doc.getString("owner"),
+                            siteSubmissionId = doc.getString("site_submission_id"),
+                            quotedPayoutCents = doc.number("quoted_payout_cents") ?: doc.number("payout_cents"),
+                            requestedOutputs = doc.stringList("requested_outputs")
+                                .ifEmpty { listOf("qualification") },
+                            rightsProfile = doc.getString("rights_profile"),
                         )
                     }
                     .sortedWith(
@@ -82,4 +92,10 @@ private fun com.google.firebase.firestore.DocumentSnapshot.number(key: String): 
         is String -> raw.toIntOrNull()
         else -> null
     }
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.stringList(key: String): List<String> {
+    return (get(key) as? List<*>)
+        .orEmpty()
+        .mapNotNull { it?.toString()?.takeIf(String::isNotBlank) }
 }

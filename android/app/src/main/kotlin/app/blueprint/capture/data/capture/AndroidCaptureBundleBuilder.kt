@@ -51,11 +51,14 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             zone = request.zone,
             owner = request.owner,
             sceneMemoryCapture = SceneMemoryCapture(),
-            captureRights = CaptureRights(),
+            captureRights = CaptureRights(
+                payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
+                consentNotes = listOfNotNull(request.rightsProfile?.let { "rights_profile:$it" }),
+            ),
             captureEvidence = CaptureEvidence(),
         )
         val context = CaptureContext(
-            siteSubmissionId = request.sceneId,
+            siteSubmissionId = request.siteSubmissionId ?: request.sceneId,
             taskTextHint = request.workflowName ?: request.captureContextHint,
             taskSteps = request.taskSteps,
             zone = request.zone,

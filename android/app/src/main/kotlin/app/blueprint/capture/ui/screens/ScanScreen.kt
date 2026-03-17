@@ -72,6 +72,15 @@ fun ScanScreen(
                     CaptureLaunch(
                         label = target?.title ?: "Android phone capture",
                         targetId = target?.id,
+                        jobId = target?.id,
+                        siteSubmissionId = target?.siteSubmissionId,
+                        workflowName = target?.workflowName,
+                        workflowSteps = target?.workflowSteps.orEmpty(),
+                        zone = target?.zone,
+                        owner = target?.owner,
+                        requestedOutputs = target?.requestedOutputs ?: listOf("qualification"),
+                        quotedPayoutCents = target?.quotedPayoutCents,
+                        rightsProfile = target?.rightsProfile,
                     ),
                 )
             },

@@ -17,6 +17,15 @@ enum class MainTab {
 data class CaptureLaunch(
     val label: String,
     val targetId: String? = null,
+    val jobId: String? = null,
+    val siteSubmissionId: String? = null,
+    val workflowName: String? = null,
+    val workflowSteps: List<String> = emptyList(),
+    val zone: String? = null,
+    val owner: String? = null,
+    val requestedOutputs: List<String> = listOf("qualification"),
+    val quotedPayoutCents: Int? = null,
+    val rightsProfile: String? = null,
 )
 
 data class ScanTarget(
@@ -26,6 +35,14 @@ data class ScanTarget(
     val payoutText: String,
     val distanceText: String,
     val readyNow: Boolean,
+    val workflowName: String? = null,
+    val workflowSteps: List<String> = emptyList(),
+    val zone: String? = null,
+    val owner: String? = null,
+    val siteSubmissionId: String? = null,
+    val quotedPayoutCents: Int? = null,
+    val requestedOutputs: List<String> = listOf("qualification"),
+    val rightsProfile: String? = null,
 )
 
 @Serializable
@@ -33,6 +50,7 @@ enum class UploadQueueStatus {
     Queued,
     Preparing,
     Uploading,
+    Registering,
     Completed,
     Failed,
 }
@@ -40,6 +58,8 @@ enum class UploadQueueStatus {
 @Serializable
 data class UploadQueueItem(
     val id: String,
+    val sceneId: String = "",
+    val captureId: String = "",
     val label: String,
     val progress: Float,
     val status: UploadQueueStatus = UploadQueueStatus.Queued,
@@ -47,6 +67,16 @@ data class UploadQueueItem(
     val localBundlePath: String? = null,
     val remotePrefix: String? = null,
     val creatorId: String? = null,
+    val captureJobId: String? = null,
+    val siteSubmissionId: String? = null,
+    val captureStartEpochMs: Long = System.currentTimeMillis(),
+    val captureDurationMs: Long? = null,
+    val quotedPayoutCents: Int? = null,
+    val requestedOutputs: List<String> = emptyList(),
+    val uploadCompletedAtEpochMs: Long? = null,
+    val submittedAtEpochMs: Long? = null,
+    val submissionDocumentPath: String? = null,
+    val lastAttemptEpochMs: Long? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
 )
 

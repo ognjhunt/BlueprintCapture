@@ -8,18 +8,23 @@ data class AndroidCaptureBundleRequest(
     @SerialName("scene_id") val sceneId: String,
     @SerialName("capture_id") val captureId: String,
     @SerialName("creator_id") val creatorId: String,
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("site_submission_id") val siteSubmissionId: String? = null,
     @SerialName("device_model") val deviceModel: String,
     @SerialName("os_version") val osVersion: String,
     @SerialName("fps_source") val fpsSource: Double,
     val width: Int,
     val height: Int,
     @SerialName("capture_start_epoch_ms") val captureStartEpochMs: Long,
+    @SerialName("capture_duration_ms") val captureDurationMs: Long? = null,
     @SerialName("has_lidar") val hasLiDAR: Boolean = false,
     @SerialName("capture_context_hint") val captureContextHint: String? = null,
     @SerialName("workflow_name") val workflowName: String? = null,
     @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
     val zone: String? = null,
     val owner: String? = null,
+    @SerialName("quoted_payout_cents") val quotedPayoutCents: Int? = null,
+    @SerialName("rights_profile") val rightsProfile: String? = null,
     @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification"),
 )
 
@@ -98,7 +103,7 @@ data class CaptureEvidence(
 
 @Serializable
 data class CaptureContext(
-    @SerialName("site_submission_id") val siteSubmissionId: String,
+    @SerialName("site_submission_id") val siteSubmissionId: String? = null,
     @SerialName("task_text_hint") val taskTextHint: String? = null,
     @SerialName("task_steps") val taskSteps: List<String>,
     val zone: String? = null,
