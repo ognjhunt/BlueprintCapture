@@ -19,11 +19,11 @@ import kotlinx.coroutines.flow.stateIn
 data class ScanUiState(
     val userName: String = "",
     val targets: List<ScanTarget> = DemoData.scanTargets,
-    val configSummary: String = "Backend URL not set yet",
-    val feedSummary: String = "Curated jobs are loading from Firestore.",
-) {
-    val hasTargets: Boolean = targets.isNotEmpty()
-}
+    val showGlassesBanner: Boolean = true,
+    val showPayoutBanner: Boolean = true,
+    val payoutBannerTitle: String = "Payout setup unavailable",
+    val payoutBannerBody: String = "Payout setup is not enabled for this alpha build.",
+)
 
 @HiltViewModel
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -44,18 +44,20 @@ class ScanViewModel @Inject constructor(
         ScanUiState(
             userName = profile?.name.orEmpty(),
             targets = targets,
-            configSummary = config.backendBaseUrl.ifBlank { "Backend URL not set yet" },
-            feedSummary = if (targets == DemoData.scanTargets) {
-                "Showing local fallback jobs until Firestore returns curated capture jobs."
+            payoutBannerTitle = if (config.hasStripe) {
+                "Connect payout method"
             } else {
-                "Curated capture jobs are now flowing from Firebase, matching the iOS nearby-opportunities model."
+                "Payout setup unavailable"
+            },
+            payoutBannerBody = if (config.hasStripe) {
+                "Connect a payout method to receive capture earnings."
+            } else {
+                "Payout setup is not enabled for this alpha build."
             },
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = ScanUiState(
-            configSummary = config.backendBaseUrl.ifBlank { "Backend URL not set yet" },
-        ),
+        initialValue = ScanUiState(),
     )
 }

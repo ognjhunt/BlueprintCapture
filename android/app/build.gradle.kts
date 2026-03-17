@@ -128,6 +128,7 @@ dependencies {
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.maps.compose)
     implementation(libs.places)
+    implementation(libs.coil.compose)
 
     testImplementation(libs.junit4)
     testImplementation(libs.truth)

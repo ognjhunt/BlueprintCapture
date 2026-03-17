@@ -13,10 +13,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.CreditCard
-import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -37,7 +38,10 @@ import app.blueprint.capture.ui.screens.ProfileScreen
 import app.blueprint.capture.ui.screens.ScanScreen
 import app.blueprint.capture.ui.screens.WalletScreen
 import app.blueprint.capture.ui.theme.BlueprintBlack
+import app.blueprint.capture.ui.theme.BlueprintNavSelected
 import app.blueprint.capture.ui.theme.BlueprintSurface
+import app.blueprint.capture.ui.theme.BlueprintTextMuted
+import app.blueprint.capture.ui.theme.BlueprintTextPrimary
 
 @Composable
 fun BlueprintCaptureRoot(
@@ -87,9 +91,16 @@ fun BlueprintCaptureRoot(
                                     NavigationBarItem(
                                         selected = rootState.selectedTab == MainTab.Scan,
                                         onClick = { rootViewModel.selectTab(MainTab.Scan) },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = BlueprintTextPrimary,
+                                            selectedTextColor = BlueprintTextPrimary,
+                                            unselectedIconColor = BlueprintTextMuted,
+                                            unselectedTextColor = BlueprintTextMuted,
+                                            indicatorColor = BlueprintNavSelected,
+                                        ),
                                         icon = {
                                             Icon(
-                                                imageVector = Icons.Rounded.MyLocation,
+                                                imageVector = Icons.Rounded.CropFree,
                                                 contentDescription = "Scan",
                                                 modifier = Modifier.size(24.dp),
                                             )
@@ -99,6 +110,13 @@ fun BlueprintCaptureRoot(
                                     NavigationBarItem(
                                         selected = rootState.selectedTab == MainTab.Wallet,
                                         onClick = { rootViewModel.selectTab(MainTab.Wallet) },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = BlueprintTextPrimary,
+                                            selectedTextColor = BlueprintTextPrimary,
+                                            unselectedIconColor = BlueprintTextMuted,
+                                            unselectedTextColor = BlueprintTextMuted,
+                                            indicatorColor = BlueprintNavSelected,
+                                        ),
                                         icon = {
                                             Icon(
                                                 imageVector = Icons.Rounded.CreditCard,
@@ -111,6 +129,13 @@ fun BlueprintCaptureRoot(
                                     NavigationBarItem(
                                         selected = rootState.selectedTab == MainTab.Profile,
                                         onClick = { rootViewModel.selectTab(MainTab.Profile) },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = BlueprintTextPrimary,
+                                            selectedTextColor = BlueprintTextPrimary,
+                                            unselectedIconColor = BlueprintTextMuted,
+                                            unselectedTextColor = BlueprintTextMuted,
+                                            indicatorColor = BlueprintNavSelected,
+                                        ),
                                         icon = {
                                             Icon(
                                                 imageVector = Icons.Rounded.AccountCircle,

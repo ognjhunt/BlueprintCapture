@@ -1,6 +1,7 @@
 package app.blueprint.capture.data.targets
 
 import app.blueprint.capture.data.model.DemoData
+import app.blueprint.capture.data.model.CapturePermissionTone
 import app.blueprint.capture.data.model.ScanTarget
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.FirebaseFirestore
@@ -33,6 +34,9 @@ class ScanTargetsRepository @Inject constructor(
                         val workflowSteps = doc.stringList("workflow_steps")
                             .ifEmpty { doc.stringList("instructions") }
                         val address = doc.getString("address").orEmpty()
+                        val estimatedMinutes = doc.number("est_minutes") ?: 20
+                        val readyNow = (doc.number("priority") ?: 0) > 0 ||
+                            recentlyUpdated(doc.get("updated_at"))
                         val subtitle = when {
                             workflowSteps.isNotEmpty() -> workflowSteps.first()
                             address.isNotBlank() -> address
@@ -44,9 +48,13 @@ class ScanTargetsRepository @Inject constructor(
                             title = title,
                             subtitle = subtitle,
                             payoutText = "$${payoutCents / 100}",
-                            distanceText = "${durationMinutes} min",
-                            readyNow = (doc.number("priority") ?: 0) > 0 ||
-                                recentlyUpdated(doc.get("updated_at")),
+                            distanceText = doc.distanceText() ?: "${estimatedMinutes} min",
+                            readyNow = readyNow,
+                            addressText = address.ifBlank { subtitle },
+                            categoryLabel = doc.getString("category")?.uppercase(),
+                            estimatedMinutes = estimatedMinutes,
+                            permissionTone = doc.permissionTone(readyNow),
+                            imageUrl = doc.getString("preview_url") ?: doc.getString("image_url"),
                             workflowName = doc.getString("workflow_name") ?: title,
                             workflowSteps = workflowSteps,
                             zone = doc.getString("zone"),
@@ -70,6 +78,29 @@ class ScanTargetsRepository @Inject constructor(
     }
 }
 
+private fun com.google.firebase.firestore.DocumentSnapshot.distanceText(): String? {
+    val explicit = getString("distance_text")?.takeIf(String::isNotBlank)
+    if (explicit != null) return explicit
+    val miles = numberDouble("distance_miles") ?: numberDouble("distanceMiles")
+    return miles?.let { String.format("%.1f mi", it) }
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.permissionTone(readyNow: Boolean): CapturePermissionTone {
+    val raw = listOfNotNull(
+        getString("permission_tier"),
+        getString("rights_profile"),
+        getString("capture_policy"),
+    ).joinToString(" ").lowercase()
+
+    return when {
+        raw.contains("blocked") || raw.contains("restrict") || raw.contains("forbid") -> CapturePermissionTone.Blocked
+        raw.contains("permission") || raw.contains("access") -> CapturePermissionTone.Permission
+        raw.contains("review") -> CapturePermissionTone.Review
+        readyNow -> CapturePermissionTone.Approved
+        else -> CapturePermissionTone.Review
+    }
+}
+
 private fun payoutValue(payoutText: String): Int = payoutText.removePrefix("$").toIntOrNull() ?: 0
 
 private fun recentlyUpdated(value: Any?): Boolean {
@@ -90,6 +121,19 @@ private fun com.google.firebase.firestore.DocumentSnapshot.number(key: String): 
         is Double -> raw.toInt()
         is Number -> raw.toInt()
         is String -> raw.toIntOrNull()
+        else -> null
+    }
+}
+
+private fun com.google.firebase.firestore.DocumentSnapshot.numberDouble(key: String): Double? {
+    val raw = get(key)
+    return when (raw) {
+        is Int -> raw.toDouble()
+        is Long -> raw.toDouble()
+        is Double -> raw
+        is Float -> raw.toDouble()
+        is Number -> raw.toDouble()
+        is String -> raw.toDoubleOrNull()
         else -> null
     }
 }
