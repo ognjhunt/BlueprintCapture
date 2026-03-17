@@ -16,6 +16,14 @@ enum class MainTab {
 
 data class CaptureLaunch(
     val label: String,
+    val categoryLabel: String? = null,
+    val addressText: String? = null,
+    val payoutText: String? = null,
+    val distanceText: String? = null,
+    val estimatedMinutes: Int? = null,
+    val permissionTone: CapturePermissionTone = CapturePermissionTone.Review,
+    val imageUrl: String? = null,
+    val detailChecklist: List<String> = emptyList(),
     val targetId: String? = null,
     val jobId: String? = null,
     val siteSubmissionId: String? = null,
@@ -47,6 +55,7 @@ data class ScanTarget(
     val estimatedMinutes: Int? = null,
     val permissionTone: CapturePermissionTone = if (readyNow) CapturePermissionTone.Approved else CapturePermissionTone.Review,
     val imageUrl: String? = null,
+    val detailChecklist: List<String> = emptyList(),
     val workflowName: String? = null,
     val workflowSteps: List<String> = emptyList(),
     val zone: String? = null,
@@ -130,6 +139,13 @@ object DemoData {
             categoryLabel = "PARKING",
             estimatedMinutes = 20,
             permissionTone = CapturePermissionTone.Review,
+            detailChecklist = listOf(
+                "Stay in common or approved areas only.",
+                "Keep faces, screens, and paperwork out of frame.",
+                "Call out restricted zones before you begin.",
+                "Complete all floors before submitting.",
+            ),
+            quotedPayoutCents = 3000,
             imageUrl = "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1200&q=80",
         ),
         ScanTarget(
@@ -143,6 +159,13 @@ object DemoData {
             categoryLabel = "LIBRARY",
             estimatedMinutes = 18,
             permissionTone = CapturePermissionTone.Review,
+            detailChecklist = listOf(
+                "Capture public entry and circulation paths first.",
+                "Avoid library patrons, staff screens, and check-out desks.",
+                "Note any wings or reading rooms that are off-limits.",
+                "Finish each accessible floor before submitting.",
+            ),
+            quotedPayoutCents = 3500,
             imageUrl = "https://images.unsplash.com/photo-1511818966892-d7d671e672a2?auto=format&fit=crop&w=1200&q=80",
         ),
         ScanTarget(
@@ -156,6 +179,13 @@ object DemoData {
             categoryLabel = "MARKET",
             estimatedMinutes = 16,
             permissionTone = CapturePermissionTone.Approved,
+            detailChecklist = listOf(
+                "Start with the main entrance and front-of-house aisles.",
+                "Keep checkout screens, staff stations, and paperwork out of frame.",
+                "Call out any employee-only sections before moving on.",
+                "Cover each aisle group before ending the capture.",
+            ),
+            quotedPayoutCents = 4200,
             imageUrl = "https://images.unsplash.com/photo-1488459716781-31db52582fe9?auto=format&fit=crop&w=1200&q=80",
         ),
     )

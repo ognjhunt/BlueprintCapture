@@ -758,6 +758,14 @@ private val ScanTarget.shouldShowMinutes: Boolean
 private fun ScanTarget.toLaunch(): CaptureLaunch {
     return CaptureLaunch(
         label = title,
+        categoryLabel = categoryLabel,
+        addressText = addressText,
+        payoutText = payoutText,
+        distanceText = distanceText,
+        estimatedMinutes = estimatedMinutes,
+        permissionTone = permissionTone,
+        imageUrl = imageUrl,
+        detailChecklist = detailChecklist,
         targetId = id,
         jobId = id,
         siteSubmissionId = siteSubmissionId,
