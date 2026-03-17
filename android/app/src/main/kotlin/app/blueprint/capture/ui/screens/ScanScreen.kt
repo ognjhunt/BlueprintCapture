@@ -78,7 +78,7 @@ fun ScanScreen(
                         workflowSteps = target?.workflowSteps.orEmpty(),
                         zone = target?.zone,
                         owner = target?.owner,
-                        requestedOutputs = target?.requestedOutputs ?: listOf("qualification"),
+                        requestedOutputs = target?.requestedOutputs ?: listOf("qualification", "review_intake"),
                         quotedPayoutCents = target?.quotedPayoutCents,
                         rightsProfile = target?.rightsProfile,
                     ),

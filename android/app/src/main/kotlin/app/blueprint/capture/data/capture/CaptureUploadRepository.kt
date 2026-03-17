@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import androidx.core.content.edit
+import androidx.work.ForegroundInfo
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -67,6 +68,7 @@ class CaptureUploadRepository @Inject constructor(
         label: String,
         bundleRoot: File,
         request: AndroidCaptureBundleRequest,
+        startImmediately: Boolean = true,
     ): String {
         val uploadId = request.captureId
         val remotePrefix = buildRemotePrefix(
@@ -79,8 +81,8 @@ class CaptureUploadRepository @Inject constructor(
             captureId = request.captureId,
             label = label,
             progress = 0f,
-            status = UploadQueueStatus.Queued,
-            detail = "Queued for upload",
+            status = if (startImmediately) UploadQueueStatus.Queued else UploadQueueStatus.Saved,
+            detail = if (startImmediately) "Queued for upload" else "Saved on this device. Upload when ready.",
             localBundlePath = bundleRoot.absolutePath,
             remotePrefix = remotePrefix,
             creatorId = request.creatorId,
@@ -97,13 +99,26 @@ class CaptureUploadRepository @Inject constructor(
             _queue.value = updated
             persistQueue(updated)
         }
-        enqueueWork(uploadId, replaceExisting = true)
+        if (startImmediately) {
+            enqueueWork(uploadId, replaceExisting = true)
+        }
         return uploadId
     }
 
-    fun retryUpload(id: String) {
+    fun saveBundleForLater(
+        label: String,
+        bundleRoot: File,
+        request: AndroidCaptureBundleRequest,
+    ): String = enqueueBundleUpload(
+        label = label,
+        bundleRoot = bundleRoot,
+        request = request,
+        startImmediately = false,
+    )
+
+    fun startUpload(id: String) {
         val item = _queue.value.firstOrNull { it.id == id } ?: return
-        if (item.uploadCompletedAtEpochMs == null && item.localBundlePath.isNullOrBlank()) {
+        if (item.localBundlePath.isNullOrBlank()) {
             markFailed(id, "Local capture bundle is missing.")
             return
         }
@@ -119,30 +134,72 @@ class CaptureUploadRepository @Inject constructor(
                 detail = if (it.uploadCompletedAtEpochMs != null) {
                     "Retrying capture submission"
                 } else {
-                    "Retry queued"
+                    "Queued for upload"
                 },
                 lastAttemptEpochMs = null,
+                cancelRequestedAtEpochMs = null,
             )
         }
         enqueueWork(id, replaceExisting = true)
     }
 
+    fun retryUpload(id: String) {
+        startUpload(id)
+    }
+
+    fun cancelUpload(id: String) {
+        workManager.cancelUniqueWork(uniqueWorkName(id))
+        updateItem(id) {
+            it.copy(
+                status = UploadQueueStatus.Failed,
+                detail = "Upload cancelled.",
+                cancelRequestedAtEpochMs = System.currentTimeMillis(),
+                progress = if (it.uploadCompletedAtEpochMs != null) {
+                    it.progress.coerceAtLeast(0.99f)
+                } else {
+                    it.progress
+                },
+            )
+        }
+    }
+
+    fun dismissUpload(id: String) {
+        workManager.cancelUniqueWork(uniqueWorkName(id))
+        synchronized(queueLock) {
+            val updated = _queue.value.filterNot { it.id == id }
+            if (updated.size == _queue.value.size) return
+            _queue.value = updated
+            persistQueue(updated)
+        }
+    }
+
+    fun getForegroundInfo(id: String): ForegroundInfo? {
+        val item = _queue.value.firstOrNull { it.id == id } ?: return null
+        return CaptureUploadNotifications.buildForegroundInfo(item)
+    }
+
     suspend fun runWorkerAttempt(
         id: String,
         runAttemptCount: Int,
+        onItemUpdated: suspend (UploadQueueItem) -> Unit = {},
     ): CaptureUploadWorkOutcome {
         val initialItem = _queue.value.firstOrNull { it.id == id } ?: return CaptureUploadWorkOutcome.Failure
 
         return try {
-            updateItem(id) { item ->
+            if (initialItem.cancelRequestedAtEpochMs != null) {
+                return CaptureUploadWorkOutcome.Failure
+            }
+
+            updateItemAndEmit(id, onItemUpdated) { item ->
                 item.copy(lastAttemptEpochMs = System.currentTimeMillis())
             }
 
             val latestItem = _queue.value.firstOrNull { it.id == id } ?: initialItem
+            throwIfCancellationRequested(latestItem)
             if (latestItem.uploadCompletedAtEpochMs == null) {
-                uploadBundleFiles(latestItem)
+                uploadBundleFiles(latestItem, onItemUpdated)
             } else {
-                updateItem(id) { item ->
+                updateItemAndEmit(id, onItemUpdated) { item ->
                     item.copy(
                         status = UploadQueueStatus.Registering,
                         progress = item.progress.coerceAtLeast(0.99f),
@@ -152,6 +209,7 @@ class CaptureUploadRepository @Inject constructor(
             }
 
             val submissionItem = _queue.value.firstOrNull { it.id == id } ?: initialItem
+            throwIfCancellationRequested(submissionItem)
             if (submissionItem.submittedAtEpochMs == null) {
                 registerSubmission(submissionItem)
             } else {
@@ -167,13 +225,20 @@ class CaptureUploadRepository @Inject constructor(
             markFailed(id, error.message ?: "Upload failed.")
             CaptureUploadWorkOutcome.Failure
         } catch (_: CancellationException) {
-            queueAutomaticRetry(id, runAttemptCount, "Upload interrupted.")
+            if (_queue.value.firstOrNull { it.id == id }?.cancelRequestedAtEpochMs != null) {
+                CaptureUploadWorkOutcome.Failure
+            } else {
+                queueAutomaticRetry(id, runAttemptCount, "Upload interrupted.")
+            }
         } catch (error: Exception) {
             queueAutomaticRetry(id, runAttemptCount, error.message ?: "Upload failed.")
         }
     }
 
-    private suspend fun uploadBundleFiles(item: UploadQueueItem) {
+    private suspend fun uploadBundleFiles(
+        item: UploadQueueItem,
+        onItemUpdated: suspend (UploadQueueItem) -> Unit,
+    ) {
         val bundlePath = item.localBundlePath ?: throw PermanentUploadException("Local capture bundle is missing.")
         val bundleRoot = File(bundlePath)
         if (!bundleRoot.exists()) {
@@ -195,7 +260,7 @@ class CaptureUploadRepository @Inject constructor(
             captureId = item.captureId.ifBlank { item.id },
         )
 
-        updateItem(item.id) {
+        updateItemAndEmit(item.id, onItemUpdated) {
             it.copy(
                 status = UploadQueueStatus.Preparing,
                 detail = "Preparing ${files.size} files",
@@ -206,8 +271,9 @@ class CaptureUploadRepository @Inject constructor(
 
         var uploadedBytes = 0L
         files.forEach { file ->
+            throwIfCancellationRequested(item.id)
             val relativePath = file.relativeTo(bundleRoot).invariantSeparatorsPath
-            updateItem(item.id) {
+            updateItemAndEmit(item.id, onItemUpdated) {
                 it.copy(
                     status = UploadQueueStatus.Uploading,
                     detail = "Uploading $relativePath",
@@ -220,7 +286,7 @@ class CaptureUploadRepository @Inject constructor(
                 val totalProgress = ((uploadedBytes + fileBytes).toDouble() / totalBytes.toDouble())
                     .toFloat()
                     .coerceIn(0f, 0.985f)
-                updateItem(item.id) {
+                updateItemAndEmitBlocking(item.id, onItemUpdated) {
                     it.copy(
                         status = UploadQueueStatus.Uploading,
                         progress = totalProgress,
@@ -232,7 +298,7 @@ class CaptureUploadRepository @Inject constructor(
             uploadedBytes += file.length().coerceAtLeast(1L)
         }
 
-        updateItem(item.id) {
+        updateItemAndEmit(item.id, onItemUpdated) {
             it.copy(
                 status = UploadQueueStatus.Registering,
                 progress = 0.995f,
@@ -349,6 +415,7 @@ class CaptureUploadRepository @Inject constructor(
 
     private fun scheduleRecoveredUploads(items: List<UploadQueueItem>) {
         items.filter { item ->
+            item.status != UploadQueueStatus.Saved &&
             item.status != UploadQueueStatus.Completed &&
                 item.status != UploadQueueStatus.Failed
         }.forEach { item ->
@@ -418,18 +485,55 @@ class CaptureUploadRepository @Inject constructor(
     private fun updateItem(
         id: String,
         transform: (UploadQueueItem) -> UploadQueueItem,
-    ) {
+    ): UploadQueueItem? {
         synchronized(queueLock) {
+            var updatedItem: UploadQueueItem? = null
             val updated = _queue.value.map { item ->
                 if (item.id == id) {
-                    transform(item)
+                    transform(item).also { updatedItem = it }
                 } else {
                     item
                 }
             }
+            if (updatedItem == null) {
+                return null
+            }
             _queue.value = updated
             persistQueue(updated)
+            return updatedItem
         }
+    }
+
+    private suspend fun updateItemAndEmit(
+        id: String,
+        onItemUpdated: suspend (UploadQueueItem) -> Unit,
+        transform: (UploadQueueItem) -> UploadQueueItem,
+    ) {
+        val updatedItem = updateItem(id, transform) ?: return
+        onItemUpdated(updatedItem)
+    }
+
+    private fun updateItemAndEmitBlocking(
+        id: String,
+        onItemUpdated: suspend (UploadQueueItem) -> Unit,
+        transform: (UploadQueueItem) -> UploadQueueItem,
+    ) {
+        updateItem(id, transform)?.let { item ->
+            kotlinx.coroutines.runBlocking {
+                onItemUpdated(item)
+            }
+        }
+    }
+
+    private fun throwIfCancellationRequested(item: UploadQueueItem) {
+        if (item.cancelRequestedAtEpochMs != null) {
+            throw CancellationException("Upload cancelled")
+        }
+    }
+
+    private fun throwIfCancellationRequested(id: String) {
+        val item = _queue.value.firstOrNull { it.id == id } ?: return
+        throwIfCancellationRequested(item)
     }
 
     private fun loadQueue(): List<UploadQueueItem> {

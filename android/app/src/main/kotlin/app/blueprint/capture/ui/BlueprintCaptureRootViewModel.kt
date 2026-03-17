@@ -76,4 +76,16 @@ class BlueprintCaptureRootViewModel @Inject constructor(
     fun retryUpload(id: String) {
         captureUploadRepository.retryUpload(id)
     }
+
+    fun startUpload(id: String) {
+        captureUploadRepository.startUpload(id)
+    }
+
+    fun dismissUpload(id: String) {
+        captureUploadRepository.dismissUpload(id)
+    }
+
+    fun cancelUpload(id: String) {
+        captureUploadRepository.cancelUpload(id)
+    }
 }

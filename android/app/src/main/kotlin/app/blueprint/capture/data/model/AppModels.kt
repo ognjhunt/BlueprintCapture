@@ -23,7 +23,7 @@ data class CaptureLaunch(
     val workflowSteps: List<String> = emptyList(),
     val zone: String? = null,
     val owner: String? = null,
-    val requestedOutputs: List<String> = listOf("qualification"),
+    val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
     val quotedPayoutCents: Int? = null,
     val rightsProfile: String? = null,
 )
@@ -41,12 +41,13 @@ data class ScanTarget(
     val owner: String? = null,
     val siteSubmissionId: String? = null,
     val quotedPayoutCents: Int? = null,
-    val requestedOutputs: List<String> = listOf("qualification"),
+    val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
     val rightsProfile: String? = null,
 )
 
 @Serializable
 enum class UploadQueueStatus {
+    Saved,
     Queued,
     Preparing,
     Uploading,
@@ -77,6 +78,7 @@ data class UploadQueueItem(
     val submittedAtEpochMs: Long? = null,
     val submissionDocumentPath: String? = null,
     val lastAttemptEpochMs: Long? = null,
+    val cancelRequestedAtEpochMs: Long? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
 )
 

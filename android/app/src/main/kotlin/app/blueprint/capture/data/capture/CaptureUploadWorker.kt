@@ -15,7 +15,24 @@ class CaptureUploadWorker @AssistedInject constructor(
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
         val uploadId = inputData.getString(KEY_UPLOAD_ID) ?: return Result.failure()
-        return when (repository.runWorkerAttempt(uploadId, runAttemptCount)) {
+        repository.getForegroundInfo(uploadId)?.let { setForeground(it) }
+
+        return when (
+            repository.runWorkerAttempt(
+                id = uploadId,
+                runAttemptCount = runAttemptCount,
+                onItemUpdated = { item ->
+                    if (
+                        item.status == app.blueprint.capture.data.model.UploadQueueStatus.Queued ||
+                        item.status == app.blueprint.capture.data.model.UploadQueueStatus.Preparing ||
+                        item.status == app.blueprint.capture.data.model.UploadQueueStatus.Uploading ||
+                        item.status == app.blueprint.capture.data.model.UploadQueueStatus.Registering
+                    ) {
+                        setForeground(CaptureUploadNotifications.buildForegroundInfo(item))
+                    }
+                },
+            )
+        ) {
             CaptureUploadWorkOutcome.Success -> Result.success()
             CaptureUploadWorkOutcome.Retry -> Result.retry()
             CaptureUploadWorkOutcome.Failure -> Result.failure()

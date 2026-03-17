@@ -21,19 +21,22 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -62,6 +65,7 @@ import java.io.File
 import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @Composable
 fun CaptureSessionScreen(
@@ -72,6 +76,7 @@ fun CaptureSessionScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val uiState by viewModel.uiState.collectAsState()
+    val reviewDraft = uiState.reviewDraft
 
     var permissionsGranted by remember { mutableStateOf(hasCapturePermissions(context)) }
     var cameraError by remember { mutableStateOf<String?>(null) }
@@ -93,9 +98,16 @@ fun CaptureSessionScreen(
         permissionsGranted = hasCapturePermissions(context)
     }
 
+    fun closeSession() {
+        if (reviewDraft != null) {
+            viewModel.discardPendingCapture()
+        }
+        onClose()
+    }
+
     BackHandler {
         if (!isRecording && !uiState.isPackaging) {
-            onClose()
+            closeSession()
         }
     }
 
@@ -112,8 +124,8 @@ fun CaptureSessionScreen(
         }
     }
 
-    LaunchedEffect(uiState.queuedUploadId) {
-        if (uiState.queuedUploadId != null) {
+    LaunchedEffect(uiState.queuedUploadId, uiState.savedUploadId) {
+        if (uiState.queuedUploadId != null || uiState.savedUploadId != null) {
             onClose()
         }
     }
@@ -192,8 +204,8 @@ fun CaptureSessionScreen(
                 ) {
                     Text("Phone Capture")
                     if (!isRecording && !uiState.isPackaging) {
-                        OutlinedButton(onClick = onClose) {
-                            Text("Close")
+                        OutlinedButton(onClick = ::closeSession) {
+                            Text(if (reviewDraft != null) "Discard" else "Close")
                         }
                     }
                 }
@@ -201,10 +213,18 @@ fun CaptureSessionScreen(
                 SurfaceCard {
                     Text(capture.label)
                     Text(
-                        if (permissionsGranted) {
-                            "Record a real walkthrough, then package the bundle and queue it for Firebase Storage."
-                        } else {
-                            "Camera and microphone access are required before Android can record the walkthrough."
+                        when {
+                            !permissionsGranted -> {
+                                "Camera and microphone access are required before Android can record the walkthrough."
+                            }
+
+                            reviewDraft != null -> {
+                                "Review the finished capture, confirm structured intake, then choose whether to upload now or save the bundle for later."
+                            }
+
+                            else -> {
+                                "Record the walkthrough first. Android now stops in a real post-capture review stage instead of jumping straight into queueing."
+                            }
                         },
                         color = BlueprintTextMuted,
                     )
@@ -219,7 +239,7 @@ fun CaptureSessionScreen(
 
                 uiState.errorMessage?.let { message ->
                     SurfaceCard {
-                        Text("Capture packaging failed")
+                        Text("Capture review issue")
                         Text(message, color = BlueprintTextMuted)
                         OutlinedButton(onClick = viewModel::clearError) {
                             Text("Dismiss")
@@ -231,114 +251,292 @@ fun CaptureSessionScreen(
             Column(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                SurfaceCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(if (isRecording) "Recording live" else "Capture ready")
-                            Text(formatElapsed(elapsedSeconds), color = BlueprintTextMuted)
-                        }
-                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(if (permissionsGranted) "Permissions ready" else "Permissions missing")
-                            Text(
-                                if (uiState.isPackaging) "Packaging bundle" else "Queue uploads appear on the scan tab",
-                                color = BlueprintTextMuted,
-                            )
+                SessionStatusCard(
+                    permissionsGranted = permissionsGranted,
+                    isRecording = isRecording,
+                    elapsedSeconds = elapsedSeconds,
+                    uiState = uiState,
+                )
+
+                when {
+                    !permissionsGranted -> {
+                        Button(
+                            onClick = { permissionLauncher.launch(REQUIRED_CAPTURE_PERMISSIONS) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BlueprintAccent,
+                                contentColor = BlueprintBlack,
+                            ),
+                        ) {
+                            Text("Grant camera + microphone access")
                         }
                     }
 
-                    if (uiState.isPackaging) {
-                        LinearProgressIndicator(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 12.dp),
-                            trackColor = BlueprintBorder,
+                    reviewDraft != null -> {
+                        ReviewPanel(
+                            draft = reviewDraft,
+                            isPackaging = uiState.isPackaging,
+                            onWorkflowNameChanged = viewModel::updateWorkflowName,
+                            onTaskStepsChanged = viewModel::updateTaskSteps,
+                            onZoneChanged = viewModel::updateZone,
+                            onOwnerChanged = viewModel::updateOwner,
+                            onNotesChanged = viewModel::updateReviewNotes,
+                            onUploadNow = { viewModel.packageCapture(startImmediately = true) },
+                            onSaveForLater = { viewModel.packageCapture(startImmediately = false) },
                         )
                     }
-                }
 
-                if (!permissionsGranted) {
-                    Button(
-                        onClick = { permissionLauncher.launch(REQUIRED_CAPTURE_PERMISSIONS) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BlueprintAccent,
-                            contentColor = BlueprintBlack,
-                        ),
-                    ) {
-                        Text("Grant camera + microphone access")
-                    }
-                } else if (!isRecording) {
-                    Button(
-                        onClick = {
-                            val captureUseCase = videoCapture ?: return@Button
-                            val outputFile = createRecordingFile(context)
-                            captureStartEpochMs = System.currentTimeMillis()
-                            elapsedSeconds = 0L
-                            cameraError = null
+                    !isRecording -> {
+                        Button(
+                            onClick = {
+                                val captureUseCase = videoCapture ?: return@Button
+                                val outputFile = createRecordingFile(context)
+                                captureStartEpochMs = System.currentTimeMillis()
+                                elapsedSeconds = 0L
+                                cameraError = null
 
-                            var pendingRecording = captureUseCase.output.prepareRecording(
-                                context,
-                                FileOutputOptions.Builder(outputFile).build(),
-                            )
-                            pendingRecording = pendingRecording.withAudioEnabled()
+                                var pendingRecording = captureUseCase.output.prepareRecording(
+                                    context,
+                                    FileOutputOptions.Builder(outputFile).build(),
+                                )
+                                pendingRecording = pendingRecording.withAudioEnabled()
 
-                            recording = pendingRecording.start(mainExecutor) { event ->
-                                when (event) {
-                                    is VideoRecordEvent.Start -> {
-                                        isRecording = true
-                                    }
+                                recording = pendingRecording.start(mainExecutor) { event ->
+                                    when (event) {
+                                        is VideoRecordEvent.Start -> {
+                                            isRecording = true
+                                        }
 
-                                    is VideoRecordEvent.Status -> {
-                                        elapsedSeconds = event.recordingStats.recordedDurationNanos / 1_000_000_000L
-                                    }
+                                        is VideoRecordEvent.Status -> {
+                                            elapsedSeconds = event.recordingStats.recordedDurationNanos / 1_000_000_000L
+                                        }
 
-                                    is VideoRecordEvent.Finalize -> {
-                                        isRecording = false
-                                        recording = null
-                                        if (event.hasError()) {
-                                            outputFile.delete()
-                                            cameraError = event.cause?.message ?: "Recording failed before the file finalized."
-                                        } else {
-                                            viewModel.queueRecordedCapture(
-                                                capture = capture,
-                                                recordingFile = outputFile,
-                                                captureStartEpochMs = captureStartEpochMs,
-                                                captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
-                                            )
+                                        is VideoRecordEvent.Finalize -> {
+                                            isRecording = false
+                                            recording = null
+                                            if (event.hasError()) {
+                                                outputFile.delete()
+                                                cameraError = event.cause?.message
+                                                    ?: "Recording failed before the file finalized."
+                                            } else {
+                                                viewModel.prepareRecordedCapture(
+                                                    capture = capture,
+                                                    recordingFile = outputFile,
+                                                    captureStartEpochMs = captureStartEpochMs,
+                                                    captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        },
-                        enabled = videoCapture != null && !uiState.isPackaging,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BlueprintAccent,
-                            contentColor = BlueprintBlack,
-                        ),
-                    ) {
-                        Text("Start walkthrough recording")
+                            },
+                            enabled = videoCapture != null && !uiState.isPackaging,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BlueprintAccent,
+                                contentColor = BlueprintBlack,
+                            ),
+                        ) {
+                            Text("Start walkthrough recording")
+                        }
                     }
-                } else {
-                    Button(
-                        onClick = {
-                            recording?.stop()
-                        },
-                        enabled = !uiState.isPackaging,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BlueprintAccent,
-                            contentColor = BlueprintBlack,
-                        ),
-                    ) {
-                        Text("Finish capture and queue upload")
+
+                    else -> {
+                        Button(
+                            onClick = { recording?.stop() },
+                            enabled = !uiState.isPackaging,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = BlueprintAccent,
+                                contentColor = BlueprintBlack,
+                            ),
+                        ) {
+                            Text("Finish capture and review")
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SessionStatusCard(
+    permissionsGranted: Boolean,
+    isRecording: Boolean,
+    elapsedSeconds: Long,
+    uiState: CaptureSessionUiState,
+) {
+    SurfaceCard {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val statusTitle = when {
+                    uiState.reviewDraft != null -> "Capture finished"
+                    isRecording -> "Recording live"
+                    else -> "Capture ready"
+                }
+                Text(statusTitle)
+                Text(formatElapsed(elapsedSeconds), color = BlueprintTextMuted)
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (permissionsGranted) "Permissions ready" else "Permissions missing")
+                Text(
+                    when {
+                        uiState.isPackaging -> "Packaging bundle"
+                        uiState.reviewDraft != null -> "Structured intake required"
+                        else -> "Review and queueing happens after recording"
+                    },
+                    color = BlueprintTextMuted,
+                )
+            }
+        }
+
+        if (uiState.isPackaging) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                trackColor = BlueprintBorder,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewPanel(
+    draft: CaptureReviewDraft,
+    isPackaging: Boolean,
+    onWorkflowNameChanged: (String) -> Unit,
+    onTaskStepsChanged: (String) -> Unit,
+    onZoneChanged: (String) -> Unit,
+    onOwnerChanged: (String) -> Unit,
+    onNotesChanged: (String) -> Unit,
+    onUploadNow: () -> Unit,
+    onSaveForLater: () -> Unit,
+) {
+    SurfaceCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("Post-Capture Review")
+            Text(
+                "Confirm the workflow details before Android packages this bundle. This mirrors the iOS rule that structured intake must exist before submission.",
+                color = BlueprintTextMuted,
+            )
+
+            DetailRow("Duration", formatDurationMs(draft.captureDurationMs))
+            DetailRow("Resolution", "${draft.width} x ${draft.height}")
+            DetailRow("Frame rate", "${draft.frameRate.roundToInt()} fps")
+            DetailRow(
+                "Requested outputs",
+                draft.capture.requestedOutputs.joinToString().ifBlank { "qualification, review_intake" },
+            )
+            draft.capture.quotedPayoutCents?.let { payout ->
+                DetailRow("Estimated payout", formatPayout(payout))
+            }
+            draft.capture.rightsProfile?.takeIf(String::isNotBlank)?.let { rightsProfile ->
+                DetailRow("Rights profile", rightsProfile.replace('_', ' '))
+            }
+
+            OutlinedTextField(
+                value = draft.workflowName,
+                onValueChange = onWorkflowNameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Workflow name") },
+                singleLine = true,
+                enabled = !isPackaging,
+            )
+            OutlinedTextField(
+                value = draft.taskStepsText,
+                onValueChange = onTaskStepsChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Task steps") },
+                minLines = 3,
+                enabled = !isPackaging,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = draft.zone,
+                    onValueChange = onZoneChanged,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Zone") },
+                    singleLine = true,
+                    enabled = !isPackaging,
+                )
+                OutlinedTextField(
+                    value = draft.owner,
+                    onValueChange = onOwnerChanged,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Owner") },
+                    singleLine = true,
+                    enabled = !isPackaging,
+                )
+            }
+            OutlinedTextField(
+                value = draft.notes,
+                onValueChange = onNotesChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Capture notes") },
+                minLines = 3,
+                enabled = !isPackaging,
+            )
+
+            Text(
+                if (draft.isStructuredIntakeComplete) {
+                    "Structured intake complete. You can queue the upload now or save the bundle on-device."
+                } else {
+                    "Enter workflow details, at least one task step, and either a zone or owner to continue."
+                },
+                color = BlueprintTextMuted,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = onUploadNow,
+                    modifier = Modifier.weight(1f),
+                    enabled = draft.isStructuredIntakeComplete && !isPackaging,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = BlueprintAccent,
+                        contentColor = BlueprintBlack,
+                    ),
+                ) {
+                    Text("Upload now")
+                }
+                OutlinedButton(
+                    onClick = onSaveForLater,
+                    modifier = Modifier.weight(1f),
+                    enabled = draft.isStructuredIntakeComplete && !isPackaging,
+                ) {
+                    Text("Upload later")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRow(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, color = BlueprintTextMuted)
+        Text(value)
     }
 }
 
@@ -371,6 +569,16 @@ private fun formatElapsed(seconds: Long): String {
     val minutes = seconds / 60
     val remainingSeconds = seconds % 60
     return String.format(Locale.US, "%02d:%02d", minutes, remainingSeconds)
+}
+
+private fun formatDurationMs(durationMs: Long): String {
+    return formatElapsed(durationMs / 1_000L)
+}
+
+private fun formatPayout(cents: Int): String {
+    val dollars = cents / 100
+    val remainder = cents % 100
+    return "$$dollars.${remainder.toString().padStart(2, '0')}"
 }
 
 private val REQUIRED_CAPTURE_PERMISSIONS = arrayOf(

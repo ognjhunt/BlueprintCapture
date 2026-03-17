@@ -148,7 +148,10 @@ fun BlueprintCaptureRoot(
                                 ) {
                                     UploadQueueOverlay(
                                         items = rootState.uploads,
+                                        onStartUpload = rootViewModel::startUpload,
                                         onRetry = rootViewModel::retryUpload,
+                                        onDismiss = rootViewModel::dismissUpload,
+                                        onCancel = rootViewModel::cancelUpload,
                                     )
                                 }
                             }

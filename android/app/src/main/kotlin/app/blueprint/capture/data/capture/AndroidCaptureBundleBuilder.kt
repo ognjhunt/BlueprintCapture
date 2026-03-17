@@ -12,6 +12,7 @@ data class AndroidCaptureBundleResult(
     val manifestFile: File,
     val contextFile: File,
     val hypothesisFile: File,
+    val intakeFile: File?,
     val completionFile: File,
 )
 
@@ -46,11 +47,13 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureStartEpochMs = request.captureStartEpochMs,
             hasLiDAR = request.hasLiDAR,
             requestedOutputs = request.requestedOutputs,
-            taskTextHint = request.workflowName ?: request.captureContextHint,
-            taskSteps = request.taskSteps,
-            zone = request.zone,
-            owner = request.owner,
-            sceneMemoryCapture = SceneMemoryCapture(),
+            taskTextHint = request.intakePacket?.workflowName ?: request.workflowName ?: request.captureContextHint,
+            taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
+            zone = request.intakePacket?.zone ?: request.zone,
+            owner = request.intakePacket?.owner ?: request.owner,
+            sceneMemoryCapture = SceneMemoryCapture(
+                operatorNotes = request.operatorNotes,
+            ),
             captureRights = CaptureRights(
                 payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
                 consentNotes = listOfNotNull(request.rightsProfile?.let { "rights_profile:$it" }),
@@ -59,16 +62,17 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         )
         val context = CaptureContext(
             siteSubmissionId = request.siteSubmissionId ?: request.sceneId,
-            taskTextHint = request.workflowName ?: request.captureContextHint,
-            taskSteps = request.taskSteps,
-            zone = request.zone,
-            owner = request.owner,
+            taskTextHint = request.intakePacket?.workflowName ?: request.workflowName ?: request.captureContextHint,
+            taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
+            zone = request.intakePacket?.zone ?: request.zone,
+            owner = request.intakePacket?.owner ?: request.owner,
+            operatorNotes = request.operatorNotes,
         )
         val hypothesis = TaskHypothesis(
-            workflowName = request.workflowName,
-            taskSteps = request.taskSteps,
-            zone = request.zone,
-            owner = request.owner,
+            workflowName = request.intakePacket?.workflowName ?: request.workflowName,
+            taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
+            zone = request.intakePacket?.zone ?: request.zone,
+            owner = request.intakePacket?.owner ?: request.owner,
         )
         val completion = UploadComplete(
             sceneId = request.sceneId,
@@ -78,6 +82,9 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val manifestFile = rawDirectory.resolve("manifest.json").also { it.writeText(json.encodeToString(manifest)) }
         val contextFile = rawDirectory.resolve("capture_context.json").also { it.writeText(json.encodeToString(context)) }
         val hypothesisFile = rawDirectory.resolve("task_hypothesis.json").also { it.writeText(json.encodeToString(hypothesis)) }
+        val intakeFile = request.intakePacket?.let { packet ->
+            rawDirectory.resolve("intake_packet.json").also { it.writeText(json.encodeToString(packet)) }
+        }
         val completionFile = rawDirectory.resolve("capture_upload_complete.json").also {
             it.writeText(json.encodeToString(completion))
         }
@@ -88,6 +95,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             manifestFile = manifestFile,
             contextFile = contextFile,
             hypothesisFile = hypothesisFile,
+            intakeFile = intakeFile,
             completionFile = completionFile,
         )
     }

@@ -23,9 +23,36 @@ data class AndroidCaptureBundleRequest(
     @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
     val zone: String? = null,
     val owner: String? = null,
+    @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
+    @SerialName("intake_packet") val intakePacket: QualificationIntakePacket? = null,
+    @SerialName("intake_metadata") val intakeMetadata: CaptureIntakeMetadata? = null,
     @SerialName("quoted_payout_cents") val quotedPayoutCents: Int? = null,
     @SerialName("rights_profile") val rightsProfile: String? = null,
-    @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification"),
+    @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
+)
+
+@Serializable
+data class QualificationIntakePacket(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("workflow_name") val workflowName: String? = null,
+    @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
+    val zone: String? = null,
+    val owner: String? = null,
+)
+
+val QualificationIntakePacket.isComplete: Boolean
+    get() {
+        val hasWorkflow = !workflowName.isNullOrBlank()
+        val hasSteps = taskSteps.any { it.isNotBlank() }
+        val hasZoneOrOwner = !zone.isNullOrBlank() || !owner.isNullOrBlank()
+        return hasWorkflow && hasSteps && hasZoneOrOwner
+    }
+
+@Serializable
+data class CaptureIntakeMetadata(
+    val source: String = "human_manual",
+    val confidence: Double? = null,
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable
@@ -108,6 +135,7 @@ data class CaptureContext(
     @SerialName("task_steps") val taskSteps: List<String>,
     val zone: String? = null,
     val owner: String? = null,
+    @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
     @SerialName("world_model_candidate") val worldModelCandidate: Boolean = false,
     @SerialName("capture_evidence") val captureEvidence: CaptureEvidence = CaptureEvidence(),
     @SerialName("capture_rights") val captureRights: CaptureRights = CaptureRights(),
