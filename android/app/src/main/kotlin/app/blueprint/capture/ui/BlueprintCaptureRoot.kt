@@ -3,28 +3,34 @@ package app.blueprint.capture.ui
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.CreditCard
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.config.LocalConfigProvider
@@ -38,6 +44,8 @@ import app.blueprint.capture.ui.screens.ProfileScreen
 import app.blueprint.capture.ui.screens.ScanScreen
 import app.blueprint.capture.ui.screens.WalletScreen
 import app.blueprint.capture.ui.theme.BlueprintBlack
+import app.blueprint.capture.ui.theme.BlueprintBorder
+import app.blueprint.capture.ui.theme.BlueprintNavDivider
 import app.blueprint.capture.ui.theme.BlueprintNavSelected
 import app.blueprint.capture.ui.theme.BlueprintSurface
 import app.blueprint.capture.ui.theme.BlueprintTextMuted
@@ -84,68 +92,10 @@ fun BlueprintCaptureRoot(
                             modifier = Modifier.fillMaxSize(),
                             containerColor = BlueprintBlack,
                             bottomBar = {
-                                NavigationBar(
-                                    containerColor = BlueprintSurface,
-                                    tonalElevation = 0.dp,
-                                ) {
-                                    NavigationBarItem(
-                                        selected = rootState.selectedTab == MainTab.Scan,
-                                        onClick = { rootViewModel.selectTab(MainTab.Scan) },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = BlueprintTextPrimary,
-                                            selectedTextColor = BlueprintTextPrimary,
-                                            unselectedIconColor = BlueprintTextMuted,
-                                            unselectedTextColor = BlueprintTextMuted,
-                                            indicatorColor = BlueprintNavSelected,
-                                        ),
-                                        icon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.CropFree,
-                                                contentDescription = "Scan",
-                                                modifier = Modifier.size(24.dp),
-                                            )
-                                        },
-                                        label = { Text("Scan") },
-                                    )
-                                    NavigationBarItem(
-                                        selected = rootState.selectedTab == MainTab.Wallet,
-                                        onClick = { rootViewModel.selectTab(MainTab.Wallet) },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = BlueprintTextPrimary,
-                                            selectedTextColor = BlueprintTextPrimary,
-                                            unselectedIconColor = BlueprintTextMuted,
-                                            unselectedTextColor = BlueprintTextMuted,
-                                            indicatorColor = BlueprintNavSelected,
-                                        ),
-                                        icon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.CreditCard,
-                                                contentDescription = "Wallet",
-                                                modifier = Modifier.size(24.dp),
-                                            )
-                                        },
-                                        label = { Text("Wallet") },
-                                    )
-                                    NavigationBarItem(
-                                        selected = rootState.selectedTab == MainTab.Profile,
-                                        onClick = { rootViewModel.selectTab(MainTab.Profile) },
-                                        colors = NavigationBarItemDefaults.colors(
-                                            selectedIconColor = BlueprintTextPrimary,
-                                            selectedTextColor = BlueprintTextPrimary,
-                                            unselectedIconColor = BlueprintTextMuted,
-                                            unselectedTextColor = BlueprintTextMuted,
-                                            indicatorColor = BlueprintNavSelected,
-                                        ),
-                                        icon = {
-                                            Icon(
-                                                imageVector = Icons.Rounded.AccountCircle,
-                                                contentDescription = "Profile",
-                                                modifier = Modifier.size(24.dp),
-                                            )
-                                        },
-                                        label = { Text("Profile") },
-                                    )
-                                }
+                                BlueprintBottomBar(
+                                    selectedTab = rootState.selectedTab,
+                                    onSelect = rootViewModel::selectTab,
+                                )
                             },
                         ) { padding ->
                             Box(
@@ -181,6 +131,71 @@ fun BlueprintCaptureRoot(
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private data class RootTabSpec(
+    val tab: MainTab,
+    val icon: ImageVector,
+    val contentDescription: String,
+)
+
+@Composable
+private fun BlueprintBottomBar(
+    selectedTab: MainTab,
+    onSelect: (MainTab) -> Unit,
+) {
+    val tabs = listOf(
+        RootTabSpec(MainTab.Scan, Icons.Rounded.CropFree, "Scan"),
+        RootTabSpec(MainTab.Wallet, Icons.Rounded.CreditCard, "Wallet"),
+        RootTabSpec(MainTab.Profile, Icons.Rounded.AccountCircle, "Profile"),
+    )
+
+    Surface(
+        color = BlueprintSurface,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(BlueprintNavDivider),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 30.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEach { spec ->
+                    val isSelected = spec.tab == selectedTab
+                    Box(
+                        modifier = Modifier
+                            .size(if (isSelected) 68.dp else 56.dp)
+                            .clip(CircleShape)
+                            .background(if (isSelected) BlueprintNavSelected else Color.Transparent)
+                            .border(
+                                width = if (isSelected) 1.dp else 0.dp,
+                                color = if (isSelected) BlueprintBorder else Color.Transparent,
+                                shape = CircleShape,
+                            )
+                            .clickable(onClick = { onSelect(spec.tab) }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = spec.icon,
+                            contentDescription = spec.contentDescription,
+                            tint = if (isSelected) BlueprintTextPrimary else BlueprintTextMuted,
+                            modifier = Modifier.size(if (isSelected) 32.dp else 28.dp),
+                        )
                     }
                 }
             }
