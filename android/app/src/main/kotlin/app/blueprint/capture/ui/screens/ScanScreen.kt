@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -29,7 +30,7 @@ import app.blueprint.capture.ui.theme.BlueprintTextMuted
 
 @Composable
 fun ScanScreen(
-    onStartCapture: (String) -> Unit,
+    onStartCapture: (CaptureLaunch) -> Unit,
     viewModel: ScanViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -66,8 +67,13 @@ fun ScanScreen(
         )
         Button(
             onClick = {
-                val label = state.targets.firstOrNull()?.title ?: "Android phone capture"
-                onStartCapture(label)
+                val target = state.targets.firstOrNull()
+                onStartCapture(
+                    CaptureLaunch(
+                        label = target?.title ?: "Android phone capture",
+                        targetId = target?.id,
+                    ),
+                )
             },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(

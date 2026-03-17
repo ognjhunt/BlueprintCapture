@@ -3,6 +3,8 @@ package app.blueprint.capture.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.blueprint.capture.data.auth.AuthRepository
+import app.blueprint.capture.data.capture.CaptureUploadRepository
+import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.MainTab
 import app.blueprint.capture.data.model.RootStage
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.stateIn
 data class BlueprintCaptureRootUiState(
     val stage: RootStage = RootStage.Onboarding,
     val selectedTab: MainTab = MainTab.Scan,
+    val activeCapture: CaptureLaunch? = null,
     val uploads: List<UploadQueueItem> = DemoData.uploadQueue,
 )
 
@@ -26,16 +29,18 @@ data class BlueprintCaptureRootUiState(
 class BlueprintCaptureRootViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val authRepository: AuthRepository,
+    private val captureUploadRepository: CaptureUploadRepository,
 ) : ViewModel() {
     private val selectedTab = MutableStateFlow(MainTab.Scan)
-    private val uploads = MutableStateFlow(DemoData.uploadQueue)
+    private val activeCapture = MutableStateFlow<CaptureLaunch?>(null)
 
     val uiState: StateFlow<BlueprintCaptureRootUiState> = combine(
         sessionPreferences.onboardingCompleted,
         authRepository.authState,
         selectedTab,
-        uploads,
-    ) { onboardingComplete, user, tab, uploadQueue ->
+        activeCapture,
+        captureUploadRepository.queue,
+    ) { onboardingComplete, user, tab, capture, uploadQueue ->
         BlueprintCaptureRootUiState(
             stage = when {
                 !onboardingComplete -> RootStage.Onboarding
@@ -43,6 +48,7 @@ class BlueprintCaptureRootViewModel @Inject constructor(
                 else -> RootStage.App
             },
             selectedTab = tab,
+            activeCapture = capture,
             uploads = uploadQueue,
         )
     }.stateIn(
@@ -59,16 +65,15 @@ class BlueprintCaptureRootViewModel @Inject constructor(
         selectedTab.value = tab
     }
 
-    fun queueCapture(label: String) {
-        if (uploads.value.any { it.id == "upload-new" }) {
-            return
-        }
-        uploads.value = listOf(
-            UploadQueueItem(
-                id = "upload-new",
-                label = label,
-                progress = 0.12f,
-            ),
-        ) + uploads.value
+    fun startCaptureSession(capture: CaptureLaunch) {
+        activeCapture.value = capture
+    }
+
+    fun dismissCaptureSession() {
+        activeCapture.value = null
+    }
+
+    fun retryUpload(id: String) {
+        captureUploadRepository.retryUpload(id)
     }
 }

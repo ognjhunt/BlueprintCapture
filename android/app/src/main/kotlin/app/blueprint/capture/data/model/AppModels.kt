@@ -1,5 +1,7 @@
 package app.blueprint.capture.data.model
 
+import kotlinx.serialization.Serializable
+
 enum class RootStage {
     Onboarding,
     Auth,
@@ -12,6 +14,11 @@ enum class MainTab {
     Profile,
 }
 
+data class CaptureLaunch(
+    val label: String,
+    val targetId: String? = null,
+)
+
 data class ScanTarget(
     val id: String,
     val title: String,
@@ -21,10 +28,26 @@ data class ScanTarget(
     val readyNow: Boolean,
 )
 
+@Serializable
+enum class UploadQueueStatus {
+    Queued,
+    Preparing,
+    Uploading,
+    Completed,
+    Failed,
+}
+
+@Serializable
 data class UploadQueueItem(
     val id: String,
     val label: String,
     val progress: Float,
+    val status: UploadQueueStatus = UploadQueueStatus.Queued,
+    val detail: String = "",
+    val localBundlePath: String? = null,
+    val remotePrefix: String? = null,
+    val creatorId: String? = null,
+    val createdAtEpochMs: Long = System.currentTimeMillis(),
 )
 
 data class ContributorStats(
@@ -78,13 +101,7 @@ object DemoData {
         ),
     )
 
-    val uploadQueue = listOf(
-        UploadQueueItem(
-            id = "upload-1",
-            label = "North Beach Grocery",
-            progress = 0.58f,
-        )
-    )
+    val uploadQueue = emptyList<UploadQueueItem>()
 
     val contributorProfile = ContributorProfile(
         uid = "demo-user",

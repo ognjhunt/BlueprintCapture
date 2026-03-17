@@ -31,6 +31,7 @@ import app.blueprint.capture.data.model.MainTab
 import app.blueprint.capture.data.model.RootStage
 import app.blueprint.capture.ui.components.UploadQueueOverlay
 import app.blueprint.capture.ui.screens.AuthScreen
+import app.blueprint.capture.ui.screens.CaptureSessionScreen
 import app.blueprint.capture.ui.screens.OnboardingScreen
 import app.blueprint.capture.ui.screens.ProfileScreen
 import app.blueprint.capture.ui.screens.ScanScreen
@@ -68,79 +69,88 @@ fun BlueprintCaptureRoot(
                 )
 
                 RootStage.App -> {
-                    Scaffold(
-                        modifier = Modifier.fillMaxSize(),
-                        containerColor = BlueprintBlack,
-                        bottomBar = {
-                            NavigationBar(
-                                containerColor = BlueprintSurface,
-                                tonalElevation = 0.dp,
-                            ) {
-                                NavigationBarItem(
-                                    selected = rootState.selectedTab == MainTab.Scan,
-                                    onClick = { rootViewModel.selectTab(MainTab.Scan) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.MyLocation,
-                                            contentDescription = "Scan",
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    },
-                                    label = { Text("Scan") },
-                                )
-                                NavigationBarItem(
-                                    selected = rootState.selectedTab == MainTab.Wallet,
-                                    onClick = { rootViewModel.selectTab(MainTab.Wallet) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.CreditCard,
-                                            contentDescription = "Wallet",
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    },
-                                    label = { Text("Wallet") },
-                                )
-                                NavigationBarItem(
-                                    selected = rootState.selectedTab == MainTab.Profile,
-                                    onClick = { rootViewModel.selectTab(MainTab.Profile) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.AccountCircle,
-                                            contentDescription = "Profile",
-                                            modifier = Modifier.size(24.dp),
-                                        )
-                                    },
-                                    label = { Text("Profile") },
-                                )
-                            }
-                        },
-                    ) { padding ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(padding)
-                                .background(BlueprintBlack),
-                        ) {
-                            AnimatedContent(targetState = rootState.selectedTab, label = "tab-content") { tab ->
-                                when (tab) {
-                                    MainTab.Scan -> ScanScreen(
-                                        onStartCapture = { label ->
-                                            rootViewModel.queueCapture(label)
+                    val activeCapture = rootState.activeCapture
+                    if (activeCapture != null) {
+                        CaptureSessionScreen(
+                            capture = activeCapture,
+                            onClose = rootViewModel::dismissCaptureSession,
+                        )
+                    } else {
+                        Scaffold(
+                            modifier = Modifier.fillMaxSize(),
+                            containerColor = BlueprintBlack,
+                            bottomBar = {
+                                NavigationBar(
+                                    containerColor = BlueprintSurface,
+                                    tonalElevation = 0.dp,
+                                ) {
+                                    NavigationBarItem(
+                                        selected = rootState.selectedTab == MainTab.Scan,
+                                        onClick = { rootViewModel.selectTab(MainTab.Scan) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.MyLocation,
+                                                contentDescription = "Scan",
+                                                modifier = Modifier.size(24.dp),
+                                            )
                                         },
+                                        label = { Text("Scan") },
                                     )
-
-                                    MainTab.Wallet -> WalletScreen()
-                                    MainTab.Profile -> ProfileScreen()
+                                    NavigationBarItem(
+                                        selected = rootState.selectedTab == MainTab.Wallet,
+                                        onClick = { rootViewModel.selectTab(MainTab.Wallet) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.CreditCard,
+                                                contentDescription = "Wallet",
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        },
+                                        label = { Text("Wallet") },
+                                    )
+                                    NavigationBarItem(
+                                        selected = rootState.selectedTab == MainTab.Profile,
+                                        onClick = { rootViewModel.selectTab(MainTab.Profile) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = Icons.Rounded.AccountCircle,
+                                                contentDescription = "Profile",
+                                                modifier = Modifier.size(24.dp),
+                                            )
+                                        },
+                                        label = { Text("Profile") },
+                                    )
                                 }
-                            }
-
-                            Column(
+                            },
+                        ) { padding ->
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 20.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.Bottom,
+                                    .fillMaxSize()
+                                    .padding(padding)
+                                    .background(BlueprintBlack),
                             ) {
-                                UploadQueueOverlay(items = rootState.uploads)
+                                AnimatedContent(targetState = rootState.selectedTab, label = "tab-content") { tab ->
+                                    when (tab) {
+                                        MainTab.Scan -> ScanScreen(
+                                            onStartCapture = rootViewModel::startCaptureSession,
+                                        )
+
+                                        MainTab.Wallet -> WalletScreen()
+                                        MainTab.Profile -> ProfileScreen()
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                    verticalArrangement = Arrangement.Bottom,
+                                ) {
+                                    UploadQueueOverlay(
+                                        items = rootState.uploads,
+                                        onRetry = rootViewModel::retryUpload,
+                                    )
+                                }
                             }
                         }
                     }

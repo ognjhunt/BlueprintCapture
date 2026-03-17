@@ -55,6 +55,8 @@ class AuthRepository @Inject constructor(
         auth.signOut()
     }
 
+    fun currentUserId(): String? = auth.currentUser?.uid
+
     private suspend fun bootstrapUserDocument(
         user: FirebaseUser,
         nameOverride: String?,
