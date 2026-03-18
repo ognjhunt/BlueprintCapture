@@ -2,124 +2,129 @@ import SwiftUI
 
 struct PostCaptureSummaryView: View {
     let duration: TimeInterval
-    let frameCount: Int
-    let depthFrameCount: Int
     let estimatedDataSizeMB: Double
-    let estimatedCoveragePercent: Double
-    let hasLiDAR: Bool
-    let capturePolicyLabel: String
-    let rightsSummary: String
+    let spaceTitle: String
+    let spaceAddress: String?
     let onUploadNow: () -> Void
     let onUploadLater: () -> Void
+    let onExport: () -> Void
     @Binding var userNotes: String
 
-    private let device = DeviceCapabilityService.shared
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(BlueprintTheme.successGreen)
-                Text("Submission ready for review")
-                    .font(.headline)
-                Spacer()
-            }
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-            LazyVGrid(columns: [
-                GridItem(.flexible()),
-                GridItem(.flexible()),
-            ], spacing: 12) {
-                statCell(label: "Duration", value: formattedDuration)
-                statCell(label: "Frames", value: "\(frameCount)")
-                statCell(label: "Depth Frames", value: "\(depthFrameCount)")
-                statCell(label: "Data Size", value: formattedDataSize)
-            }
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    // ── Hero ──────────────────────────────────────────────
+                    VStack(spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 52))
+                            .foregroundStyle(Color(red: 0.2, green: 0.85, blue: 0.45))
+                            .padding(.top, 48)
 
-            // Device multiplier badge
-            HStack(spacing: 8) {
-                Image(systemName: hasLiDAR ? "sensor.tag.radiowaves.forward.fill" : "iphone")
-                    .foregroundStyle(BlueprintTheme.brandTeal)
-                Text(device.deviceModel)
-                    .font(.subheadline)
-                Spacer()
-                Text(device.multiplierLabel)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
-                Text("multiplier")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(BlueprintTheme.brandTeal.opacity(0.1))
-            )
+                        Text(spaceTitle.isEmpty ? "Capture complete" : spaceTitle)
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(.white)
+                            .multilineTextAlignment(.center)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Submission readiness")
-                    .font(.subheadline.weight(.semibold))
+                        if let address = spaceAddress, !address.isEmpty {
+                            Text(address)
+                                .font(.subheadline)
+                                .foregroundStyle(Color(white: 0.5))
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 40)
 
-                readinessRow(label: "Next stage", value: nextStageLabel, tone: estimatedCoveragePercent >= 65 ? .good : .warning)
-                readinessRow(label: "Coverage", value: "\(Int(estimatedCoveragePercent))%", tone: estimatedCoveragePercent >= 70 ? .good : .warning)
-                readinessRow(label: "Device score", value: device.capabilityDescription, tone: hasLiDAR ? .good : .warning)
-                readinessRow(label: "Capture policy", value: capturePolicyLabel, tone: .neutral)
-                readinessRow(label: "Review estimate", value: expectedReviewSLA, tone: .neutral)
-                readinessRow(label: "Estimated earnings band", value: estimatedEarningsRange, tone: .good)
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemBackground))
-            )
+                    // ── Summary card ──────────────────────────────────────
+                    VStack(spacing: 0) {
+                        summaryRow(label: "Duration", value: formattedDuration)
+                        Divider().background(Color(white: 0.15))
+                        summaryRow(label: "Size", value: formattedDataSize)
+                    }
+                    .background(Color(white: 0.07))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .padding(.horizontal, 20)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Rights and review")
-                    .font(.subheadline.weight(.semibold))
-                Text(rightsSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(.tertiarySystemBackground))
-            )
+                    // ── Notes ─────────────────────────────────────────────
+                    TextField("Add a note (optional)", text: $userNotes, axis: .vertical)
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .tint(Color(red: 0.22, green: 0.9, blue: 0.78))
+                        .lineLimit(2...4)
+                        .padding(14)
+                        .background(Color(white: 0.07))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
 
-            Text("These are local capture estimates only. Final approval, payout, rights status, and buyer readiness come from Blueprint review after upload.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    // ── CTAs ─────────────────────────────────────────────
+                    VStack(spacing: 10) {
+                        // Primary — Upload
+                        Button(action: onUploadNow) {
+                            Text("Upload")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 17)
+                                .background(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
 
-            TextField("Add notes about this space (optional)", text: $userNotes, axis: .vertical)
-                .font(.subheadline)
-                .lineLimit(2...4)
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(.tertiarySystemBackground))
-                )
+                        // Secondary — Export / AirDrop
+                        Button(action: onExport) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text("Export bundle")
+                                    .font(.system(size: 16, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color(white: 0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color(white: 0.2), lineWidth: 1)
+                            )
+                        }
 
-            VStack(spacing: 8) {
-                Button(action: onUploadNow) {
-                    Text("Queue for review")
-                        .frame(maxWidth: .infinity)
+                        // Tertiary — save for later
+                        Button(action: onUploadLater) {
+                            Text("Save for later")
+                                .font(.subheadline)
+                                .foregroundStyle(Color(white: 0.4))
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 48)
                 }
-                .buttonStyle(BlueprintPrimaryButtonStyle())
-
-                Button(action: onUploadLater) {
-                    Text("Upload later (Wi-Fi)")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(BlueprintSecondaryButtonStyle())
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
     }
 
-    // MARK: - Computed Properties
+    // MARK: - Row helper
+
+    private func summaryRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(Color(white: 0.55))
+            Spacer()
+            Text(value)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Computed
 
     private var formattedDuration: String {
         let mins = Int(duration) / 60
@@ -136,103 +141,18 @@ struct PostCaptureSummaryView: View {
         }
         return String(format: "%.1f GB", estimatedDataSizeMB / 1024)
     }
-
-    private var estimatedEarningsRange: String {
-        // Base estimate: $20-60 range scaled by multiplier and duration
-        let multiplier = device.captureMultiplier
-        let durationMinutes = duration / 60.0
-        let durationFactor = min(1.0, durationMinutes / 15.0) // Full rate at 15+ min
-
-        let baseLow = 20.0
-        let baseHigh = 60.0
-
-        let low = Int(baseLow * durationFactor * (multiplier / 2.0))
-        let high = Int(baseHigh * durationFactor * (multiplier / 2.0))
-
-        return "$\(max(low, 5))–$\(max(high, 10))"
-    }
-
-    private func statCell(label: String, value: String) -> some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(.primary)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(.tertiarySystemBackground))
-        )
-    }
-
-    private var expectedReviewSLA: String {
-        if estimatedCoveragePercent >= 80 {
-            return "Usually reviewed within 24h"
-        }
-        if estimatedCoveragePercent >= 60 {
-            return "Review likely within 24-48h"
-        }
-        return "May require recapture review"
-    }
-
-    private var nextStageLabel: String {
-        if estimatedCoveragePercent >= 80 {
-            return "Upload and review"
-        }
-        if estimatedCoveragePercent >= 60 {
-            return "Upload for review"
-        }
-        return "Needs more coverage"
-    }
-
-    private enum ReadinessTone {
-        case good
-        case warning
-        case neutral
-    }
-
-    private func readinessRow(label: String, value: String, tone: ReadinessTone) -> some View {
-        HStack {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(readinessColor(tone))
-        }
-    }
-
-    private func readinessColor(_ tone: ReadinessTone) -> Color {
-        switch tone {
-        case .good:
-            return BlueprintTheme.successGreen
-        case .warning:
-            return .orange
-        case .neutral:
-            return .primary
-        }
-    }
 }
 
 #Preview {
     PostCaptureSummaryView(
-        duration: 1245,
-        frameCount: 18720,
-        depthFrameCount: 9360,
-        estimatedDataSizeMB: 485.3,
-        estimatedCoveragePercent: 72,
-        hasLiDAR: true,
-        capturePolicyLabel: "Review required",
-        rightsSummary: "Capture common areas only. Keep faces, screens, paperwork, and restricted zones out of frame.",
+        duration: 82,
+        estimatedDataSizeMB: 103.9,
+        spaceTitle: "Current Location",
+        spaceAddress: "1005 Crete St, Durham",
         onUploadNow: {},
         onUploadLater: {},
+        onExport: {},
         userNotes: .constant("")
     )
-    .padding()
     .preferredColorScheme(.dark)
 }

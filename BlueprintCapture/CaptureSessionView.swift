@@ -96,13 +96,9 @@ struct CaptureSessionView: View {
                     let monitor = captureManager.qualityMonitor
                     PostCaptureSummaryView(
                         duration: monitor.elapsedSeconds,
-                        frameCount: monitor.frameCount,
-                        depthFrameCount: monitor.depthFrameCount,
                         estimatedDataSizeMB: monitor.estimatedDataSizeMB,
-                        estimatedCoveragePercent: monitor.estimatedCoveragePercent,
-                        hasLiDAR: monitor.hasLiDAR,
-                        capturePolicyLabel: capturePolicyLabel,
-                        rightsSummary: rightsSummary,
+                        spaceTitle: viewModel.currentTargetInfo?.name ?? viewModel.pendingCaptureTargetName ?? "Capture complete",
+                        spaceAddress: viewModel.currentAddress,
                         onUploadNow: {
                             viewModel.updatePendingCaptureNotes(captureNotes)
                             viewModel.startPendingCaptureUpload()
@@ -111,9 +107,13 @@ struct CaptureSessionView: View {
                             viewModel.updatePendingCaptureNotes(captureNotes)
                             completeAndDismiss()
                         },
+                        onExport: {
+                            viewModel.updatePendingCaptureNotes(captureNotes)
+                            viewModel.startPendingCaptureExport()
+                        },
                         userNotes: $captureNotes
                     )
-                    .padding(.horizontal)
+                    .ignoresSafeArea()
                 }
 
                 if case .finished = captureManager.captureState,

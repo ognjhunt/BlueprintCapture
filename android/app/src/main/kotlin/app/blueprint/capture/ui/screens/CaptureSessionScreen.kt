@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,6 +47,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowUpward
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MonetizationOn
@@ -55,6 +59,7 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -972,306 +977,156 @@ private fun ReviewScreen(
     val isBusy = uiState.actionState != FinishedCaptureActionState.Idle
     val needsManualEntry = uiState.errorMessage != null && !draft.isStructuredIntakeComplete
 
+    val spaceTitle = draft.capture.label.ifBlank { "Capture complete" }
+    val spaceAddress = draft.capture.addressText?.ifBlank { null }
+
+    // Duration + size for the summary card
+    val durationSec = draft.captureDurationMs / 1_000L
+    val estimatedMB = run {
+        val pixels = draft.width.toLong() * draft.height.toLong()
+        val mbPerMin = when {
+            pixels >= 8_294_400L -> 280.0
+            pixels >= 2_073_600L -> 85.0
+            else -> 42.0
+        }
+        (durationSec / 60.0 * mbPerMin).toLong().coerceAtLeast(1L)
+    }
+    val sizeLabel = if (estimatedMB >= 1024) "%.1f GB".format(estimatedMB / 1024.0) else "$estimatedMB MB"
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BlueprintBlack),
+            .background(Color.Black),
     ) {
-        // ── Scrollable body ───────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(top = 16.dp, bottom = 128.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(bottom = 160.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Nav header
+            // ── Close button (top-left) ────────────────────────────────
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(36.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFF222224))
+                        .background(Color(0xFF1A1A1A))
                         .clickable(onClick = onClose, enabled = !isBusy),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        imageVector = Icons.Rounded.Close,
                         contentDescription = "Close",
-                        tint = if (isBusy) BlueprintTextMuted.copy(alpha = 0.4f) else BlueprintTextPrimary,
-                        modifier = Modifier.size(24.dp),
+                        tint = if (isBusy) Color(0xFF444444) else Color.White,
+                        modifier = Modifier.size(18.dp),
                     )
                 }
-                Text(
-                    text = "Capture Summary",
-                    style = TextStyle(
-                        color = BlueprintTextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.2).sp,
-                    ),
+            }
+
+            // ── Hero: checkmark + space name ──────────────────────────
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (isBusy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(52.dp),
+                    color = BlueprintTeal,
+                    strokeWidth = 3.dp,
+                    trackColor = Color(0xFF1A1A1A),
                 )
-                Text(
-                    text = "Save later",
-                    style = TextStyle(
-                        color = if (isBusy) BlueprintTextMuted.copy(alpha = 0.3f) else BlueprintTextMuted,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                    modifier = Modifier.clickable(enabled = !isBusy, onClick = onSaveForLater),
-                )
-            }
-
-            // Status header card
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (isBusy) BlueprintTeal.copy(alpha = 0.10f) else BlueprintSuccess.copy(alpha = 0.10f),
-                    )
-                    .border(
-                        1.dp,
-                        if (isBusy) BlueprintTeal.copy(alpha = 0.22f) else BlueprintSuccess.copy(alpha = 0.22f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (isBusy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        color = BlueprintTeal,
-                        strokeWidth = 2.5.dp,
-                        trackColor = BlueprintSurfaceRaised,
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(BlueprintSuccess),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Visibility,
-                            contentDescription = null,
-                            tint = BlueprintBlack,
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = when (uiState.actionState) {
-                            FinishedCaptureActionState.GeneratingIntake -> "Preparing intake…"
-                            FinishedCaptureActionState.QueueingUpload -> "Queuing for upload…"
-                            FinishedCaptureActionState.SavingForLater -> "Saving locally…"
-                            FinishedCaptureActionState.Exporting -> "Building export…"
-                            FinishedCaptureActionState.Idle -> "Walkthrough ready"
-                        },
-                        color = if (isBusy) BlueprintTeal else BlueprintSuccess,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = if (isBusy) "Please wait — do not close the app." else "Review your capture below, then queue for Blueprint review.",
-                        color = BlueprintTextMuted,
-                        fontSize = 13.sp,
-                        lineHeight = 17.sp,
-                    )
-                }
-            }
-
-            // Error / manual-entry banner
-            if (uiState.errorMessage != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(BlueprintAccent.copy(alpha = 0.10f))
-                        .border(1.dp, BlueprintAccent.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Schedule,
-                        contentDescription = null,
-                        tint = BlueprintAccent,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .padding(top = 1.dp),
-                    )
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("Add a little context", color = BlueprintTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                        Text(uiState.errorMessage, color = BlueprintTextMuted, fontSize = 13.sp, lineHeight = 18.sp)
-                    }
-                }
-            }
-
-            // Stats 2×2 grid
-            val durationSec = draft.captureDurationMs / 1_000L
-            val resolutionLabel = when {
-                draft.height >= 2160 -> "4K"
-                draft.height >= 1080 -> "1080p"
-                draft.height >= 720 -> "720p"
-                else -> "${draft.width}×${draft.height}"
-            }
-            val estimatedMB = run {
-                val pixels = draft.width.toLong() * draft.height.toLong()
-                val mbPerMin = when {
-                    pixels >= 8_294_400L -> 280.0
-                    pixels >= 2_073_600L -> 85.0
-                    else -> 42.0
-                }
-                (durationSec / 60.0 * mbPerMin).toLong().coerceAtLeast(1L)
-            }
-            val fileSizeLabel = if (estimatedMB >= 1024) "%.1f GB".format(estimatedMB / 1024.0) else "$estimatedMB MB"
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CaptureStatCard("Duration", formatDurationMs(draft.captureDurationMs), Modifier.weight(1f))
-                CaptureStatCard("Resolution", resolutionLabel, Modifier.weight(1f))
-            }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CaptureStatCard("Frame rate", "${draft.frameRate.roundToInt()} fps", Modifier.weight(1f))
-                CaptureStatCard("Est. size", fileSizeLabel, Modifier.weight(1f))
-            }
-
-            // Device multiplier badge
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(BlueprintTeal.copy(alpha = 0.09f))
-                    .border(1.dp, BlueprintTeal.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 14.dp, vertical = 11.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.NearMe,
-                    contentDescription = null,
-                    tint = BlueprintTeal,
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(
-                    text = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
-                    color = BlueprintTextMuted,
-                    fontSize = 14.sp,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text("1×", color = BlueprintSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text("multiplier", color = BlueprintTextMuted, fontSize = 12.sp)
-            }
-
-            // Readiness rows
-            val coveragePct = when {
-                durationSec < 30 -> 25
-                durationSec < 90 -> 45
-                durationSec < 180 -> 65
-                durationSec < 420 -> 80
-                else -> 90
-            }
-            val earningsLow: Int
-            val earningsHigh: Int
-            if (draft.capture.quotedPayoutCents != null) {
-                earningsLow = draft.capture.quotedPayoutCents / 100
-                earningsHigh = earningsLow
             } else {
-                earningsLow = when { durationSec < 120 -> 15; durationSec < 300 -> 25; durationSec < 600 -> 35; else -> 45 }
-                earningsHigh = earningsLow + 30
-            }
-            val earningsLabel = if (earningsLow == earningsHigh) "$$earningsLow" else "$$earningsLow–$$earningsHigh"
-            val policyLabel = when (draft.capture.permissionTone) {
-                CapturePermissionTone.Approved -> "Pre-approved"
-                CapturePermissionTone.Review -> "Under review"
-                CapturePermissionTone.Permission -> "Permission check"
-                CapturePermissionTone.Blocked -> "Blocked"
+                Icon(
+                    imageVector = Icons.Rounded.Check,
+                    contentDescription = null,
+                    tint = BlueprintSuccess,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(BlueprintSuccess.copy(alpha = 0.15f))
+                        .padding(12.dp),
+                )
             }
 
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = when (uiState.actionState) {
+                    FinishedCaptureActionState.GeneratingIntake -> "Preparing…"
+                    FinishedCaptureActionState.QueueingUpload -> "Uploading…"
+                    FinishedCaptureActionState.SavingForLater -> "Saving…"
+                    FinishedCaptureActionState.Exporting -> "Exporting…"
+                    FinishedCaptureActionState.Idle -> spaceTitle
+                },
+                color = Color.White,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 28.dp),
+            )
+
+            if (spaceAddress != null && !isBusy) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = spaceAddress,
+                    color = Color(0xFF666666),
+                    fontSize = 15.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 28.dp),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // ── Summary card: Duration + Size ─────────────────────────
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(Color(0xFF171719))
-                    .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 20.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF111111)),
             ) {
-                PostCaptureReadinessRow("Coverage estimate", "$coveragePct%", if (coveragePct >= 65) PostCaptureTone.Good else PostCaptureTone.Warning)
-                PostCaptureReadinessDivider()
-                PostCaptureReadinessRow("Estimated earnings", earningsLabel, PostCaptureTone.Good)
-                PostCaptureReadinessDivider()
-                PostCaptureReadinessRow("Capture policy", policyLabel, PostCaptureTone.Neutral)
-                PostCaptureReadinessDivider()
-                PostCaptureReadinessRow(
-                    "Review estimate",
-                    if (coveragePct >= 80) "Usually within 24h" else "Usually 3–5 days",
-                    PostCaptureTone.Neutral,
-                )
+                ReviewSummaryRow("Duration", formatDurationMs(draft.captureDurationMs))
+                HorizontalDivider(color = Color(0xFF222222), thickness = 1.dp)
+                ReviewSummaryRow("Size", sizeLabel)
             }
 
-            // Optional notes field
-            OutlinedTextField(
-                value = draft.notes,
-                onValueChange = onNotesChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Add notes about this space (optional)", color = BlueprintTextMuted) },
-                minLines = 2,
-                enabled = !isBusy,
-                shape = RoundedCornerShape(14.dp),
-                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = BlueprintTextPrimary,
-                    unfocusedTextColor = BlueprintTextPrimary,
-                    focusedContainerColor = Color(0xFF171719),
-                    unfocusedContainerColor = Color(0xFF171719),
-                    focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
-                    unfocusedBorderColor = BlueprintBorder,
-                    cursorColor = BlueprintTeal,
-                    focusedLabelColor = BlueprintTextMuted,
-                    unfocusedLabelColor = BlueprintTextMuted,
-                ),
-            )
-
-            // Manual intake assist — only shown when AI inference can't resolve
+            // ── Manual intake (only when AI couldn't resolve) ─────────
             if (needsManualEntry) {
+                Spacer(modifier = Modifier.height(12.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xFF171719))
-                        .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 20.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF111111))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("Help Blueprint categorise this capture", color = BlueprintTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Add capture context", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     OutlinedTextField(
                         value = draft.workflowName,
                         onValueChange = onWorkflowNameChanged,
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Workflow name (e.g. Parking garage walkthrough)") },
+                        label = { Text("Workflow name") },
                         singleLine = true,
                         enabled = !isBusy,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = BlueprintTextPrimary,
-                            unfocusedTextColor = BlueprintTextPrimary,
-                            focusedContainerColor = Color(0xFF1E1E20),
-                            unfocusedContainerColor = Color(0xFF1E1E20),
-                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
-                            unfocusedBorderColor = BlueprintBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color(0xFF1A1A1A),
+                            unfocusedContainerColor = Color(0xFF1A1A1A),
+                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.5f),
+                            unfocusedBorderColor = Color(0xFF333333),
                             cursorColor = BlueprintTeal,
-                            focusedLabelColor = BlueprintTextMuted,
-                            unfocusedLabelColor = BlueprintTextMuted,
+                            focusedLabelColor = Color(0xFF666666),
+                            unfocusedLabelColor = Color(0xFF666666),
                         ),
                     )
                     OutlinedTextField(
@@ -1281,71 +1136,131 @@ private fun ReviewScreen(
                         label = { Text("Task steps (one per line)") },
                         minLines = 3,
                         enabled = !isBusy,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = BlueprintTextPrimary,
-                            unfocusedTextColor = BlueprintTextPrimary,
-                            focusedContainerColor = Color(0xFF1E1E20),
-                            unfocusedContainerColor = Color(0xFF1E1E20),
-                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
-                            unfocusedBorderColor = BlueprintBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color(0xFF1A1A1A),
+                            unfocusedContainerColor = Color(0xFF1A1A1A),
+                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.5f),
+                            unfocusedBorderColor = Color(0xFF333333),
                             cursorColor = BlueprintTeal,
-                            focusedLabelColor = BlueprintTextMuted,
-                            unfocusedLabelColor = BlueprintTextMuted,
+                            focusedLabelColor = Color(0xFF666666),
+                            unfocusedLabelColor = Color(0xFF666666),
                         ),
                     )
                 }
             }
 
-            // Disclaimer
-            Text(
-                text = "Stats are local estimates only. Final approval, rights status, and payout are determined after Blueprint review.",
-                color = BlueprintTextMuted.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-                lineHeight = 17.sp,
+            // ── Notes ─────────────────────────────────────────────────
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = draft.notes,
+                onValueChange = onNotesChanged,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
+                placeholder = { Text("Add a note (optional)", color = Color(0xFF444444)) },
+                minLines = 2,
+                enabled = !isBusy,
+                shape = RoundedCornerShape(14.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedContainerColor = Color(0xFF111111),
+                    unfocusedContainerColor = Color(0xFF111111),
+                    focusedBorderColor = BlueprintTeal.copy(alpha = 0.5f),
+                    unfocusedBorderColor = Color(0xFF222222),
+                    cursorColor = BlueprintTeal,
+                ),
             )
         }
 
-        // ── Pinned bottom CTA ─────────────────────────────────────────────
-        Box(
+        // ── Pinned CTAs ───────────────────────────────────────────────
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, BlueprintBlack.copy(alpha = 0.96f), BlueprintBlack),
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.97f), Color.Black),
                     ),
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 20.dp),
+                .padding(horizontal = 20.dp)
+                .padding(top = 24.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // Primary — Upload
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(if (isBusy) BlueprintAccent.copy(alpha = 0.35f) else BlueprintAccent)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isBusy) Color.White.copy(alpha = 0.3f) else Color.White)
                     .clickable(enabled = !isBusy, onClick = onUploadNow)
-                    .padding(vertical = 18.dp),
+                    .padding(vertical = 17.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 if (isBusy) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(22.dp),
-                        color = BlueprintBlack.copy(alpha = 0.5f),
+                        color = Color.Black.copy(alpha = 0.4f),
                         strokeWidth = 2.5.dp,
                         trackColor = Color.Transparent,
                     )
                 } else {
-                    Text(
-                        text = "Queue for review",
-                        color = BlueprintBlack,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.2).sp,
-                    )
+                    Text("Upload", color = Color.Black, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+
+            // Secondary — Export
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF111111))
+                    .border(1.dp, Color(0xFF2A2A2A), RoundedCornerShape(14.dp))
+                    .clickable(enabled = !isBusy, onClick = onExportForTesting)
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowUpward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text("Export bundle", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // Tertiary — save for later
+            androidx.compose.material3.TextButton(
+                onClick = onSaveForLater,
+                enabled = !isBusy,
+            ) {
+                Text("Save for later", color = if (isBusy) Color(0xFF333333) else Color(0xFF555555), fontSize = 14.sp)
+            }
         }
+    }
+}
+
+@Composable
+private fun ReviewSummaryRow(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = Color(0xFF666666), fontSize = 15.sp)
+        Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
