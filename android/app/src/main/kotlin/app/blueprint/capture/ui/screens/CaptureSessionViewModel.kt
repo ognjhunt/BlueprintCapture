@@ -397,17 +397,19 @@ class CaptureSessionViewModel @Inject constructor(
                     continueWithResolvedDraft(resolvedDraft, resolution.request, action)
                 }
                 is IntakeResolutionOutcome.NeedsManualEntry -> {
-                    val updatedDraft = CaptureReviewDraft.fromResolution(
+                    // Alpha: AI intake is disabled — skip the manual form and proceed directly
+                    val resolvedDraft = CaptureReviewDraft.fromResolution(
                         base = draft,
                         request = resolution.request,
-                        helperText = resolution.draft.helperText,
-                        reviewTitle = resolution.draft.reviewTitle,
+                        helperText = "",
+                        reviewTitle = "Capture complete",
                     ).copy(preparedCaptureId = captureId)
                     _uiState.value = _uiState.value.copy(
-                        reviewDraft = updatedDraft,
-                        actionState = FinishedCaptureActionState.Idle,
-                        errorMessage = "Review the inferred intake before continuing.",
+                        reviewDraft = resolvedDraft,
+                        actionState = action,
+                        errorMessage = null,
                     )
+                    continueWithResolvedDraft(resolvedDraft, resolution.request, action)
                 }
             }
         }

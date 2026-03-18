@@ -662,12 +662,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                     }
                 }
             }
-        case .needsManualEntry(let unresolvedRequest, let draft):
-            await MainActor.run {
-                self.pendingCaptureRequest = unresolvedRequest
-                self.manualIntakeDraft = draft
-                self.finishedCaptureActionState = .idle
-            }
+        case .needsManualEntry(let unresolvedRequest, _):
+            // Alpha: AI intake is disabled — skip the manual form and proceed directly
+            await resolvePendingCaptureAndContinue(request: unresolvedRequest, action: action, skipResolution: true)
         }
     }
 

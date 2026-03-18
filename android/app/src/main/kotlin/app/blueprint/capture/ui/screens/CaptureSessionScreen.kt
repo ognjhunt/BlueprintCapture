@@ -975,7 +975,9 @@ private fun ReviewScreen(
     onExportForTesting: () -> Unit,
 ) {
     val isBusy = uiState.actionState != FinishedCaptureActionState.Idle
-    val needsManualEntry = uiState.errorMessage != null && !draft.isStructuredIntakeComplete
+    // Alpha: suppress manual intake form — always skip regardless of AI intake result
+    @Suppress("UNUSED_VARIABLE")
+    val needsManualEntry = false
 
     val spaceTitle = draft.capture.label.ifBlank { "Capture complete" }
     val spaceAddress = draft.capture.addressText?.ifBlank { null }

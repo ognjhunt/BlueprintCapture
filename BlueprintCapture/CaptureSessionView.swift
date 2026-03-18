@@ -91,36 +91,6 @@ struct CaptureSessionView: View {
                     .padding(.horizontal)
                 }
 
-                // Post-capture summary
-                if case .finished = captureManager.captureState {
-                    let monitor = captureManager.qualityMonitor
-                    PostCaptureSummaryView(
-                        duration: monitor.elapsedSeconds,
-                        estimatedDataSizeMB: monitor.estimatedDataSizeMB,
-                        spaceTitle: viewModel.currentTargetInfo?.name ?? viewModel.pendingCaptureTargetName ?? "Capture complete",
-                        spaceAddress: viewModel.currentAddress,
-                        onUploadNow: {
-                            viewModel.updatePendingCaptureNotes(captureNotes)
-                            viewModel.startPendingCaptureUpload()
-                        },
-                        onUploadLater: {
-                            viewModel.updatePendingCaptureNotes(captureNotes)
-                            completeAndDismiss()
-                        },
-                        onExport: {
-                            viewModel.updatePendingCaptureNotes(captureNotes)
-                            viewModel.startPendingCaptureExport()
-                        },
-                        userNotes: $captureNotes
-                    )
-                    .ignoresSafeArea()
-                }
-
-                if case .finished = captureManager.captureState,
-                   viewModel.pendingCaptureRequest != nil || viewModel.finishedCaptureActionState != .idle {
-                    finishedCaptureCard
-                        .padding(.horizontal)
-                }
 
                 HStack {
                     Spacer()
@@ -175,10 +145,30 @@ struct CaptureSessionView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
-        .sheet(item: $viewModel.manualIntakeDraft) { draft in
-            ManualIntakeSheetView(title: draft.reviewTitle, draft: draft) { updatedDraft in
-                viewModel.submitManualIntake(updatedDraft)
-            }
+        .fullScreenCover(isPresented: Binding(
+            get: { captureManager.captureState.isFinished },
+            set: { if !$0 { completeAndDismiss() } }
+        )) {
+            let monitor = captureManager.qualityMonitor
+            PostCaptureSummaryView(
+                duration: monitor.elapsedSeconds,
+                estimatedDataSizeMB: monitor.estimatedDataSizeMB,
+                spaceTitle: viewModel.currentTargetInfo?.name ?? viewModel.pendingCaptureTargetName ?? "Capture complete",
+                spaceAddress: viewModel.currentAddress,
+                onUploadNow: {
+                    viewModel.updatePendingCaptureNotes(captureNotes)
+                    viewModel.startPendingCaptureUpload()
+                },
+                onUploadLater: {
+                    viewModel.updatePendingCaptureNotes(captureNotes)
+                    completeAndDismiss()
+                },
+                onExport: {
+                    viewModel.updatePendingCaptureNotes(captureNotes)
+                    viewModel.startPendingCaptureExport()
+                },
+                userNotes: $captureNotes
+            )
         }
         .sheet(item: $viewModel.shareSheetItem) { shareItem in
             ShareSheet(items: [shareItem.url])
@@ -520,6 +510,10 @@ private struct CaptureGuidanceTip {
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
         if case .recording = self { return true }
+        return false
+    }
+    var isFinished: Bool {
+        if case .finished = self { return true }
         return false
     }
 }
