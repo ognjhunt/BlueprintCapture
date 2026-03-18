@@ -58,6 +58,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let packageURL: URL
     }
 
+    struct EntryAnchorHold: Equatable {
+        let anchorId: String            // always "anchor_entry" (v1)
+        let holdStartFrameId: String    // frameId of first frame in hold window
+        let holdEndFrameId: String      // frameId when 2 s threshold was met
+        let tCaptureSec: Double         // midpoint t_device_sec of the hold
+        let durationSec: Double         // total hold duration in seconds
+    }
+
     private struct ARFrameLogEntry: Codable {
         let frameIndex: Int
         let timestamp: TimeInterval
@@ -68,6 +76,18 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let sceneDepthFile: String?
         let smoothedSceneDepthFile: String?
         let confidenceFile: String?
+        // Tracking health
+        let trackingState: String
+        let trackingReason: String?
+        let worldMappingStatus: String?
+        let relocalizationEvent: Bool
+        // Exposure quality
+        let exposureDurationS: Double?
+        let iso: Double?
+        // Image sharpness (higher = sharper; computed from luma variance)
+        let sharpnessScore: Double?
+        // Anchor observations populated in Phase 2 when structured routes are active
+        let anchorObservations: [String]
     }
 
     struct PipelinePoseRow: Codable {
@@ -88,6 +108,53 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     static func deviceTimeSeconds(frameTimestamp: TimeInterval, firstFrameTimestamp: TimeInterval?) -> Double {
         let base = firstFrameTimestamp ?? frameTimestamp
         return max(0.0, frameTimestamp - base)
+    }
+
+    /// Estimates image sharpness via Laplacian variance on a downsampled luma plane.
+    /// Operates on a 64×64 thumbnail to keep per-frame CPU overhead low.
+    /// Higher score = sharper image. Returns nil if the pixel buffer cannot be accessed.
+    static func laplacianVariance(pixelBuffer: CVPixelBuffer, thumbnailSize: Int = 64) -> Double? {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        guard width > 0, height > 0,
+              let baseAddress = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, 0) else {
+            return nil
+        }
+        let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, 0)
+        let lumaBytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+
+        // Sample a sparse grid of pixels at thumbnail_size × thumbnail_size spacing.
+        let stepX = max(1, width / thumbnailSize)
+        let stepY = max(1, height / thumbnailSize)
+        var sum: Double = 0
+        var sumSq: Double = 0
+        var count: Int = 0
+
+        var y = stepY
+        while y < height - stepY {
+            var x = stepX
+            while x < width - stepX {
+                let center = Double(lumaBytes[y * bytesPerRow + x])
+                let top    = Double(lumaBytes[(y - stepY) * bytesPerRow + x])
+                let bottom = Double(lumaBytes[(y + stepY) * bytesPerRow + x])
+                let left   = Double(lumaBytes[y * bytesPerRow + (x - stepX)])
+                let right  = Double(lumaBytes[y * bytesPerRow + (x + stepX)])
+                let laplacian = 4 * center - top - bottom - left - right
+                sum += laplacian
+                sumSq += laplacian * laplacian
+                count += 1
+                x += stepX
+            }
+            y += stepY
+        }
+
+        guard count > 0 else { return nil }
+        let mean = sum / Double(count)
+        let variance = (sumSq / Double(count)) - mean * mean
+        return max(0, variance)
     }
 
     @Published private(set) var captureState: CaptureState = .idle
@@ -145,6 +212,11 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var currentARKitArtifacts: RecordingArtifacts.ARKitArtifacts?
     private var arFrameCount: Int = 0
     private var arFirstFrameTimestamp: TimeInterval?
+    // Entry anchor hold detection state (reset at startRecording)
+    private(set) var detectedEntryAnchorHold: EntryAnchorHold?
+    private var holdCandidateOrigin: simd_float3?
+    private var holdCandidateStartTDeviceSec: Double = 0
+    private var holdCandidateStartFrameId: String = ""
     private var exportedMeshAnchors: Set<UUID> = []
     private var isARRunning: Bool = false
     private var shouldSkipARKitOnNextRecording: Bool = false
@@ -326,6 +398,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         currentARKitArtifacts = artifacts.arKit
         arFrameCount = 0
         arFirstFrameTimestamp = nil
+        detectedEntryAnchorHold = nil
+        holdCandidateOrigin = nil
+        holdCandidateStartTDeviceSec = 0
+        holdCandidateStartFrameId = ""
         exportedMeshAnchors.removeAll()
         latestUploadPayload = nil
         exposureSamples = []
@@ -971,6 +1047,55 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
         let tDeviceSec = Self.deviceTimeSeconds(frameTimestamp: frame.timestamp, firstFrameTimestamp: arFirstFrameTimestamp)
 
+        // --- Entry anchor hold detection (first 60 s, one-shot) ---
+        // Operator stands still < 5 cm from starting position for ≥ 2 s.
+        let anchorObservations: [String]
+        if detectedEntryAnchorHold == nil && tDeviceSec <= 60.0 {
+            let currentPos = simd_float3(
+                frame.camera.transform.columns.3.x,
+                frame.camera.transform.columns.3.y,
+                frame.camera.transform.columns.3.z
+            )
+            if holdCandidateOrigin == nil {
+                holdCandidateOrigin = currentPos
+                holdCandidateStartTDeviceSec = tDeviceSec
+                holdCandidateStartFrameId = frameId
+            }
+            let distFromOrigin = simd_length(currentPos - holdCandidateOrigin!)
+            if distFromOrigin < 0.05 {
+                let holdDuration = tDeviceSec - holdCandidateStartTDeviceSec
+                if holdDuration >= 2.0 {
+                    let midT = holdCandidateStartTDeviceSec + holdDuration / 2.0
+                    detectedEntryAnchorHold = EntryAnchorHold(
+                        anchorId: "anchor_entry",
+                        holdStartFrameId: holdCandidateStartFrameId,
+                        holdEndFrameId: frameId,
+                        tCaptureSec: midT,
+                        durationSec: holdDuration
+                    )
+                }
+                anchorObservations = holdCandidateStartTDeviceSec < tDeviceSec &&
+                    (tDeviceSec - holdCandidateStartTDeviceSec) >= 2.0 ? ["anchor_entry"] : []
+            } else {
+                holdCandidateOrigin = currentPos
+                holdCandidateStartTDeviceSec = tDeviceSec
+                holdCandidateStartFrameId = frameId
+                anchorObservations = []
+            }
+        } else if let hold = detectedEntryAnchorHold {
+            // Continue tagging frames while camera remains near the hold origin
+            let currentPos = simd_float3(
+                frame.camera.transform.columns.3.x,
+                frame.camera.transform.columns.3.y,
+                frame.camera.transform.columns.3.z
+            )
+            let holdOriginPos = holdCandidateOrigin ?? currentPos
+            anchorObservations = simd_length(currentPos - holdOriginPos) < 0.05 ? ["anchor_entry"] : []
+            _ = hold  // suppress unused warning
+        } else {
+            anchorObservations = []
+        }
+
         var sceneDepthFile: String?
         var smoothedDepthFile: String?
         var confidenceFile: String?
@@ -1009,6 +1134,56 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             }
         }
 
+        // Tracking health fields from ARCamera.
+        let (trackingStateStr, trackingReasonStr): (String, String?) = {
+            switch frame.camera.trackingState {
+            case .normal:
+                return ("normal", nil)
+            case .limited(let reason):
+                let reasonStr: String
+                switch reason {
+                case .initializing: reasonStr = "initializing"
+                case .excessiveMotion: reasonStr = "excessive_motion"
+                case .insufficientFeatures: reasonStr = "insufficient_features"
+                case .relocalizing: reasonStr = "relocalizing"
+                @unknown default: reasonStr = "unknown"
+                }
+                return ("limited", reasonStr)
+            case .notAvailable:
+                return ("not_available", nil)
+            @unknown default:
+                return ("unknown", nil)
+            }
+        }()
+
+        let worldMappingStr: String? = {
+            switch frame.worldMappingStatus {
+            case .notAvailable: return "not_available"
+            case .limited: return "limited"
+            case .extending: return "extending"
+            case .mapped: return "mapped"
+            @unknown default: return nil
+            }
+        }()
+
+        // Detect relocalization events: camera is in "limited/relocalizing" state.
+        let isRelocalization = trackingStateStr == "limited" && trackingReasonStr == "relocalizing"
+
+        // Exposure metadata from the captured image.
+        let capturedImage = frame.capturedImage
+        let exposureDurationS: Double? = {
+            let d = capturedImage.exposureDuration
+            return d > 0 ? d : nil
+        }()
+        let isoValue: Double? = {
+            let v = capturedImage.ISO
+            return v > 0 ? Double(v) : nil
+        }()
+
+        // Sharpness estimate: Laplacian variance of a downsampled luma plane.
+        // Higher = sharper. Runs on a 64×64 thumbnail to keep CPU cost low.
+        let sharpness = Self.laplacianVariance(pixelBuffer: capturedImage)
+
         let entry = ARFrameLogEntry(
             frameIndex: frameIndex,
             timestamp: frame.timestamp,
@@ -1018,7 +1193,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             imageResolution: resolution,
             sceneDepthFile: sceneDepthFile,
             smoothedSceneDepthFile: smoothedDepthFile,
-            confidenceFile: confidenceFile
+            confidenceFile: confidenceFile,
+            trackingState: trackingStateStr,
+            trackingReason: trackingReasonStr,
+            worldMappingStatus: worldMappingStr,
+            relocalizationEvent: isRelocalization,
+            exposureDurationS: exposureDurationS,
+            iso: isoValue,
+            sharpnessScore: sharpness,
+            anchorObservations: anchorObservations
         )
 
         do {

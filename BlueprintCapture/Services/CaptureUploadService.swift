@@ -142,6 +142,43 @@ struct CaptureScaffoldingPacket: Equatable, Codable {
     }
 }
 
+struct SiteGeoPoint: Equatable, Codable {
+    let latitude: Double
+    let longitude: Double
+    let accuracyM: Double
+}
+
+struct SiteIdentity: Equatable, Codable {
+    let siteId: String
+    let siteIdSource: String   // "buyer_request" | "site_submission" | "open_capture"
+    let placeId: String?
+    let siteName: String?
+    let addressFull: String?
+    let geo: SiteGeoPoint?
+    let buildingId: String?
+    let floorId: String?
+    let roomId: String?
+    let zoneId: String?
+}
+
+struct CaptureTopologyMetadata: Equatable, Codable {
+    let captureSessionId: String
+    let routeId: String
+    let passId: String
+    let passIndex: Int
+    let intendedPassRole: String   // "primary" | "revisit" | "loop_closure" | "critical_zone_revisit"
+    let entryAnchorId: String?
+    let returnAnchorId: String?
+    let entryAnchorTCaptureSec: Double?      // t_device_sec midpoint of detected entry hold
+    let entryAnchorHoldDurationSec: Double?  // seconds held at entry anchor
+}
+
+struct CaptureModeMetadata: Equatable, Codable {
+    let requestedMode: String    // "qualification_only" | "site_world_candidate"
+    let resolvedMode: String     // may be downgraded at finalization
+    let downgradeReason: String?
+}
+
 struct SceneMemoryCaptureMetadata: Equatable, Codable {
     let continuityScore: Double?
     let lightingConsistency: String?
@@ -237,6 +274,9 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let captureContextHint: String?
     let sceneMemory: SceneMemoryCaptureMetadata?
     let captureRights: CaptureRightsMetadata?
+    let siteIdentity: SiteIdentity?
+    let captureTopology: CaptureTopologyMetadata?
+    let captureMode: CaptureModeMetadata?
 }
 
 struct CaptureUploadRequest: Equatable {

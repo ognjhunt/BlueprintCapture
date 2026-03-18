@@ -115,6 +115,20 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     private var hasRequestedPermissions = false
     private let onboardingKey = "com.blueprint.isOnboarded"
+
+    /// Stable site ID for open captures within this app session. Allows repeated captures
+    /// of the same facility to share a site_id even without a targetId or reservationId.
+    private let openCaptureSiteId: String = UUID().uuidString
+
+    /// Shared across all recordings in a single app session (multiple passes at one facility visit).
+    private let captureSessionId: String = UUID().uuidString
+
+    /// Stable route ID for this session. Shared across passes of the same intended path.
+    private let captureRouteId: String = UUID().uuidString
+
+    /// Tracks how many recordings have been made in this session, for pass_index.
+    private var capturePassIndex: Int = 0
+
     private let uploadService: CaptureUploadServiceProtocol
     private let targetStateService: TargetStateServiceProtocol
     private let intakeResolutionService: IntakeResolutionServiceProtocol
@@ -447,6 +461,56 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
+
+        // Derive stable site identity. Priority: buyer target > reservation > session-stable UUID.
+        let siteId: String
+        let siteIdSource: String
+        if let targetId = targetId?.trimmingCharacters(in: .whitespacesAndNewlines), !targetId.isEmpty {
+            siteId = targetId
+            siteIdSource = "buyer_request"
+        } else if let reservationId = reservationId?.trimmingCharacters(in: .whitespacesAndNewlines), !reservationId.isEmpty {
+            siteId = reservationId
+            siteIdSource = "site_submission"
+        } else {
+            siteId = openCaptureSiteId
+            siteIdSource = "open_capture"
+        }
+        let siteIdentity = SiteIdentity(
+            siteId: siteId,
+            siteIdSource: siteIdSource,
+            placeId: nil,
+            siteName: currentTargetInfo?.name ?? reviewSeed?.title,
+            addressFull: currentAddress,
+            geo: nil,
+            buildingId: nil,
+            floorId: nil,
+            roomId: nil,
+            zoneId: nil
+        )
+
+        // Increment pass index per recording within this session.
+        capturePassIndex += 1
+        let hold = captureManager.detectedEntryAnchorHold
+        let captureTopology = CaptureTopologyMetadata(
+            captureSessionId: captureSessionId,
+            routeId: captureRouteId,
+            passId: UUID().uuidString,
+            passIndex: capturePassIndex,
+            intendedPassRole: "primary",
+            entryAnchorId: hold?.anchorId,
+            returnAnchorId: nil,
+            entryAnchorTCaptureSec: hold?.tCaptureSec,
+            entryAnchorHoldDurationSec: hold?.durationSec
+        )
+
+        // iPhone captures default to requesting site_world_candidate mode.
+        // Resolved mode is determined at finalization time from actual evidence.
+        let captureMode = CaptureModeMetadata(
+            requestedMode: "site_world_candidate",
+            resolvedMode: "site_world_candidate",
+            downgradeReason: nil
+        )
+
         let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: targetId,
@@ -498,7 +562,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 permissionDocumentURI: nil,
                 consentScope: [],
                 consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
-            )
+            ),
+            siteIdentity: siteIdentity,
+            captureTopology: captureTopology,
+            captureMode: captureMode
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 

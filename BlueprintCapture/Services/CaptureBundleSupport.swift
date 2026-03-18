@@ -314,11 +314,37 @@ enum CaptureBundleContext {
         return "pre_screen_video"
     }
 
-    static func worldModelCandidate(for request: CaptureUploadRequest) -> Bool {
-        guard let continuityScore = request.metadata.sceneMemory?.continuityScore else {
-            return false
-        }
-        return continuityScore >= 0.5
+    /// Deterministic world-model candidacy computed from actual evidence, not from a nullable
+    /// operator-entered continuity score. This is the canonical rule used by iOS finalization.
+    /// The cloud bridge enforces the same rule using actual artifact presence from GCS.
+    static func worldModelCandidate(
+        for request: CaptureUploadRequest,
+        evidence: CaptureEvidenceSummary
+    ) -> Bool {
+        let captureMode = request.metadata.captureMode
+        return captureMode?.resolvedMode == "site_world_candidate"
+            && evidence.arkitPoseRows > 0
+            && evidence.arkitIntrinsicsValid
+            && evidence.arkitDepthFrames > 0
+            && (request.metadata.intakePacket?.isComplete == true)
+            && (request.metadata.captureRights?.derivedSceneGenerationAllowed == true)
+    }
+
+    /// Returns a list of gate results for world_model_candidate, useful for debugging and
+    /// downstream reasoning fields.
+    static func worldModelCandidateReasoning(
+        for request: CaptureUploadRequest,
+        evidence: CaptureEvidenceSummary
+    ) -> [String] {
+        let captureMode = request.metadata.captureMode
+        var gates: [String] = []
+        gates.append("capture_mode_site_world_candidate:\(captureMode?.resolvedMode == "site_world_candidate")")
+        gates.append("arkit_poses_valid:\(evidence.arkitPoseRows > 0)")
+        gates.append("arkit_intrinsics_valid:\(evidence.arkitIntrinsicsValid)")
+        gates.append("depth_coverage_ok:\(evidence.arkitDepthFrames > 0)")
+        gates.append("intake_complete:\(request.metadata.intakePacket?.isComplete == true)")
+        gates.append("derived_scene_generation_allowed:\(request.metadata.captureRights?.derivedSceneGenerationAllowed == true)")
+        return gates
     }
 
     static func rawDirectoryURL(for request: CaptureUploadRequest) -> URL {
@@ -393,6 +419,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let captureRights: CaptureRightsMetadata
         let captureEvidence: CaptureEvidenceSummary
         let worldModelCandidate: Bool
+        let worldModelCandidateReasoning: [String]
+        let siteIdentity: SiteIdentity?
+        let captureTopology: CaptureTopologyMetadata?
+        let captureMode: CaptureModeMetadata?
         let capturedAt: String
     }
 
@@ -402,6 +432,33 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let captureId: String
         let rawPrefix: String
         let completedAt: String
+    }
+
+    // Route anchor definitions — fixed v1 schema (entry anchor only for now).
+    private struct RouteAnchorsFile: Codable {
+        struct RouteAnchor: Codable {
+            let anchorId: String
+            let anchorType: String
+            let label: String
+            let expectedObservation: String
+            let requiredInPrimaryPass: Bool
+            let requiredInRevisitPass: Bool
+        }
+        let schemaVersion: String
+        let routeAnchors: [RouteAnchor]
+    }
+
+    // Checkpoint events — one event per detected anchor hold in this pass.
+    private struct CheckpointEventsFile: Codable {
+        struct CheckpointEvent: Codable {
+            let anchorId: String
+            let passId: String
+            let tCaptureSec: Double
+            let holdDurationSec: Double
+            let completed: Bool
+        }
+        let schemaVersion: String
+        let checkpointEvents: [CheckpointEvent]
     }
 
     private let completionMarkerFilename = "capture_upload_complete.json"
@@ -589,7 +646,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "sensor_availability": evidence.sensorAvailability,
             "operator_notes": normalized.operatorNotes,
             "inaccessible_areas": normalized.inaccessibleAreas,
-            "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request),
+            "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
+            "world_model_candidate_reasoning": CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
             "motion_provenance": evidence.motionProvenance as Any,
             "motion_timestamps_capture_relative": evidence.motionTimestampsCaptureRelative,
         ]
@@ -652,6 +710,29 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             normalized: normalizedSceneMemory
         )
         json["capture_evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(evidence))
+
+        // Site identity, topology, and capture mode blocks.
+        if let siteIdentity = request.metadata.siteIdentity {
+            json["site_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(siteIdentity))
+        }
+        if let topology = request.metadata.captureTopology {
+            json["capture_topology"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(topology))
+        }
+        if let captureMode = request.metadata.captureMode {
+            // Resolve the mode based on actual evidence at finalization time.
+            let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
+                ? "site_world_candidate"
+                : "qualification_only"
+            let downgradeReason: String? = (captureMode.requestedMode == "site_world_candidate" && resolvedMode == "qualification_only")
+                ? "insufficient_arkit_evidence"
+                : nil
+            let resolvedCaptureMode = CaptureModeMetadata(
+                requestedMode: captureMode.requestedMode,
+                resolvedMode: resolvedMode,
+                downgradeReason: downgradeReason
+            )
+            json["capture_mode"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(resolvedCaptureMode))
+        }
         json["task_text_hint"] = request.metadata.taskHypothesis?.workflowName ?? request.metadata.intakePacket?.workflowName
         json["task_steps"] = request.metadata.taskHypothesis?.taskSteps ?? request.metadata.intakePacket?.taskSteps ?? []
         json["target_kpi"] = request.metadata.taskHypothesis?.targetKPI ?? request.metadata.intakePacket?.targetKPI
@@ -747,11 +828,65 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             sceneMemory: normalizedSceneMemory,
             captureRights: normalizedRights,
             captureEvidence: evidence,
-            worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request),
+            worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
+            worldModelCandidateReasoning: CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
+            siteIdentity: request.metadata.siteIdentity,
+            captureTopology: request.metadata.captureTopology,
+            captureMode: request.metadata.captureMode,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let contextURL = directory.appendingPathComponent("capture_context.json")
         try encoder.encode(context).write(to: contextURL, options: .atomic)
+
+        // Write standalone site_identity.json for pipeline and bridge consumption.
+        if let siteIdentity = request.metadata.siteIdentity {
+            let siteIdentityURL = directory.appendingPathComponent("site_identity.json")
+            try encoder.encode(siteIdentity).write(to: siteIdentityURL, options: .atomic)
+        }
+
+        // Write standalone capture_topology.json.
+        if let topology = request.metadata.captureTopology {
+            let topologyURL = directory.appendingPathComponent("capture_topology.json")
+            try encoder.encode(topology).write(to: topologyURL, options: .atomic)
+        }
+
+        // Write route_anchors.json — fixed v1 entry anchor definition.
+        let routeAnchors = RouteAnchorsFile(
+            schemaVersion: "v1",
+            routeAnchors: [
+                RouteAnchorsFile.RouteAnchor(
+                    anchorId: "anchor_entry",
+                    anchorType: "entry",
+                    label: "Site entry point",
+                    expectedObservation: "pause_and_pan",
+                    requiredInPrimaryPass: true,
+                    requiredInRevisitPass: true
+                )
+            ]
+        )
+        let routeAnchorsURL = directory.appendingPathComponent("route_anchors.json")
+        try encoder.encode(routeAnchors).write(to: routeAnchorsURL, options: .atomic)
+
+        // Write checkpoint_events.json — one event if entry hold was detected, else empty.
+        let topology = request.metadata.captureTopology
+        var checkpointEvents: [CheckpointEventsFile.CheckpointEvent] = []
+        if let passId = topology?.passId,
+           let tCaptureSec = topology?.entryAnchorTCaptureSec,
+           let holdDuration = topology?.entryAnchorHoldDurationSec {
+            checkpointEvents.append(CheckpointEventsFile.CheckpointEvent(
+                anchorId: "anchor_entry",
+                passId: passId,
+                tCaptureSec: tCaptureSec,
+                holdDurationSec: holdDuration,
+                completed: true
+            ))
+        }
+        let checkpointEventsFile = CheckpointEventsFile(
+            schemaVersion: "v1",
+            checkpointEvents: checkpointEvents
+        )
+        let checkpointEventsURL = directory.appendingPathComponent("checkpoint_events.json")
+        try encoder.encode(checkpointEventsFile).write(to: checkpointEventsURL, options: .atomic)
 
         let taskHypothesisURL = directory.appendingPathComponent(taskHypothesisFilename)
         try encoder.encode(taskHypothesis).write(to: taskHypothesisURL, options: .atomic)
