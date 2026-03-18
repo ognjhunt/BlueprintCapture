@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,6 +20,12 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -47,6 +54,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -813,6 +821,21 @@ private fun RecorderScreen(
                 ),
         )
 
+        // Floating recording badges — shown when actively recording
+        if (isRecording) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RecordingIndicatorBadge()
+                TimerBadge(elapsedSeconds = elapsedSeconds)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -946,66 +969,382 @@ private fun ReviewScreen(
     onSaveForLater: () -> Unit,
     onExportForTesting: () -> Unit,
 ) {
+    val isBusy = uiState.actionState != FinishedCaptureActionState.Idle
+    val needsManualEntry = uiState.errorMessage != null && !draft.isStructuredIntakeComplete
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BlueprintBlack),
     ) {
+        // ── Scrollable body ───────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(top = 16.dp, bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // Nav header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF222224))
+                        .clickable(onClick = onClose, enabled = !isBusy),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Close",
+                        tint = if (isBusy) BlueprintTextMuted.copy(alpha = 0.4f) else BlueprintTextPrimary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
                 Text(
-                    text = "Capture Review",
+                    text = "Capture Summary",
                     style = TextStyle(
                         color = BlueprintTextPrimary,
-                        fontSize = 24.sp,
-                        lineHeight = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.2).sp,
                     ),
                 )
-                OutlinedButton(onClick = onClose) {
-                    Text("Close")
+                Text(
+                    text = "Save later",
+                    style = TextStyle(
+                        color = if (isBusy) BlueprintTextMuted.copy(alpha = 0.3f) else BlueprintTextMuted,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                    modifier = Modifier.clickable(enabled = !isBusy, onClick = onSaveForLater),
+                )
+            }
+
+            // Status header card
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (isBusy) BlueprintTeal.copy(alpha = 0.10f) else BlueprintSuccess.copy(alpha = 0.10f),
+                    )
+                    .border(
+                        1.dp,
+                        if (isBusy) BlueprintTeal.copy(alpha = 0.22f) else BlueprintSuccess.copy(alpha = 0.22f),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = BlueprintTeal,
+                        strokeWidth = 2.5.dp,
+                        trackColor = BlueprintSurfaceRaised,
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(BlueprintSuccess),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Visibility,
+                            contentDescription = null,
+                            tint = BlueprintBlack,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = when (uiState.actionState) {
+                            FinishedCaptureActionState.GeneratingIntake -> "Preparing intake…"
+                            FinishedCaptureActionState.QueueingUpload -> "Queuing for upload…"
+                            FinishedCaptureActionState.SavingForLater -> "Saving locally…"
+                            FinishedCaptureActionState.Exporting -> "Building export…"
+                            FinishedCaptureActionState.Idle -> "Walkthrough ready"
+                        },
+                        color = if (isBusy) BlueprintTeal else BlueprintSuccess,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = if (isBusy) "Please wait — do not close the app." else "Review your capture below, then queue for Blueprint review.",
+                        color = BlueprintTextMuted,
+                        fontSize = 13.sp,
+                        lineHeight = 17.sp,
+                    )
                 }
             }
 
-            uiState.errorMessage?.let { message ->
-                SurfaceCard {
-                    Text("Capture review issue")
-                    Text(message, color = BlueprintTextMuted)
+            // Error / manual-entry banner
+            if (uiState.errorMessage != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(BlueprintAccent.copy(alpha = 0.10f))
+                        .border(1.dp, BlueprintAccent.copy(alpha = 0.25f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = BlueprintAccent,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .padding(top = 1.dp),
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Add a little context", color = BlueprintTextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text(uiState.errorMessage, color = BlueprintTextMuted, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
                 }
             }
 
-            uiState.exportMessage?.let { message ->
-                SurfaceCard {
-                    Text("Export ready")
-                    Text(message, color = BlueprintTextMuted)
+            // Stats 2×2 grid
+            val durationSec = draft.captureDurationMs / 1_000L
+            val resolutionLabel = when {
+                draft.height >= 2160 -> "4K"
+                draft.height >= 1080 -> "1080p"
+                draft.height >= 720 -> "720p"
+                else -> "${draft.width}×${draft.height}"
+            }
+            val estimatedMB = run {
+                val pixels = draft.width.toLong() * draft.height.toLong()
+                val mbPerMin = when {
+                    pixels >= 8_294_400L -> 280.0
+                    pixels >= 2_073_600L -> 85.0
+                    else -> 42.0
                 }
+                (durationSec / 60.0 * mbPerMin).toLong().coerceAtLeast(1L)
+            }
+            val fileSizeLabel = if (estimatedMB >= 1024) "%.1f GB".format(estimatedMB / 1024.0) else "$estimatedMB MB"
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CaptureStatCard("Duration", formatDurationMs(draft.captureDurationMs), Modifier.weight(1f))
+                CaptureStatCard("Resolution", resolutionLabel, Modifier.weight(1f))
+            }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CaptureStatCard("Frame rate", "${draft.frameRate.roundToInt()} fps", Modifier.weight(1f))
+                CaptureStatCard("Est. size", fileSizeLabel, Modifier.weight(1f))
             }
 
-            ReviewPanel(
-                draft = draft,
-                actionState = uiState.actionState,
-                exportMessage = uiState.exportMessage,
-                onWorkflowNameChanged = onWorkflowNameChanged,
-                onTaskStepsChanged = onTaskStepsChanged,
-                onZoneChanged = onZoneChanged,
-                onOwnerChanged = onOwnerChanged,
-                onNotesChanged = onNotesChanged,
-                onUploadNow = onUploadNow,
-                onSaveForLater = onSaveForLater,
-                onExportForTesting = onExportForTesting,
+            // Device multiplier badge
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(BlueprintTeal.copy(alpha = 0.09f))
+                    .border(1.dp, BlueprintTeal.copy(alpha = 0.18f), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.NearMe,
+                    contentDescription = null,
+                    tint = BlueprintTeal,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                    color = BlueprintTextMuted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text("1×", color = BlueprintSuccess, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text("multiplier", color = BlueprintTextMuted, fontSize = 12.sp)
+            }
+
+            // Readiness rows
+            val coveragePct = when {
+                durationSec < 30 -> 25
+                durationSec < 90 -> 45
+                durationSec < 180 -> 65
+                durationSec < 420 -> 80
+                else -> 90
+            }
+            val earningsLow: Int
+            val earningsHigh: Int
+            if (draft.capture.quotedPayoutCents != null) {
+                earningsLow = draft.capture.quotedPayoutCents / 100
+                earningsHigh = earningsLow
+            } else {
+                earningsLow = when { durationSec < 120 -> 15; durationSec < 300 -> 25; durationSec < 600 -> 35; else -> 45 }
+                earningsHigh = earningsLow + 30
+            }
+            val earningsLabel = if (earningsLow == earningsHigh) "$$earningsLow" else "$$earningsLow–$$earningsHigh"
+            val policyLabel = when (draft.capture.permissionTone) {
+                CapturePermissionTone.Approved -> "Pre-approved"
+                CapturePermissionTone.Review -> "Under review"
+                CapturePermissionTone.Permission -> "Permission check"
+                CapturePermissionTone.Blocked -> "Blocked"
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(Color(0xFF171719))
+                    .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            ) {
+                PostCaptureReadinessRow("Coverage estimate", "$coveragePct%", if (coveragePct >= 65) PostCaptureTone.Good else PostCaptureTone.Warning)
+                PostCaptureReadinessDivider()
+                PostCaptureReadinessRow("Estimated earnings", earningsLabel, PostCaptureTone.Good)
+                PostCaptureReadinessDivider()
+                PostCaptureReadinessRow("Capture policy", policyLabel, PostCaptureTone.Neutral)
+                PostCaptureReadinessDivider()
+                PostCaptureReadinessRow(
+                    "Review estimate",
+                    if (coveragePct >= 80) "Usually within 24h" else "Usually 3–5 days",
+                    PostCaptureTone.Neutral,
+                )
+            }
+
+            // Optional notes field
+            OutlinedTextField(
+                value = draft.notes,
+                onValueChange = onNotesChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Add notes about this space (optional)", color = BlueprintTextMuted) },
+                minLines = 2,
+                enabled = !isBusy,
+                shape = RoundedCornerShape(14.dp),
+                colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = BlueprintTextPrimary,
+                    unfocusedTextColor = BlueprintTextPrimary,
+                    focusedContainerColor = Color(0xFF171719),
+                    unfocusedContainerColor = Color(0xFF171719),
+                    focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
+                    unfocusedBorderColor = BlueprintBorder,
+                    cursorColor = BlueprintTeal,
+                    focusedLabelColor = BlueprintTextMuted,
+                    unfocusedLabelColor = BlueprintTextMuted,
+                ),
             )
+
+            // Manual intake assist — only shown when AI inference can't resolve
+            if (needsManualEntry) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(Color(0xFF171719))
+                        .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("Help Blueprint categorise this capture", color = BlueprintTextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    OutlinedTextField(
+                        value = draft.workflowName,
+                        onValueChange = onWorkflowNameChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Workflow name (e.g. Parking garage walkthrough)") },
+                        singleLine = true,
+                        enabled = !isBusy,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = BlueprintTextPrimary,
+                            unfocusedTextColor = BlueprintTextPrimary,
+                            focusedContainerColor = Color(0xFF1E1E20),
+                            unfocusedContainerColor = Color(0xFF1E1E20),
+                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
+                            unfocusedBorderColor = BlueprintBorder,
+                            cursorColor = BlueprintTeal,
+                            focusedLabelColor = BlueprintTextMuted,
+                            unfocusedLabelColor = BlueprintTextMuted,
+                        ),
+                    )
+                    OutlinedTextField(
+                        value = draft.taskStepsText,
+                        onValueChange = onTaskStepsChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Task steps (one per line)") },
+                        minLines = 3,
+                        enabled = !isBusy,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = BlueprintTextPrimary,
+                            unfocusedTextColor = BlueprintTextPrimary,
+                            focusedContainerColor = Color(0xFF1E1E20),
+                            unfocusedContainerColor = Color(0xFF1E1E20),
+                            focusedBorderColor = BlueprintTeal.copy(alpha = 0.6f),
+                            unfocusedBorderColor = BlueprintBorder,
+                            cursorColor = BlueprintTeal,
+                            focusedLabelColor = BlueprintTextMuted,
+                            unfocusedLabelColor = BlueprintTextMuted,
+                        ),
+                    )
+                }
+            }
+
+            // Disclaimer
+            Text(
+                text = "Stats are local estimates only. Final approval, rights status, and payout are determined after Blueprint review.",
+                color = BlueprintTextMuted.copy(alpha = 0.6f),
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+            )
+        }
+
+        // ── Pinned bottom CTA ─────────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, BlueprintBlack.copy(alpha = 0.96f), BlueprintBlack),
+                    ),
+                )
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(if (isBusy) BlueprintAccent.copy(alpha = 0.35f) else BlueprintAccent)
+                    .clickable(enabled = !isBusy, onClick = onUploadNow)
+                    .padding(vertical = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        color = BlueprintBlack.copy(alpha = 0.5f),
+                        strokeWidth = 2.5.dp,
+                        trackColor = Color.Transparent,
+                    )
+                } else {
+                    Text(
+                        text = "Queue for review",
+                        color = BlueprintBlack,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.2).sp,
+                    )
+                }
+            }
         }
     }
 }
@@ -1049,152 +1388,45 @@ private fun SessionStatusCard(
 }
 
 @Composable
-private fun ReviewPanel(
-    draft: CaptureReviewDraft,
-    actionState: FinishedCaptureActionState,
-    exportMessage: String?,
-    onWorkflowNameChanged: (String) -> Unit,
-    onTaskStepsChanged: (String) -> Unit,
-    onZoneChanged: (String) -> Unit,
-    onOwnerChanged: (String) -> Unit,
-    onNotesChanged: (String) -> Unit,
-    onUploadNow: () -> Unit,
-    onSaveForLater: () -> Unit,
-    onExportForTesting: () -> Unit,
-) {
-    val isBusy = actionState != FinishedCaptureActionState.Idle
+private fun CaptureStatCard(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF171719))
+            .border(1.dp, BlueprintBorder, RoundedCornerShape(16.dp))
+            .padding(vertical = 14.dp, horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(value, color = BlueprintTextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
+        Text(label, color = BlueprintTextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    }
+}
 
-    SurfaceCard {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(draft.reviewTitle)
-            Text(draft.helperText, color = BlueprintTextMuted)
+private enum class PostCaptureTone { Good, Warning, Neutral }
 
-            DetailRow("Duration", formatDurationMs(draft.captureDurationMs))
-            DetailRow("Resolution", "${draft.width} x ${draft.height}")
-            DetailRow("Frame rate", "${draft.frameRate.roundToInt()} fps")
-            DetailRow(
-                "Requested outputs",
-                draft.capture.requestedOutputs.joinToString().ifBlank { "qualification, review_intake" },
-            )
-            draft.capture.quotedPayoutCents?.let { payout ->
-                DetailRow("Estimated payout", formatPayout(payout))
-            }
-            draft.capture.rightsProfile?.takeIf(String::isNotBlank)?.let { rightsProfile ->
-                DetailRow("Rights profile", rightsProfile.replace('_', ' '))
-            }
-            draft.intakeMetadata?.let { metadata ->
-                DetailRow("Intake source", metadata.source.name.lowercase(Locale.US).replace('_', ' '))
-                metadata.confidence?.let { confidence ->
-                    DetailRow("Inference confidence", "${(confidence * 100).roundToInt()}%")
-                }
-            }
-
-            OutlinedTextField(
-                value = draft.workflowName,
-                onValueChange = onWorkflowNameChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Workflow name") },
-                singleLine = true,
-                enabled = !isBusy,
-            )
-            OutlinedTextField(
-                value = draft.taskStepsText,
-                onValueChange = onTaskStepsChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Task steps") },
-                minLines = 3,
-                enabled = !isBusy,
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                OutlinedTextField(
-                    value = draft.zone,
-                    onValueChange = onZoneChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Zone") },
-                    singleLine = true,
-                    enabled = !isBusy,
-                )
-                OutlinedTextField(
-                    value = draft.owner,
-                    onValueChange = onOwnerChanged,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Owner") },
-                    singleLine = true,
-                    enabled = !isBusy,
-                )
-            }
-            OutlinedTextField(
-                value = draft.notes,
-                onValueChange = onNotesChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Capture notes") },
-                minLines = 3,
-                enabled = !isBusy,
-            )
-
-            Text(
-                when {
-                    exportMessage != null -> exportMessage
-                    draft.isStructuredIntakeComplete -> "Structured intake is ready. You can export this bundle for testing or send it into the Android upload queue."
-                    else -> "If intake is incomplete, Android will try to infer it from capture context and ask you to confirm anything uncertain."
-                },
-                color = BlueprintTextMuted,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Button(
-                    onClick = onUploadNow,
-                    modifier = Modifier.weight(1f),
-                    enabled = !isBusy,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BlueprintAccent,
-                        contentColor = BlueprintBlack,
-                    ),
-                ) {
-                    Text("Upload now")
-                }
-                OutlinedButton(
-                    onClick = onSaveForLater,
-                    modifier = Modifier.weight(1f),
-                    enabled = !isBusy,
-                ) {
-                    Text("Upload later")
-                }
-            }
-            OutlinedButton(
-                onClick = onExportForTesting,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isBusy,
-            ) {
-                Text("Export for testing")
-            }
-        }
+@Composable
+private fun PostCaptureReadinessRow(label: String, value: String, tone: PostCaptureTone) {
+    val valueColor = when (tone) {
+        PostCaptureTone.Good -> BlueprintSuccess
+        PostCaptureTone.Warning -> BlueprintAccent
+        PostCaptureTone.Neutral -> BlueprintTextPrimary
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 11.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = BlueprintTextMuted, fontSize = 14.sp)
+        Text(value, color = valueColor, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
-private fun DetailRow(
-    label: String,
-    value: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(label, color = BlueprintTextMuted)
-        Text(value)
-    }
+private fun PostCaptureReadinessDivider() {
+    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(BlueprintBorder))
 }
 
 @Composable
@@ -1306,6 +1538,65 @@ private fun shareExportArtifact(
     context.startActivity(
         Intent.createChooser(intent, "Share capture export").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
     )
+}
+
+@Composable
+private fun RecordingIndicatorBadge() {
+    val infiniteTransition = rememberInfiniteTransition(label = "rec-pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "rec-alpha",
+    )
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xCC1A1A1C))
+            .border(1.dp, BlueprintError.copy(alpha = 0.35f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(BlueprintError.copy(alpha = alpha)),
+        )
+        Text(
+            text = "REC",
+            color = BlueprintTextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
+        )
+    }
+}
+
+@Composable
+private fun TimerBadge(elapsedSeconds: Long) {
+    val minutes = elapsedSeconds / 60
+    val seconds = elapsedSeconds % 60
+    val label = "%d:%02d".format(minutes, seconds)
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xCC1A1A1C))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text = label,
+            color = BlueprintTextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            letterSpacing = 0.5.sp,
+        )
+    }
 }
 
 private val REQUIRED_CAPTURE_PERMISSIONS = arrayOf(

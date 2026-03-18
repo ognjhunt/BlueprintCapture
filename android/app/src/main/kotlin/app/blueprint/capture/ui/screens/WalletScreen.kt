@@ -105,6 +105,10 @@ fun WalletScreen(
                 WalletStatusBanner(
                     title = state.payoutBannerTitle,
                     subtitle = state.payoutBannerBody,
+                    actionLabel = state.payoutBannerActionLabel,
+                    onAction = if (state.payoutBannerActionLabel != null) {
+                        { showPayouts = true }
+                    } else null,
                 )
             }
         }
@@ -207,6 +211,8 @@ private fun WalletHeader(
 private fun WalletStatusBanner(
     title: String,
     subtitle: String,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -259,6 +265,24 @@ private fun WalletStatusBanner(
                         fontWeight = FontWeight.Medium,
                     ),
                 )
+            }
+
+            if (actionLabel != null && onAction != null) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(BlueprintTeal.copy(alpha = 0.18f))
+                        .border(1.dp, BlueprintTeal.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .clickable(onClick = onAction)
+                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                ) {
+                    Text(
+                        text = actionLabel,
+                        color = BlueprintTeal,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         }
     }

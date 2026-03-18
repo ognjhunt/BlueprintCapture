@@ -27,6 +27,7 @@ data class WalletUiState(
     val payoutBannerTitle: String = "Payout setup unavailable",
     val payoutBannerBody: String = "Payout setup is not enabled for this alpha build.",
     val showPayoutBanner: Boolean = true,
+    val payoutBannerActionLabel: String? = null,
     val isRefreshing: Boolean = false,
     val payoutEntries: List<CaptureHistoryEntry> = emptyList(),
     val historyEntries: List<CaptureHistoryEntry> = emptyList(),
@@ -80,6 +81,7 @@ class WalletViewModel @Inject constructor(
                 else -> "Your Wallet is connected and synced to the signed-in contributor profile."
             },
             showPayoutBanner = !config.hasBackend || !config.hasStripe,
+            payoutBannerActionLabel = if (config.hasBackend && !config.hasStripe) "Connect" else null,
             isRefreshing = refreshing,
             payoutEntries = history.filter { it.stage == CaptureSubmissionStage.Paid },
             historyEntries = history,

@@ -1,7 +1,10 @@
 package app.blueprint.capture.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -26,10 +29,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material3.Button
@@ -662,18 +667,75 @@ private fun ProfileSheet(
             }
 
             ProfileSheetMode.Referrals -> {
-                SheetInfoCard(
-                    title = "$0",
-                    subtitle = "Referrals connected",
-                )
+                val context = LocalContext.current
+                val referralCode = remember(state.profile?.uid) {
+                    state.profile?.uid
+                        ?.take(8)
+                        ?.uppercase()
+                        ?.let { "BLU-$it" }
+                        ?: "—"
+                }
+
+                // Referral code card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BlueprintSurfaceCard, RoundedCornerShape(20.dp))
+                        .border(1.dp, BlueprintBorder, RoundedCornerShape(20.dp))
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "Your invite code",
+                                color = BlueprintTextMuted,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                letterSpacing = 1.sp,
+                            )
+                            Text(
+                                text = referralCode,
+                                color = BlueprintTeal,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 2.sp,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(BlueprintTealSurface)
+                                .clickable {
+                                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                                    clipboard?.setPrimaryClip(ClipData.newPlainText("Blueprint invite code", referralCode))
+                                    Toast.makeText(context, "Copied!", Toast.LENGTH_SHORT).show()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ContentCopy,
+                                contentDescription = "Copy code",
+                                tint = BlueprintTeal,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Friends who use your code get 10% extra on their first payout — and so do you.",
+                        color = BlueprintTextMuted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+
                 SheetMetricRow("Referral earnings", formatCurrency((stats?.referralEarningsCents ?: 0) / 100.0))
                 SheetMetricRow("Referral bonuses", formatCurrency((stats?.referralBonusCents ?: 0) / 100.0))
-                Text(
-                    text = "Referral totals are available here while the full referrals destination is still being brought over from iOS.",
-                    color = BlueprintTextMuted,
-                    fontSize = 14.sp,
-                    lineHeight = 19.sp,
-                )
             }
         }
     }
