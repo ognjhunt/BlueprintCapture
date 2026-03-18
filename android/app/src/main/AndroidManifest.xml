@@ -15,6 +15,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <!-- Geofence proximity alerts (Android 10+ requires background location) -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".BlueprintCaptureApplication"
@@ -24,6 +27,14 @@
         android:roundIcon="@drawable/ic_blueprint_launcher_foreground"
         android:supportsRtl="true"
         android:theme="@style/Theme.BlueprintCapture">
+        <!-- Meta MWDAT SDK: app ID from https://wearables.developer.meta.com/
+             Set MWDAT_APPLICATION_ID in android/local.properties or gradle.properties -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="${mwdatApplicationId}" />
+        <meta-data
+            android:name="com.meta.wearable.mwdat.CLIENT_TOKEN"
+            android:value="${mwdatClientToken}" />
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
@@ -48,6 +59,11 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Geofence entry events receiver -->
+        <receiver
+            android:name="app.blueprint.capture.data.notification.GeofenceBroadcastReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

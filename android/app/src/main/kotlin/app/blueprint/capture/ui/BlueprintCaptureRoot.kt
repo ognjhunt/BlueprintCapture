@@ -39,7 +39,9 @@ import app.blueprint.capture.data.model.RootStage
 import app.blueprint.capture.ui.components.UploadQueueOverlay
 import app.blueprint.capture.ui.screens.AuthScreen
 import app.blueprint.capture.ui.screens.CaptureSessionScreen
+import app.blueprint.capture.ui.screens.InviteCodeScreen
 import app.blueprint.capture.ui.screens.OnboardingScreen
+import app.blueprint.capture.ui.screens.PermissionsScreen
 import app.blueprint.capture.ui.screens.ProfileScreen
 import app.blueprint.capture.ui.screens.ScanScreen
 import app.blueprint.capture.ui.screens.WalletScreen
@@ -73,11 +75,16 @@ fun BlueprintCaptureRoot(
                 )
 
                 RootStage.Auth -> AuthScreen(
-                    configSummary = if (config.hasBackend) {
-                        "Firebase auth is live and backend config is present for creator APIs."
-                    } else {
-                        "Firebase auth is live. Add backend config to unlock creator APIs and payouts."
-                    },
+                    onSkip = rootViewModel::skipAuth,
+                )
+
+                RootStage.InviteCode -> InviteCodeScreen(
+                    onSkip = rootViewModel::completeInviteCode,
+                    onApply = rootViewModel::completeInviteCode,
+                )
+
+                RootStage.Permissions -> PermissionsScreen(
+                    onEnable = rootViewModel::completePermissions,
                 )
 
                 RootStage.App -> {

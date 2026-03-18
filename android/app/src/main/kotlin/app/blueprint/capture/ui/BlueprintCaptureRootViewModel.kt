@@ -35,16 +35,31 @@ class BlueprintCaptureRootViewModel @Inject constructor(
     private val activeCapture = MutableStateFlow<CaptureLaunch?>(null)
 
     val uiState: StateFlow<BlueprintCaptureRootUiState> = combine(
-        sessionPreferences.onboardingCompleted,
-        authRepository.authState,
-        selectedTab,
-        activeCapture,
-        captureUploadRepository.queue,
-    ) { onboardingComplete, user, tab, capture, uploadQueue ->
+        combine(
+            sessionPreferences.onboardingCompleted,
+            sessionPreferences.authSkipped,
+            sessionPreferences.inviteCodeCompleted,
+            sessionPreferences.permissionsCompleted,
+        ) { onboarding, authSkip, invite, perms -> listOf(onboarding, authSkip, invite, perms) },
+        combine(authRepository.authState, selectedTab, activeCapture, captureUploadRepository.queue) { u, t, c, q -> listOf(u, t, c, q) },
+    ) { flags, rest ->
+        val onboardingComplete = flags[0] as Boolean
+        val authSkipped = flags[1] as Boolean
+        val inviteCodeComplete = flags[2] as Boolean
+        val permissionsComplete = flags[3] as Boolean
+        @Suppress("UNCHECKED_CAST")
+        val user = rest[0]
+        val tab = rest[1] as MainTab
+        @Suppress("UNCHECKED_CAST")
+        val capture = rest[2] as? CaptureLaunch
+        @Suppress("UNCHECKED_CAST")
+        val uploadQueue = rest[3] as List<UploadQueueItem>
         BlueprintCaptureRootUiState(
             stage = when {
                 !onboardingComplete -> RootStage.Onboarding
-                user == null -> RootStage.Auth
+                user == null && !authSkipped -> RootStage.Auth
+                !inviteCodeComplete -> RootStage.InviteCode
+                !permissionsComplete -> RootStage.Permissions
                 else -> RootStage.App
             },
             selectedTab = tab,
@@ -59,6 +74,18 @@ class BlueprintCaptureRootViewModel @Inject constructor(
 
     fun completeOnboarding() {
         sessionPreferences.setOnboardingCompleted(true)
+    }
+
+    fun skipAuth() {
+        sessionPreferences.setAuthSkipped(true)
+    }
+
+    fun completeInviteCode() {
+        sessionPreferences.setInviteCodeCompleted(true)
+    }
+
+    fun completePermissions() {
+        sessionPreferences.setPermissionsCompleted(true)
     }
 
     fun selectTab(tab: MainTab) {

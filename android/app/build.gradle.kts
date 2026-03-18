@@ -34,6 +34,10 @@ android {
         buildConfigField("String", "GOOGLE_PLACES_API_KEY", "\"$googlePlacesKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         manifestPlaceholders["blueprintAppScheme"] = "blueprint"
+        val mwdatAppId = providers.gradleProperty("MWDAT_APPLICATION_ID").orNull ?: ""
+        val mwdatClientToken = providers.gradleProperty("MWDAT_CLIENT_TOKEN").orNull ?: ""
+        manifestPlaceholders["mwdatApplicationId"] = mwdatAppId
+        manifestPlaceholders["mwdatClientToken"] = mwdatClientToken
     }
 
     buildTypes {
@@ -129,6 +133,8 @@ dependencies {
     implementation(libs.maps.compose)
     implementation(libs.places)
     implementation(libs.coil.compose)
+    implementation(libs.mwdat.core)
+    implementation(libs.mwdat.camera)
 
     testImplementation(libs.junit4)
     testImplementation(libs.truth)

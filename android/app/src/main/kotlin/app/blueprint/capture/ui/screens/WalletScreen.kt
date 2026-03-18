@@ -29,12 +29,19 @@ import androidx.compose.material.icons.rounded.AttachMoney
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import app.blueprint.capture.data.capture.CaptureHistoryEntry
+import app.blueprint.capture.data.capture.CaptureSubmissionStage
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -71,6 +78,12 @@ fun WalletScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var showPayouts by rememberSaveable { mutableStateOf(false) }
+
+    if (showPayouts) {
+        PayoutsScreen(onBack = { showPayouts = false })
+        return
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -105,6 +118,7 @@ fun WalletScreen(
                 totalCaptures = state.totalCaptures,
                 pendingReviewCount = state.pendingReviewCount,
                 cashoutEnabled = state.cashoutEnabled,
+                onCashout = { showPayouts = true },
             )
         }
 
@@ -116,7 +130,12 @@ fun WalletScreen(
         }
 
         item {
-            WalletLedgerContent(selectedTab = WalletLedgerTab.entries[selectedTabIndex])
+            WalletLedgerContent(
+                selectedTab = WalletLedgerTab.entries[selectedTabIndex],
+                payoutEntries = state.payoutEntries,
+                historyEntries = state.historyEntries,
+                isLoading = state.isLedgerLoading,
+            )
         }
     }
 }
@@ -386,6 +405,7 @@ private fun WalletPendingRow(
     totalCaptures: Int,
     pendingReviewCount: Int,
     cashoutEnabled: Boolean,
+    onCashout: () -> Unit = {},
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -418,7 +438,7 @@ private fun WalletPendingRow(
                 .clip(RoundedCornerShape(22.dp))
                 .background(Color(0xFF232325))
                 .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(22.dp))
-                .clickable(enabled = cashoutEnabled, onClick = {})
+                .clickable(onClick = onCashout)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -491,8 +511,16 @@ private fun WalletLedgerPicker(
 @Composable
 private fun WalletLedgerContent(
     selectedTab: WalletLedgerTab,
+    payoutEntries: List<CaptureHistoryEntry>,
+    historyEntries: List<CaptureHistoryEntry>,
+    isLoading: Boolean,
 ) {
-    val (title, subtitle) = when (selectedTab) {
+    val entries = when (selectedTab) {
+        WalletLedgerTab.Payouts -> payoutEntries
+        WalletLedgerTab.Cashouts -> emptyList()
+        WalletLedgerTab.History -> historyEntries
+    }
+    val (emptyTitle, emptySubtitle) = when (selectedTab) {
         WalletLedgerTab.Payouts -> "No payouts yet" to "Approved captures will appear here."
         WalletLedgerTab.Cashouts -> "No cashouts yet" to "Cashouts will appear here once processed."
         WalletLedgerTab.History -> "No history yet" to "Wallet activity will appear here."
@@ -502,38 +530,121 @@ private fun WalletLedgerContent(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 240.dp),
-        contentAlignment = Alignment.Center,
+        contentAlignment = if (isLoading || entries.isEmpty()) Alignment.Center else Alignment.TopStart,
+    ) {
+        when {
+            isLoading -> CircularProgressIndicator(
+                color = BlueprintTeal,
+                modifier = Modifier.size(36.dp),
+            )
+            entries.isEmpty() -> Column(
+                modifier = Modifier.padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.AccountBalanceWallet,
+                    contentDescription = null,
+                    tint = Color(0xFF2F3135),
+                    modifier = Modifier.size(74.dp),
+                )
+                Text(
+                    text = emptyTitle,
+                    style = TextStyle(
+                        color = Color(0xFF6D7177),
+                        fontSize = 20.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+                Text(
+                    text = emptySubtitle,
+                    style = TextStyle(
+                        color = Color(0xFF4C5056),
+                        fontSize = 16.sp,
+                        lineHeight = 21.sp,
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                    ),
+                )
+            }
+            else -> Column(modifier = Modifier.fillMaxWidth()) {
+                entries.forEach { entry -> LedgerRow(entry) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LedgerRow(entry: CaptureHistoryEntry) {
+    val dateLabel = entry.submittedAtMs?.let { ms ->
+        SimpleDateFormat("MMM d", Locale.US).format(Date(ms))
+    } ?: "—"
+    val amountLabel = "$" + String.format("%.2f", entry.payoutCents / 100.0)
+    val title = entry.jobId ?: "Capture ${entry.captureId.take(8)}"
+    val (chipText, chipColor) = when (entry.stage) {
+        CaptureSubmissionStage.Paid -> "Paid" to BlueprintTeal
+        CaptureSubmissionStage.NeedsRecapture -> "Needs Recapture" to Color(0xFFF5A623)
+        CaptureSubmissionStage.InReview -> "In Review" to Color(0xFF6C7077)
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Icon(
-                imageVector = Icons.Rounded.AccountBalanceWallet,
-                contentDescription = null,
-                tint = Color(0xFF2F3135),
-                modifier = Modifier.size(74.dp),
-            )
             Text(
                 text = title,
                 style = TextStyle(
-                    color = Color(0xFF6D7177),
-                    fontSize = 20.sp,
-                    lineHeight = 24.sp,
+                    color = BlueprintTextPrimary,
+                    fontSize = 15.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.SemiBold,
                 ),
+                maxLines = 1,
             )
             Text(
-                text = subtitle,
+                text = dateLabel,
                 style = TextStyle(
-                    color = Color(0xFF4C5056),
-                    fontSize = 16.sp,
-                    lineHeight = 21.sp,
+                    color = BlueprintTextMuted,
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
                     fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
                 ),
             )
         }
+
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(chipColor.copy(alpha = 0.15f))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text = chipText,
+                style = TextStyle(
+                    color = chipColor,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+        }
+
+        Text(
+            text = amountLabel,
+            style = TextStyle(
+                color = if (entry.stage == CaptureSubmissionStage.Paid) BlueprintSuccess else BlueprintTextMuted,
+                fontSize = 15.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Bold,
+            ),
+        )
     }
 }

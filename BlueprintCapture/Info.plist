@@ -49,6 +49,14 @@
     <string>Local network access is used to discover and connect to your Meta smart glasses.</string>
     <key>MWDAT</key>
     <dict>
+        <key>AppLinkURLScheme</key>
+        <string>https://tryblueprint.io/</string>
+        <key>MetaAppID</key>
+        <string>1264466975619515</string>
+        <key>ClientToken</key>
+        <string>AR|1264466975619515|d76eedb6122e6a27da63682db293c0ab</string>
+        <key>TeamID</key>
+        <string>$(DEVELOPMENT_TEAM)</string>
         <key>Analytics</key>
         <dict>
             <key>OptOut</key>

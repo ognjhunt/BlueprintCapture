@@ -1169,16 +1169,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         // Detect relocalization events: camera is in "limited/relocalizing" state.
         let isRelocalization = trackingStateStr == "limited" && trackingReasonStr == "relocalizing"
 
-        // Exposure metadata from the captured image.
+        // Exposure metadata from the capture device (CVPixelBuffer has no exposure properties).
         let capturedImage = frame.capturedImage
-        let exposureDurationS: Double? = {
-            let d = capturedImage.exposureDuration
-            return d > 0 ? d : nil
-        }()
-        let isoValue: Double? = {
-            let v = capturedImage.ISO
+        let exposureDurationS: Double? = videoDevice.map { d in
+            let s = d.exposureDuration.seconds
+            return s > 0 ? s : nil
+        } ?? nil
+        let isoValue: Double? = videoDevice.map { d in
+            let v = d.iso
             return v > 0 ? Double(v) : nil
-        }()
+        } ?? nil
 
         // Sharpness estimate: Laplacian variance of a downsampled luma plane.
         // Higher = sharper. Runs on a 64×64 thumbnail to keep CPU cost low.

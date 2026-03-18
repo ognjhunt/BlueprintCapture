@@ -2,6 +2,7 @@ package app.blueprint.capture.ui.screens
 
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -88,8 +89,6 @@ fun ProfileScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val stats = state.profile?.stats
-    val scrollState = rememberScrollState()
-    val deviceSummary = rememberDeviceSummary()
     val tier = remember(stats?.totalCaptures) { tierPresentation(stats?.totalCaptures ?: 0) }
     val contributorName = remember(state.firebaseUser) {
         state.firebaseUser?.displayName
@@ -98,78 +97,88 @@ fun ProfileScreen(
             ?: "Capturer"
     }
     val subtitle = state.firebaseUser?.email ?: "Not signed in"
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var activeSheet by rememberSaveable { mutableStateOf<ProfileSheetMode?>(null) }
 
-    activeSheet?.let { sheetMode ->
-        ModalBottomSheet(
-            onDismissRequest = { activeSheet = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = BlueprintSurfaceRaised,
-            contentColor = BlueprintTextPrimary,
-            dragHandle = {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 10.dp)
-                        .width(42.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(BlueprintBorderStrong),
-                )
-            },
-        ) {
-            ProfileSheet(
-                mode = sheetMode,
-                state = state,
-                tier = tier,
-                onUpdateName = viewModel::updateName,
-                onUpdatePhone = viewModel::updatePhone,
-                onUpdateCompany = viewModel::updateCompany,
-                onSaveProfile = viewModel::saveProfile,
-                onSignOut = viewModel::signOut,
+    AnimatedContent(targetState = showSettings, label = "profile-settings-nav") { onSettings ->
+        if (onSettings) {
+            SettingsScreen(
+                isSignedIn = state.isSignedIn,
+                userName = contributorName,
+                userEmail = state.firebaseUser?.email,
+                onSignIn = {},
+                onBack = { showSettings = false },
             )
-        }
-    }
+        } else {
+            activeSheet?.let { sheetMode ->
+                ModalBottomSheet(
+                    onDismissRequest = { activeSheet = null },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = BlueprintSurfaceRaised,
+                    contentColor = BlueprintTextPrimary,
+                    dragHandle = {
+                        Box(
+                            modifier = Modifier
+                                .padding(top = 10.dp)
+                                .width(42.dp)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(BlueprintBorderStrong),
+                        )
+                    },
+                ) {
+                    ProfileSheet(
+                        mode = sheetMode,
+                        state = state,
+                        tier = tier,
+                    )
+                }
+            }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(BlueprintBlack)
-            .statusBarsPadding()
-            .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp),
-    ) {
-        Spacer(modifier = Modifier.height(12.dp))
-        HeaderSection(
-            subtitle = subtitle,
-            onOpenSettings = { activeSheet = ProfileSheetMode.Settings },
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        ContributorCard(
-            contributorName = contributorName,
-            tier = tier,
-        )
-        Spacer(modifier = Modifier.height(26.dp))
-        SectionLabel("Statistics")
-        Spacer(modifier = Modifier.height(12.dp))
-        StatisticsGrid(
-            totalCaptures = stats?.totalCaptures ?: 0,
-            earnings = formatCurrency((stats?.totalEarningsCents ?: 0) / 100.0),
-            referrals = 0,
-            approved = stats?.approvedCaptures ?: 0,
-        )
-        Spacer(modifier = Modifier.height(28.dp))
-        SectionLabel("Account")
-        Spacer(modifier = Modifier.height(12.dp))
-        AccountLinksCard(
-            onOpenAchievements = { activeSheet = ProfileSheetMode.Achievements },
-            onOpenReferrals = { activeSheet = ProfileSheetMode.Referrals },
-            onOpenSettings = { activeSheet = ProfileSheetMode.Settings },
-        )
-        Spacer(modifier = Modifier.height(28.dp))
-        SectionLabel("Device")
-        Spacer(modifier = Modifier.height(12.dp))
-        DeviceCard(deviceSummary = deviceSummary)
-        Spacer(modifier = Modifier.height(32.dp))
+            val scrollState = rememberScrollState()
+            val deviceSummary = rememberDeviceSummary()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(BlueprintBlack)
+                    .statusBarsPadding()
+                    .verticalScroll(scrollState)
+                    .padding(horizontal = 20.dp),
+            ) {
+                Spacer(modifier = Modifier.height(12.dp))
+                HeaderSection(
+                    subtitle = subtitle,
+                    onOpenSettings = { showSettings = true },
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                ContributorCard(
+                    contributorName = contributorName,
+                    tier = tier,
+                )
+                Spacer(modifier = Modifier.height(26.dp))
+                SectionLabel("Statistics")
+                Spacer(modifier = Modifier.height(12.dp))
+                StatisticsGrid(
+                    totalCaptures = stats?.totalCaptures ?: 0,
+                    earnings = formatCurrency((stats?.totalEarningsCents ?: 0) / 100.0),
+                    referrals = 0,
+                    approved = stats?.approvedCaptures ?: 0,
+                )
+                Spacer(modifier = Modifier.height(28.dp))
+                SectionLabel("Account")
+                Spacer(modifier = Modifier.height(12.dp))
+                AccountLinksCard(
+                    onOpenAchievements = { activeSheet = ProfileSheetMode.Achievements },
+                    onOpenReferrals = { activeSheet = ProfileSheetMode.Referrals },
+                    onOpenSettings = { showSettings = true },
+                )
+                Spacer(modifier = Modifier.height(28.dp))
+                SectionLabel("Device")
+                Spacer(modifier = Modifier.height(12.dp))
+                DeviceCard(deviceSummary = deviceSummary)
+                Spacer(modifier = Modifier.height(32.dp))
+            }
+        }
     }
 }
 
@@ -624,11 +633,6 @@ private fun ProfileSheet(
     mode: ProfileSheetMode,
     state: ProfileUiState,
     tier: TierPresentation,
-    onUpdateName: (String) -> Unit,
-    onUpdatePhone: (String) -> Unit,
-    onUpdateCompany: (String) -> Unit,
-    onSaveProfile: () -> Unit,
-    onSignOut: () -> Unit,
 ) {
     val stats = state.profile?.stats
     Column(
@@ -670,60 +674,6 @@ private fun ProfileSheet(
                     fontSize = 14.sp,
                     lineHeight = 19.sp,
                 )
-            }
-
-            ProfileSheetMode.Settings -> {
-                if (state.isSignedIn) {
-                    Text(
-                        text = state.firebaseUser?.email ?: "",
-                        color = BlueprintTextMuted,
-                        fontSize = 15.sp,
-                    )
-                }
-                ProfileTextField(
-                    label = "Full name",
-                    value = state.nameDraft,
-                    onValueChange = onUpdateName,
-                )
-                ProfileTextField(
-                    label = "Phone number",
-                    value = state.phoneDraft,
-                    onValueChange = onUpdatePhone,
-                )
-                ProfileTextField(
-                    label = "Company",
-                    value = state.companyDraft,
-                    onValueChange = onUpdateCompany,
-                )
-                state.errorMessage?.let {
-                    Text(
-                        text = it,
-                        color = BlueprintTextMuted,
-                        fontSize = 14.sp,
-                    )
-                }
-                Button(
-                    onClick = onSaveProfile,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = BlueprintAccent,
-                        contentColor = BlueprintBlack,
-                    ),
-                    enabled = state.isSignedIn && !state.isSaving,
-                    contentPadding = PaddingValues(vertical = 14.dp),
-                ) {
-                    Text(
-                        text = if (state.isSaving) "Saving..." else "Save profile",
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                OutlinedButton(
-                    onClick = onSignOut,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = state.isSignedIn,
-                ) {
-                    Text("Sign out")
-                }
             }
         }
     }
@@ -845,7 +795,6 @@ private data class DeviceSummary(
 private enum class ProfileSheetMode(val title: String) {
     Achievements("Level & Achievements"),
     Referrals("Referrals"),
-    Settings("Settings"),
 }
 
 private data class TierPresentation(

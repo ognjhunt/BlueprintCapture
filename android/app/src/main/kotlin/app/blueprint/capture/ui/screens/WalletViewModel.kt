@@ -3,12 +3,14 @@ package app.blueprint.capture.ui.screens
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.blueprint.capture.data.auth.AuthRepository
+import app.blueprint.capture.data.capture.CaptureHistoryEntry
+import app.blueprint.capture.data.capture.CaptureHistoryRepository
+import app.blueprint.capture.data.capture.CaptureSubmissionStage
 import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.ContributorProfile
 import app.blueprint.capture.data.profile.ContributorProfileRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,6 +28,9 @@ data class WalletUiState(
     val payoutBannerBody: String = "Payout setup is not enabled for this alpha build.",
     val showPayoutBanner: Boolean = true,
     val isRefreshing: Boolean = false,
+    val payoutEntries: List<CaptureHistoryEntry> = emptyList(),
+    val historyEntries: List<CaptureHistoryEntry> = emptyList(),
+    val isLedgerLoading: Boolean = false,
 ) {
     val totalEarningsLabel: String = centsToCurrency(profile?.stats?.totalEarningsCents ?: 0)
     val availableBalanceLabel: String = centsToCurrency(profile?.stats?.availableBalanceCents ?: 0)
@@ -44,6 +49,7 @@ data class WalletUiState(
 class WalletViewModel @Inject constructor(
     authRepository: AuthRepository,
     contributorProfileRepository: ContributorProfileRepository,
+    private val historyRepository: CaptureHistoryRepository,
     localConfigProvider: LocalConfigProvider,
 ) : ViewModel() {
     private val config = localConfigProvider.current()
@@ -53,7 +59,12 @@ class WalletViewModel @Inject constructor(
         contributorProfileRepository.observeProfile(user?.uid)
     }
 
-    val uiState: StateFlow<WalletUiState> = combine(profileFlow, isRefreshing) { profile, refreshing ->
+    private val _history = MutableStateFlow<List<CaptureHistoryEntry>>(emptyList())
+    private val _historyLoading = MutableStateFlow(false)
+
+    val uiState: StateFlow<WalletUiState> = combine(
+        profileFlow, isRefreshing, _history, _historyLoading,
+    ) { profile, refreshing, history, historyLoading ->
         WalletUiState(
             profile = profile,
             hasBackend = config.hasBackend,
@@ -70,6 +81,9 @@ class WalletViewModel @Inject constructor(
             },
             showPayoutBanner = !config.hasBackend || !config.hasStripe,
             isRefreshing = refreshing,
+            payoutEntries = history.filter { it.stage == CaptureSubmissionStage.Paid },
+            historyEntries = history,
+            isLedgerLoading = historyLoading,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -77,14 +91,25 @@ class WalletViewModel @Inject constructor(
         initialValue = WalletUiState(
             hasBackend = config.hasBackend,
             hasStripe = config.hasStripe,
+            isLedgerLoading = true,
         ),
     )
+
+    init {
+        viewModelScope.launch {
+            _historyLoading.value = true
+            _history.value = historyRepository.fetchHistory()
+            _historyLoading.value = false
+        }
+    }
 
     fun refresh() {
         if (isRefreshing.value) return
         viewModelScope.launch {
             isRefreshing.value = true
-            delay(900)
+            _historyLoading.value = true
+            _history.value = historyRepository.fetchHistory()
+            _historyLoading.value = false
             isRefreshing.value = false
         }
     }

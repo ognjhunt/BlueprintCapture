@@ -95,6 +95,11 @@ class CaptureUploadRepository @Inject constructor(
             captureDurationMs = request.captureDurationMs,
             quotedPayoutCents = request.quotedPayoutCents,
             requestedOutputs = request.requestedOutputs,
+            captureSource = request.captureSource.name.lowercase().replace("_", " ")
+                .let { if (request.captureSource == AndroidCaptureSource.MetaGlasses) "meta_glasses" else "android_phone" },
+            motionSampleCount = request.motionSampleCount,
+            priorityWeight = request.priorityWeight,
+            reservationId = request.reservationId,
         )
         synchronized(queueLock) {
             val trimmed = _queue.value.filterNot { it.id == uploadId }.take(11)
@@ -328,7 +333,7 @@ class CaptureUploadRepository @Inject constructor(
             "scene_id" to sceneId,
             "creator_id" to (item.creatorId ?: "anonymous"),
             "status" to "submitted",
-            "capture_source" to "android_phone",
+            "capture_source" to item.captureSource,
             "submitted_at" to Timestamp(Date(submittedAtEpochMs)),
             "created_at" to Timestamp(Date()),
             "capture_start_epoch_ms" to item.captureStartEpochMs,
@@ -342,6 +347,34 @@ class CaptureUploadRepository @Inject constructor(
             payload["requested_outputs"] = item.requestedOutputs
         }
         item.remotePrefix?.takeIf(String::isNotBlank)?.let { payload["raw_prefix"] = "${it}raw/" }
+
+        // Sensor / ranking metadata enrichment
+        if (item.motionSampleCount > 0) {
+            payload["motion_sample_count"] = item.motionSampleCount
+            payload["motion_provenance"] = "phone_imu_accelerometer_gyroscope"
+        }
+        if (item.priorityWeight > 0) payload["priority_weight"] = item.priorityWeight
+        item.reservationId?.takeIf(String::isNotBlank)?.let { payload["reservation_id"] = it }
+
+        // Attempt to read site_identity and capture_topology from bundle for submission doc
+        val bundlePath = item.localBundlePath
+        if (!bundlePath.isNullOrBlank()) {
+            val rawDir = File(bundlePath).resolve("raw")
+            runCatching {
+                val siteFile = rawDir.resolve("site_identity.json")
+                if (siteFile.exists()) payload["has_site_identity"] = true
+            }
+            runCatching {
+                val topoFile = rawDir.resolve("capture_topology.json")
+                if (topoFile.exists()) payload["has_capture_topology"] = true
+            }
+            runCatching {
+                val imuFile = rawDir.resolve("imu_samples.jsonl")
+                if (imuFile.exists() && imuFile.length() > 0) {
+                    payload["imu_samples_available"] = true
+                }
+            }
+        }
 
         firestore.collection("capture_submissions")
             .document(captureId)

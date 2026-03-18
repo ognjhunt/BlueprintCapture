@@ -28,11 +28,18 @@ enum class CaptureTaskHypothesisStatus {
 }
 
 @Serializable
+enum class AndroidCaptureSource {
+    @SerialName("android_phone") AndroidPhone,
+    @SerialName("meta_glasses") MetaGlasses,
+}
+
+@Serializable
 data class AndroidCaptureBundleRequest(
     @SerialName("scene_id") val sceneId: String,
     @SerialName("capture_id") val captureId: String,
     @SerialName("creator_id") val creatorId: String,
     @SerialName("job_id") val jobId: String? = null,
+    @SerialName("reservation_id") val reservationId: String? = null,
     @SerialName("site_submission_id") val siteSubmissionId: String? = null,
     @SerialName("device_model") val deviceModel: String,
     @SerialName("os_version") val osVersion: String,
@@ -42,6 +49,8 @@ data class AndroidCaptureBundleRequest(
     @SerialName("capture_start_epoch_ms") val captureStartEpochMs: Long,
     @SerialName("capture_duration_ms") val captureDurationMs: Long? = null,
     @SerialName("has_lidar") val hasLiDAR: Boolean = false,
+    @SerialName("capture_source") val captureSource: AndroidCaptureSource = AndroidCaptureSource.AndroidPhone,
+    @SerialName("priority_weight") val priorityWeight: Double = 0.0,
     @SerialName("capture_context_hint") val captureContextHint: String? = null,
     @SerialName("workflow_name") val workflowName: String? = null,
     @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
@@ -54,6 +63,13 @@ data class AndroidCaptureBundleRequest(
     @SerialName("quoted_payout_cents") val quotedPayoutCents: Int? = null,
     @SerialName("rights_profile") val rightsProfile: String? = null,
     @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
+    // Phase 2 world-model fields
+    @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
+    @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
+    @SerialName("capture_mode") val captureMode: CaptureModeMetadata? = null,
+    @SerialName("scaffolding_packet") val scaffoldingPacket: CaptureScaffoldingPacket? = null,
+    // IMU motion sample count (from CaptureIMUSampler)
+    @SerialName("motion_sample_count") val motionSampleCount: Int = 0,
 )
 
 @Serializable
@@ -61,8 +77,82 @@ data class QualificationIntakePacket(
     @SerialName("schema_version") val schemaVersion: String = "v1",
     @SerialName("workflow_name") val workflowName: String? = null,
     @SerialName("task_steps") val taskSteps: List<String> = emptyList(),
+    @SerialName("target_kpi") val targetKPI: String? = null,
     val zone: String? = null,
+    val shift: String? = null,
     val owner: String? = null,
+    @SerialName("facility_template") val facilityTemplate: String? = null,
+    @SerialName("required_coverage_areas") val requiredCoverageAreas: List<String> = emptyList(),
+    @SerialName("benchmark_stations") val benchmarkStations: List<String> = emptyList(),
+    @SerialName("adjacent_systems") val adjacentSystems: List<String> = emptyList(),
+    @SerialName("privacy_security_limits") val privacySecurityLimits: List<String> = emptyList(),
+    @SerialName("known_blockers") val knownBlockers: List<String> = emptyList(),
+    @SerialName("non_routine_modes") val nonRoutineModes: List<String> = emptyList(),
+    @SerialName("people_traffic_notes") val peopleTrafficNotes: List<String> = emptyList(),
+    @SerialName("capture_restrictions") val captureRestrictions: List<String> = emptyList(),
+    @SerialName("lighting_windows") val lightingWindows: List<String> = emptyList(),
+    @SerialName("shift_traffic_windows") val shiftTrafficWindows: List<String> = emptyList(),
+    @SerialName("movable_obstacles") val movableObstacles: List<String> = emptyList(),
+    @SerialName("floor_condition_notes") val floorConditionNotes: List<String> = emptyList(),
+    @SerialName("reflective_surface_notes") val reflectiveSurfaceNotes: List<String> = emptyList(),
+    @SerialName("access_rules") val accessRules: List<String> = emptyList(),
+)
+
+@Serializable
+data class SiteGeoPoint(
+    val latitude: Double,
+    val longitude: Double,
+    @SerialName("accuracy_m") val accuracyM: Double = 0.0,
+)
+
+@Serializable
+data class SiteIdentity(
+    @SerialName("site_id") val siteId: String,
+    @SerialName("site_id_source") val siteIdSource: String, // "buyer_request" | "site_submission" | "open_capture"
+    @SerialName("place_id") val placeId: String? = null,
+    @SerialName("site_name") val siteName: String? = null,
+    @SerialName("address_full") val addressFull: String? = null,
+    val geo: SiteGeoPoint? = null,
+    @SerialName("building_id") val buildingId: String? = null,
+    @SerialName("floor_id") val floorId: String? = null,
+    @SerialName("room_id") val roomId: String? = null,
+    @SerialName("zone_id") val zoneId: String? = null,
+)
+
+@Serializable
+data class CaptureTopologyMetadata(
+    @SerialName("capture_session_id") val captureSessionId: String,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("pass_id") val passId: String,
+    @SerialName("pass_index") val passIndex: Int = 0,
+    // "primary" | "revisit" | "loop_closure" | "critical_zone_revisit"
+    @SerialName("intended_pass_role") val intendedPassRole: String = "primary",
+    @SerialName("entry_anchor_id") val entryAnchorId: String? = null,
+    @SerialName("return_anchor_id") val returnAnchorId: String? = null,
+    @SerialName("entry_anchor_t_capture_sec") val entryAnchorTCaptureSec: Double? = null,
+    @SerialName("entry_anchor_hold_duration_sec") val entryAnchorHoldDurationSec: Double? = null,
+)
+
+@Serializable
+data class CaptureModeMetadata(
+    // "qualification_only" | "site_world_candidate"
+    @SerialName("requested_mode") val requestedMode: String,
+    @SerialName("resolved_mode") val resolvedMode: String,
+    @SerialName("downgrade_reason") val downgradeReason: String? = null,
+)
+
+@Serializable
+data class CaptureScaffoldingPacket(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("scaffolding_used") val scaffoldingUsed: List<String> = emptyList(),
+    @SerialName("coverage_plan") val coveragePlan: List<String> = emptyList(),
+    @SerialName("calibration_assets") val calibrationAssets: List<String> = emptyList(),
+    @SerialName("scale_anchor_assets") val scaleAnchorAssets: List<String> = emptyList(),
+    @SerialName("checkpoint_assets") val checkpointAssets: List<String> = emptyList(),
+    @SerialName("validated_scale_meters") val validatedScaleMeters: Double? = null,
+    @SerialName("validated_pose_coverage") val validatedPoseCoverage: Double? = null,
+    @SerialName("hidden_zone_bound") val hiddenZoneBound: Double? = null,
+    @SerialName("uncertainty_priors") val uncertaintyPriors: Map<String, Double> = emptyMap(),
 )
 
 val QualificationIntakePacket.isComplete: Boolean

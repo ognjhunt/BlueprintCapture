@@ -789,7 +789,10 @@ final class GlassesUploadViewModel: ObservableObject {
                 permissionDocumentURI: nil,
                 consentScope: [],
                 consentNotes: []
-            )
+            ),
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         currentRequest = request

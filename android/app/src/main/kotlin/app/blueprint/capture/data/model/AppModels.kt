@@ -5,6 +5,8 @@ import kotlinx.serialization.Serializable
 enum class RootStage {
     Onboarding,
     Auth,
+    InviteCode,
+    Permissions,
     App,
 }
 
@@ -43,6 +45,38 @@ enum class CapturePermissionTone {
     Blocked,
 }
 
+enum class TargetAvailabilityStatus {
+    Available,
+    Reserved,
+    InProgress,
+    Completed;
+
+    val firestoreValue: String
+        get() = when (this) {
+            Available -> "available"
+            Reserved -> "reserved"
+            InProgress -> "in_progress"
+            Completed -> "completed"
+        }
+
+    companion object {
+        fun fromFirestoreValue(value: String): TargetAvailabilityStatus? = when (value) {
+            "available" -> Available
+            "reserved" -> Reserved
+            "in_progress" -> InProgress
+            "completed" -> Completed
+            else -> null
+        }
+    }
+}
+
+enum class VenuePermission {
+    Documented,   // Explicit written permission on file
+    PolicyOnly,   // Public area, policy permits capture
+    Unknown,      // Not assessed
+    Blocked,      // Explicitly prohibited
+}
+
 data class ScanTarget(
     val id: String,
     val title: String,
@@ -64,6 +98,15 @@ data class ScanTarget(
     val quotedPayoutCents: Int? = null,
     val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
     val rightsProfile: String? = null,
+    // Phase 2 location + ranking fields
+    val lat: Double? = null,
+    val lng: Double? = null,
+    val priorityWeight: Double = 0.0,
+    val checkinRadiusM: Int = 150,
+    // Target reservation/availability state (fetched from target_state collection)
+    val targetAvailability: TargetAvailabilityStatus = TargetAvailabilityStatus.Available,
+    // Venue permission classification
+    val venuePermission: VenuePermission = VenuePermission.Unknown,
 )
 
 @Serializable
@@ -101,6 +144,11 @@ data class UploadQueueItem(
     val lastAttemptEpochMs: Long? = null,
     val cancelRequestedAtEpochMs: Long? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
+    // Capture-source and sensor metadata forwarded to the Firestore submission doc
+    val captureSource: String = "android_phone",   // "android_phone" | "meta_glasses"
+    val motionSampleCount: Int = 0,
+    val priorityWeight: Double = 0.0,
+    val reservationId: String? = null,
 )
 
 data class ContributorStats(

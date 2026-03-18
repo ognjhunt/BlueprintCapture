@@ -9,6 +9,7 @@ import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.capture.AndroidCaptureBundleBuilder
 import app.blueprint.capture.data.capture.AndroidCaptureBundleRequest
 import app.blueprint.capture.data.capture.CaptureExportService
+import app.blueprint.capture.data.capture.CaptureIMUSampler
 import app.blueprint.capture.data.capture.CaptureIntakeMetadata
 import app.blueprint.capture.data.capture.CaptureIntakeSource
 import app.blueprint.capture.data.capture.CaptureManualIntakeDraft
@@ -60,18 +61,17 @@ data class CaptureReviewDraft(
     val taskHypothesis: TaskHypothesis? = null,
     val preparedBundlePath: String? = null,
     val preparedCaptureId: String? = null,
+    // IMU motion sample count written during the session
+    val motionSampleCount: Int = 0,
+    // Path to pre-written imu_samples.jsonl file from CaptureIMUSampler
+    val imuSamplesFilePath: String? = null,
 ) {
-    val recordingFile: File
-        get() = File(recordingFilePath)
-
-    val preparedBundleFile: File?
-        get() = preparedBundlePath?.let(::File)
+    val recordingFile: File get() = File(recordingFilePath)
+    val preparedBundleFile: File? get() = preparedBundlePath?.let(::File)
+    val imuSamplesFile: File? get() = imuSamplesFilePath?.let(::File)
 
     val taskSteps: List<String>
-        get() = taskStepsText
-            .lines()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+        get() = taskStepsText.lines().map { it.trim() }.filter { it.isNotEmpty() }
 
     val intakePacket: QualificationIntakePacket
         get() = QualificationIntakePacket(
@@ -85,13 +85,9 @@ data class CaptureReviewDraft(
         get() = notes.trim().ifBlank { "" }
             .let { if (it.isBlank()) emptyList() else listOf(it) }
 
-    val isStructuredIntakeComplete: Boolean
-        get() = intakePacket.isComplete
+    val isStructuredIntakeComplete: Boolean get() = intakePacket.isComplete
 
-    fun buildRequest(
-        creatorId: String,
-        captureId: String,
-    ): AndroidCaptureBundleRequest {
+    fun buildRequest(creatorId: String, captureId: String): AndroidCaptureBundleRequest {
         val contextHint = listOfNotNull(
             capture.label.takeIf(String::isNotBlank),
             notes.trim().ifBlank { null }?.let { "Notes: $it" },
@@ -122,7 +118,10 @@ data class CaptureReviewDraft(
             zone = intakePacket.zone,
             owner = intakePacket.owner,
             operatorNotes = notesList,
-            intakePacket = intakePacket.takeIf { it.workflowName != null || it.taskSteps.isNotEmpty() || it.zone != null || it.owner != null },
+            intakePacket = intakePacket.takeIf {
+                it.workflowName != null || it.taskSteps.isNotEmpty() ||
+                    it.zone != null || it.owner != null
+            },
             intakeMetadata = intakeMetadataValue,
             taskHypothesis = taskHypothesis,
             quotedPayoutCents = capture.quotedPayoutCents,
@@ -130,6 +129,7 @@ data class CaptureReviewDraft(
             requestedOutputs = capture.requestedOutputs.ifEmpty {
                 listOf("qualification", "review_intake")
             },
+            motionSampleCount = motionSampleCount,
         )
     }
 
@@ -137,25 +137,20 @@ data class CaptureReviewDraft(
         manualDraft: CaptureManualIntakeDraft,
         metadata: CaptureIntakeMetadata? = intakeMetadata,
         hypothesis: TaskHypothesis? = taskHypothesis,
-    ): CaptureReviewDraft {
-        return copy(
-            workflowName = manualDraft.workflowName,
-            taskStepsText = manualDraft.taskStepsText,
-            zone = manualDraft.zone,
-            owner = manualDraft.owner,
-            helperText = manualDraft.helperText,
-            reviewTitle = manualDraft.reviewTitle,
-            intakeMetadata = metadata,
-            taskHypothesis = hypothesis,
-        )
-    }
+    ): CaptureReviewDraft = copy(
+        workflowName = manualDraft.workflowName,
+        taskStepsText = manualDraft.taskStepsText,
+        zone = manualDraft.zone,
+        owner = manualDraft.owner,
+        helperText = manualDraft.helperText,
+        reviewTitle = manualDraft.reviewTitle,
+        intakeMetadata = metadata,
+        taskHypothesis = hypothesis,
+    )
 
     fun invalidatePreparedBundle(): CaptureReviewDraft {
         preparedBundleFile?.deleteRecursively()
-        return copy(
-            preparedBundlePath = null,
-            preparedCaptureId = null,
-        )
+        return copy(preparedBundlePath = null, preparedCaptureId = null)
     }
 
     fun markManualEdit(): CaptureReviewDraft {
@@ -164,7 +159,6 @@ data class CaptureReviewDraft(
                 source = CaptureIntakeSource.HumanManual,
                 warnings = intakeMetadata.warnings,
             )
-
             else -> intakeMetadata
         }
         val updatedHypothesis = taskHypothesis?.copy(
@@ -174,10 +168,7 @@ data class CaptureReviewDraft(
             fps = null,
             status = CaptureTaskHypothesisStatus.Accepted,
         )
-        return copy(
-            intakeMetadata = updatedMetadata,
-            taskHypothesis = updatedHypothesis,
-        )
+        return copy(intakeMetadata = updatedMetadata, taskHypothesis = updatedHypothesis)
     }
 
     companion object {
@@ -223,14 +214,44 @@ class CaptureSessionViewModel @Inject constructor(
     private val intakeResolutionService: IntakeResolutionService,
     private val exportService: CaptureExportService,
 ) : ViewModel() {
+
     private val _uiState = MutableStateFlow(CaptureSessionUiState())
     val uiState: StateFlow<CaptureSessionUiState> = _uiState.asStateFlow()
+
+    /** IMU sampler is created per capture session and released on completion or discard. */
+    private var imuSampler: CaptureIMUSampler? = null
+
+    // ---------------------------------------------------------------------------
+    // IMU lifecycle — called by the recording screen
+    // ---------------------------------------------------------------------------
+
+    /** Start accelerometer + gyroscope collection. Call when recording begins. */
+    fun startIMUSampling(captureStartMs: Long = System.currentTimeMillis()) {
+        val sampler = CaptureIMUSampler(context)
+        sampler.startCapture(captureStartMs)
+        imuSampler = sampler
+    }
+
+    /** Stop sampling and flush to a .jsonl file alongside the recording. Returns sample count. */
+    fun stopIMUSamplingAndFlush(rawOutputDir: File): Pair<File?, Int> {
+        val sampler = imuSampler ?: return Pair(null, 0)
+        val count = sampler.sampleCount()
+        val file = if (count > 0) sampler.writeToFile(rawOutputDir) else null
+        imuSampler = null
+        return Pair(file, count)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Capture preparation
+    // ---------------------------------------------------------------------------
 
     fun prepareRecordedCapture(
         capture: CaptureLaunch,
         recordingFile: File,
         captureStartEpochMs: Long,
         captureDurationMs: Long,
+        imuSamplesFile: File? = null,
+        motionSampleCount: Int = 0,
     ) {
         viewModelScope.launch {
             runCatching {
@@ -250,6 +271,8 @@ class CaptureSessionViewModel @Inject constructor(
                             .joinToString(separator = "\n"),
                         zone = capture.zone.orEmpty(),
                         owner = capture.owner.orEmpty(),
+                        motionSampleCount = motionSampleCount,
+                        imuSamplesFilePath = imuSamplesFile?.absolutePath,
                     )
                 }
             }.onSuccess { draft ->
@@ -262,6 +285,10 @@ class CaptureSessionViewModel @Inject constructor(
             }
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // Review draft mutations
+    // ---------------------------------------------------------------------------
 
     fun updateReviewNotes(notes: String) {
         updateReviewDraft { it.copy(notes = notes).markManualEdit().invalidatePreparedBundle() }
@@ -283,17 +310,13 @@ class CaptureSessionViewModel @Inject constructor(
         updateReviewDraft { it.copy(owner = owner).markManualEdit().invalidatePreparedBundle() }
     }
 
-    fun queueUploadNow() {
-        resolveAndContinue(action = FinishedCaptureActionState.QueueingUpload)
-    }
+    // ---------------------------------------------------------------------------
+    // Upload / save / export actions
+    // ---------------------------------------------------------------------------
 
-    fun saveForLater() {
-        resolveAndContinue(action = FinishedCaptureActionState.SavingForLater)
-    }
-
-    fun exportForTesting() {
-        resolveAndContinue(action = FinishedCaptureActionState.Exporting)
-    }
+    fun queueUploadNow() { resolveAndContinue(action = FinishedCaptureActionState.QueueingUpload) }
+    fun saveForLater() { resolveAndContinue(action = FinishedCaptureActionState.SavingForLater) }
+    fun exportForTesting() { resolveAndContinue(action = FinishedCaptureActionState.Exporting) }
 
     fun consumeExportShare() {
         _uiState.value = _uiState.value.copy(exportSharePath = null)
@@ -302,12 +325,19 @@ class CaptureSessionViewModel @Inject constructor(
     fun discardPendingCapture() {
         _uiState.value.reviewDraft?.recordingFile?.takeIf(File::exists)?.delete()
         _uiState.value.reviewDraft?.preparedBundleFile?.deleteRecursively()
+        _uiState.value.reviewDraft?.imuSamplesFile?.delete()
+        imuSampler?.release()
+        imuSampler = null
         _uiState.value = CaptureSessionUiState()
     }
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }
+
+    // ---------------------------------------------------------------------------
+    // Internals
+    // ---------------------------------------------------------------------------
 
     private fun updateReviewDraft(transform: (CaptureReviewDraft) -> CaptureReviewDraft) {
         val draft = _uiState.value.reviewDraft ?: return
@@ -322,18 +352,14 @@ class CaptureSessionViewModel @Inject constructor(
         val draft = _uiState.value.reviewDraft ?: return
         val creatorId = authRepository.currentUserId() ?: "anonymous"
         val captureId = draft.preparedCaptureId ?: UUID.randomUUID().toString()
-        val request = draft.buildRequest(
-            creatorId = creatorId,
-            captureId = captureId,
-        )
+        val request = draft.buildRequest(creatorId = creatorId, captureId = captureId)
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                actionState = if (action == FinishedCaptureActionState.Exporting) {
+                actionState = if (action == FinishedCaptureActionState.Exporting)
                     FinishedCaptureActionState.GeneratingIntake
-                } else {
-                    action
-                },
+                else
+                    action,
                 errorMessage = null,
             )
 
@@ -344,25 +370,20 @@ class CaptureSessionViewModel @Inject constructor(
                         request = resolution.request,
                         helperText = resolvedHelperText(resolution.request),
                         reviewTitle = "Submission Ready",
-                    ).copy(
-                        preparedCaptureId = captureId,
-                    )
+                    ).copy(preparedCaptureId = captureId)
                     _uiState.value = _uiState.value.copy(
                         reviewDraft = resolvedDraft,
                         actionState = action,
                     )
                     continueWithResolvedDraft(resolvedDraft, resolution.request, action)
                 }
-
                 is IntakeResolutionOutcome.NeedsManualEntry -> {
                     val updatedDraft = CaptureReviewDraft.fromResolution(
                         base = draft,
                         request = resolution.request,
                         helperText = resolution.draft.helperText,
                         reviewTitle = resolution.draft.reviewTitle,
-                    ).copy(
-                        preparedCaptureId = captureId,
-                    )
+                    ).copy(preparedCaptureId = captureId)
                     _uiState.value = _uiState.value.copy(
                         reviewDraft = updatedDraft,
                         actionState = FinishedCaptureActionState.Idle,
@@ -380,65 +401,42 @@ class CaptureSessionViewModel @Inject constructor(
     ) {
         runCatching {
             withContext(Dispatchers.IO) {
-                val bundleRoot = ensurePackagedBundle(
-                    draft = draft,
-                    request = request,
-                )
+                val bundleRoot = ensurePackagedBundle(draft = draft, request = request)
 
                 when (action) {
-                    FinishedCaptureActionState.QueueingUpload -> {
+                    FinishedCaptureActionState.QueueingUpload ->
                         uploadRepository.enqueueBundleUpload(
                             label = draft.capture.label,
                             bundleRoot = bundleRoot,
                             request = request,
                         )
-                    }
-
-                    FinishedCaptureActionState.SavingForLater -> {
+                    FinishedCaptureActionState.SavingForLater ->
                         uploadRepository.saveBundleForLater(
                             label = draft.capture.label,
                             bundleRoot = bundleRoot,
                             request = request,
                         )
-                    }
-
-                    FinishedCaptureActionState.Exporting -> {
-                        exportService.exportCapture(
-                            request = request,
-                            bundleRoot = bundleRoot,
-                        )
-                    }
-
+                    FinishedCaptureActionState.Exporting ->
+                        exportService.exportCapture(request = request, bundleRoot = bundleRoot)
                     FinishedCaptureActionState.Idle,
-                    FinishedCaptureActionState.GeneratingIntake,
-                    -> error("Unexpected action state $action")
+                    FinishedCaptureActionState.GeneratingIntake ->
+                        error("Unexpected action state $action")
                 }
             }
         }.onSuccess { result ->
             when (action) {
-                FinishedCaptureActionState.QueueingUpload -> {
-                    val uploadId = result as String
-                    _uiState.value = CaptureSessionUiState(
-                        queuedUploadId = uploadId,
-                    )
-                }
-
-                FinishedCaptureActionState.SavingForLater -> {
-                    val uploadId = result as String
-                    _uiState.value = CaptureSessionUiState(
-                        savedUploadId = uploadId,
-                    )
-                }
-
+                FinishedCaptureActionState.QueueingUpload ->
+                    _uiState.value = CaptureSessionUiState(queuedUploadId = result as String)
+                FinishedCaptureActionState.SavingForLater ->
+                    _uiState.value = CaptureSessionUiState(savedUploadId = result as String)
                 FinishedCaptureActionState.Exporting -> {
                     val bundle = result as app.blueprint.capture.data.capture.FinalizedCaptureBundle
                     _uiState.value = _uiState.value.copy(
                         actionState = FinishedCaptureActionState.Idle,
                         exportSharePath = bundle.shareArtifact.absolutePath,
-                        exportMessage = "Export ready. Android saved a local testing bundle and opened the share sheet.",
+                        exportMessage = "Export ready. Android saved a local testing bundle.",
                     )
                 }
-
                 else -> Unit
             }
         }.onFailure { error ->
@@ -449,30 +447,27 @@ class CaptureSessionViewModel @Inject constructor(
         }
     }
 
-    private fun resolvedHelperText(request: AndroidCaptureBundleRequest): String {
-        val sourceLabel = when (request.intakeMetadata?.source) {
+    private fun resolvedHelperText(request: AndroidCaptureBundleRequest): String =
+        when (request.intakeMetadata?.source) {
             CaptureIntakeSource.Authoritative -> "Structured intake came from the target metadata."
             CaptureIntakeSource.HumanManual -> "Structured intake is complete and ready for packaging."
             CaptureIntakeSource.AiInferred -> "Android inferred the intake from capture context and accepted it."
             null -> "Structured intake is complete and ready for packaging."
         }
-        return sourceLabel
-    }
 
     private fun ensurePackagedBundle(
         draft: CaptureReviewDraft,
         request: AndroidCaptureBundleRequest,
     ): File {
         val existing = draft.preparedBundleFile
-        if (existing != null && existing.exists()) {
-            return existing
-        }
+        if (existing != null && existing.exists()) return existing
 
         val outputRoot = context.filesDir.resolve("capture_bundles").also { it.mkdirs() }
         val bundle = bundleBuilder.writeBundle(
             outputRoot = outputRoot,
             request = request,
             walkthroughSource = draft.recordingFile,
+            imuSamplesSource = draft.imuSamplesFile,
         )
         draft.recordingFile.takeIf(File::exists)?.delete()
 
@@ -488,20 +483,16 @@ class CaptureSessionViewModel @Inject constructor(
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
-            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
-                ?.toIntOrNull()
-                ?: 1920
-            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
-                ?.toIntOrNull()
-                ?: 1080
-            val frameRate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
-                ?.toDoubleOrNull()
-                ?: 30.0
-            VideoMetadata(
-                width = width,
-                height = height,
-                frameRate = frameRate,
-            )
+            val width = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+                ?.toIntOrNull() ?: 1920
+            val height = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+                ?.toIntOrNull() ?: 1080
+            val frameRate = retriever
+                .extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                ?.toDoubleOrNull() ?: 30.0
+            VideoMetadata(width = width, height = height, frameRate = frameRate)
         } finally {
             retriever.release()
         }
@@ -516,15 +507,10 @@ class CaptureSessionViewModel @Inject constructor(
     }
 }
 
-private fun captureFallbackSceneId(label: String): String {
-    return label.lowercase(Locale.US)
+private fun captureFallbackSceneId(label: String): String =
+    label.lowercase(Locale.US)
         .replace("[^a-z0-9]+".toRegex(), "-")
         .trim('-')
         .ifBlank { "open-capture" }
-}
 
-private data class VideoMetadata(
-    val width: Int,
-    val height: Int,
-    val frameRate: Double,
-)
+private data class VideoMetadata(val width: Int, val height: Int, val frameRate: Double)

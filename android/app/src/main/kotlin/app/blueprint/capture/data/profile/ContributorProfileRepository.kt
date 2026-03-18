@@ -2,7 +2,6 @@ package app.blueprint.capture.data.profile
 
 import app.blueprint.capture.data.model.ContributorProfile
 import app.blueprint.capture.data.model.ContributorStats
-import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -27,12 +26,15 @@ class ContributorProfileRepository @Inject constructor(
             val registration = firestore.collection("users").document(uid)
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        trySend(DemoData.contributorProfile.copy(uid = uid))
+                        trySend(null)
                         return@addSnapshotListener
                     }
 
-                    val profile = snapshot?.toContributorProfile(uid)
-                        ?: DemoData.contributorProfile.copy(uid = uid)
+                    val profile = if (snapshot?.exists() == true) {
+                        snapshot.toContributorProfile(uid)
+                    } else {
+                        null
+                    }
                     trySend(profile)
                 }
 
@@ -63,8 +65,8 @@ class ContributorProfileRepository @Inject constructor(
         val stats = data["stats"] as? Map<*, *> ?: emptyMap<String, Any>()
         return ContributorProfile(
             uid = uid,
-            name = data["name"] as? String ?: DemoData.contributorProfile.name,
-            email = data["email"] as? String ?: DemoData.contributorProfile.email,
+            name = data["name"] as? String ?: "",
+            email = data["email"] as? String ?: "",
             phoneNumber = data["phone_number"] as? String ?: "",
             company = data["company"] as? String ?: "",
             role = data["role"] as? String ?: "capturer",

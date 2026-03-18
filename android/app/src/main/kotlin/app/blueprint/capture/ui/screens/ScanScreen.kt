@@ -1,7 +1,16 @@
 package app.blueprint.capture.ui.screens
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -80,6 +89,7 @@ import app.blueprint.capture.ui.theme.BlueprintBorderStrong
 import app.blueprint.capture.ui.theme.BlueprintError
 import app.blueprint.capture.ui.theme.BlueprintSectionLabel
 import app.blueprint.capture.ui.theme.BlueprintSuccess
+import app.blueprint.capture.ui.theme.BlueprintBorderStrong
 import app.blueprint.capture.ui.theme.BlueprintSurface
 import app.blueprint.capture.ui.theme.BlueprintSurfaceRaised
 import app.blueprint.capture.ui.theme.BlueprintTeal
@@ -105,14 +115,41 @@ private data class SearchLocationSuggestion(
     val isRecent: Boolean = false,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
     onStartCapture: (CaptureLaunch) -> Unit,
     viewModel: ScanViewModel = hiltViewModel(),
+    glassesViewModel: GlassesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
     val locationSuggestions = remember { searchLocationSuggestions() }
 
+    var showGlassesSheet by rememberSaveable { mutableStateOf(false) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        // Permissions resolved (granted or denied) — ViewModel handles BLE/mock fallback
+        glassesViewModel.startScanning()
+    }
+
+    fun requestBleAndScan() {
+        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val allGranted = required.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            glassesViewModel.startScanning()
+        } else {
+            blePermissionLauncher.launch(required)
+        }
+    }
     var parityScreen by rememberSaveable { mutableStateOf<SearchParityScreen?>(null) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedLocationId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -197,7 +234,7 @@ fun ScanScreen(
                             subtitle = "Required for approved capture opportunities.",
                             accentColor = BlueprintTeal,
                             actionTitle = "Connect",
-                            onClick = {},
+                            onClick = { showGlassesSheet = true },
                         )
                     }
                     if (state.showPayoutBanner) {
@@ -292,6 +329,30 @@ fun ScanScreen(
                     null -> Unit
                 }
             }
+        }
+    }
+
+    if (showGlassesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showGlassesSheet = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = BlueprintSurfaceRaised,
+            contentColor = BlueprintTextPrimary,
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp)
+                        .width(42.dp)
+                        .height(4.dp)
+                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(999.dp))
+                        .background(BlueprintBorderStrong),
+                )
+            },
+        ) {
+            GlassesConnectionSheet(
+                viewModel = glassesViewModel,
+                onScanRequest = ::requestBleAndScan,
+            )
         }
     }
 }

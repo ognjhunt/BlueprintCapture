@@ -84,7 +84,10 @@ final class UploadQueueViewModel: ObservableObject {
                 permissionDocumentURI: job.permissionDocURL?.absoluteString,
                 consentScope: job.allowedAreas,
                 consentNotes: []
-            )
+            ),
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
         let payoutUsd = job.payoutDollars
@@ -139,7 +142,10 @@ final class UploadQueueViewModel: ObservableObject {
                 permissionDocumentURI: job.permissionDocURL?.absoluteString,
                 consentScope: job.allowedAreas,
                 consentNotes: ["UI test simulated upload"]
-            )
+            ),
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         )
 
         let status = UploadStatus(
