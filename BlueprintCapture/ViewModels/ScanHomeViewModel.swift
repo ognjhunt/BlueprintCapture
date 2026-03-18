@@ -299,7 +299,7 @@ final class ScanHomeViewModel: ObservableObject {
             let nearbyDynamic = hydrated.filter { $0.opportunityKind == .nearby }
             // Always prepend the hardcoded alpha test space (current location) so the
             // full non-GPU pipeline can be exercised against a real capture from this device.
-            self.nearbyItems = [Self.makeCurrentLocationItem(at: loc)] + nearbyDynamic
+            self.nearbyItems = [await Self.makeCurrentLocationItem(at: loc)] + nearbyDynamic
             self.specialItems = hydrated.filter { $0.opportunityKind == .special }
             self.readyNow = self.nearbyItems.first(where: { $0.isReadyNow && $0.permissionTier == .approved })
             self.submissionSummary = await loadSubmissionSummary()
@@ -393,13 +393,29 @@ final class ScanHomeViewModel: ObservableObject {
     /// non-GPU pipeline run against a live device capture for internal testing.
     static let alphaCurrentLocationJobID = "alpha-current-location"
 
-    private static func makeCurrentLocationItem(at location: CLLocation) -> JobItem {
+    private static func makeCurrentLocationItem(at location: CLLocation) async -> JobItem {
         let lat = location.coordinate.latitude
         let lng = location.coordinate.longitude
+
+        // Reverse-geocode to show a real street address instead of raw coordinates.
+        let address: String
+        if let placemark = try? await CLGeocoder().reverseGeocodeLocation(location).first {
+            let parts = [
+                placemark.subThoroughfare,
+                placemark.thoroughfare,
+                placemark.locality
+            ].compactMap { $0 }
+            address = parts.isEmpty
+                ? String(format: "%.5f, %.5f", lat, lng)
+                : parts.joined(separator: " ")
+        } else {
+            address = String(format: "%.5f, %.5f", lat, lng)
+        }
+
         let job = ScanJob(
             id: alphaCurrentLocationJobID,
             title: "Current Location",
-            address: String(format: "%.5f, %.5f", lat, lng),
+            address: address,
             lat: lat,
             lng: lng,
             payoutCents: 4500,

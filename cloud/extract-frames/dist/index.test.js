@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 process.env.FIREBASE_CONFIG = JSON.stringify({ storageBucket: "test-bucket" });
 process.env.GCLOUD_PROJECT = "test-project";
-const { buildTaskSiteContext, buildWorldlabsPreviewFields, deriveRequestedRouting, parseCapturePath, validateManifest, } = await import("./index.js");
+const { buildTaskSiteContext, buildWorldlabsPreviewFields, canonicalWorldModelCandidate, deriveRequestedRouting, mergeManifestWithSidecars, parseCapturePath, validateManifest, } = await import("./index.js");
 test("parseCapturePath supports canonical scenes capture layout", () => {
     const parsed = parseCapturePath("scenes/scene-123/captures/capture-456/raw/walkthrough.mov", "0");
     assert.ok(parsed);
@@ -139,4 +139,34 @@ test("buildWorldlabsPreviewFields reserves worldlabs uris when preview is reques
     assert.equal(fields.worldlabs_request_manifest_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/worldlabs/request_manifest.json");
     assert.equal(fields.worldlabs_input_manifest_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/worldlabs/input_manifest.json");
     assert.equal(fields.worldlabs_input_video_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov");
+});
+test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest shape", () => {
+    const merged = mergeManifestWithSidecars({
+        scene_id: "scene-1",
+        capture_source: "android_phone",
+    }, {
+        siteIdentity: { site_id: "site-123", site_id_source: "site_submission" },
+        captureTopology: { capture_session_id: "sess-1", pass_id: "pass-1" },
+        captureMode: { requested_mode: "site_world_candidate", resolved_mode: "site_world_candidate" },
+    });
+    assert.equal(merged?.site_identity?.site_id, "site-123");
+    assert.equal(merged?.capture_topology?.capture_session_id, "sess-1");
+    assert.equal(merged?.capture_mode?.requested_mode, "site_world_candidate");
+});
+test("canonicalWorldModelCandidate defers non-ARKit world model promotion until geometry stage", () => {
+    const result = canonicalWorldModelCandidate({
+        manifest: {
+            capture_mode: { requested_mode: "site_world_candidate", resolved_mode: "qualification_only" },
+        },
+        actualAvailability: {
+            arkit_poses: false,
+            arkit_intrinsics: false,
+            arkit_depth: false,
+        },
+        processingProfile: "video_only",
+        captureRights: { derived_scene_generation_allowed: true },
+        captureSource: "android_phone",
+    });
+    assert.equal(result.candidate, false);
+    assert.ok(result.reasoning.includes("awaiting_geometry_stage:true"));
 });

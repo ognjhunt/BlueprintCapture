@@ -257,37 +257,29 @@ struct ScanHomeView: View {
                     .foregroundStyle(Color(white: 0.4))
                     .padding(.horizontal, 20)
             case .loaded:
-                if featuredItems.isEmpty {
-                    // Show nearby POI cards (real locations) or static fallback
-                    let placeholders = nearbyPOIs.isEmpty ? DemoCapture.samples : nearbyPOIs
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(placeholders) { demo in
-                                Button { selectedDemo = demo } label: {
-                                    DemoFeaturedCard(demo: demo)
-                                        .frame(width: 280)
-                                }
-                                .buttonStyle(.plain)
+                // Always show real job cards first (includes the pinned alpha item),
+                // then append the dynamic nearby POI / demo cards so they are never hidden.
+                let placeholders = nearbyPOIs.isEmpty ? DemoCapture.samples : nearbyPOIs
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
+                            Button { selectedItem = item } label: {
+                                FeaturedCaptureCard(item: item)
+                                    .frame(width: 280)
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("scan-home-featured-\(index)")
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 2)
-                    }
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
-                                Button { selectedItem = item } label: {
-                                    FeaturedCaptureCard(item: item)
-                                        .frame(width: 280)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("scan-home-featured-\(index)")
+                        ForEach(placeholders) { demo in
+                            Button { selectedDemo = demo } label: {
+                                DemoFeaturedCard(demo: demo)
+                                    .frame(width: 280)
                             }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 2)
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 2)
                 }
             }
         }

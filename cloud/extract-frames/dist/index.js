@@ -158,7 +158,7 @@ async function loadJsonObject(bucket, objectName, tmpDir) {
         return null;
     }
 }
-function mergeManifestWithSidecars(manifest, sidecars) {
+export function mergeManifestWithSidecars(manifest, sidecars) {
     const base = asRecord(manifest) || {};
     return {
         ...base,
@@ -461,7 +461,7 @@ function normalizedCaptureTopology(manifest) {
  *   AND pose alignment quality is pose_assisted (implies poseMatchRate >= 0.65 AND p95 <= 0.2)
  *   AND derived_scene_generation_allowed
  */
-function canonicalWorldModelCandidate({ manifest, actualAvailability, processingProfile, captureRights, captureSource, }) {
+export function canonicalWorldModelCandidate({ manifest, actualAvailability, processingProfile, captureRights, captureSource, }) {
     const captureMode = asRecord(manifest?.capture_mode);
     const resolvedMode = asString(captureMode?.resolved_mode) ?? "qualification_only";
     const requestedMode = asString(captureMode?.requested_mode) ?? "qualification_only";
