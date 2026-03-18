@@ -214,6 +214,23 @@ async function loadJsonObject(
   }
 }
 
+function mergeManifestWithSidecars(
+  manifest: Record<string, unknown> | null,
+  sidecars: {
+    siteIdentity?: Record<string, unknown> | null;
+    captureTopology?: Record<string, unknown> | null;
+    captureMode?: Record<string, unknown> | null;
+  }
+): Record<string, unknown> | null {
+  const base = asRecord(manifest) || {};
+  return {
+    ...base,
+    site_identity: asRecord(base.site_identity) || sidecars.siteIdentity || null,
+    capture_topology: asRecord(base.capture_topology) || sidecars.captureTopology || null,
+    capture_mode: asRecord(base.capture_mode) || sidecars.captureMode || null,
+  };
+}
+
 async function prefixHasObjects(bucket: StorageBucket, prefix: string): Promise<boolean> {
   try {
     const [files] = await bucket.getFiles({ prefix, maxResults: 1 });
@@ -547,28 +564,41 @@ function canonicalWorldModelCandidate({
   actualAvailability,
   processingProfile,
   captureRights,
+  captureSource,
 }: {
   manifest: Record<string, unknown> | null;
   actualAvailability: { arkit_poses: boolean; arkit_intrinsics: boolean; arkit_depth: boolean };
   processingProfile: string;
   captureRights: Record<string, unknown>;
+  captureSource: "iphone" | "android_phone" | "glasses" | "unknown";
 }): { candidate: boolean; reasoning: string[] } {
   const captureMode = asRecord(manifest?.capture_mode);
   const resolvedMode = asString(captureMode?.resolved_mode) ?? "qualification_only";
+  const requestedMode = asString(captureMode?.requested_mode) ?? "qualification_only";
+  const arkitReady =
+    actualAvailability.arkit_poses &&
+    actualAvailability.arkit_intrinsics &&
+    actualAvailability.arkit_depth &&
+    processingProfile === "pose_assisted";
+  const nonArkitDeferred =
+    captureSource !== "iphone" &&
+    requestedMode === "site_world_candidate" &&
+    captureRights.derived_scene_generation_allowed === true;
   const reasoning: string[] = [
     `capture_mode_site_world_candidate:${resolvedMode === "site_world_candidate"}`,
+    `capture_source:${captureSource}`,
     `arkit_poses_valid:${actualAvailability.arkit_poses}`,
     `arkit_intrinsics_valid:${actualAvailability.arkit_intrinsics}`,
     `depth_coverage_ok:${actualAvailability.arkit_depth}`,
     `pose_alignment_ok:${processingProfile === "pose_assisted"}`,
+    `geometry_ready:false`,
+    `geometry_source:none`,
     `derived_scene_generation_allowed:${captureRights.derived_scene_generation_allowed === true}`,
+    `awaiting_geometry_stage:${nonArkitDeferred}`,
   ];
   const candidate =
     resolvedMode === "site_world_candidate" &&
-    actualAvailability.arkit_poses &&
-    actualAvailability.arkit_intrinsics &&
-    actualAvailability.arkit_depth &&
-    processingProfile === "pose_assisted" &&
+    arkitReady &&
     captureRights.derived_scene_generation_allowed === true;
   return { candidate, reasoning };
 }
@@ -738,11 +768,22 @@ export const extractFrames = onObjectFinalized(
 
     const manifestObjectName = `${pathInfo.rawPrefix}/manifest.json`;
     const completionMarkerObjectName = `${pathInfo.rawPrefix}/capture_upload_complete.json`;
+    const siteIdentityObjectName = `${pathInfo.rawPrefix}/site_identity.json`;
+    const captureTopologyObjectName = `${pathInfo.rawPrefix}/capture_topology.json`;
+    const captureModeObjectName = `${pathInfo.rawPrefix}/capture_mode.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
     const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
     const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
-    const manifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
+    const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
+    const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
+    const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
+    const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
+    const manifest = mergeManifestWithSidecars(rawManifest, {
+      siteIdentity: sidecarSiteIdentity,
+      captureTopology: sidecarCaptureTopology,
+      captureMode: sidecarCaptureMode,
+    });
     const completionMarker =
       objectKind === "completion_marker"
         ? await loadJsonObject(bucket, completionMarkerObjectName, tmp)
@@ -1015,25 +1056,34 @@ export const extractFrames = onObjectFinalized(
         },
         processingProfile: qualityGate.processingProfile,
         captureRights,
+        captureSource,
       });
     sceneMemoryCapture.world_model_candidate = worldModelCandidate;
     sceneMemoryCapture.world_model_candidate_reasoning = worldModelCandidateReasoning;
+    sceneMemoryCapture.geometry_source = null;
+    sceneMemoryCapture.geometry_ready = false;
 
-    // Resolve capture_mode: downgrade to qualification_only if ARKit evidence is insufficient.
+    // Resolve capture_mode with source-aware semantics.
     const rawCaptureMode = asRecord(manifest?.capture_mode);
     const requestedMode = asString(rawCaptureMode?.requested_mode) ?? "qualification_only";
-    const resolvedMode = worldModelCandidate ? "site_world_candidate" : "qualification_only";
+    const deferGeometry =
+      captureSource !== "iphone" &&
+      requestedMode === "site_world_candidate" &&
+      captureRights.derived_scene_generation_allowed === true;
+    const resolvedMode =
+      worldModelCandidate || deferGeometry ? "site_world_candidate" : "qualification_only";
     const captureMode = {
       requested_mode: requestedMode,
       resolved_mode: resolvedMode,
       downgrade_reason:
         requestedMode === "site_world_candidate" && resolvedMode === "qualification_only"
-          ? "insufficient_arkit_evidence_or_pose_alignment"
+          ? "awaiting_geometry_stage"
           : null,
+      geometry_status: deferGeometry && !worldModelCandidate ? "awaiting_geometry_stage" : null,
     };
 
     const runtimeBuildBlockers = [
-      ...(captureSource === "iphone" ? [] : ["capture_source_not_iphone"]),
+      ...(captureSource === "iphone" ? [] : ["geometry_ready=false"]),
       ...(worldModelCandidate ? [] : ["world_model_candidate=false"]),
       ...(walkthroughExists ? [] : ["missing_walkthrough"]),
       ...(sortedFiles.length > 0 ? [] : ["missing_frames_index"]),
@@ -1072,6 +1122,12 @@ export const extractFrames = onObjectFinalized(
       site_identity: siteIdentity,
       capture_topology: captureTopology,
       capture_mode: captureMode,
+      geometry_source: null,
+      geometry_ready: false,
+      coordinate_frame_session_id:
+        asString(captureTopology?.capture_session_id) ??
+        asString(captureTopology?.captureSessionId) ??
+        pathInfo.captureId,
       task_site_context: taskSiteContext,
       identity: identityValidation.identity,
       neoverse_runtime: {

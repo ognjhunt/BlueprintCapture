@@ -13,11 +13,14 @@ import app.blueprint.capture.data.capture.CaptureIMUSampler
 import app.blueprint.capture.data.capture.CaptureIntakeMetadata
 import app.blueprint.capture.data.capture.CaptureIntakeSource
 import app.blueprint.capture.data.capture.CaptureManualIntakeDraft
+import app.blueprint.capture.data.capture.CaptureModeMetadata
+import app.blueprint.capture.data.capture.CaptureTopologyMetadata
 import app.blueprint.capture.data.capture.CaptureTaskHypothesisStatus
 import app.blueprint.capture.data.capture.CaptureUploadRepository
 import app.blueprint.capture.data.capture.IntakeResolutionOutcome
 import app.blueprint.capture.data.capture.IntakeResolutionService
 import app.blueprint.capture.data.capture.QualificationIntakePacket
+import app.blueprint.capture.data.capture.SiteIdentity
 import app.blueprint.capture.data.capture.TaskHypothesis
 import app.blueprint.capture.data.capture.isComplete
 import app.blueprint.capture.data.model.CaptureLaunch
@@ -105,6 +108,22 @@ data class CaptureReviewDraft(
             creatorId = creatorId,
             jobId = capture.jobId ?: capture.targetId,
             siteSubmissionId = capture.siteSubmissionId,
+            siteIdentity = SiteIdentity(
+                siteId = capture.siteSubmissionId ?: capture.targetId ?: capture.jobId ?: captureFallbackSceneId(capture.label),
+                siteIdSource = if (!capture.siteSubmissionId.isNullOrBlank()) "site_submission" else if (!capture.targetId.isNullOrBlank()) "buyer_request" else "open_capture",
+                siteName = capture.label.takeIf(String::isNotBlank),
+            ),
+            captureTopology = CaptureTopologyMetadata(
+                captureSessionId = captureId,
+                routeId = capture.siteSubmissionId ?: capture.targetId ?: capture.jobId ?: "android-route",
+                passId = captureId,
+                passIndex = 0,
+                intendedPassRole = "primary",
+            ),
+            captureMode = CaptureModeMetadata(
+                requestedMode = "site_world_candidate",
+                resolvedMode = "site_world_candidate",
+            ),
             deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
             osVersion = "Android ${Build.VERSION.RELEASE ?: Build.VERSION.SDK_INT}",
             fpsSource = frameRate,

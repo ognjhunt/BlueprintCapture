@@ -56,6 +56,9 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureStartEpochMs = request.captureStartEpochMs,
             hasLiDAR = request.hasLiDAR,
             requestedOutputs = request.requestedOutputs,
+            siteIdentity = request.siteIdentity,
+            captureTopology = request.captureTopology,
+            captureMode = request.captureMode,
             taskTextHint = request.intakePacket?.workflowName
                 ?: request.workflowName
                 ?: request.captureContextHint,
@@ -109,6 +112,9 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureRights = CaptureRights(
                 payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
             ),
+            siteIdentity = request.siteIdentity,
+            captureTopology = request.captureTopology,
+            captureMode = request.captureMode,
         )
 
         val hypothesis = request.taskHypothesis ?: request.synthesizedTaskHypothesis()

@@ -189,6 +189,9 @@ data class CaptureManifest(
     @SerialName("capture_modality") val captureModality: String = "android_video_only",
     @SerialName("evidence_tier") val evidenceTier: String = "pre_screen_video",
     @SerialName("requested_outputs") val requestedOutputs: List<String>,
+    @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
+    @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
+    @SerialName("capture_mode") val captureMode: CaptureModeMetadata? = null,
     @SerialName("task_text_hint") val taskTextHint: String? = null,
     @SerialName("task_steps") val taskSteps: List<String>,
     val zone: String? = null,
@@ -256,6 +259,9 @@ data class CaptureContext(
     @SerialName("world_model_candidate") val worldModelCandidate: Boolean = false,
     @SerialName("capture_evidence") val captureEvidence: CaptureEvidence = CaptureEvidence(),
     @SerialName("capture_rights") val captureRights: CaptureRights = CaptureRights(),
+    @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
+    @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
+    @SerialName("capture_mode") val captureMode: CaptureModeMetadata? = null,
 )
 
 @Serializable
