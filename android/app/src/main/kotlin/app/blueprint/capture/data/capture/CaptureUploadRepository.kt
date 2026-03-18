@@ -112,7 +112,7 @@ class CaptureUploadRepository @Inject constructor(
             quotedPayoutCents = request.quotedPayoutCents,
             requestedOutputs = request.requestedOutputs,
             captureSource = request.captureSource.name.lowercase().replace("_", " ")
-                .let { if (request.captureSource == AndroidCaptureSource.MetaGlasses) "meta_glasses" else "android_phone" },
+                .let { if (request.captureSource == AndroidCaptureSource.MetaGlasses) "glasses" else "android" },
             motionSampleCount = request.motionSampleCount,
             priorityWeight = request.priorityWeight,
             reservationId = request.reservationId,

@@ -358,7 +358,7 @@ fake, and surface a clear message:
    connection state (connecting → connected → disconnected) driven by `BluetoothGattCallback`.
 2. **Honest capture UI**: When connected, show a card that reads "Video capture from Meta Glasses
    requires the MWDAT SDK — currently unavailable on Android. Audio annotation mode only." then
-   offer to record an audio note via the phone mic and submit it as `captureSource = "android_phone"`.
+   offer to record an audio note via the phone mic and submit it as `captureSource = "android"`.
 3. **Remove mock injection**: Delete `injectMock()` and the emulator fake. Either find a real device
    or show a "No glasses found" empty state honestly.
 

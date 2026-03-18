@@ -146,7 +146,7 @@ data class UploadQueueItem(
     val cancelRequestedAtEpochMs: Long? = null,
     val createdAtEpochMs: Long = System.currentTimeMillis(),
     // Capture-source and sensor metadata forwarded to the Firestore submission doc
-    val captureSource: String = "android_phone",   // "android_phone" | "meta_glasses"
+    val captureSource: String = "android",   // "android" | "glasses"
     val motionSampleCount: Int = 0,
     val priorityWeight: Double = 0.0,
     val reservationId: String? = null,

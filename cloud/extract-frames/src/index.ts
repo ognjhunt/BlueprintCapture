@@ -570,7 +570,7 @@ export function canonicalWorldModelCandidate({
   actualAvailability: { arkit_poses: boolean; arkit_intrinsics: boolean; arkit_depth: boolean };
   processingProfile: string;
   captureRights: Record<string, unknown>;
-  captureSource: "iphone" | "android_phone" | "glasses" | "unknown";
+  captureSource: "iphone" | "android" | "glasses" | "unknown";
 }): { candidate: boolean; reasoning: string[] } {
   const captureMode = asRecord(manifest?.capture_mode);
   const resolvedMode = asString(captureMode?.resolved_mode) ?? "qualification_only";
@@ -958,14 +958,17 @@ export const extractFrames = onObjectFinalized(
 
     const captureSourceRaw =
       asString(manifest?.capture_source) ??
-      (pathInfo.captureSourcePath === "iphone" || pathInfo.captureSourcePath === "glasses"
+      (pathInfo.captureSourcePath === "iphone" ||
+      pathInfo.captureSourcePath === "glasses" ||
+      pathInfo.captureSourcePath === "android" ||
+      pathInfo.captureSourcePath === "android_phone"
         ? pathInfo.captureSourcePath
         : "unknown");
-    const captureSource: "iphone" | "android_phone" | "glasses" | "unknown" =
+    const captureSource: "iphone" | "android" | "glasses" | "unknown" =
       captureSourceRaw === "iphone"
         ? "iphone"
-        : captureSourceRaw === "android_phone"
-        ? "android_phone"
+        : captureSourceRaw === "android" || captureSourceRaw === "android_phone"
+        ? "android"
         : captureSourceRaw === "glasses"
         ? "glasses"
         : "unknown";
@@ -1157,8 +1160,8 @@ export const extractFrames = onObjectFinalized(
         (
           captureSource === "iphone"
             ? "tier1_iphone"
-            : captureSource === "android_phone"
-            ? "tier2_android_phone"
+            : captureSource === "android"
+            ? "tier2_android"
             : "tier2_glasses"
         ),
       capture_tier_final: qualityGate.captureTier,

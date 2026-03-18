@@ -29,8 +29,8 @@ enum class CaptureTaskHypothesisStatus {
 
 @Serializable
 enum class AndroidCaptureSource {
-    @SerialName("android_phone") AndroidPhone,
-    @SerialName("meta_glasses") MetaGlasses,
+    @SerialName("android") AndroidPhone,
+    @SerialName("glasses") MetaGlasses,
 }
 
 @Serializable
@@ -184,8 +184,8 @@ data class CaptureManifest(
     @SerialName("capture_start_epoch_ms") val captureStartEpochMs: Long,
     @SerialName("has_lidar") val hasLiDAR: Boolean,
     @SerialName("capture_schema_version") val captureSchemaVersion: String = "2.0.0",
-    @SerialName("capture_source") val captureSource: String = "android_phone",
-    @SerialName("capture_tier_hint") val captureTierHint: String = "tier2_android_phone",
+    @SerialName("capture_source") val captureSource: String = "android",
+    @SerialName("capture_tier_hint") val captureTierHint: String = "tier2_android",
     @SerialName("capture_modality") val captureModality: String = "android_video_only",
     @SerialName("evidence_tier") val evidenceTier: String = "pre_screen_video",
     @SerialName("requested_outputs") val requestedOutputs: List<String>,

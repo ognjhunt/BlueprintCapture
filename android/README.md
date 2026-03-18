@@ -7,8 +7,8 @@ Native Android app scaffold for BlueprintCapture.
 - Kotlin + Jetpack Compose app shell
 - Firebase app registration wired through `app/google-services.json`
 - onboarding, auth, scan, wallet, and profile shell screens
-- Android phone capture bundle writer with `android_phone` contract output
-- cloud bridge contract updated to accept `android_phone`
+- Android phone capture bundle writer with canonical `android` contract output
+- cloud bridge contract updated to normalize legacy `android_phone` into `android`
 
 ## Local Setup
 

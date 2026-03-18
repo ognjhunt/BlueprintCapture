@@ -188,7 +188,7 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
   const merged = mergeManifestWithSidecars(
     {
       scene_id: "scene-1",
-      capture_source: "android_phone",
+      capture_source: "android",
     },
     {
       siteIdentity: { site_id: "site-123", site_id_source: "site_submission" },
@@ -214,7 +214,7 @@ test("canonicalWorldModelCandidate defers non-ARKit world model promotion until 
     },
     processingProfile: "video_only",
     captureRights: { derived_scene_generation_allowed: true },
-    captureSource: "android_phone",
+    captureSource: "android",
   });
 
   assert.equal(result.candidate, false);

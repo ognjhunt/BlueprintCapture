@@ -42,6 +42,11 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
 
         walkthroughSource.copyTo(rawDirectory.resolve("walkthrough.mp4"), overwrite = true)
 
+        val captureModality = captureModalityFor(request)
+        val evidenceTier = evidenceTierFor(request, captureModality)
+        val captureSource = if (request.captureSource == AndroidCaptureSource.MetaGlasses) "glasses" else "android"
+        val captureTierHint = if (request.captureSource == AndroidCaptureSource.MetaGlasses) "tier2_glasses" else "tier2_android"
+
         // -----------------------------------------------------------------
         // manifest.json
         // -----------------------------------------------------------------
@@ -55,6 +60,10 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             height = request.height,
             captureStartEpochMs = request.captureStartEpochMs,
             hasLiDAR = request.hasLiDAR,
+            captureSource = captureSource,
+            captureTierHint = captureTierHint,
+            captureModality = captureModality,
+            evidenceTier = evidenceTier,
             requestedOutputs = request.requestedOutputs,
             siteIdentity = request.siteIdentity,
             captureTopology = request.captureTopology,
@@ -183,5 +192,34 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             scaffoldingPacketFile = scaffoldingPacketFile,
             imuSamplesFile = imuSamplesFile,
         )
+    }
+
+    private fun captureModalityFor(request: AndroidCaptureBundleRequest): String {
+        val hasScaffolding = !request.scaffoldingPacket?.scaffoldingUsed.isNullOrEmpty()
+        return when (request.captureSource) {
+            AndroidCaptureSource.MetaGlasses ->
+                if (hasScaffolding) "glasses_plus_scaffolding" else "glasses_video_only"
+            AndroidCaptureSource.AndroidPhone ->
+                if (hasScaffolding) "android_plus_scaffolding" else "android_video_only"
+        }
+    }
+
+    private fun evidenceTierFor(request: AndroidCaptureBundleRequest, captureModality: String): String {
+        val intakeComplete = request.intakePacket?.isComplete == true
+        val scaffolding = request.scaffoldingPacket
+        val validatedMetricBundle = !scaffolding?.calibrationAssets.isNullOrEmpty() &&
+            (scaffolding?.validatedScaleMeters != null) &&
+            (scaffolding?.validatedPoseCoverage ?: 0.0) >= 0.7 &&
+            (scaffolding?.hiddenZoneBound ?: 1.0) <= 0.35 &&
+            !scaffolding?.scaleAnchorAssets.isNullOrEmpty() &&
+            !scaffolding?.checkpointAssets.isNullOrEmpty()
+        if (
+            captureModality in setOf("glasses_plus_scaffolding", "android_plus_scaffolding") &&
+            intakeComplete &&
+            validatedMetricBundle
+        ) {
+            return "video_with_validated_scaffolding"
+        }
+        return "pre_screen_video"
     }
 }

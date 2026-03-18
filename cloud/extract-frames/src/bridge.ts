@@ -15,7 +15,7 @@ export type PoseIndex = {
 };
 
 export type QualityGateInput = {
-  captureSource: "iphone" | "android_phone" | "glasses" | "unknown";
+  captureSource: "iphone" | "android" | "glasses" | "unknown";
   manifestPresent: boolean;
   manifestValid: boolean;
   requiredFiles: {
@@ -29,7 +29,7 @@ export type QualityGateInput = {
 
 export type QualityGateResult = {
   status: "passed" | "blocked";
-  captureTier: "tier1_iphone" | "tier2_android_phone" | "tier2_glasses";
+  captureTier: "tier1_iphone" | "tier2_android" | "tier2_glasses";
   processingProfile: "pose_assisted" | "video_only";
   reasons: string[];
   warnings: string[];
@@ -261,8 +261,8 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
       captureTier:
         input.captureSource === "iphone"
           ? "tier1_iphone"
-          : input.captureSource === "android_phone"
-          ? "tier2_android_phone"
+          : input.captureSource === "android"
+          ? "tier2_android"
           : "tier2_glasses",
       processingProfile: input.captureSource === "iphone" ? "pose_assisted" : "video_only",
       reasons,
@@ -300,7 +300,7 @@ export function evaluateQualityGate(input: QualityGateInput): QualityGateResult 
   }
   return {
     status: "passed",
-    captureTier: input.captureSource === "android_phone" ? "tier2_android_phone" : "tier2_glasses",
+    captureTier: input.captureSource === "android" ? "tier2_android" : "tier2_glasses",
     processingProfile: "video_only",
     reasons,
     warnings,

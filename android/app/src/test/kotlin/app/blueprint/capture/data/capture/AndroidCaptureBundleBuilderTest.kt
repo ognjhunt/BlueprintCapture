@@ -10,7 +10,7 @@ class AndroidCaptureBundleBuilderTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
-    fun `bundle builder writes android phone manifest and supplemental files`() {
+    fun `bundle builder writes canonical android manifest and supplemental files`() {
         val tempDir = createTempDirectory("android-capture-bundle").toFile()
         val sourceVideo = File(tempDir, "walkthrough.mp4").apply {
             writeBytes(byteArrayOf(0x01, 0x02, 0x03))
@@ -43,8 +43,8 @@ class AndroidCaptureBundleBuilderTest {
         assertThat(File(result.rawDirectory, "walkthrough.mp4").exists()).isTrue()
 
         val manifest = json.decodeFromString<CaptureManifest>(result.manifestFile.readText())
-        assertThat(manifest.captureSource).isEqualTo("android_phone")
-        assertThat(manifest.captureTierHint).isEqualTo("tier2_android_phone")
+        assertThat(manifest.captureSource).isEqualTo("android")
+        assertThat(manifest.captureTierHint).isEqualTo("tier2_android")
         assertThat(manifest.captureModality).isEqualTo("android_video_only")
         assertThat(manifest.sceneMemoryCapture.sensorAvailability.arkitPoses).isFalse()
         assertThat(manifest.sceneMemoryCapture.sensorAvailability.motion).isTrue()

@@ -309,7 +309,7 @@ enum CaptureBundleContext {
         if request.metadata.captureSource == .metaGlasses,
            request.metadata.scaffoldingPacket?.hasValidatedMetricBundle == true,
            intakeComplete {
-            return "glasses_with_validated_scaffolding"
+            return "video_with_validated_scaffolding"
         }
         return "pre_screen_video"
     }
