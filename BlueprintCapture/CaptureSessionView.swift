@@ -9,7 +9,6 @@ struct CaptureSessionView: View {
     @ObservedObject private var captureManager: VideoCaptureManager
     @State private var didAutoStart = false
     @State private var isEnding = false
-    @State private var showShortCaptureAlert = false
     @State private var captureNotes = ""
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
@@ -184,16 +183,6 @@ struct CaptureSessionView: View {
         .sheet(item: $viewModel.shareSheetItem) { shareItem in
             ShareSheet(items: [shareItem.url])
         }
-        .alert("End capture early?", isPresented: $showShortCaptureAlert) {
-            Button("Keep Recording", role: .cancel) {
-                isEnding = false
-            }
-            Button("End Anyway", role: .destructive) {
-                endSession()
-            }
-        } message: {
-            Text("Your capture is under 10 minutes. Longer, more thorough captures earn significantly more.")
-        }
     }
 
     private var capturePolicyLabel: String {
@@ -224,17 +213,7 @@ struct CaptureSessionView: View {
 
     private func handleEndTapped() {
         guard !isEnding else { return }
-        if case .finished = captureManager.captureState {
-            endSession()
-            return
-        }
-        // Check if capture is under 10 minutes
-        if captureManager.qualityMonitor.elapsedSeconds < 600 && captureManager.captureState.isRecording {
-            isEnding = true
-            showShortCaptureAlert = true
-        } else {
-            endSession()
-        }
+        endSession()
     }
 
     private func autoStartRecordingIfNeeded() {
