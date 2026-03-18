@@ -482,10 +482,95 @@ function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null):
     },
     operator_notes: hasStringArray(raw?.operator_notes) ? raw?.operator_notes : [],
     inaccessible_areas: hasStringArray(raw?.inaccessible_areas) ? raw?.inaccessible_areas : [],
-    world_model_candidate: raw?.world_model_candidate === true,
+    // world_model_candidate is NOT read from the raw manifest here. It is computed
+    // deterministically from actual artifact presence and capture_mode after the bridge
+    // has verified GCS artifacts. See canonicalWorldModelCandidate() below.
+    world_model_candidate_reasoning: Array.isArray(raw?.world_model_candidate_reasoning)
+      ? (raw?.world_model_candidate_reasoning as string[])
+      : [],
     motion_provenance: asString(raw?.motion_provenance) ?? null,
     motion_timestamps_capture_relative: raw?.motion_timestamps_capture_relative === true,
   };
+}
+
+function normalizedSiteIdentity(manifest: Record<string, unknown> | null): Record<string, unknown> | null {
+  const raw = asRecord(manifest?.site_identity);
+  if (!raw) return null;
+  const geo = asRecord(raw.geo);
+  return {
+    site_id: asString(raw.site_id) ?? null,
+    site_id_source: asString(raw.site_id_source) ?? "unknown",
+    place_id: asString(raw.place_id) ?? null,
+    site_name: asString(raw.site_name) ?? null,
+    address_full: asString(raw.address_full) ?? null,
+    geo: geo
+      ? {
+          latitude: typeof geo.latitude === "number" ? geo.latitude : null,
+          longitude: typeof geo.longitude === "number" ? geo.longitude : null,
+          accuracy_m: typeof geo.accuracy_m === "number" ? geo.accuracy_m : null,
+        }
+      : null,
+    building_id: asString(raw.building_id) ?? null,
+    floor_id: asString(raw.floor_id) ?? null,
+    room_id: asString(raw.room_id) ?? null,
+    zone_id: asString(raw.zone_id) ?? null,
+  };
+}
+
+function normalizedCaptureTopology(manifest: Record<string, unknown> | null): Record<string, unknown> | null {
+  const raw = asRecord(manifest?.capture_topology);
+  if (!raw) return null;
+  return {
+    capture_session_id: asString(raw.capture_session_id) ?? null,
+    route_id: asString(raw.route_id) ?? null,
+    pass_id: asString(raw.pass_id) ?? null,
+    pass_index: typeof raw.pass_index === "number" ? raw.pass_index : null,
+    intended_pass_role: asString(raw.intended_pass_role) ?? "primary",
+    entry_anchor_id: asString(raw.entry_anchor_id) ?? null,
+    return_anchor_id: asString(raw.return_anchor_id) ?? null,
+  };
+}
+
+/**
+ * Canonical world_model_candidate rule — shared across iOS finalizer, cloud bridge,
+ * and local pipeline. Must be kept in sync.
+ *
+ * capture_mode.resolved_mode == "site_world_candidate"
+ *   AND arkit_poses present (actual GCS artifact check)
+ *   AND arkit_intrinsics present
+ *   AND arkit_depth present
+ *   AND pose alignment quality is pose_assisted (implies poseMatchRate >= 0.65 AND p95 <= 0.2)
+ *   AND derived_scene_generation_allowed
+ */
+function canonicalWorldModelCandidate({
+  manifest,
+  actualAvailability,
+  processingProfile,
+  captureRights,
+}: {
+  manifest: Record<string, unknown> | null;
+  actualAvailability: { arkit_poses: boolean; arkit_intrinsics: boolean; arkit_depth: boolean };
+  processingProfile: string;
+  captureRights: Record<string, unknown>;
+}): { candidate: boolean; reasoning: string[] } {
+  const captureMode = asRecord(manifest?.capture_mode);
+  const resolvedMode = asString(captureMode?.resolved_mode) ?? "qualification_only";
+  const reasoning: string[] = [
+    `capture_mode_site_world_candidate:${resolvedMode === "site_world_candidate"}`,
+    `arkit_poses_valid:${actualAvailability.arkit_poses}`,
+    `arkit_intrinsics_valid:${actualAvailability.arkit_intrinsics}`,
+    `depth_coverage_ok:${actualAvailability.arkit_depth}`,
+    `pose_alignment_ok:${processingProfile === "pose_assisted"}`,
+    `derived_scene_generation_allowed:${captureRights.derived_scene_generation_allowed === true}`,
+  ];
+  const candidate =
+    resolvedMode === "site_world_candidate" &&
+    actualAvailability.arkit_poses &&
+    actualAvailability.arkit_intrinsics &&
+    actualAvailability.arkit_depth &&
+    processingProfile === "pose_assisted" &&
+    captureRights.derived_scene_generation_allowed === true;
+  return { candidate, reasoning };
 }
 
 function normalizedCaptureRights(manifest: Record<string, unknown> | null): Record<string, unknown> {
@@ -875,7 +960,9 @@ export const extractFrames = onObjectFinalized(
     const pipelineHandoffUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/pipeline_handoff.json`);
     const sceneMemoryCapture = normalizedSceneMemoryCapture(manifest);
     const captureRights = normalizedCaptureRights(manifest);
-    const worldModelCandidate = sceneMemoryCapture.world_model_candidate === true;
+    const siteIdentity = normalizedSiteIdentity(manifest);
+    const captureTopology = normalizedCaptureTopology(manifest);
+    // worldModelCandidate is computed AFTER actualAvailability is known (see below).
     const routing = deriveRequestedRouting(manifest);
     const taskSiteContext = buildTaskSiteContext(manifest);
     const worldlabsPreview = buildWorldlabsPreviewFields(
@@ -915,12 +1002,39 @@ export const extractFrames = onObjectFinalized(
     }
     finalWarnings.push(...identityValidation.warnings);
     sceneMemoryCapture.sensor_availability = claimedArtifactEvaluation.valid;
+
+    // Compute world_model_candidate deterministically from actual artifact presence.
+    // This is the canonical rule shared with iOS finalizer and local pipeline.
+    const { candidate: worldModelCandidate, reasoning: worldModelCandidateReasoning } =
+      canonicalWorldModelCandidate({
+        manifest,
+        actualAvailability: {
+          arkit_poses: claimedArtifactEvaluation.valid.arkit_poses === true,
+          arkit_intrinsics: claimedArtifactEvaluation.valid.arkit_intrinsics === true,
+          arkit_depth: claimedArtifactEvaluation.valid.arkit_depth === true,
+        },
+        processingProfile: qualityGate.processingProfile,
+        captureRights,
+      });
+    sceneMemoryCapture.world_model_candidate = worldModelCandidate;
+    sceneMemoryCapture.world_model_candidate_reasoning = worldModelCandidateReasoning;
+
+    // Resolve capture_mode: downgrade to qualification_only if ARKit evidence is insufficient.
+    const rawCaptureMode = asRecord(manifest?.capture_mode);
+    const requestedMode = asString(rawCaptureMode?.requested_mode) ?? "qualification_only";
+    const resolvedMode = worldModelCandidate ? "site_world_candidate" : "qualification_only";
+    const captureMode = {
+      requested_mode: requestedMode,
+      resolved_mode: resolvedMode,
+      downgrade_reason:
+        requestedMode === "site_world_candidate" && resolvedMode === "qualification_only"
+          ? "insufficient_arkit_evidence_or_pose_alignment"
+          : null,
+    };
+
     const runtimeBuildBlockers = [
-      ...(qualityGate.processingProfile === "pose_assisted" ? [] : ["processing_profile_not_pose_assisted"]),
       ...(captureSource === "iphone" ? [] : ["capture_source_not_iphone"]),
-      ...(worldModelCandidate ? [] : ["scene_memory_capture.world_model_candidate=false"]),
-      ...(claimedArtifactEvaluation.valid.arkit_poses === true ? [] : ["missing_arkit_poses"]),
-      ...(claimedArtifactEvaluation.valid.arkit_intrinsics === true ? [] : ["missing_arkit_intrinsics"]),
+      ...(worldModelCandidate ? [] : ["world_model_candidate=false"]),
       ...(walkthroughExists ? [] : ["missing_walkthrough"]),
       ...(sortedFiles.length > 0 ? [] : ["missing_frames_index"]),
     ];
@@ -955,6 +1069,9 @@ export const extractFrames = onObjectFinalized(
       requested_outputs: routing.requestedOutputs,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      site_identity: siteIdentity,
+      capture_topology: captureTopology,
+      capture_mode: captureMode,
       task_site_context: taskSiteContext,
       identity: identityValidation.identity,
       neoverse_runtime: {

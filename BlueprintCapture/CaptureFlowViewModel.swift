@@ -878,7 +878,10 @@ private extension CaptureUploadMetadata {
             evidenceTier: evidenceTier,
             captureContextHint: updatedHint,
             sceneMemory: updatedSceneMemory,
-            captureRights: captureRights
+            captureRights: captureRights,
+            siteIdentity: siteIdentity,
+            captureTopology: captureTopology,
+            captureMode: captureMode
         )
     }
 }
