@@ -1033,15 +1033,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    private func writeARFrame(_ frame: ARFrame) {
+    private func writeARFrame(_ frame: ARFrameData) {
         guard let artifacts = currentArtifacts, let arKit = artifacts.arKit else { return }
         guard let handle = arFrameLogFileHandle else { return }
 
         let frameIndex = arFrameCount
         let frameId = String(format: "%06d", frameIndex + 1)
-        let cameraTransform = matrixToArray(frame.camera.transform)
-        let intrinsics = matrixToArray(frame.camera.intrinsics)
-        let resolution = [Int(frame.camera.imageResolution.width), Int(frame.camera.imageResolution.height)]
+        let cameraTransform = matrixToArray(frame.transform)
+        let intrinsics = matrixToArray(frame.intrinsics)
+        let resolution = [Int(frame.imageResolution.width), Int(frame.imageResolution.height)]
         if arFirstFrameTimestamp == nil {
             arFirstFrameTimestamp = frame.timestamp
         }
@@ -1052,9 +1052,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let anchorObservations: [String]
         if detectedEntryAnchorHold == nil && tDeviceSec <= 60.0 {
             let currentPos = simd_float3(
-                frame.camera.transform.columns.3.x,
-                frame.camera.transform.columns.3.y,
-                frame.camera.transform.columns.3.z
+                frame.transform.columns.3.x,
+                frame.transform.columns.3.y,
+                frame.transform.columns.3.z
             )
             if holdCandidateOrigin == nil {
                 holdCandidateOrigin = currentPos
@@ -1085,9 +1085,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         } else if let hold = detectedEntryAnchorHold {
             // Continue tagging frames while camera remains near the hold origin
             let currentPos = simd_float3(
-                frame.camera.transform.columns.3.x,
-                frame.camera.transform.columns.3.y,
-                frame.camera.transform.columns.3.z
+                frame.transform.columns.3.x,
+                frame.transform.columns.3.y,
+                frame.transform.columns.3.z
             )
             let holdOriginPos = holdCandidateOrigin ?? currentPos
             anchorObservations = simd_length(currentPos - holdOriginPos) < 0.05 ? ["anchor_entry"] : []
@@ -1100,29 +1100,29 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         var smoothedDepthFile: String?
         var confidenceFile: String?
 
-        if let depth = frame.sceneDepth, let depthDirectory = arKit.depthDirectoryURL {
+        if let depthMap = frame.sceneDepthMap, let depthDirectory = arKit.depthDirectoryURL {
             let filename = "\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
-                try writeDepthPNG(depth.depthMap, to: fileURL)
+                try writeDepthPNG(depthMap, to: fileURL)
                 sceneDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
             } catch {
                 print("Failed to persist scene depth map: \(error)")
             }
         }
 
-        if let smoothedDepth = frame.smoothedSceneDepth, let depthDirectory = arKit.depthDirectoryURL {
+        if let smoothedDepthMap = frame.smoothedDepthMap, let depthDirectory = arKit.depthDirectoryURL {
             let filename = "smoothed-\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
-                try writeDepthPNG(smoothedDepth.depthMap, to: fileURL)
+                try writeDepthPNG(smoothedDepthMap, to: fileURL)
                 smoothedDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
             } catch {
                 print("Failed to persist smoothed depth map: \(error)")
             }
         }
 
-        if let confidenceMap = frame.smoothedSceneDepth?.confidenceMap ?? frame.sceneDepth?.confidenceMap,
+        if let confidenceMap = frame.confidenceMap,
            let confidenceDirectory = arKit.confidenceDirectoryURL {
             let filename = "\(frameId).png"
             let fileURL = confidenceDirectory.appendingPathComponent(filename)
@@ -1136,7 +1136,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         // Tracking health fields from ARCamera.
         let (trackingStateStr, trackingReasonStr): (String, String?) = {
-            switch frame.camera.trackingState {
+            switch frame.trackingState {
             case .normal:
                 return ("normal", nil)
             case .limited(let reason):
@@ -1218,7 +1218,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         // Legacy fields retained: frameIndex, timestamp, transform
         // Bridge fields added: pose_schema_version, frame_id, t_device_sec, T_world_camera
         if let poseHandle = arPoseLogFileHandle {
-            let m = frame.camera.transform
+            let m = frame.transform
             // Convert from SIMD column-major to row-major format for pipeline compatibility
             // Row 0: [m00, m01, m02, tx] = [columns.0.x, columns.1.x, columns.2.x, columns.3.x]
             // Row 1: [m10, m11, m12, ty] = [columns.0.y, columns.1.y, columns.2.y, columns.3.y]
@@ -1250,12 +1250,12 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         // Write intrinsics.json once per clip
         if !arIntrinsicsWritten {
-            let fx = Double(frame.camera.intrinsics.columns.0.x)
-            let fy = Double(frame.camera.intrinsics.columns.1.y)
-            let cx = Double(frame.camera.intrinsics.columns.2.x)
-            let cy = Double(frame.camera.intrinsics.columns.2.y)
-            let width = Int(frame.camera.imageResolution.width)
-            let height = Int(frame.camera.imageResolution.height)
+            let fx = Double(frame.intrinsics.columns.0.x)
+            let fy = Double(frame.intrinsics.columns.1.y)
+            let cx = Double(frame.intrinsics.columns.2.x)
+            let cy = Double(frame.intrinsics.columns.2.y)
+            let width = Int(frame.imageResolution.width)
+            let height = Int(frame.imageResolution.height)
             let intrinsicsDict: [String: Any] = [
                 "fx": fx, "fy": fy, "cx": cx, "cy": cy,
                 "width": width, "height": height
@@ -1348,6 +1348,36 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
     }
 }
 
+// Snapshot of all data needed from an ARFrame extracted synchronously on the delegate callback
+// thread. Passing this struct to arDataQueue instead of the ARFrame itself ensures ARFrames are
+// released immediately after each delegate callback, preventing the "retaining N ARFrames" error
+// that causes ARKit to stop delivering camera images mid-recording.
+private struct ARFrameData {
+    let transform: simd_float4x4
+    let intrinsics: simd_float3x3
+    let imageResolution: CGSize
+    let timestamp: TimeInterval
+    let trackingState: ARCamera.TrackingState
+    let worldMappingStatus: ARFrame.WorldMappingStatus
+    let capturedImage: CVPixelBuffer
+    let sceneDepthMap: CVPixelBuffer?
+    let smoothedDepthMap: CVPixelBuffer?
+    let confidenceMap: CVPixelBuffer?
+
+    init(_ frame: ARFrame) {
+        transform = frame.camera.transform
+        intrinsics = frame.camera.intrinsics
+        imageResolution = frame.camera.imageResolution
+        timestamp = frame.timestamp
+        trackingState = frame.camera.trackingState
+        worldMappingStatus = frame.worldMappingStatus
+        capturedImage = frame.capturedImage
+        sceneDepthMap = frame.sceneDepth?.depthMap
+        smoothedDepthMap = frame.smoothedSceneDepth?.depthMap
+        confidenceMap = frame.smoothedSceneDepth?.confidenceMap ?? frame.sceneDepth?.confidenceMap
+    }
+}
+
 extension VideoCaptureManager: ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         if usingCustomARSessionRecorder {
@@ -1358,8 +1388,11 @@ extension VideoCaptureManager: ARSessionDelegate {
             }
             appendFrameToARRecorder(frame)
         }
+        // Extract all data from the ARFrame synchronously before dispatching so that
+        // the ARFrame itself is released immediately rather than being held by the closure.
+        let snapshot = ARFrameData(frame)
         arDataQueue.async { [weak self] in
-            self?.writeARFrame(frame)
+            self?.writeARFrame(snapshot)
         }
         qualityMonitor.updateFromARFrame(frame)
     }

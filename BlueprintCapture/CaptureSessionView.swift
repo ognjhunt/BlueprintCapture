@@ -169,9 +169,9 @@ struct CaptureSessionView: View {
                 },
                 userNotes: $captureNotes
             )
-        }
-        .sheet(item: $viewModel.shareSheetItem) { shareItem in
-            ShareSheet(items: [shareItem.url])
+            .sheet(item: $viewModel.shareSheetItem) { shareItem in
+                ShareSheet(items: [shareItem.url])
+            }
         }
     }
 
