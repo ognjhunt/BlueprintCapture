@@ -296,7 +296,10 @@ final class ScanHomeViewModel: ObservableObject {
 
             let hydrated = await hydrate(items: visible)
             self.items = hydrated
-            self.nearbyItems = hydrated.filter { $0.opportunityKind == .nearby }
+            let nearbyDynamic = hydrated.filter { $0.opportunityKind == .nearby }
+            // Always prepend the hardcoded alpha test space (current location) so the
+            // full non-GPU pipeline can be exercised against a real capture from this device.
+            self.nearbyItems = [Self.makeCurrentLocationItem(at: loc)] + nearbyDynamic
             self.specialItems = hydrated.filter { $0.opportunityKind == .special }
             self.readyNow = self.nearbyItems.first(where: { $0.isReadyNow && $0.permissionTier == .approved })
             self.submissionSummary = await loadSubmissionSummary()
@@ -381,6 +384,91 @@ final class ScanHomeViewModel: ObservableObject {
         return CaptureSubmissionStage.allCases.map { stage in
             SubmissionSummaryItem(stage: stage, count: grouped[stage]?.count ?? 0)
         }
+    }
+
+    // MARK: - Alpha Internal Test Space
+
+    /// A hardcoded capture opportunity pinned to the user's current GPS position.
+    /// Always `.approved` so it bypasses all permission gates and lets the full
+    /// non-GPU pipeline run against a live device capture for internal testing.
+    static let alphaCurrentLocationJobID = "alpha-current-location"
+
+    private static func makeCurrentLocationItem(at location: CLLocation) -> JobItem {
+        let lat = location.coordinate.latitude
+        let lng = location.coordinate.longitude
+        let job = ScanJob(
+            id: alphaCurrentLocationJobID,
+            title: "Current Location",
+            address: String(format: "%.5f, %.5f", lat, lng),
+            lat: lat,
+            lng: lng,
+            payoutCents: 4500,
+            estMinutes: 20,
+            active: true,
+            updatedAt: Date(),
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: "ALPHA",
+            instructions: [
+                "Capture the full space you are currently in.",
+                "Walk through every accessible room or area.",
+                "Pause 2-3 seconds at each major transition point.",
+                "Capture from multiple heights where possible."
+            ],
+            allowedAreas: ["All visible areas"],
+            restrictedAreas: [],
+            permissionDocURL: nil,
+            checkinRadiusM: 999_999,
+            alertRadiusM: 999_999,
+            priority: 100,
+            priorityWeight: 100.0,
+            regionId: nil,
+            jobType: .operatorApprovedOnDemand,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            quotedPayoutCents: 4500,
+            dueWindow: nil,
+            approvalRequirements: [],
+            recaptureReason: nil,
+            rightsChecklist: [],
+            rightsProfile: nil,
+            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            workflowName: "Alpha Internal Test Capture",
+            workflowSteps: [
+                "Capture the full space you are currently in.",
+                "Walk through every accessible room or area.",
+                "Pause 2-3 seconds at each major transition point.",
+                "Capture from multiple heights where possible."
+            ],
+            targetKPI: nil,
+            zone: nil,
+            shift: nil,
+            owner: "blueprint-internal",
+            facilityTemplate: "general",
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: [],
+            adjacentSystems: [],
+            privacyRestrictions: [],
+            securityRestrictions: [],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: []
+        )
+        return JobItem(
+            job: job,
+            distanceMeters: 0,
+            distanceMiles: 0,
+            targetState: nil,
+            permissionTier: .approved,
+            opportunityKind: .nearby,
+            previewURL: nil,
+            previewSource: .mapSnapshot
+        )
     }
 }
 

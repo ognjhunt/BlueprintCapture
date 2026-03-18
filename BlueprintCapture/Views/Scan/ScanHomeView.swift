@@ -210,9 +210,15 @@ struct ScanHomeView: View {
     // MARK: - Featured Section
 
     private var featuredItems: [ScanHomeViewModel.JobItem] {
+        // The alpha current-location item is always pinned first so we can test
+        // the full pipeline on any live device capture.
+        let alphaItem = viewModel.nearbyItems.first(where: { $0.id == ScanHomeViewModel.alphaCurrentLocationJobID })
         let specials = viewModel.specialItems
-        let readyNearby = viewModel.nearbyItems.filter { $0.isReadyNow && $0.permissionTier == .approved }
-        let combined = specials + readyNearby
+        let readyNearby = viewModel.nearbyItems.filter {
+            $0.isReadyNow && $0.permissionTier == .approved
+            && $0.id != ScanHomeViewModel.alphaCurrentLocationJobID
+        }
+        let combined = [alphaItem].compactMap { $0 } + specials + readyNearby
         return Array(combined.prefix(10))
     }
 
