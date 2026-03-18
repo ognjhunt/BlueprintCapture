@@ -6,13 +6,15 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import com.meta.wearable.dat.camera.StreamConfiguration
 import com.meta.wearable.dat.camera.StreamSession
-import com.meta.wearable.dat.camera.StreamSessionState
-import com.meta.wearable.dat.core.AutoDeviceSelector
-import com.meta.wearable.dat.core.DeviceIdentifier
-import com.meta.wearable.dat.core.SpecificDeviceSelector
+import com.meta.wearable.dat.camera.startStreamSession
+import com.meta.wearable.dat.camera.types.StreamConfiguration
+import com.meta.wearable.dat.camera.types.StreamSessionState
+import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
+import com.meta.wearable.dat.core.selectors.SpecificDeviceSelector
+import com.meta.wearable.dat.core.types.DeviceIdentifier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -20,7 +22,7 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,7 +81,10 @@ class GlassesCaptureManager @Inject constructor(
             } else {
                 AutoDeviceSelector()
             }
-            val config = StreamConfiguration.Builder().build()
+            val config = StreamConfiguration(
+                videoQuality = VideoQuality.HIGH,
+                frameRate = 30,
+            )
             val session = Wearables.startStreamSession(context, selector, config)
             streamSession = session
 
@@ -119,7 +124,10 @@ class GlassesCaptureManager @Inject constructor(
             frameTimestamps.add(frame.presentationTimeUs)
 
             // Write raw frame bytes to disk.
-            File(framesDir, "frame_%06d.bin".format(idx)).writeBytes(frame.data)
+            val frameBuffer = frame.buffer.duplicate()
+            val bytes = ByteArray(frameBuffer.remaining())
+            frameBuffer.get(bytes)
+            File(framesDir, "frame_%06d.bin".format(idx)).writeBytes(bytes)
 
             // Update streaming state approximately once per second.
             framesInWindow++

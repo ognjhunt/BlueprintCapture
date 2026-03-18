@@ -40,6 +40,7 @@ import app.blueprint.capture.ui.components.UploadQueueOverlay
 import app.blueprint.capture.ui.screens.AuthScreen
 import app.blueprint.capture.ui.screens.CaptureSessionScreen
 import app.blueprint.capture.ui.screens.InviteCodeScreen
+import app.blueprint.capture.ui.screens.OnboardingGlassesScreen
 import app.blueprint.capture.ui.screens.OnboardingScreen
 import app.blueprint.capture.ui.screens.PermissionsScreen
 import app.blueprint.capture.ui.screens.ProfileScreen
@@ -85,6 +86,10 @@ fun BlueprintCaptureRoot(
 
                 RootStage.Permissions -> PermissionsScreen(
                     onEnable = rootViewModel::completePermissions,
+                )
+
+                RootStage.ConnectGlasses -> OnboardingGlassesScreen(
+                    onContinue = rootViewModel::completeGlassesSetup,
                 )
 
                 RootStage.App -> {

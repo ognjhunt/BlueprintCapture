@@ -7,6 +7,7 @@ enum class RootStage {
     Auth,
     InviteCode,
     Permissions,
+    ConnectGlasses,
     App,
 }
 

@@ -40,13 +40,15 @@ class BlueprintCaptureRootViewModel @Inject constructor(
             sessionPreferences.authSkipped,
             sessionPreferences.inviteCodeCompleted,
             sessionPreferences.permissionsCompleted,
-        ) { onboarding, authSkip, invite, perms -> listOf(onboarding, authSkip, invite, perms) },
+            sessionPreferences.glassesSetupCompleted,
+        ) { onboarding, authSkip, invite, perms, glasses -> listOf(onboarding, authSkip, invite, perms, glasses) },
         combine(authRepository.authState, selectedTab, activeCapture, captureUploadRepository.queue) { u, t, c, q -> listOf(u, t, c, q) },
     ) { flags, rest ->
         val onboardingComplete = flags[0] as Boolean
         val authSkipped = flags[1] as Boolean
         val inviteCodeComplete = flags[2] as Boolean
         val permissionsComplete = flags[3] as Boolean
+        val glassesSetupComplete = flags[4] as Boolean
         @Suppress("UNCHECKED_CAST")
         val user = rest[0]
         val tab = rest[1] as MainTab
@@ -60,6 +62,7 @@ class BlueprintCaptureRootViewModel @Inject constructor(
                 user == null && !authSkipped -> RootStage.Auth
                 !inviteCodeComplete -> RootStage.InviteCode
                 !permissionsComplete -> RootStage.Permissions
+                !glassesSetupComplete -> RootStage.ConnectGlasses
                 else -> RootStage.App
             },
             selectedTab = tab,
@@ -86,6 +89,10 @@ class BlueprintCaptureRootViewModel @Inject constructor(
 
     fun completePermissions() {
         sessionPreferences.setPermissionsCompleted(true)
+    }
+
+    fun completeGlassesSetup() {
+        sessionPreferences.setGlassesSetupCompleted(true)
     }
 
     fun selectTab(tab: MainTab) {

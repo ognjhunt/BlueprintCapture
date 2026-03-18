@@ -18,7 +18,7 @@ class BlueprintCaptureApplication : Application(), Configuration.Provider {
         app.blueprint.capture.data.capture.CaptureUploadNotifications.initialize(this)
         val mwdatResult = Wearables.initialize(this)
         if (!mwdatResult.isSuccess) {
-            Log.w("MWDAT", "Wearables SDK init failed: ${mwdatResult.error}")
+            Log.w("MWDAT", "Wearables SDK init failed")
         }
     }
 

@@ -11,14 +11,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.blueprint.capture.data.glasses.GlassesCaptureManager
 import app.blueprint.capture.data.glasses.GlassesCaptureState
-import com.meta.wearable.dat.core.DeviceIdentifier
-import com.meta.wearable.dat.core.DeviceType
 import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.types.DeviceIdentifier
+import com.meta.wearable.dat.core.types.DeviceType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.File
 import javax.inject.Inject
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,9 +79,11 @@ class GlassesViewModel @Inject constructor(
                 val mwdatDevices = identifiers.map { id ->
                     val meta = Wearables.devicesMetadata[id]?.value
                     val name = when (meta?.deviceType) {
-                        DeviceType.RAY_BAN_DISPLAY -> "Ray-Ban Meta (Display)"
-                        DeviceType.DISPLAYLESS_GLASSES -> "Ray-Ban Meta"
-                        else -> "Meta Glasses"
+                        DeviceType.META_RAYBAN_DISPLAY -> "Ray-Ban Meta (Display)"
+                        DeviceType.RAYBAN_META -> "Ray-Ban Meta"
+                        DeviceType.OAKLEY_META_HSTN -> "Oakley Meta HSTN"
+                        DeviceType.OAKLEY_META_VANGUARD -> "Oakley Meta Vanguard"
+                        else -> meta?.name ?: "Meta Glasses"
                     }
                     GlassesDevice(id = id.toString(), name = name, mwdatIdentifier = id)
                 }

@@ -51,6 +51,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,6 +101,7 @@ fun SettingsScreen(
     userEmail: String?,
     onSignIn: () -> Unit,
     onBack: () -> Unit,
+    settingsPreferencesViewModel: SettingsPreferencesViewModel = hiltViewModel(),
     glassesViewModel: GlassesViewModel = hiltViewModel(),
 ) {
     val scrollState = rememberScrollState()
@@ -135,7 +137,7 @@ fun SettingsScreen(
     }
 
     var wifiOnlyUploads by remember { mutableStateOf(false) }
-    var autoClearCompleted by remember { mutableStateOf(true) }
+    val autoClearCompleted by settingsPreferencesViewModel.uploadAutoClear.collectAsState()
     var captureHaptics by remember { mutableStateOf(true) }
     var nearbyJobAlerts by remember { mutableStateOf(true) }
     var reservationAlerts by remember { mutableStateOf(true) }
@@ -273,7 +275,7 @@ fun SettingsScreen(
                 title = "Auto-Clear Completed",
                 subtitle = "Remove completed items from queue",
                 checked = autoClearCompleted,
-                onCheckedChange = { autoClearCompleted = it },
+                onCheckedChange = settingsPreferencesViewModel::setUploadAutoClear,
             )
             SettingsRowDivider()
             SettingsToggleRow(

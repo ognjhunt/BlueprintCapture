@@ -181,7 +181,7 @@ class TargetStateRepository @Inject constructor(
         snap.documents.firstOrNull()?.let { doc ->
             val untilMs = (doc.data?.get("reservedUntil") as? Timestamp)?.toDate()?.time
                 ?: return@let null
-            TargetReservation(targetId = doc.documentID, reservedUntilMs = untilMs)
+            TargetReservation(targetId = doc.id, reservedUntilMs = untilMs)
         }
     }.getOrNull()
 

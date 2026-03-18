@@ -14,6 +14,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import app.blueprint.capture.data.model.UploadQueueItem
 import app.blueprint.capture.data.model.UploadQueueStatus
+import app.blueprint.capture.data.session.SessionPreferences
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.FirebaseException
 import com.google.firebase.Timestamp
@@ -32,9 +33,16 @@ import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -51,13 +59,16 @@ class CaptureUploadRepository @Inject constructor(
     private val storage: FirebaseStorage,
     private val firestore: FirebaseFirestore,
     private val workManager: WorkManager,
+    private val sessionPreferences: SessionPreferences,
 ) {
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val json = Json {
         encodeDefaults = true
         explicitNulls = false
         ignoreUnknownKeys = true
     }
     private val queueLock = Any()
+    private val autoClearJobs = mutableMapOf<String, Job>()
     private val _queue = MutableStateFlow(loadQueue().recoverQueueState())
 
     val queue: StateFlow<List<UploadQueueItem>> = _queue.asStateFlow()
@@ -65,6 +76,11 @@ class CaptureUploadRepository @Inject constructor(
     init {
         persistQueue(_queue.value)
         scheduleRecoveredUploads(_queue.value)
+        repositoryScope.launch {
+            sessionPreferences.uploadAutoClear.collect { enabled ->
+                syncAutoClearPreference(enabled)
+            }
+        }
     }
 
     fun enqueueBundleUpload(
@@ -173,6 +189,7 @@ class CaptureUploadRepository @Inject constructor(
 
     fun dismissUpload(id: String) {
         workManager.cancelUniqueWork(uniqueWorkName(id))
+        cancelPendingAutoClear(id)
         synchronized(queueLock) {
             val updated = _queue.value.filterNot { it.id == id }
             if (updated.size == _queue.value.size) return
@@ -540,6 +557,11 @@ class CaptureUploadRepository @Inject constructor(
             if (updatedItem == null) {
                 return null
             }
+            if (updatedItem?.status == UploadQueueStatus.Completed) {
+                scheduleAutoClearIfNeeded(id)
+            } else {
+                cancelPendingAutoClear(id)
+            }
             _queue.value = updated
             persistQueue(updated)
             return updatedItem
@@ -553,6 +575,35 @@ class CaptureUploadRepository @Inject constructor(
     ) {
         val updatedItem = updateItem(id, transform) ?: return
         onItemUpdated(updatedItem)
+    }
+
+    private fun syncAutoClearPreference(enabled: Boolean) {
+        if (!enabled) {
+            synchronized(queueLock) {
+                autoClearJobs.keys.toList().forEach(::cancelPendingAutoClear)
+            }
+            return
+        }
+
+        _queue.value
+            .filter { it.status == UploadQueueStatus.Completed }
+            .forEach { item -> scheduleAutoClearIfNeeded(item.id) }
+    }
+
+    private fun scheduleAutoClearIfNeeded(id: String) {
+        if (!sessionPreferences.uploadAutoClear.value) return
+        cancelPendingAutoClear(id)
+        autoClearJobs[id] = repositoryScope.launch {
+            delay(AUTO_CLEAR_DELAY_MS)
+            val item = _queue.value.firstOrNull { it.id == id }
+            if (sessionPreferences.uploadAutoClear.value && item?.status == UploadQueueStatus.Completed) {
+                dismissUpload(id)
+            }
+        }
+    }
+
+    private fun cancelPendingAutoClear(id: String) {
+        autoClearJobs.remove(id)?.cancel()
     }
 
     private fun updateItemAndEmitBlocking(
@@ -706,6 +757,7 @@ class CaptureUploadRepository @Inject constructor(
         const val QUEUE_KEY = "capture_upload_queue"
         const val WORK_TAG = "capture_upload"
         const val MAX_AUTO_RETRIES = 5
+        const val AUTO_CLEAR_DELAY_MS = 4_000L
         val SEGMENT_SANITIZE_REGEX = "[^a-z0-9._-]+".toRegex()
     }
 }
