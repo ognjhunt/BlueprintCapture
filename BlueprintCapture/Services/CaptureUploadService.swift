@@ -292,6 +292,8 @@ protocol CaptureUploadServiceProtocol: AnyObject {
 }
 
 final class CaptureUploadService: CaptureUploadServiceProtocol {
+    nonisolated(unsafe) static let shared = CaptureUploadService()
+
     /// Firebase-backed upload pipeline that emits progress/completion events
     enum Event {
         case queued(CaptureUploadRequest)
@@ -327,6 +329,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private struct UploadRecord {
         var request: CaptureUploadRequest
         var task: Task<Void, Never>?
+        var cancelActiveTransfer: (() -> Void)?
+        var attempt: UUID
     }
 
     private let queue = DispatchQueue(label: "com.blueprint.captureUploadService")
@@ -347,11 +351,16 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     func retryUpload(id: UUID) {
         queue.async {
-            guard let record = self.uploads[id] else { return }
+            guard var record = self.uploads[id] else { return }
             record.task?.cancel()
-            self.uploads[id] = record
+            record.cancelActiveTransfer?()
             var request = record.request
             request.metadata.uploadedAt = nil
+            record.request = request
+            record.task = nil
+            record.cancelActiveTransfer = nil
+            record.attempt = UUID()
+            self.uploads[id] = record
             self.storeAndBeginUpload(request: request)
         }
     }
@@ -360,39 +369,50 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         queue.async {
             guard var record = self.uploads[id] else { return }
             record.task?.cancel()
+            record.cancelActiveTransfer?()
             record.task = nil
+            record.cancelActiveTransfer = nil
+            record.attempt = UUID()
             self.uploads[id] = record
             self.subject.send(.failed(record.request, .cancelled))
         }
     }
 
     private func storeAndBeginUpload(request: CaptureUploadRequest) {
-        var record = UploadRecord(request: request, task: nil)
-        uploads[request.metadata.id] = record
+        let id = request.metadata.id
+        if var existing = uploads[id], existing.task != nil {
+            existing.request = request
+            uploads[id] = existing
+            print("ℹ️ [UploadService] Duplicate enqueue ignored for id=\(id)")
+            return
+        }
+
+        let attempt = UUID()
+        var record = uploads[id] ?? UploadRecord(request: request, task: nil, cancelActiveTransfer: nil, attempt: attempt)
+        record.request = request
+        record.task = nil
+        record.cancelActiveTransfer = nil
+        record.attempt = attempt
+        uploads[id] = record
         subject.send(.queued(request))
 
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.performUpload(for: request.metadata.id)
+            await self.performUpload(for: id, attempt: attempt)
         }
         record.task = task
-        uploads[request.metadata.id] = record
+        uploads[id] = record
     }
 
-    private func performUpload(for id: UUID) async {
-        guard let record = queue.sync(execute: { uploads[id] }) else { return }
+    private func performUpload(for id: UUID, attempt: UUID) async {
+        guard let record = queue.sync(execute: { uploads[id] }), record.attempt == attempt else { return }
         let packageURL = record.request.packageURL
         print("🚀 [UploadService] performUpload start id=\(id) url=\(packageURL.path)")
 
         // Alpha: intake gate removed — proceed regardless of intake completeness
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
             print("❌ [UploadService] package missing at path=\(packageURL.path)")
-            queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, .fileMissing))
-            }
+            markUploadFailed(id: id, attempt: attempt, error: .fileMissing)
             return
         }
 
@@ -410,6 +430,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 localDirectory: packageURL,
                 remoteBasePath: basePath,
                 id: id,
+                attempt: attempt,
                 request: record.request
             )
             if !ok { return }
@@ -432,45 +453,41 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             metadata.customMetadata = custom
 
             let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
+            setActiveTransferCancellationHandler(for: id, attempt: attempt) {
+                uploadTask.cancel()
+            }
 
             // Observe progress
             let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-                guard let self else { return }
+                guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
                 let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
                 self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
             }
 
             // Await completion
+            var uploadSucceeded = false
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let successHandle = uploadTask.observe(.success) { [weak self] _ in
-                    guard let self else { continuation.resume(); return }
-                    self.queue.async {
-                        guard var latestRecord = self.uploads[id] else { continuation.resume(); return }
-                        latestRecord.request.metadata.uploadedAt = Date()
-                        latestRecord.task = nil
-                        self.uploads[id] = latestRecord
-                        self.subject.send(.progress(id: id, progress: 1.0))
-                        self.subject.send(.completed(latestRecord.request))
-                        self.writeSubmissionRecord(for: latestRecord.request)
-                        print("✅ [UploadService] Upload finished id=\(id)")
-                    }
+                let successHandle = uploadTask.observe(.success) { _ in
+                    uploadSucceeded = true
                     continuation.resume()
                 }
 
-                let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
-                    guard let self else { continuation.resume(); return }
-                    self.queue.async {
-                        guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
-                        failingRecord.task = nil
-                        self.uploads[id] = failingRecord
-                        self.subject.send(.failed(failingRecord.request, .uploadFailed))
-                        print("❌ [UploadService] Upload failed id=\(id)")
-                    }
+                let failureHandle = uploadTask.observe(.failure) { _ in
                     continuation.resume()
                 }
 
                 // Keep observers alive until continuation resumes
                 _ = (progressHandle, successHandle, failureHandle)
+            }
+            clearActiveTransferCancellationHandler(for: id, attempt: attempt)
+
+            guard isCurrentAttempt(id: id, attempt: attempt) else { return }
+            if uploadSucceeded {
+                markUploadCompleted(id: id, attempt: attempt)
+                print("✅ [UploadService] Upload finished id=\(id)")
+            } else if !Task.isCancelled {
+                markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
+                print("❌ [UploadService] Upload failed id=\(id)")
             }
         }
         #else
@@ -496,7 +513,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     #if canImport(FirebaseStorage)
     // Upload all files under a directory, preserving relative paths beneath remoteBasePath
-    private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, request: CaptureUploadRequest) async -> Bool {
+    private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, attempt: UUID, request: CaptureUploadRequest) async -> Bool {
         print("📁 [UploadService] Preparing directory upload at \(localDirectory.path)")
         do {
             _ = try finalizer.finalize(
@@ -508,31 +525,16 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             )
         } catch let error as CaptureBundleFinalizer.FinalizationError {
             let uploadError: UploadError = error == .missingStructuredIntake ? .missingStructuredIntake : .uploadFailed
-            self.queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, uploadError))
-            }
+            markUploadFailed(id: id, attempt: attempt, error: uploadError)
             return false
         } catch {
-            self.queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, .uploadFailed))
-            }
+            markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
         // Gather files
         guard let enumerator = FileManager.default.enumerator(at: localDirectory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
             print("❌ [UploadService] Failed to enumerate directory at \(localDirectory.path)")
-            self.queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, .uploadFailed))
-            }
+            markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
 
@@ -555,13 +557,22 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
         guard !files.isEmpty, totalBytes > 0 else {
             print("❌ [UploadService] No files found to upload under \(localDirectory.path)")
-            self.queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, .uploadFailed))
-            }
+            markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
+        }
+
+        // Check if this capture was already fully uploaded (GCS session already finalized).
+        // Firebase Storage will fail with 400 "already finalized" if we attempt to re-upload
+        // to a path whose resumable session was already committed, so bail out early if the
+        // completion marker already exists in storage.
+        let completionMarkerRef = storage.reference(withPath: remoteBasePath + "capture_upload_complete.json")
+        let alreadyUploaded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            completionMarkerRef.getMetadata { _, error in cont.resume(returning: error == nil) }
+        }
+        if alreadyUploaded {
+            print("✅ [UploadService] Capture already uploaded (completion marker found), treating as success id=\(id)")
+            markUploadCompleted(id: id, attempt: attempt)
+            return true
         }
 
         var uploadedBytes: Int64 = 0
@@ -586,10 +597,14 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             md.customMetadata = custom
 
             let uploadTask = ref.putFile(from: file, metadata: md)
+            setActiveTransferCancellationHandler(for: id, attempt: attempt) {
+                uploadTask.cancel()
+            }
 
+            var fileUploaded = false
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-                    guard let self else { return }
+                    guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
                     let completed = snapshot.progress?.completedUnitCount ?? 0
                     let fraction = Double(uploadedBytes + completed) / Double(max(1, totalBytes))
                     self.subject.send(.progress(id: id, progress: min(max(fraction, 0.0), 0.999)))
@@ -597,31 +612,26 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 let successHandle = uploadTask.observe(.success) { _ in
                     let completed = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
                     uploadedBytes += completed
+                    fileUploaded = true
                     continuation.resume()
                 }
-                let failureHandle = uploadTask.observe(.failure) { [weak self] _ in
-                    guard let self else { continuation.resume(); return }
-                    self.queue.async {
-                        guard var failingRecord = self.uploads[id] else { continuation.resume(); return }
-                        failingRecord.task = nil
-                        self.uploads[id] = failingRecord
-                        self.subject.send(.failed(failingRecord.request, .uploadFailed))
-                    }
+                let failureHandle = uploadTask.observe(.failure) { _ in
                     continuation.resume()
                 }
                 _ = (progressHandle, successHandle, failureHandle)
             }
+            clearActiveTransferCancellationHandler(for: id, attempt: attempt)
+
+            guard isCurrentAttempt(id: id, attempt: attempt) else { return false }
+            if Task.isCancelled { return false }
+
+            if !fileUploaded {
+                markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
+                return false
+            }
         }
 
-        self.queue.async {
-            guard var latestRecord = self.uploads[id] else { return }
-            latestRecord.request.metadata.uploadedAt = Date()
-            latestRecord.task = nil
-            self.uploads[id] = latestRecord
-            self.subject.send(.progress(id: id, progress: 1.0))
-            self.subject.send(.completed(latestRecord.request))
-            self.writeSubmissionRecord(for: latestRecord.request)
-        }
+        markUploadCompleted(id: id, attempt: attempt)
         return true
     }
 
@@ -678,4 +688,49 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return CaptureBundleContext.rawBasePath(for: request)
     }
     #endif
+
+    private func isCurrentAttempt(id: UUID, attempt: UUID) -> Bool {
+        queue.sync {
+            uploads[id]?.attempt == attempt
+        }
+    }
+
+    private func setActiveTransferCancellationHandler(for id: UUID, attempt: UUID, handler: @escaping () -> Void) {
+        queue.sync {
+            guard var record = uploads[id], record.attempt == attempt else { return }
+            record.cancelActiveTransfer = handler
+            uploads[id] = record
+        }
+    }
+
+    private func clearActiveTransferCancellationHandler(for id: UUID, attempt: UUID) {
+        queue.sync {
+            guard var record = uploads[id], record.attempt == attempt else { return }
+            record.cancelActiveTransfer = nil
+            uploads[id] = record
+        }
+    }
+
+    private func markUploadCompleted(id: UUID, attempt: UUID) {
+        queue.async {
+            guard var latestRecord = self.uploads[id], latestRecord.attempt == attempt else { return }
+            latestRecord.request.metadata.uploadedAt = Date()
+            latestRecord.task = nil
+            latestRecord.cancelActiveTransfer = nil
+            self.uploads[id] = latestRecord
+            self.subject.send(.progress(id: id, progress: 1.0))
+            self.subject.send(.completed(latestRecord.request))
+            self.writeSubmissionRecord(for: latestRecord.request)
+        }
+    }
+
+    private func markUploadFailed(id: UUID, attempt: UUID, error: UploadError) {
+        queue.async {
+            guard var failingRecord = self.uploads[id], failingRecord.attempt == attempt else { return }
+            failingRecord.task = nil
+            failingRecord.cancelActiveTransfer = nil
+            self.uploads[id] = failingRecord
+            self.subject.send(.failed(failingRecord.request, error))
+        }
+    }
 }

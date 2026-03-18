@@ -141,7 +141,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var pendingPostCaptureAction: PendingPostCaptureAction?
 
     init(flowMode: FlowMode = .standard,
-         uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+         uploadService: CaptureUploadServiceProtocol = CaptureUploadService.shared,
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
          exportService: CaptureExportServiceProtocol = CaptureExportService(),

@@ -681,7 +681,7 @@ final class GlassesUploadViewModel: ObservableObject {
     private var pendingAction: PendingAction?
 
     init(
-        uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+        uploadService: CaptureUploadServiceProtocol = CaptureUploadService.shared,
         intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
         exportService: CaptureExportServiceProtocol = CaptureExportService()
     ) {

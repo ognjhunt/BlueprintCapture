@@ -13,7 +13,7 @@ final class UploadQueueViewModel: ObservableObject {
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
-    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService(),
+    init(uploadService: CaptureUploadServiceProtocol = CaptureUploadService.shared,
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          store: UploadQueueStore = UploadQueueStore(),
          exportService: CaptureExportServiceProtocol = CaptureExportService()) {

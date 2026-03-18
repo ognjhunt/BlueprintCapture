@@ -90,6 +90,10 @@ class CaptureUploadRepository @Inject constructor(
         startImmediately: Boolean = true,
     ): String {
         val uploadId = request.captureId
+        val existingItem = _queue.value.firstOrNull { it.id == uploadId }
+        if (existingItem != null && existingItem.status.isActive) {
+            return uploadId
+        }
         val remotePrefix = buildRemotePrefix(
             creatorId = request.creatorId,
             captureId = request.captureId,
@@ -142,6 +146,9 @@ class CaptureUploadRepository @Inject constructor(
 
     fun startUpload(id: String) {
         val item = _queue.value.firstOrNull { it.id == id } ?: return
+        if (item.status.isActive) {
+            return
+        }
         if (item.localBundlePath.isNullOrBlank()) {
             markFailed(id, "Local capture bundle is missing.")
             return
@@ -279,10 +286,16 @@ class CaptureUploadRepository @Inject constructor(
         val files = bundleRoot.walkTopDown()
             .filter(File::isFile)
             .sortedBy { file -> file.absolutePath }
-            .toList()
+            .toMutableList()
 
         if (files.isEmpty()) {
             throw PermanentUploadException("Capture bundle has no files to upload.")
+        }
+
+        val completionMarkerIndex = files.indexOfFirst { it.name == "capture_upload_complete.json" }
+        if (completionMarkerIndex >= 0) {
+            val completionMarker = files.removeAt(completionMarkerIndex)
+            files += completionMarker
         }
 
         val totalBytes = files.sumOf { it.length().coerceAtLeast(1L) }.coerceAtLeast(1L)
@@ -290,6 +303,24 @@ class CaptureUploadRepository @Inject constructor(
             creatorId = item.creatorId ?: "anonymous",
             captureId = item.captureId.ifBlank { item.id },
         )
+
+        // Check if this capture was already fully uploaded (GCS session already finalized).
+        // Firebase Storage will fail with "already finalized" if we re-attempt an upload whose
+        // resumable session was already committed, so bail out early if the completion marker
+        // already exists in storage.
+        val completionMarkerRef = storage.reference.child(remotePrefix + "raw/capture_upload_complete.json")
+        if (fileExistsInStorage(completionMarkerRef)) {
+            updateItemAndEmit(item.id, onItemUpdated) {
+                it.copy(
+                    status = UploadQueueStatus.Registering,
+                    progress = 0.995f,
+                    detail = "Registering capture submission",
+                    remotePrefix = remotePrefix,
+                    uploadCompletedAtEpochMs = it.uploadCompletedAtEpochMs ?: System.currentTimeMillis(),
+                )
+            }
+            return
+        }
 
         updateItemAndEmit(item.id, onItemUpdated) {
             it.copy(
@@ -404,6 +435,13 @@ class CaptureUploadRepository @Inject constructor(
             submissionDocumentPath = submissionDocumentPath,
         )
     }
+
+    private suspend fun fileExistsInStorage(ref: StorageReference): Boolean =
+        suspendCancellableCoroutine { continuation ->
+            ref.metadata
+                .addOnSuccessListener { continuation.resume(true) }
+                .addOnFailureListener { continuation.resume(false) }
+        }
 
     private suspend fun uploadFile(
         storageReference: StorageReference,
@@ -761,3 +799,9 @@ class CaptureUploadRepository @Inject constructor(
         val SEGMENT_SANITIZE_REGEX = "[^a-z0-9._-]+".toRegex()
     }
 }
+
+private val UploadQueueStatus.isActive: Boolean
+    get() = this == UploadQueueStatus.Queued ||
+        this == UploadQueueStatus.Preparing ||
+        this == UploadQueueStatus.Uploading ||
+        this == UploadQueueStatus.Registering
