@@ -214,7 +214,7 @@ async function loadJsonObject(
   }
 }
 
-function mergeManifestWithSidecars(
+export function mergeManifestWithSidecars(
   manifest: Record<string, unknown> | null,
   sidecars: {
     siteIdentity?: Record<string, unknown> | null;
@@ -559,7 +559,7 @@ function normalizedCaptureTopology(manifest: Record<string, unknown> | null): Re
  *   AND pose alignment quality is pose_assisted (implies poseMatchRate >= 0.65 AND p95 <= 0.2)
  *   AND derived_scene_generation_allowed
  */
-function canonicalWorldModelCandidate({
+export function canonicalWorldModelCandidate({
   manifest,
   actualAvailability,
   processingProfile,
