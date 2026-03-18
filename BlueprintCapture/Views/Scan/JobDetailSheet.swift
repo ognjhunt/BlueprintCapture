@@ -4,7 +4,8 @@ import CoreLocation
 struct JobDetailSheet: View {
     let item: ScanHomeViewModel.JobItem
     let userLocation: CLLocation?
-    let onStartCapture: () -> Void
+    let onStartCapture: () -> Void          // glasses path
+    let onStartPhoneCapture: () -> Void     // ARKit / phone camera path
     let onSubmitForReview: () -> Void
     let onDirections: () -> Void
 
@@ -12,6 +13,7 @@ struct JobDetailSheet: View {
 
     @State private var focusTip: String? = nil
     @State private var isLoadingTip = false
+    @State private var showCapturePicker = false
 
     private var isOnSite: Bool {
         if AppConfig.allowOffsiteCheckIn() { return true }
@@ -149,6 +151,19 @@ struct JobDetailSheet: View {
         .preferredColorScheme(.dark)
         .onAppear {
             Task { await generateFocusTip() }
+        }
+        .confirmationDialog("How do you want to capture?", isPresented: $showCapturePicker, titleVisibility: .visible) {
+            Button("📱  Use iPhone Camera") {
+                dismiss()
+                onStartPhoneCapture()
+            }
+            Button("🥽  Use Glasses") {
+                dismiss()
+                onStartCapture()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("iPhone uses ARKit + LiDAR. Glasses record hands-free.")
         }
     }
 
@@ -383,13 +398,14 @@ struct JobDetailSheet: View {
         }
         switch item.permissionTier {
         case .approved:
-            onStartCapture()
+            // Ask the user whether to use iPhone camera or glasses before routing.
+            showCapturePicker = true
         case .reviewRequired:
             onSubmitForReview()
+            dismiss()
         case .permissionRequired, .blocked:
             return
         }
-        dismiss()
     }
 
     // MARK: - Subviews

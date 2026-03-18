@@ -7,8 +7,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
@@ -150,6 +153,9 @@ fun ScanScreen(
             blePermissionLauncher.launch(required)
         }
     }
+    // Capture method picker — set when a nearby-space card is tapped
+    var capturePickerTarget by remember { mutableStateOf<ScanTarget?>(null) }
+
     var parityScreen by rememberSaveable { mutableStateOf<SearchParityScreen?>(null) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedLocationId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -258,13 +264,78 @@ fun ScanScreen(
         item {
             NearbySpacesSection(
                 targets = state.targets,
-                onTargetClick = { target -> onStartCapture(target.toLaunch()) },
+                onTargetClick = { target -> capturePickerTarget = target },
             )
         }
 
         item {
             SubmitSpaceCard(onClick = ::openSearchFlow)
         }
+    }
+
+    // Capture method picker — shown when a nearby-space card is tapped
+    capturePickerTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { capturePickerTarget = null },
+            containerColor = androidx.compose.ui.graphics.Color(0xFF111111),
+            title = {
+                Text(
+                    text = "How do you want to capture?",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            },
+            text = {
+                Text(
+                    text = "Phone uses your camera + ARCore. Glasses record hands-free.",
+                    color = androidx.compose.ui.graphics.Color(0xFF888888),
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            capturePickerTarget = null
+                            onStartCapture(target.toLaunch())
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = BlueprintTeal,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text("📱  Use Phone Camera", fontWeight = FontWeight.SemiBold)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            capturePickerTarget = null
+                            requestBleAndScan()
+                            showGlassesSheet = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp, BlueprintTeal.copy(alpha = 0.5f)
+                        ),
+                    ) {
+                        Text(
+                            "🥽  Use Glasses",
+                            color = BlueprintTeal,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { capturePickerTarget = null },
+                ) {
+                    Text("Cancel", color = androidx.compose.ui.graphics.Color(0xFF666666))
+                }
+            },
+        )
     }
 
     if (parityScreen != null) {

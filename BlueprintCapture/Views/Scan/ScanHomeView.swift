@@ -88,6 +88,7 @@ struct ScanHomeView: View {
                 item: item,
                 userLocation: viewModel.currentLocation,
                 onStartCapture: { recordingJob = item.job },
+                onStartPhoneCapture: { reviewSubmissionSeed = submissionSeed(for: item) },
                 onSubmitForReview: { reviewSubmissionSeed = submissionSeed(for: item) },
                 onDirections: { openDirections(to: item.job) }
             )

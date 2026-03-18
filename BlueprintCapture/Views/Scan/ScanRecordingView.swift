@@ -330,26 +330,30 @@ struct ScanRecordingView: View {
         }
 
         // Reserve + check-in right before recording starts.
-        phase = .preparing("Reserving job…")
-        do {
-            let target = Target(
-                id: job.id,
-                displayName: job.title,
-                sku: .B,
-                lat: job.lat,
-                lng: job.lng,
-                address: job.address,
-                demandScore: nil,
-                sizeSqFt: nil,
-                category: job.category,
-                computedDistanceMeters: nil
-            )
-            _ = try await targetStateService.reserve(target: target, for: 60 * 60)
-            try await targetStateService.checkIn(targetId: job.id)
-        } catch {
-            errorMessage = "This job is already reserved or in progress."
-            phase = .error
-            return
+        // Skip for the alpha current-location item — it lives only on-device and
+        // has no Firestore document to reserve against.
+        if job.id != ScanHomeViewModel.alphaCurrentLocationJobID {
+            phase = .preparing("Reserving job…")
+            do {
+                let target = Target(
+                    id: job.id,
+                    displayName: job.title,
+                    sku: .B,
+                    lat: job.lat,
+                    lng: job.lng,
+                    address: job.address,
+                    demandScore: nil,
+                    sizeSqFt: nil,
+                    category: job.category,
+                    computedDistanceMeters: nil
+                )
+                _ = try await targetStateService.reserve(target: target, for: 60 * 60)
+                try await targetStateService.checkIn(targetId: job.id)
+            } catch {
+                errorMessage = "This job is already reserved or in progress."
+                phase = .error
+                return
+            }
         }
 
         // Start recording
