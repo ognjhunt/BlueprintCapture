@@ -580,13 +580,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     func startPendingCaptureUpload() {
         guard let request = pendingCaptureRequest else { return }
         pendingPostCaptureAction = .upload
-        Task { await resolvePendingCaptureAndContinue(request: request, action: .upload) }
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .upload, skipResolution: true) }
     }
 
     func startPendingCaptureExport() {
         guard let request = pendingCaptureRequest else { return }
         pendingPostCaptureAction = .export
-        Task { await resolvePendingCaptureAndContinue(request: request, action: .export) }
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .export, skipResolution: true) }
     }
 
     func submitManualIntake(_ draft: CaptureManualIntakeDraft) {

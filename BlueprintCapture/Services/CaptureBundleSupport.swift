@@ -466,10 +466,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     private let fileManager = FileManager.default
 
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
-        guard request.metadata.intakePacket?.isComplete == true else {
-            throw FinalizationError.missingStructuredIntake
-        }
-
+        // Alpha: intake gate removed — finalize regardless of intake completeness
         let directory = CaptureBundleContext.rawDirectoryURL(for: request)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {

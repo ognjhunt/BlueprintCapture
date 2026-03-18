@@ -375,14 +375,14 @@ class CaptureSessionViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
-                actionState = if (action == FinishedCaptureActionState.Exporting)
-                    FinishedCaptureActionState.GeneratingIntake
-                else
-                    action,
+                actionState = action,
                 errorMessage = null,
             )
 
-            when (val resolution = intakeResolutionService.resolve(request)) {
+            // Alpha: skip AI intake resolution entirely — proceed directly with the raw request
+            val skipResolution = true
+            val syntheticResolution: IntakeResolutionOutcome = IntakeResolutionOutcome.Resolved(request)
+            when (val resolution = if (skipResolution) syntheticResolution else intakeResolutionService.resolve(request)) {
                 is IntakeResolutionOutcome.Resolved -> {
                     val resolvedDraft = CaptureReviewDraft.fromResolution(
                         base = draft,

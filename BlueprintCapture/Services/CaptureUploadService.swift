@@ -384,16 +384,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         let packageURL = record.request.packageURL
         print("🚀 [UploadService] performUpload start id=\(id) url=\(packageURL.path)")
 
-        guard record.request.metadata.intakePacket?.isComplete == true else {
-            queue.async {
-                guard var failingRecord = self.uploads[id] else { return }
-                failingRecord.task = nil
-                self.uploads[id] = failingRecord
-                self.subject.send(.failed(failingRecord.request, .missingStructuredIntake))
-            }
-            return
-        }
-
+        // Alpha: intake gate removed — proceed regardless of intake completeness
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
             print("❌ [UploadService] package missing at path=\(packageURL.path)")
             queue.async {
