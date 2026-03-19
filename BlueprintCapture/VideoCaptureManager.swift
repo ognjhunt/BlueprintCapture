@@ -1098,39 +1098,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         var sceneDepthFile: String?
         var smoothedDepthFile: String?
-        var confidenceFile: String?
+        let confidenceFile: String? = nil
 
-        if let depthMap = frame.sceneDepthMap, let depthDirectory = arKit.depthDirectoryURL {
+        // Persist a single depth representation per frame to keep raw bundle size bounded.
+        // Prefer smoothed depth when available; otherwise fall back to the raw scene depth map.
+        if let depthMap = frame.smoothedDepthMap ?? frame.sceneDepthMap,
+           let depthDirectory = arKit.depthDirectoryURL {
             let filename = "\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
                 try writeDepthPNG(depthMap, to: fileURL)
-                sceneDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
+                let relative = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
+                if frame.smoothedDepthMap != nil {
+                    smoothedDepthFile = relative
+                } else {
+                    sceneDepthFile = relative
+                }
             } catch {
-                print("Failed to persist scene depth map: \(error)")
-            }
-        }
-
-        if let smoothedDepthMap = frame.smoothedDepthMap, let depthDirectory = arKit.depthDirectoryURL {
-            let filename = "smoothed-\(frameId).png"
-            let fileURL = depthDirectory.appendingPathComponent(filename)
-            do {
-                try writeDepthPNG(smoothedDepthMap, to: fileURL)
-                smoothedDepthFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
-            } catch {
-                print("Failed to persist smoothed depth map: \(error)")
-            }
-        }
-
-        if let confidenceMap = frame.confidenceMap,
-           let confidenceDirectory = arKit.confidenceDirectoryURL {
-            let filename = "\(frameId).png"
-            let fileURL = confidenceDirectory.appendingPathComponent(filename)
-            do {
-                try writeConfidencePNG(confidenceMap, to: fileURL)
-                confidenceFile = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
-            } catch {
-                print("Failed to persist confidence map: \(error)")
+                print("Failed to persist depth map: \(error)")
             }
         }
 
