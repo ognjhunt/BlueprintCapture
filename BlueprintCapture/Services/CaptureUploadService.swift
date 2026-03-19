@@ -341,9 +341,28 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private let subject = PassthroughSubject<Event, Never>()
     private let storageBucketURL = "gs://blueprint-8c1ca.appspot.com"
     private let finalizer: CaptureBundleFinalizerProtocol
+    private var pendingSubmissionWrites: [String: CaptureUploadRequest] = [:]
+    private var authStateObserver: NSObjectProtocol?
 
     init(finalizer: CaptureBundleFinalizerProtocol = CaptureBundleFinalizer()) {
         self.finalizer = finalizer
+        #if canImport(FirebaseFirestore) && canImport(FirebaseAuth)
+        self.authStateObserver = NotificationCenter.default.addObserver(
+            forName: .AuthStateDidChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.queue.async {
+                self?.flushPendingSubmissionWritesIfPossible()
+            }
+        }
+        #endif
+    }
+
+    deinit {
+        if let authStateObserver {
+            NotificationCenter.default.removeObserver(authStateObserver)
+        }
     }
 
     func enqueue(_ request: CaptureUploadRequest) {
@@ -678,11 +697,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     /// backend via the `updateCaptureStatus` Cloud Function.
     private func writeSubmissionRecord(for request: CaptureUploadRequest) {
         #if canImport(FirebaseFirestore)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
         guard Auth.auth().currentUser != nil else {
-            print("ℹ️ [UploadService] Skipping capture_submissions write until Firebase auth is available")
+            pendingSubmissionWrites[captureId] = request
+            print("ℹ️ [UploadService] Deferring capture_submissions/\(captureId) write until Firebase auth is available")
             return
         }
-        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        pendingSubmissionWrites.removeValue(forKey: captureId)
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let db = Firestore.firestore()
         let docRef = db.collection("capture_submissions").document(captureId)
@@ -696,12 +717,29 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             "submitted_at": Timestamp(date: request.metadata.uploadedAt ?? Date()),
             "created_at": Timestamp(date: Date())
         ]
-        docRef.setData(payload, merge: true) { error in
+        docRef.setData(payload, merge: true) { [weak self] error in
             if let error = error {
+                self?.queue.async {
+                    self?.pendingSubmissionWrites[captureId] = request
+                }
                 print("⚠️ [UploadService] Failed to write capture_submissions record: \(error.localizedDescription)")
             } else {
+                self?.queue.async {
+                    self?.pendingSubmissionWrites.removeValue(forKey: captureId)
+                }
                 print("✅ [UploadService] capture_submissions/\(captureId) written")
             }
+        }
+        #endif
+    }
+
+    private func flushPendingSubmissionWritesIfPossible() {
+        #if canImport(FirebaseFirestore) && canImport(FirebaseAuth)
+        guard Auth.auth().currentUser != nil, !pendingSubmissionWrites.isEmpty else { return }
+        let pending = Array(pendingSubmissionWrites.values)
+        print("ℹ️ [UploadService] Retrying \(pending.count) deferred capture_submissions write(s) after auth change")
+        for request in pending {
+            writeSubmissionRecord(for: request)
         }
         #endif
     }

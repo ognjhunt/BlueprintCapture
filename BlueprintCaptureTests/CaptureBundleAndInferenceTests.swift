@@ -505,7 +505,8 @@ struct CaptureBundleAndInferenceTests {
                     allowOffsiteCheckIn: false,
                     maxReservationDriveMinutes: 60,
                     fallbackMaxReservationAirMiles: 35.0,
-                    enableDirectProviderFeatures: true
+                    enableDirectProviderFeatures: true,
+                    allowMockJobsFallback: false
                 )
             },
             apiKeyProvider: { "test-key" }

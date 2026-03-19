@@ -3,9 +3,20 @@ import Foundation
 // MARK: - API Service
 
 final class APIService {
-    enum APIError: Error {
+    enum APIError: Error, Equatable, LocalizedError {
         case missingBaseURL
         case invalidResponse(statusCode: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingBaseURL:
+                return "BLUEPRINT_BACKEND_BASE_URL is not configured for this build."
+            case .invalidResponse(let statusCode) where statusCode == -1:
+                return "The backend returned an invalid non-HTTP response."
+            case .invalidResponse(let statusCode):
+                return "The backend returned HTTP \(statusCode)."
+            }
+        }
     }
 
     static let shared = APIService()

@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.blueprint.capture.data.notification.NotificationPreferenceKey
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -138,12 +139,8 @@ fun SettingsScreen(
 
     var wifiOnlyUploads by remember { mutableStateOf(false) }
     val autoClearCompleted by settingsPreferencesViewModel.uploadAutoClear.collectAsState()
+    val notificationPreferences by settingsPreferencesViewModel.notificationPreferences.collectAsState()
     var captureHaptics by remember { mutableStateOf(true) }
-    var nearbyJobAlerts by remember { mutableStateOf(true) }
-    var reservationAlerts by remember { mutableStateOf(true) }
-    var captureStatus by remember { mutableStateOf(true) }
-    var payoutUpdates by remember { mutableStateOf(true) }
-    var accountAlerts by remember { mutableStateOf(true) }
 
     val packageInfo = remember(context) {
         runCatching {
@@ -301,8 +298,13 @@ fun SettingsScreen(
                 iconTint = BlueprintTeal,
                 title = "Nearby job alerts",
                 subtitle = "Nearby approved jobs that enter your geofence",
-                checked = nearbyJobAlerts,
-                onCheckedChange = { nearbyJobAlerts = it },
+                checked = notificationPreferences.isEnabled(NotificationPreferenceKey.NearbyJobs),
+                onCheckedChange = {
+                    settingsPreferencesViewModel.setNotificationPreference(
+                        NotificationPreferenceKey.NearbyJobs,
+                        it,
+                    )
+                },
             )
             SettingsRowDivider()
             SettingsToggleRow(
@@ -311,8 +313,13 @@ fun SettingsScreen(
                 iconTint = BlueprintWarning,
                 title = "Reservation alerts",
                 subtitle = "Reservation reminders and expiry updates",
-                checked = reservationAlerts,
-                onCheckedChange = { reservationAlerts = it },
+                checked = notificationPreferences.isEnabled(NotificationPreferenceKey.Reservations),
+                onCheckedChange = {
+                    settingsPreferencesViewModel.setNotificationPreference(
+                        NotificationPreferenceKey.Reservations,
+                        it,
+                    )
+                },
             )
             SettingsRowDivider()
             SettingsToggleRow(
@@ -321,8 +328,13 @@ fun SettingsScreen(
                 iconTint = BlueprintTeal,
                 title = "Capture status",
                 subtitle = "Approved, needs fix, rejected, and paid captures",
-                checked = captureStatus,
-                onCheckedChange = { captureStatus = it },
+                checked = notificationPreferences.isEnabled(NotificationPreferenceKey.CaptureStatus),
+                onCheckedChange = {
+                    settingsPreferencesViewModel.setNotificationPreference(
+                        NotificationPreferenceKey.CaptureStatus,
+                        it,
+                    )
+                },
             )
             SettingsRowDivider()
             SettingsToggleRow(
@@ -331,8 +343,13 @@ fun SettingsScreen(
                 iconTint = IconTintNavyBlue,
                 title = "Payout updates",
                 subtitle = "Scheduled, sent, and failed payout events",
-                checked = payoutUpdates,
-                onCheckedChange = { payoutUpdates = it },
+                checked = notificationPreferences.isEnabled(NotificationPreferenceKey.Payouts),
+                onCheckedChange = {
+                    settingsPreferencesViewModel.setNotificationPreference(
+                        NotificationPreferenceKey.Payouts,
+                        it,
+                    )
+                },
             )
             SettingsRowDivider()
             SettingsToggleRow(
@@ -341,8 +358,13 @@ fun SettingsScreen(
                 iconTint = BlueprintWarning,
                 title = "Account alerts",
                 subtitle = "Payout method and account action required alerts",
-                checked = accountAlerts,
-                onCheckedChange = { accountAlerts = it },
+                checked = notificationPreferences.isEnabled(NotificationPreferenceKey.Account),
+                onCheckedChange = {
+                    settingsPreferencesViewModel.setNotificationPreference(
+                        NotificationPreferenceKey.Account,
+                        it,
+                    )
+                },
             )
         }
 

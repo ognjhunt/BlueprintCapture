@@ -6,6 +6,7 @@ import javax.inject.Singleton
 
 data class LocalConfig(
     val backendBaseUrl: String,
+    val allowMockJobsFallback: Boolean,
     val stripePublishableKey: String,
     val googlePlacesApiKey: String,
     val geminiApiKey: String,
@@ -19,6 +20,7 @@ data class LocalConfig(
 class LocalConfigProvider @Inject constructor() {
     fun current(): LocalConfig = LocalConfig(
         backendBaseUrl = BuildConfig.BACKEND_BASE_URL,
+        allowMockJobsFallback = BuildConfig.ALLOW_MOCK_JOBS_FALLBACK,
         stripePublishableKey = BuildConfig.STRIPE_PUBLISHABLE_KEY,
         googlePlacesApiKey = BuildConfig.GOOGLE_PLACES_API_KEY,
         geminiApiKey = BuildConfig.GEMINI_API_KEY,

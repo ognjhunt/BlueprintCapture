@@ -23,6 +23,7 @@ sdk.dir=/Users/nijelhunt_1/Library/Android/sdk
 
 ```properties
 BLUEPRINT_BACKEND_BASE_URL=https://your-backend.example.com
+BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=false
 BLUEPRINT_STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
 BLUEPRINT_GOOGLE_PLACES_API_KEY=replace_me
 BLUEPRINT_GEMINI_API_KEY=replace_me

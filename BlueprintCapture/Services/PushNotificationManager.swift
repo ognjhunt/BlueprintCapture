@@ -31,6 +31,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
 
     private let center = UNUserNotificationCenter.current()
     private var didConfigure = false
+    private var hasLoggedMissingBackendBaseURL = false
 
     override private init() {
         super.init()
@@ -86,6 +87,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     func didRegisterForRemoteNotifications(deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
         UserDefaults.standard.set(deviceToken.hexString, forKey: "apnsToken")
+        print("✅ [Notifications] APNs registration succeeded")
         Task {
             await syncCurrentDevice()
         }
@@ -96,6 +98,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func syncNotificationPreferences() async {
+        guard canReachNotificationBackend(operation: "sync preferences") else { return }
         do {
             try await APIService.shared.updateNotificationPreferences(NotificationPreferencesStore.shared.preferences)
         } catch {
@@ -104,6 +107,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func syncCurrentDevice() async {
+        guard canReachNotificationBackend(operation: "sync device registration") else { return }
         let creatorId = UserDeviceService.resolvedUserId()
         guard !creatorId.isEmpty else { return }
 
@@ -121,6 +125,19 @@ final class PushNotificationManager: NSObject, ObservableObject {
         } catch {
             print("⚠️ [Notifications] Failed to sync device registration: \(error.localizedDescription)")
         }
+    }
+
+    private func canReachNotificationBackend(operation: String) -> Bool {
+        guard AppConfig.hasBackendBaseURL() else {
+            if !hasLoggedMissingBackendBaseURL {
+                hasLoggedMissingBackendBaseURL = true
+                print("ℹ️ [Notifications] Skipping notification backend calls because BLUEPRINT_BACKEND_BASE_URL is not configured for this build")
+            } else {
+                print("ℹ️ [Notifications] Skipping \(operation) because BLUEPRINT_BACKEND_BASE_URL is not configured")
+            }
+            return false
+        }
+        return true
     }
 
     private func notificationSettings() async -> UNNotificationSettings {

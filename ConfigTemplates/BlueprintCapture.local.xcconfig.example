@@ -2,4 +2,6 @@
 // Public runtime config only. Do not put third-party API keys in shipped app resources.
 
 BLUEPRINT_BACKEND_BASE_URL = https://your-backend.example.com
-
+// Optional: enable this only for explicit local/demo builds that should show mock jobs
+// when Firestore denies access. Production-like builds should leave this unset.
+// BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = YES

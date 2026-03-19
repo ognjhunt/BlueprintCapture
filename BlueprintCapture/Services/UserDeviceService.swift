@@ -41,7 +41,7 @@ final class UserDeviceService {
 
         Auth.auth().signInAnonymously { result, error in
             if let error {
-                print("⚠️ [Auth] Anonymous sign-in failed: \(error.localizedDescription)")
+                print("⚠️ [Auth] \(describeAnonymousAuthFailure(error))")
                 onReady()
                 return
             }
@@ -54,6 +54,21 @@ final class UserDeviceService {
                 onReady()
             }
         }
+    }
+
+    private static func describeAnonymousAuthFailure(_ error: Error) -> String {
+        let nsError = error as NSError
+        if let authCode = AuthErrorCode(rawValue: nsError.code) {
+            switch authCode {
+            case .operationNotAllowed:
+                return "Anonymous sign-in failed: operationNotAllowed. Anonymous Auth is disabled for this Firebase project or blocked by project policy."
+            case .networkError:
+                return "Anonymous sign-in failed: networkError. Check connectivity and Firebase project reachability."
+            default:
+                return "Anonymous sign-in failed: \(authCode). \(error.localizedDescription)"
+            }
+        }
+        return "Anonymous sign-in failed: \(error.localizedDescription)"
     }
 
     /// Ensures a temporary local user exists in UserDefaults and returns its document.

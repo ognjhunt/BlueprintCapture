@@ -2,6 +2,7 @@ package app.blueprint.capture.data.capture
 
 import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.core.content.edit
 import androidx.work.ForegroundInfo
@@ -18,6 +19,7 @@ import app.blueprint.capture.data.session.SessionPreferences
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.FirebaseException
 import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
@@ -58,6 +60,7 @@ class CaptureUploadRepository @Inject constructor(
     private val sharedPreferences: SharedPreferences,
     private val storage: FirebaseStorage,
     private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth,
     private val workManager: WorkManager,
     private val sessionPreferences: SessionPreferences,
 ) {
@@ -74,6 +77,11 @@ class CaptureUploadRepository @Inject constructor(
     val queue: StateFlow<List<UploadQueueItem>> = _queue.asStateFlow()
 
     init {
+        auth.addAuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser != null) {
+                retryDeferredSubmissionRegistrations()
+            }
+        }
         persistQueue(_queue.value)
         scheduleRecoveredUploads(_queue.value)
         repositoryScope.launch {
@@ -243,7 +251,10 @@ class CaptureUploadRepository @Inject constructor(
             val submissionItem = _queue.value.firstOrNull { it.id == id } ?: initialItem
             throwIfCancellationRequested(submissionItem)
             if (submissionItem.submittedAtEpochMs == null) {
-                registerSubmission(submissionItem)
+                val didRegisterSubmission = registerSubmission(submissionItem)
+                if (!didRegisterSubmission) {
+                    return CaptureUploadWorkOutcome.Success
+                }
             } else {
                 markCompleted(
                     id = id,
@@ -365,7 +376,23 @@ class CaptureUploadRepository @Inject constructor(
         }
     }
 
-    private suspend fun registerSubmission(item: UploadQueueItem) {
+    private suspend fun registerSubmission(item: UploadQueueItem): Boolean {
+        val authenticatedCreatorId = auth.currentUser?.uid
+        if (authenticatedCreatorId.isNullOrBlank()) {
+            updateItem(item.id) {
+                it.copy(
+                    status = UploadQueueStatus.Registering,
+                    progress = it.progress.coerceAtLeast(0.99f),
+                    detail = "Waiting for Firebase auth before registering capture submission",
+                )
+            }
+            Log.i(
+                "CaptureUploadRepository",
+                "Deferring capture_submissions/${item.captureId.ifBlank { item.id }} write until Firebase auth is available",
+            )
+            return false
+        }
+
         val captureId = item.captureId.ifBlank { item.id }
         val sceneId = item.sceneId.ifBlank { captureId }
         val submittedAtEpochMs = item.uploadCompletedAtEpochMs ?: System.currentTimeMillis()
@@ -373,7 +400,7 @@ class CaptureUploadRepository @Inject constructor(
         val payload = linkedMapOf<String, Any>(
             "capture_id" to captureId,
             "scene_id" to sceneId,
-            "creator_id" to (item.creatorId ?: "anonymous"),
+            "creator_id" to authenticatedCreatorId,
             "capture_source" to item.captureSource,
             "submitted_at" to Timestamp(Date(submittedAtEpochMs)),
             "created_at" to Timestamp(Date()),
@@ -421,11 +448,15 @@ class CaptureUploadRepository @Inject constructor(
             .set(payload, SetOptions.merge())
             .awaitResult()
 
+        updateItem(item.id) {
+            it.copy(creatorId = authenticatedCreatorId)
+        }
         markCompleted(
             id = item.id,
             submittedAtEpochMs = System.currentTimeMillis(),
             submissionDocumentPath = submissionDocumentPath,
         )
+        return true
     }
 
     private suspend fun uploadCompletionMarker(
@@ -691,6 +722,38 @@ class CaptureUploadRepository @Inject constructor(
 
     private fun cancelPendingAutoClear(id: String) {
         autoClearJobs.remove(id)?.cancel()
+    }
+
+    private fun retryDeferredSubmissionRegistrations() {
+        val currentUserId = auth.currentUser?.uid ?: return
+        val deferredIds = _queue.value
+            .filter { item ->
+                item.uploadCompletedAtEpochMs != null &&
+                    item.submittedAtEpochMs == null &&
+                    item.cancelRequestedAtEpochMs == null
+            }
+            .map { it.id }
+
+        if (deferredIds.isEmpty()) {
+            return
+        }
+
+        Log.i(
+            "CaptureUploadRepository",
+            "Retrying ${deferredIds.size} deferred capture_submissions write(s) after Firebase auth became available for $currentUserId",
+        )
+
+        deferredIds.forEach { id ->
+            updateItem(id) {
+                it.copy(
+                    creatorId = currentUserId,
+                    status = UploadQueueStatus.Queued,
+                    progress = it.progress.coerceAtLeast(0.99f),
+                    detail = "Retrying capture submission after Firebase auth became available",
+                )
+            }
+            enqueueWork(id, replaceExisting = true)
+        }
     }
 
     private fun updateItemAndEmitBlocking(

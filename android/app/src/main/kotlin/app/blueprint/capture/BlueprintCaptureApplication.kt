@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import app.blueprint.capture.data.auth.AuthRepository
+import app.blueprint.capture.data.auth.FirebaseAuthErrorFormatter
+import app.blueprint.capture.data.notification.PushNotificationManager
 import com.meta.wearable.dat.core.Wearables
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -21,6 +23,9 @@ class BlueprintCaptureApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var authRepository: AuthRepository
 
+    @Inject
+    lateinit var pushNotificationManager: PushNotificationManager
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -30,9 +35,16 @@ class BlueprintCaptureApplication : Application(), Configuration.Provider {
         if (!mwdatResult.isSuccess) {
             Log.w("MWDAT", "Wearables SDK init failed")
         }
+        pushNotificationManager.start()
         applicationScope.launch {
             runCatching { authRepository.ensureAnonymousSession() }
-                .onFailure { Log.w("Auth", "Anonymous sign-in failed", it) }
+                .onFailure {
+                    Log.w(
+                        "Auth",
+                        "Anonymous sign-in failed: ${FirebaseAuthErrorFormatter.describeAnonymousSignInFailure(it)}",
+                        it,
+                    )
+                }
         }
     }
 

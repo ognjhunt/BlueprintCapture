@@ -135,6 +135,9 @@ fun CaptureSessionScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
+    var didAutoStartRecorder by remember(capture.targetId, capture.jobId, capture.label, capture.autoStartRecorder) {
+        mutableStateOf(false)
+    }
     var isRecording by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var captureStartEpochMs by remember { mutableLongStateOf(0L) }
@@ -203,6 +206,58 @@ fun CaptureSessionScreen(
         val exportSharePath = uiState.exportSharePath ?: return@LaunchedEffect
         shareExportArtifact(context, File(exportSharePath))
         viewModel.consumeExportShare()
+    }
+
+    LaunchedEffect(showRecorder, capture.autoStartRecorder, permissionsGranted, videoCapture, isRecording, uiState.reviewDraft) {
+        if (!showRecorder || !capture.autoStartRecorder || !permissionsGranted || videoCapture == null || isRecording || uiState.reviewDraft != null) {
+            if (!showRecorder) {
+                didAutoStartRecorder = false
+            }
+            return@LaunchedEffect
+        }
+        if (!didAutoStartRecorder) {
+            didAutoStartRecorder = true
+            val captureUseCase = videoCapture ?: return@LaunchedEffect
+            val outputFile = createRecordingFile(context)
+            captureStartEpochMs = System.currentTimeMillis()
+            elapsedSeconds = 0L
+            cameraError = null
+
+            var pendingRecording = captureUseCase.output.prepareRecording(
+                context,
+                FileOutputOptions.Builder(outputFile).build(),
+            )
+            pendingRecording = pendingRecording.withAudioEnabled()
+
+            recording = pendingRecording.start(mainExecutor) { event ->
+                when (event) {
+                    is VideoRecordEvent.Start -> {
+                        isRecording = true
+                    }
+
+                    is VideoRecordEvent.Status -> {
+                        elapsedSeconds = event.recordingStats.recordedDurationNanos / 1_000_000_000L
+                    }
+
+                    is VideoRecordEvent.Finalize -> {
+                        isRecording = false
+                        recording = null
+                        if (event.hasError()) {
+                            outputFile.delete()
+                            cameraError = event.cause?.message
+                                ?: "Recording failed before the file finalized."
+                        } else {
+                            viewModel.prepareRecordedCapture(
+                                capture = capture,
+                                recordingFile = outputFile,
+                                captureStartEpochMs = captureStartEpochMs,
+                                captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     DisposableEffect(showRecorder, permissionsGranted, lifecycleOwner, previewView) {
@@ -927,7 +982,7 @@ private fun RecorderScreen(
                         }
                     }
 
-                    !isRecording -> {
+                    !isRecording && !capture.autoStartRecorder -> {
                         Button(
                             onClick = onStartRecording,
                             enabled = videoCapture != null && !isBusy,
@@ -938,6 +993,16 @@ private fun RecorderScreen(
                             ),
                         ) {
                             Text("Start walkthrough recording")
+                        }
+                    }
+
+                    !isRecording && capture.autoStartRecorder -> {
+                        SurfaceCard {
+                            Text("Preparing camera")
+                            Text(
+                                "Opening the camera and starting capture automatically.",
+                                color = BlueprintTextMuted,
+                            )
                         }
                     }
 
@@ -1361,7 +1426,7 @@ private fun SurfaceCard(
 }
 
 private val CaptureLaunch.hasDetailsSurface: Boolean
-    get() = targetId != null && (
+    get() = !autoStartRecorder && targetId != null && (
         !imageUrl.isNullOrBlank() ||
             !categoryLabel.isNullOrBlank() ||
             !addressText.isNullOrBlank() ||
@@ -1378,8 +1443,8 @@ private val CaptureLaunch.permissionColor: Color
 
 private val CaptureLaunch.detailActionLabel: String
     get() = when (permissionTone) {
-        CapturePermissionTone.Approved -> "Demo Capture — Tap to Start"
-        CapturePermissionTone.Review -> "Demo Capture — Tap to Start"
+        CapturePermissionTone.Approved -> "Start Capture"
+        CapturePermissionTone.Review -> "Start Capture"
         CapturePermissionTone.Permission -> "Check Access Before Starting"
         CapturePermissionTone.Blocked -> "Capture Not Allowed"
     }

@@ -14,6 +14,14 @@ enum AppConfig {
         RuntimeConfig.current.backendBaseURL
     }
 
+    static func hasBackendBaseURL() -> Bool {
+        backendBaseURL() != nil
+    }
+
+    static func allowMockJobsFallback() -> Bool {
+        RuntimeConfig.current.allowMockJobsFallback
+    }
+
     // MARK: - Reservation Guards
     static func maxReservationDriveMinutes() -> Int {
         RuntimeConfig.current.maxReservationDriveMinutes

@@ -1,10 +1,14 @@
 package app.blueprint.capture.data.targets
 
+import android.util.Log
 import android.location.Location
+import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.data.model.VenuePermission
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FirebaseFirestore
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,14 +19,42 @@ import kotlinx.coroutines.flow.callbackFlow
 @Singleton
 class ScanTargetsRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
+    localConfigProvider: LocalConfigProvider,
 ) {
+    private val config = localConfigProvider.current()
+
     fun observeActiveTargets(userLocation: Location? = null): Flow<List<ScanTarget>> = callbackFlow {
+        var lastSuccessfulTargets: List<ScanTarget> = emptyList()
         val registration = firestore.collection("capture_jobs")
             .whereEqualTo("active", true)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    // Surface empty list on error — demo fallbacks removed for production
-                    trySend(emptyList())
+                    if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        if (config.allowMockJobsFallback) {
+                            Log.w(
+                                "ScanTargetsRepository",
+                                "capture_jobs read was denied; using demo targets because BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK is enabled",
+                                error,
+                            )
+                            val demoTargets = rankForFeed(DemoData.scanTargets, userLocation)
+                            lastSuccessfulTargets = demoTargets
+                            trySend(demoTargets)
+                        } else {
+                            Log.w(
+                                "ScanTargetsRepository",
+                                "capture_jobs read failed with permission denied; keeping the last successful feed instead of silently falling back",
+                                error,
+                            )
+                            trySend(lastSuccessfulTargets)
+                        }
+                    } else {
+                        Log.w(
+                            "ScanTargetsRepository",
+                            "capture_jobs listener failed: ${error.localizedMessage ?: "unknown Firestore error"}",
+                            error,
+                        )
+                        trySend(lastSuccessfulTargets)
+                    }
                     return@addSnapshotListener
                 }
 
@@ -99,7 +131,9 @@ class ScanTargetsRepository @Inject constructor(
                         )
                     }
 
-                trySend(rankForFeed(items, userLocation))
+                val rankedTargets = rankForFeed(items, userLocation)
+                lastSuccessfulTargets = rankedTargets
+                trySend(rankedTargets)
             }
 
         awaitClose { registration.remove() }

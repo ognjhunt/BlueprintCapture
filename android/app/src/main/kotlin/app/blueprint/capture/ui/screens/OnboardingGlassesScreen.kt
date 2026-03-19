@@ -6,12 +6,10 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -96,17 +94,17 @@ fun OnboardingGlassesScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             GlassesIcon(
-                modifier = Modifier.size(86.dp),
+                modifier = Modifier.size(92.dp),
                 tint = BlueprintTeal,
             )
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             Text(
                 text = "Connect Smart Glasses",
                 color = BlueprintTextPrimary,
-                fontSize = 30.sp,
-                lineHeight = 34.sp,
+                fontSize = 32.sp,
+                lineHeight = 36.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
@@ -132,10 +130,12 @@ fun OnboardingGlassesScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.weight(1.25f))
 
-            PrimaryOnboardingButton(
+            OnboardingPrimaryButton(
                 text = if (connectedDeviceName != null) "Continue" else connectionButtonTitle(connectionState),
+                containerColor = BlueprintAccent,
+                contentColor = BlueprintBlack,
                 onClick = if (connectedDeviceName != null) {
                     onContinue
                 } else {
@@ -143,14 +143,11 @@ fun OnboardingGlassesScreen(
                 },
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
+            OnboardingSecondaryAction(
                 text = if (connectedDeviceName != null) "Manage Connection" else "Skip - Use Phone Only",
                 color = BlueprintTextMuted,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable {
+                modifier = Modifier.padding(top = 18.dp),
+                onClick = {
                     if (connectedDeviceName != null) {
                         showConnectSheet = true
                     } else {
@@ -184,28 +181,6 @@ fun OnboardingGlassesScreen(
                 onScanRequest = ::requestBleAndScan,
             )
         }
-    }
-}
-
-@Composable
-private fun PrimaryOnboardingButton(
-    text: String,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(BlueprintAccent, RoundedCornerShape(18.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 18.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = text,
-            color = BlueprintBlack,
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 

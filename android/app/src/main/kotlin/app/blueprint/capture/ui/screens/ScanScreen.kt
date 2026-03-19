@@ -1,15 +1,21 @@
 package app.blueprint.capture.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -29,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -48,8 +55,10 @@ import androidx.compose.material.icons.rounded.ArrowOutward
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Directions
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.MonetizationOn
@@ -61,6 +70,7 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,11 +80,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -103,6 +116,7 @@ import app.blueprint.capture.ui.theme.BlueprintTextSecondary
 import app.blueprint.capture.ui.theme.BlueprintWarning
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import kotlin.math.absoluteValue
 
 private enum class SearchParityScreen {
     Search,
@@ -127,6 +141,10 @@ fun ScanScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val locationSuggestions = remember { searchLocationSuggestions() }
+
+    LaunchedEffect(Unit) {
+        viewModel.onFeedVisible()
+    }
 
     var showGlassesSheet by rememberSaveable { mutableStateOf(false) }
 
@@ -154,6 +172,7 @@ fun ScanScreen(
         }
     }
     // Capture method picker — set when a nearby-space card is tapped
+    var selectedDetailTarget by remember { mutableStateOf<ScanTarget?>(null) }
     var capturePickerTarget by remember { mutableStateOf<ScanTarget?>(null) }
 
     var parityScreen by rememberSaveable { mutableStateOf<SearchParityScreen?>(null) }
@@ -227,7 +246,11 @@ fun ScanScreen(
         verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
         item {
-            ScanHeader(onSearchClick = ::openSearchFlow)
+            ScanHeader(
+                onSearchClick = ::openSearchFlow,
+                isRefreshing = state.isRefreshing,
+                onRefreshClick = { viewModel.refreshFeed() },
+            )
         }
 
         if (state.showGlassesBanner || state.showPayoutBanner) {
@@ -263,8 +286,8 @@ fun ScanScreen(
 
         item {
             NearbySpacesSection(
-                targets = state.targets,
-                onTargetClick = { target -> capturePickerTarget = target },
+                targets = state.targets + state.nearbyPlaceTargets,
+                onTargetClick = { target -> selectedDetailTarget = target },
             )
         }
 
@@ -273,7 +296,26 @@ fun ScanScreen(
         }
     }
 
-    // Capture method picker — shown when a nearby-space card is tapped
+    selectedDetailTarget?.let { target ->
+        JobDetailDialog(
+            target = target,
+            onDismiss = { selectedDetailTarget = null },
+            onStartCapture = {
+                selectedDetailTarget = null
+                capturePickerTarget = target
+            },
+            onStartReview = {
+                selectedDetailTarget = null
+                onStartCapture(target.toLaunch())
+            },
+            onOpenDirections = {
+                selectedDetailTarget = null
+                openDirections(context, target)
+            },
+        )
+    }
+
+    // Capture method picker — shown after the detail screen CTA for approved captures
     capturePickerTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { capturePickerTarget = null },
@@ -298,7 +340,7 @@ fun ScanScreen(
                     Button(
                         onClick = {
                             capturePickerTarget = null
-                            onStartCapture(target.toLaunch())
+                            onStartCapture(target.toLaunch(autoStartRecorder = true))
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
@@ -428,9 +470,32 @@ fun ScanScreen(
     }
 }
 
+private fun openDirections(context: android.content.Context, target: ScanTarget) {
+    val lat = target.lat
+    val lng = target.lng
+    val uri = if (lat != null && lng != null) {
+        Uri.parse("google.navigation:q=$lat,$lng")
+    } else {
+        Uri.parse("geo:0,0?q=${Uri.encode(target.addressText.ifBlank { target.title })}")
+    }
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        setPackage("com.google.android.apps.maps")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }
+        .recoverCatching {
+            val fallback = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=${Uri.encode(target.addressText.ifBlank { target.title })}")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(fallback)
+        }
+}
+
 @Composable
 private fun ScanHeader(
     onSearchClick: () -> Unit,
+    isRefreshing: Boolean,
+    onRefreshClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -474,7 +539,8 @@ private fun ScanHeader(
             HeaderActionButton(
                 icon = Icons.Rounded.Refresh,
                 contentDescription = "Refresh",
-                onClick = {},
+                isLoading = isRefreshing,
+                onClick = onRefreshClick,
             )
         }
     }
@@ -484,6 +550,7 @@ private fun ScanHeader(
 private fun HeaderActionButton(
     icon: ImageVector,
     contentDescription: String,
+    isLoading: Boolean = false,
     onClick: () -> Unit,
 ) {
     Box(
@@ -491,16 +558,427 @@ private fun HeaderActionButton(
             .size(56.dp)
             .clip(CircleShape)
             .background(BlueprintSurfaceRaised)
-            .clickable(onClick = onClick)
+            .clickable(enabled = !isLoading, onClick = onClick)
             .border(1.dp, BlueprintBorder, CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = BlueprintTextSecondary,
-            modifier = Modifier.size(28.dp),
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                color = BlueprintTeal,
+                strokeWidth = 2.4.dp,
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = BlueprintTextSecondary,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun JobDetailDialog(
+    target: ScanTarget,
+    onDismiss: () -> Unit,
+    onStartCapture: () -> Unit,
+    onStartReview: () -> Unit,
+    onOpenDirections: () -> Unit,
+) {
+    val isOnSite = target.readyNow
+    val requirements = target.detailChecklist
+        .ifEmpty { target.workflowSteps.drop(1) }
+        .ifEmpty {
+            listOf(
+                "Capture the primary entry, circulation path, and major transition points.",
+                "Avoid faces, screens, paperwork, and restricted areas.",
+                "Pause briefly at decision points so review can follow the route.",
+            )
+        }
+        .take(4)
+    val description = target.workflowSteps.firstOrNull()
+        ?: target.subtitle
+        ?: "Capture the primary zone, access routes, and key reference points."
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = false,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BlueprintBlack),
+        ) {
+            val scrollState = rememberScrollState()
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .navigationBarsPadding()
+                    .padding(bottom = 40.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp),
+                ) {
+                    TargetArtwork(target = target)
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.05f),
+                                        Color.Black.copy(alpha = 0.28f),
+                                        Color.Black,
+                                    ),
+                                ),
+                            ),
+                    )
+                }
+                Column(
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(
+                            text = target.categoryLabel ?: "SPACE",
+                            style = TextStyle(
+                                color = BlueprintTextMuted,
+                                fontSize = 13.sp,
+                                lineHeight = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.4.sp,
+                            ),
+                        )
+                        Text(
+                            text = target.title,
+                            style = TextStyle(
+                                color = BlueprintTextPrimary,
+                                fontSize = 30.sp,
+                                lineHeight = 34.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = (-0.8).sp,
+                            ),
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.NearMe,
+                                contentDescription = null,
+                                tint = BlueprintTextMuted,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Text(
+                                text = target.addressText,
+                                style = TextStyle(
+                                    color = BlueprintTextMuted,
+                                    fontSize = 16.sp,
+                                    lineHeight = 21.sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            MetricChip(
+                                icon = Icons.Rounded.MonetizationOn,
+                                iconTint = BlueprintSuccess,
+                                text = target.payoutText,
+                            )
+                            MetricChip(
+                                icon = Icons.Rounded.NearMe,
+                                iconTint = if (target.readyNow) BlueprintTeal else BlueprintTextSecondary,
+                                text = target.distanceText,
+                            )
+                            if (target.shouldShowMinutes) {
+                                MetricChip(
+                                    icon = Icons.Rounded.Schedule,
+                                    iconTint = BlueprintTextSecondary,
+                                    text = "${target.estimatedMinutes ?: 20} min",
+                                )
+                            }
+                        }
+                    }
+
+                    AccentInfoCard(
+                        accent = BlueprintSuccess,
+                        icon = Icons.Rounded.MonetizationOn,
+                        text = "Completing this capture earns ${target.payoutText}.",
+                    )
+
+                    AccentInfoCard(
+                        accent = BlueprintTeal,
+                        icon = Icons.Rounded.AutoAwesome,
+                        text = target.focusTip,
+                    )
+
+                    HorizontalDivider(color = BlueprintBorderStrong.copy(alpha = 0.7f))
+
+                    DetailSection(title = "Description") {
+                        Text(
+                            text = description,
+                            style = TextStyle(
+                                color = BlueprintTextSecondary,
+                                fontSize = 17.sp,
+                                lineHeight = 25.sp,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                        )
+                    }
+
+                    DetailSection(title = "Capture Requirements") {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            requirements.forEach { line ->
+                                RequirementRow(text = line)
+                            }
+                        }
+                    }
+
+                    DashedCaptureZone()
+
+                    Button(
+                        onClick = {
+                            when {
+                                target.permissionTone == CapturePermissionTone.Blocked -> Unit
+                                !isOnSite -> onOpenDirections()
+                                target.permissionTone == CapturePermissionTone.Approved -> onStartCapture()
+                                else -> onStartReview()
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .imePadding(),
+                        enabled = target.permissionTone != CapturePermissionTone.Blocked,
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = when {
+                                target.permissionTone == CapturePermissionTone.Blocked -> BlueprintSurfaceRaised
+                                !isOnSite -> BlueprintSurfaceRaised
+                                target.permissionTone == CapturePermissionTone.Approved -> BlueprintSuccess
+                                else -> BlueprintTeal
+                            },
+                        ),
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        Text(
+                            text = when {
+                                target.permissionTone == CapturePermissionTone.Blocked -> "Not Allowed"
+                                !isOnSite -> "Get Directions"
+                                target.permissionTone == CapturePermissionTone.Approved -> "Start Capture"
+                                target.permissionTone == CapturePermissionTone.Permission -> "Check Access First"
+                                else -> "Submit for Review"
+                            },
+                            style = TextStyle(
+                                color = if (target.permissionTone == CapturePermissionTone.Blocked) BlueprintTextMuted else Color.White,
+                                fontSize = 18.sp,
+                                lineHeight = 22.sp,
+                                fontWeight = FontWeight.Bold,
+                            ),
+                        )
+                    }
+
+                    if (!isOnSite && target.permissionTone != CapturePermissionTone.Blocked) {
+                        Text(
+                            text = "Move within ${target.checkinRadiusM}m of the address to start this capture directly.",
+                            modifier = Modifier.fillMaxWidth(),
+                            style = TextStyle(
+                                color = BlueprintTextMuted,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 56.dp),
+                horizontalArrangement = Arrangement.Start,
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(24.dp),
+                    border = BorderStroke(1.dp, BlueprintBorder),
+                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color(0xAA20242A),
+                        contentColor = BlueprintTextPrimary,
+                    ),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronLeft,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Text(
+                            text = "Back",
+                            style = TextStyle(
+                                fontSize = 16.sp,
+                                lineHeight = 20.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccentInfoCard(
+    accent: Color,
+    icon: ImageVector,
+    text: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(BlueprintSurface)
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(14.dp)),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .heightIn(min = 72.dp)
+                .background(accent),
         )
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                text = text,
+                style = TextStyle(
+                    color = BlueprintTextPrimary,
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailSection(
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(
+            text = title,
+            style = TextStyle(
+                color = BlueprintTextPrimary,
+                fontSize = 22.sp,
+                lineHeight = 26.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.4).sp,
+            ),
+        )
+        content()
+    }
+}
+
+@Composable
+private fun RequirementRow(
+    text: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 9.dp)
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(BlueprintTextMuted),
+        )
+        Text(
+            text = text,
+            style = TextStyle(
+                color = BlueprintTextSecondary,
+                fontSize = 17.sp,
+                lineHeight = 25.sp,
+                fontWeight = FontWeight.Medium,
+            ),
+        )
+    }
+}
+
+@Composable
+private fun DashedCaptureZone() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Transparent)
+            .border(
+                BorderStroke(1.5.dp, BlueprintBorderStrong.copy(alpha = 0.8f)),
+                RoundedCornerShape(20.dp),
+            )
+            .padding(horizontal = 20.dp, vertical = 28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.LocationOn,
+                contentDescription = null,
+                tint = BlueprintTextMuted,
+                modifier = Modifier.size(26.dp),
+            )
+            Text(
+                text = "Capture Content to Upload",
+                style = TextStyle(
+                    color = BlueprintTextMuted,
+                    fontSize = 16.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Text(
+                text = "All captures are reviewed. Only submit content that matches the requirements.",
+                style = TextStyle(
+                    color = BlueprintTextMuted.copy(alpha = 0.86f),
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
     }
 }
 
@@ -895,6 +1373,9 @@ private fun FallbackArtwork(
             .background(brush),
         contentAlignment = Alignment.BottomStart,
     ) {
+        if (target.lat != null && target.lng != null) {
+            CoordinateArtwork(target = target)
+        }
         Text(
             text = target.categoryLabel ?: "SPACE",
             modifier = Modifier.padding(start = 16.dp, bottom = 16.dp),
@@ -904,6 +1385,63 @@ private fun FallbackArtwork(
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.8).sp,
             ),
+        )
+    }
+}
+
+@Composable
+private fun CoordinateArtwork(
+    target: ScanTarget,
+) {
+    val seed = (((target.lat ?: 0.0) * 1_000) + ((target.lng ?: 0.0) * 1_000)).toFloat().absoluteValue
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        drawRect(color = Color(0xFFDEE6D8), size = size)
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xB6A8D8FF),
+                    Color(0x7AC5D9B5),
+                    Color(0x40111416),
+                ),
+            ),
+            size = size,
+        )
+
+        val roadColor = Color.White.copy(alpha = 0.46f)
+        val sideRoadColor = Color(0xFFF4F1E8).copy(alpha = 0.38f)
+        repeat(4) { index ->
+            val yBase = size.height * (0.18f + (((seed + index * 19f) % 55f) / 100f))
+            val delta = size.height * (0.04f + (((seed + index * 13f) % 18f) / 100f))
+            drawLine(
+                color = if (index % 2 == 0) roadColor else sideRoadColor,
+                start = Offset(-size.width * 0.1f, yBase),
+                end = Offset(size.width * 1.1f, yBase + delta),
+                strokeWidth = size.minDimension * if (index % 2 == 0) 0.075f else 0.045f,
+                cap = StrokeCap.Round,
+            )
+        }
+        repeat(3) { index ->
+            val xBase = size.width * (0.2f + (((seed + index * 23f) % 45f) / 100f))
+            drawLine(
+                color = sideRoadColor,
+                start = Offset(xBase, -size.height * 0.1f),
+                end = Offset(xBase + size.width * 0.08f, size.height * 1.1f),
+                strokeWidth = size.minDimension * 0.038f,
+                cap = StrokeCap.Round,
+            )
+        }
+
+        val markerX = size.width * (0.42f + ((seed % 12f) / 100f))
+        val markerY = size.height * (0.44f + (((seed / 3f) % 10f) / 100f))
+        drawCircle(
+            color = Color.White.copy(alpha = 0.82f),
+            radius = size.minDimension * 0.06f,
+            center = Offset(markerX, markerY),
+        )
+        drawCircle(
+            color = BlueprintTeal,
+            radius = size.minDimension * 0.032f,
+            center = Offset(markerX, markerY),
         )
     }
 }
@@ -2118,7 +2656,19 @@ private val ScanTarget.permissionLabel: String
 private val ScanTarget.shouldShowMinutes: Boolean
     get() = estimatedMinutes != null && !distanceText.contains("min", ignoreCase = true)
 
-private fun ScanTarget.toLaunch(): CaptureLaunch {
+private val ScanTarget.focusTip: String
+    get() = when (permissionTone) {
+        CapturePermissionTone.Approved ->
+            "Prioritize capturing high-resolution images at major entry and exit points to ensure comprehensive coverage of the current location."
+        CapturePermissionTone.Review ->
+            "Start with the public-facing approach and primary circulation path so review can judge whether the space is worth approving."
+        CapturePermissionTone.Permission ->
+            "Capture only visibly public areas and stop immediately if staff or signage indicates access is restricted."
+        CapturePermissionTone.Blocked ->
+            "This space is restricted. Do not record or submit capture content here."
+    }
+
+private fun ScanTarget.toLaunch(autoStartRecorder: Boolean = false): CaptureLaunch {
     return CaptureLaunch(
         label = title,
         categoryLabel = categoryLabel,
@@ -2139,6 +2689,7 @@ private fun ScanTarget.toLaunch(): CaptureLaunch {
         requestedOutputs = requestedOutputs.ifEmpty { listOf("qualification", "review_intake") },
         quotedPayoutCents = quotedPayoutCents,
         rightsProfile = rightsProfile,
+        autoStartRecorder = autoStartRecorder,
     )
 }
 

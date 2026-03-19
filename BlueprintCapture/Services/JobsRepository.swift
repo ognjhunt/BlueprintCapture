@@ -47,11 +47,13 @@ final class JobsRepository: JobsRepositoryProtocol {
                 .getDocuments()
             return snap.documents.compactMap { decode(docId: $0.documentID, data: $0.data()) }
         } catch {
-            // Permission denied (unauthenticated/guest) — return placeholder cards so
-            // the feed stays useful rather than showing a blank error state.
             let ns = error as NSError
             if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 7 {
-                return Self.mockJobs()
+                if AppConfig.allowMockJobsFallback() {
+                    print("⚠️ [JobsRepository] capture_jobs read was denied; using mock jobs because BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK is enabled")
+                    return Self.mockJobs()
+                }
+                print("⚠️ [JobsRepository] capture_jobs read failed with permission denied; surfacing the Firestore error instead of silently using mock jobs")
             }
             throw error
         }

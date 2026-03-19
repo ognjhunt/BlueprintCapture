@@ -43,6 +43,7 @@ struct RuntimeConfig: Equatable {
     let maxReservationDriveMinutes: Int
     let fallbackMaxReservationAirMiles: Double
     let enableDirectProviderFeatures: Bool
+    let allowMockJobsFallback: Bool
 
     static var current: RuntimeConfig {
         load()
@@ -71,7 +72,8 @@ struct RuntimeConfig: Equatable {
             allowOffsiteCheckIn: isUITesting || boolValue(environment["BLUEPRINT_ALLOW_OFFSITE_CHECKIN"], defaultValue: false),
             maxReservationDriveMinutes: intValue(environment["BLUEPRINT_MAX_RESERVATION_DRIVE_MINUTES"], defaultValue: 60),
             fallbackMaxReservationAirMiles: doubleValue(environment["BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES"], defaultValue: 35.0),
-            enableDirectProviderFeatures: boolValue(environment["BLUEPRINT_ENABLE_DIRECT_PROVIDER_FEATURES"], defaultValue: false)
+            enableDirectProviderFeatures: boolValue(environment["BLUEPRINT_ENABLE_DIRECT_PROVIDER_FEATURES"], defaultValue: false),
+            allowMockJobsFallback: boolValue(environment["BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK"], defaultValue: false)
         )
     }
 

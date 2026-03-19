@@ -25,11 +25,13 @@ android {
         }
 
         val backendBaseUrl = providers.gradleProperty("BLUEPRINT_BACKEND_BASE_URL").orNull ?: ""
+        val allowMockJobsFallback = providers.gradleProperty("BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK").orNull ?: "false"
         val stripePublishableKey = providers.gradleProperty("BLUEPRINT_STRIPE_PUBLISHABLE_KEY").orNull ?: ""
         val googlePlacesKey = providers.gradleProperty("BLUEPRINT_GOOGLE_PLACES_API_KEY").orNull ?: ""
         val geminiApiKey = providers.gradleProperty("BLUEPRINT_GEMINI_API_KEY").orNull ?: ""
 
         buildConfigField("String", "BACKEND_BASE_URL", "\"$backendBaseUrl\"")
+        buildConfigField("boolean", "ALLOW_MOCK_JOBS_FALLBACK", allowMockJobsFallback)
         buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
         buildConfigField("String", "GOOGLE_PLACES_API_KEY", "\"$googlePlacesKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
@@ -98,6 +100,8 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.google.material)
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.kotlinx.serialization.json)

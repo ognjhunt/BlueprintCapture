@@ -2,6 +2,7 @@ package app.blueprint.capture.data.auth
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.util.Log
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
@@ -46,7 +47,16 @@ class AuthRepository @Inject constructor(
     suspend fun ensureAnonymousSession() {
         val currentUser = auth.currentUser
         if (currentUser == null) {
-            val result = auth.signInAnonymously().awaitResult()
+            val result = try {
+                auth.signInAnonymously().awaitResult()
+            } catch (error: Exception) {
+                Log.w(
+                    "AuthRepository",
+                    "Anonymous sign-in failed: ${FirebaseAuthErrorFormatter.describeAnonymousSignInFailure(error)}",
+                    error,
+                )
+                throw error
+            }
             result.user?.let { user ->
                 bootstrapUserDocument(user, "Guest")
             }

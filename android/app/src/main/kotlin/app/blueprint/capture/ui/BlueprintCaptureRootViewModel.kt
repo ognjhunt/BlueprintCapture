@@ -25,6 +25,27 @@ data class BlueprintCaptureRootUiState(
     val uploads: List<UploadQueueItem> = DemoData.uploadQueue,
 )
 
+private data class IntroFlags(
+    val onboardingComplete: Boolean,
+    val authSkipped: Boolean,
+    val inviteCodeComplete: Boolean,
+)
+
+private data class CaptureFlags(
+    val permissionsComplete: Boolean,
+    val walkthroughComplete: Boolean,
+    val glassesSetupComplete: Boolean,
+)
+
+private data class StageFlags(
+    val onboardingComplete: Boolean,
+    val authSkipped: Boolean,
+    val inviteCodeComplete: Boolean,
+    val permissionsComplete: Boolean,
+    val walkthroughComplete: Boolean,
+    val glassesSetupComplete: Boolean,
+)
+
 @HiltViewModel
 class BlueprintCaptureRootViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
@@ -34,21 +55,54 @@ class BlueprintCaptureRootViewModel @Inject constructor(
     private val selectedTab = MutableStateFlow(MainTab.Scan)
     private val activeCapture = MutableStateFlow<CaptureLaunch?>(null)
 
-    val uiState: StateFlow<BlueprintCaptureRootUiState> = combine(
-        combine(
-            sessionPreferences.onboardingCompleted,
-            sessionPreferences.authSkipped,
-            sessionPreferences.inviteCodeCompleted,
-            sessionPreferences.permissionsCompleted,
-            sessionPreferences.glassesSetupCompleted,
-        ) { onboarding, authSkip, invite, perms, glasses -> listOf(onboarding, authSkip, invite, perms, glasses) },
-        combine(authRepository.registeredAuthState, selectedTab, activeCapture, captureUploadRepository.queue) { u, t, c, q -> listOf(u, t, c, q) },
-    ) { flags, rest ->
-        val onboardingComplete = flags[0] as Boolean
-        val authSkipped = flags[1] as Boolean
-        val inviteCodeComplete = flags[2] as Boolean
-        val permissionsComplete = flags[3] as Boolean
-        val glassesSetupComplete = flags[4] as Boolean
+    private val introFlags = combine(
+        sessionPreferences.onboardingCompleted,
+        sessionPreferences.authSkipped,
+        sessionPreferences.inviteCodeCompleted,
+    ) { onboarding: Boolean, authSkip: Boolean, invite: Boolean ->
+        IntroFlags(
+            onboardingComplete = onboarding,
+            authSkipped = authSkip,
+            inviteCodeComplete = invite,
+        )
+    }
+
+    private val captureFlags = combine(
+        sessionPreferences.permissionsCompleted,
+        sessionPreferences.walkthroughCompleted,
+        sessionPreferences.glassesSetupCompleted,
+    ) { permissions: Boolean, walkthrough: Boolean, glasses: Boolean ->
+        CaptureFlags(
+            permissionsComplete = permissions,
+            walkthroughComplete = walkthrough,
+            glassesSetupComplete = glasses,
+        )
+    }
+
+    private val stageFlags = combine(
+        introFlags,
+        captureFlags,
+    ) { intro, capture ->
+        StageFlags(
+            onboardingComplete = intro.onboardingComplete,
+            authSkipped = intro.authSkipped,
+            inviteCodeComplete = intro.inviteCodeComplete,
+            permissionsComplete = capture.permissionsComplete,
+            walkthroughComplete = capture.walkthroughComplete,
+            glassesSetupComplete = capture.glassesSetupComplete,
+        )
+    }
+
+    private val sessionState = combine(
+        authRepository.registeredAuthState,
+        selectedTab,
+        activeCapture,
+        captureUploadRepository.queue,
+    ) { user, tab, capture, queue ->
+        listOf(user, tab, capture, queue)
+    }
+
+    val uiState: StateFlow<BlueprintCaptureRootUiState> = combine(stageFlags, sessionState) { flags, rest ->
         @Suppress("UNCHECKED_CAST")
         val user = rest[0]
         val tab = rest[1] as MainTab
@@ -58,11 +112,12 @@ class BlueprintCaptureRootViewModel @Inject constructor(
         val uploadQueue = rest[3] as List<UploadQueueItem>
         BlueprintCaptureRootUiState(
             stage = when {
-                !onboardingComplete -> RootStage.Onboarding
-                user == null && !authSkipped -> RootStage.Auth
-                !inviteCodeComplete -> RootStage.InviteCode
-                !permissionsComplete -> RootStage.Permissions
-                !glassesSetupComplete -> RootStage.ConnectGlasses
+                !flags.onboardingComplete -> RootStage.Onboarding
+                user == null && !flags.authSkipped -> RootStage.Auth
+                !flags.inviteCodeComplete -> RootStage.InviteCode
+                !flags.permissionsComplete -> RootStage.Permissions
+                !flags.walkthroughComplete -> RootStage.Walkthrough
+                !flags.glassesSetupComplete -> RootStage.ConnectGlasses
                 else -> RootStage.App
             },
             selectedTab = tab,
@@ -89,6 +144,10 @@ class BlueprintCaptureRootViewModel @Inject constructor(
 
     fun completePermissions() {
         sessionPreferences.setPermissionsCompleted(true)
+    }
+
+    fun completeWalkthrough() {
+        sessionPreferences.setWalkthroughCompleted(true)
     }
 
     fun completeGlassesSetup() {

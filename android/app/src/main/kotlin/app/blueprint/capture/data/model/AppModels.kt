@@ -7,6 +7,7 @@ enum class RootStage {
     Auth,
     InviteCode,
     Permissions,
+    Walkthrough,
     ConnectGlasses,
     App,
 }
@@ -37,6 +38,7 @@ data class CaptureLaunch(
     val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
     val quotedPayoutCents: Int? = null,
     val rightsProfile: String? = null,
+    val autoStartRecorder: Boolean = false,
 )
 
 enum class CapturePermissionTone {

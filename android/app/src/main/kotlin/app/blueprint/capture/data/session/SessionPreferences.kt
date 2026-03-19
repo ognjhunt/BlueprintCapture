@@ -16,6 +16,7 @@ class SessionPreferences @Inject constructor(
         private const val KEY_AUTH_SKIPPED = "auth_skipped"
         private const val KEY_INVITE_CODE_COMPLETE = "invite_code_complete"
         private const val KEY_PERMISSIONS_COMPLETE = "permissions_complete"
+        private const val KEY_WALKTHROUGH_COMPLETE = "walkthrough_complete"
         private const val KEY_GLASSES_SETUP_COMPLETE = "glasses_setup_complete"
         private const val KEY_UPLOAD_AUTO_CLEAR = "upload_auto_clear"
     }
@@ -32,6 +33,9 @@ class SessionPreferences @Inject constructor(
     private val permissionsCompletedState = MutableStateFlow(
         sharedPreferences.getBoolean(KEY_PERMISSIONS_COMPLETE, false),
     )
+    private val walkthroughCompletedState = MutableStateFlow(
+        sharedPreferences.getBoolean(KEY_WALKTHROUGH_COMPLETE, false),
+    )
     private val glassesSetupCompletedState = MutableStateFlow(
         sharedPreferences.getBoolean(KEY_GLASSES_SETUP_COMPLETE, false),
     )
@@ -43,6 +47,7 @@ class SessionPreferences @Inject constructor(
     val authSkipped: StateFlow<Boolean> = authSkippedState.asStateFlow()
     val inviteCodeCompleted: StateFlow<Boolean> = inviteCodeCompletedState.asStateFlow()
     val permissionsCompleted: StateFlow<Boolean> = permissionsCompletedState.asStateFlow()
+    val walkthroughCompleted: StateFlow<Boolean> = walkthroughCompletedState.asStateFlow()
     val glassesSetupCompleted: StateFlow<Boolean> = glassesSetupCompletedState.asStateFlow()
     val uploadAutoClear: StateFlow<Boolean> = uploadAutoClearState.asStateFlow()
 
@@ -64,6 +69,11 @@ class SessionPreferences @Inject constructor(
     fun setPermissionsCompleted(completed: Boolean) {
         sharedPreferences.edit().putBoolean(KEY_PERMISSIONS_COMPLETE, completed).apply()
         permissionsCompletedState.value = completed
+    }
+
+    fun setWalkthroughCompleted(completed: Boolean) {
+        sharedPreferences.edit().putBoolean(KEY_WALKTHROUGH_COMPLETE, completed).apply()
+        walkthroughCompletedState.value = completed
     }
 
     fun setGlassesSetupCompleted(completed: Boolean) {

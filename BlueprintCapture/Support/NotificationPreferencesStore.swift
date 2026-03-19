@@ -113,6 +113,10 @@ final class NotificationPreferencesStore: ObservableObject {
     }
 
     func refreshFromBackendIfPossible() async {
+        guard AppConfig.hasBackendBaseURL() else {
+            print("ℹ️ [Notifications] Skipping preference refresh because BLUEPRINT_BACKEND_BASE_URL is not configured")
+            return
+        }
         do {
             guard let remote = try await APIService.shared.fetchNotificationPreferences() else { return }
             preferences = remote
