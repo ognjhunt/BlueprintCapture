@@ -636,10 +636,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         handleRecordingCompletion(error: error, durationSeconds: nil)
     }
 
-    private func appendFrameToARRecorder(_ frame: ARFrame) {
+    private func appendFrameToARRecorder(pixelBuffer: CVPixelBuffer, timestampSeconds: TimeInterval, resolution: CGSize) {
         guard usingCustomARSessionRecorder else { return }
         guard #available(iOS 17.0, *), let recorder = arSessionRecorder as? ARSessionVideoRecorder else { return }
-        recorder.append(frame)
+        recorder.append(pixelBuffer: pixelBuffer, timestampSeconds: timestampSeconds, resolution: resolution)
     }
 
     private func scheduleScreenRecorderStopTimeout() {
@@ -1386,7 +1386,11 @@ extension VideoCaptureManager: ARSessionDelegate {
                 currentCameraIntrinsics = makeCameraIntrinsics(from: frame)
                 persistManifest(duration: nil)
             }
-            appendFrameToARRecorder(frame)
+            appendFrameToARRecorder(
+                pixelBuffer: frame.capturedImage,
+                timestampSeconds: frame.timestamp,
+                resolution: frame.camera.imageResolution
+            )
         }
         // Extract all data from the ARFrame synchronously before dispatching so that
         // the ARFrame itself is released immediately rather than being held by the closure.
@@ -1463,11 +1467,7 @@ private final class ARSessionVideoRecorder {
         self.errorHandler = errorHandler
     }
 
-    func append(_ frame: ARFrame) {
-        let pixelBuffer = frame.capturedImage
-        let timestampSeconds = frame.timestamp
-        let resolution = frame.camera.imageResolution
-
+    func append(pixelBuffer: CVPixelBuffer, timestampSeconds: TimeInterval, resolution: CGSize) {
         // Capture the pixelBuffer strongly into the async block to keep it alive.
         queue.async { [pixelBuffer] in
             guard !self.isFinishing else { return }

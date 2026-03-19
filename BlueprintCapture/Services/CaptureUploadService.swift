@@ -555,40 +555,29 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         var files: [URL] = []
         var totalBytes: Int64 = 0
         let completionFilename = "capture_upload_complete.json"
+        var completionMarkerFile: URL?
         for case let url as URL in enumerator {
             var isRegular: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isRegular), !isRegular.boolValue {
-                files.append(url)
-                if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
-                    totalBytes += Int64(size)
+                if url.lastPathComponent == completionFilename {
+                    completionMarkerFile = url
+                } else {
+                    files.append(url)
+                    if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                        totalBytes += Int64(size)
+                    }
                 }
             }
         }
         files.sort { $0.path < $1.path }
-        if let markerIndex = files.firstIndex(where: { $0.lastPathComponent == completionFilename }) {
-            let marker = files.remove(at: markerIndex)
-            files.append(marker)
-        }
-        guard !files.isEmpty, totalBytes > 0 else {
+        guard !files.isEmpty || completionMarkerFile != nil else {
             print("❌ [UploadService] No files found to upload under \(localDirectory.path)")
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
 
-        // Check if this capture was already fully uploaded (GCS session already finalized).
-        // Firebase Storage will fail with 400 "already finalized" if we attempt to re-upload
-        // to a path whose resumable session was already committed, so bail out early if the
-        // completion marker already exists in storage.
-        let completionMarkerRef = storage.reference(withPath: remoteBasePath + "capture_upload_complete.json")
-        let alreadyUploaded = await fileExistsInStorage(completionMarkerRef)
-        if alreadyUploaded {
-            print("✅ [UploadService] Capture already uploaded (completion marker found), treating as success id=\(id)")
-            markUploadCompleted(id: id, attempt: attempt)
-            return true
-        }
-
         var uploadedBytes: Int64 = 0
-        print("📁 [UploadService] Uploading \(files.count) files (\(totalBytes) bytes) to basePath=\(remoteBasePath)")
+        print("📁 [UploadService] Uploading \(files.count + (completionMarkerFile == nil ? 0 : 1)) files (\(totalBytes) bytes + completion marker) to basePath=\(remoteBasePath)")
         for file in files {
             if Task.isCancelled { return false }
             let relPath = file.path.replacingOccurrences(of: localDirectory.path + "/", with: "")
@@ -652,11 +641,28 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 fileUploaded = true
             }
             if !fileUploaded {
+                print("❌ [UploadService] File upload failed path=\(remotePath) error=\(uploadError?.localizedDescription ?? "unknown")")
                 markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
                 return false
             }
             let completed = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
             uploadedBytes += completed
+        }
+
+        if let completionMarkerFile {
+            let completionRemotePath = remoteBasePath + completionFilename
+            let completionRef = storage.reference(withPath: completionRemotePath)
+            let completionUploaded = await uploadCompletionMarker(
+                at: completionMarkerFile,
+                to: completionRef,
+                id: id,
+                attempt: attempt
+            )
+            guard completionUploaded else {
+                print("❌ [UploadService] Completion marker upload failed path=\(completionRemotePath)")
+                markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
+                return false
+            }
         }
 
         markUploadCompleted(id: id, attempt: attempt)
@@ -714,6 +720,47 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
     private func makeBaseDirectoryPath(for request: CaptureUploadRequest) -> String {
         return CaptureBundleContext.rawBasePath(for: request)
+    }
+
+    private func uploadCompletionMarker(at file: URL, to ref: StorageReference, id: UUID, attempt: UUID) async -> Bool {
+        guard let data = try? Data(contentsOf: file) else {
+            return false
+        }
+
+        let metadata = StorageMetadata()
+        metadata.contentType = "application/json"
+
+        var uploadError: Error?
+        var finishUpload: (() -> Void)?
+        let uploadTask = ref.putData(data, metadata: metadata) { _, error in
+            uploadError = error
+            finishUpload?()
+        }
+        setActiveTransferCancellationHandler(for: id, attempt: attempt) {
+            uploadTask.cancel()
+        }
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            let resumeOnce = {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            finishUpload = resumeOnce
+            if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
+                resumeOnce()
+            }
+        }
+        clearActiveTransferCancellationHandler(for: id, attempt: attempt)
+
+        guard isCurrentAttempt(id: id, attempt: attempt), !Task.isCancelled else {
+            return false
+        }
+        if let uploadError {
+            return await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
+        }
+        return true
     }
 
     private func fileExistsInStorage(_ ref: StorageReference) async -> Bool {

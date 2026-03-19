@@ -293,10 +293,7 @@ class CaptureUploadRepository @Inject constructor(
         }
 
         val completionMarkerIndex = files.indexOfFirst { it.name == "capture_upload_complete.json" }
-        if (completionMarkerIndex >= 0) {
-            val completionMarker = files.removeAt(completionMarkerIndex)
-            files += completionMarker
-        }
+        val completionMarker = if (completionMarkerIndex >= 0) files.removeAt(completionMarkerIndex) else null
 
         val totalBytes = files.sumOf { it.length().coerceAtLeast(1L) }.coerceAtLeast(1L)
         val remotePrefix = item.remotePrefix ?: buildRemotePrefix(
@@ -304,28 +301,10 @@ class CaptureUploadRepository @Inject constructor(
             captureId = item.captureId.ifBlank { item.id },
         )
 
-        // Check if this capture was already fully uploaded (GCS session already finalized).
-        // Firebase Storage will fail with "already finalized" if we re-attempt an upload whose
-        // resumable session was already committed, so bail out early if the completion marker
-        // already exists in storage.
-        val completionMarkerRef = storage.reference.child(remotePrefix + "raw/capture_upload_complete.json")
-        if (fileExistsInStorage(completionMarkerRef)) {
-            updateItemAndEmit(item.id, onItemUpdated) {
-                it.copy(
-                    status = UploadQueueStatus.Registering,
-                    progress = 0.995f,
-                    detail = "Registering capture submission",
-                    remotePrefix = remotePrefix,
-                    uploadCompletedAtEpochMs = it.uploadCompletedAtEpochMs ?: System.currentTimeMillis(),
-                )
-            }
-            return
-        }
-
         updateItemAndEmit(item.id, onItemUpdated) {
             it.copy(
                 status = UploadQueueStatus.Preparing,
-                detail = "Preparing ${files.size} files",
+                detail = "Preparing ${files.size + if (completionMarker != null) 1 else 0} files",
                 remotePrefix = remotePrefix,
                 progress = 0.02f,
             )
@@ -358,6 +337,21 @@ class CaptureUploadRepository @Inject constructor(
                 }
             }
             uploadedBytes += file.length().coerceAtLeast(1L)
+        }
+
+        completionMarker?.let { file ->
+            throwIfCancellationRequested(item.id)
+            val relativePath = file.relativeTo(bundleRoot).invariantSeparatorsPath
+            updateItemAndEmit(item.id, onItemUpdated) {
+                it.copy(
+                    status = UploadQueueStatus.Uploading,
+                    detail = "Uploading $relativePath",
+                    remotePrefix = remotePrefix,
+                )
+            }
+
+            val storageRef = storage.reference.child(remotePrefix + relativePath)
+            uploadCompletionMarker(storageRef, file)
         }
 
         updateItemAndEmit(item.id, onItemUpdated) {
@@ -436,12 +430,54 @@ class CaptureUploadRepository @Inject constructor(
         )
     }
 
-    private suspend fun fileExistsInStorage(ref: StorageReference): Boolean =
-        suspendCancellableCoroutine { continuation ->
-            ref.metadata
-                .addOnSuccessListener { continuation.resume(true) }
-                .addOnFailureListener { continuation.resume(false) }
+    private suspend fun uploadCompletionMarker(
+        storageReference: StorageReference,
+        file: File,
+    ) {
+        suspendCancellableCoroutine<Unit> { continuation ->
+            val uploadTask = storageReference.putBytes(
+                file.readBytes(),
+                StorageMetadata.Builder()
+                    .setContentType("application/json")
+                    .build(),
+            )
+
+            uploadTask.addOnSuccessListener {
+                if (continuation.isActive) {
+                    continuation.resume(Unit)
+                }
+            }
+            uploadTask.addOnFailureListener { error ->
+                if (!continuation.isActive) {
+                    return@addOnFailureListener
+                }
+                if (CaptureUploadErrorClassifier.isAlreadyFinalized(error)) {
+                    storageReference.metadata
+                        .addOnSuccessListener {
+                            if (continuation.isActive) {
+                                continuation.resume(Unit)
+                            }
+                        }
+                        .addOnFailureListener {
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(error)
+                            }
+                        }
+                } else {
+                    continuation.resumeWithException(error)
+                }
+            }
+            uploadTask.addOnCanceledListener {
+                if (continuation.isActive) {
+                    continuation.cancel(CancellationException("Upload cancelled"))
+                }
+            }
+
+            continuation.invokeOnCancellation {
+                uploadTask.cancel()
+            }
         }
+    }
 
     private suspend fun uploadFile(
         storageReference: StorageReference,
