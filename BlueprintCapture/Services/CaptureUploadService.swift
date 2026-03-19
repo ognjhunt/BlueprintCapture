@@ -452,36 +452,50 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
             metadata.customMetadata = custom
 
-            let uploadTask = ref.putFile(from: packageURL, metadata: metadata)
+            var uploadError: Error?
+            var progressHandle: String?
+            var finishUpload: (() -> Void)?
+            let uploadTask = ref.putFile(from: packageURL, metadata: metadata) { _, error in
+                uploadError = error
+                finishUpload?()
+            }
             setActiveTransferCancellationHandler(for: id, attempt: attempt) {
                 uploadTask.cancel()
             }
 
             // Observe progress
-            let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+            progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
                 guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
                 let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
                 self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
             }
 
-            // Await completion
-            var uploadSucceeded = false
+            // Await completion using the upload completion callback. Firebase Storage can emit
+            // an "already finalized" failure after the object has already been committed.
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let successHandle = uploadTask.observe(.success) { _ in
-                    uploadSucceeded = true
+                var resumed = false
+                let resumeOnce = {
+                    guard !resumed else { return }
+                    resumed = true
                     continuation.resume()
                 }
-
-                let failureHandle = uploadTask.observe(.failure) { _ in
-                    continuation.resume()
+                finishUpload = resumeOnce
+                if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
+                    resumeOnce()
                 }
-
-                // Keep observers alive until continuation resumes
-                _ = (progressHandle, successHandle, failureHandle)
+            }
+            if let progressHandle {
+                uploadTask.removeObserver(withHandle: progressHandle)
             }
             clearActiveTransferCancellationHandler(for: id, attempt: attempt)
 
             guard isCurrentAttempt(id: id, attempt: attempt) else { return }
+            let uploadSucceeded: Bool
+            if let uploadError {
+                uploadSucceeded = await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
+            } else {
+                uploadSucceeded = true
+            }
             if uploadSucceeded {
                 markUploadCompleted(id: id, attempt: attempt)
                 print("✅ [UploadService] Upload finished id=\(id)")
@@ -566,9 +580,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         // to a path whose resumable session was already committed, so bail out early if the
         // completion marker already exists in storage.
         let completionMarkerRef = storage.reference(withPath: remoteBasePath + "capture_upload_complete.json")
-        let alreadyUploaded = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-            completionMarkerRef.getMetadata { _, error in cont.resume(returning: error == nil) }
-        }
+        let alreadyUploaded = await fileExistsInStorage(completionMarkerRef)
         if alreadyUploaded {
             print("✅ [UploadService] Capture already uploaded (completion marker found), treating as success id=\(id)")
             markUploadCompleted(id: id, attempt: attempt)
@@ -596,39 +608,55 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             if let r = request.metadata.reservationId { custom["reservationId"] = r }
             md.customMetadata = custom
 
-            let uploadTask = ref.putFile(from: file, metadata: md)
+            var uploadError: Error?
+            var progressHandle: String?
+            var finishUpload: (() -> Void)?
+            let uploadTask = ref.putFile(from: file, metadata: md) { _, error in
+                uploadError = error
+                finishUpload?()
+            }
             setActiveTransferCancellationHandler(for: id, attempt: attempt) {
                 uploadTask.cancel()
             }
 
-            var fileUploaded = false
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
+                progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
                     guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
                     let completed = snapshot.progress?.completedUnitCount ?? 0
                     let fraction = Double(uploadedBytes + completed) / Double(max(1, totalBytes))
                     self.subject.send(.progress(id: id, progress: min(max(fraction, 0.0), 0.999)))
                 }
-                let successHandle = uploadTask.observe(.success) { _ in
-                    let completed = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
-                    uploadedBytes += completed
-                    fileUploaded = true
+                var resumed = false
+                let resumeOnce = {
+                    guard !resumed else { return }
+                    resumed = true
                     continuation.resume()
                 }
-                let failureHandle = uploadTask.observe(.failure) { _ in
-                    continuation.resume()
+                finishUpload = resumeOnce
+                if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
+                    resumeOnce()
                 }
-                _ = (progressHandle, successHandle, failureHandle)
+            }
+            if let progressHandle {
+                uploadTask.removeObserver(withHandle: progressHandle)
             }
             clearActiveTransferCancellationHandler(for: id, attempt: attempt)
 
             guard isCurrentAttempt(id: id, attempt: attempt) else { return false }
             if Task.isCancelled { return false }
 
+            let fileUploaded: Bool
+            if let uploadError {
+                fileUploaded = await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
+            } else {
+                fileUploaded = true
+            }
             if !fileUploaded {
                 markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
                 return false
             }
+            let completed = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize).map { Int64($0) } ?? 0
+            uploadedBytes += completed
         }
 
         markUploadCompleted(id: id, attempt: attempt)
@@ -687,6 +715,23 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private func makeBaseDirectoryPath(for request: CaptureUploadRequest) -> String {
         return CaptureBundleContext.rawBasePath(for: request)
     }
+
+    private func fileExistsInStorage(_ ref: StorageReference) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            ref.getMetadata { _, error in
+                cont.resume(returning: error == nil)
+            }
+        }
+    }
+
+    private func shouldTreatUploadErrorAsSuccess(_ error: Error, for ref: StorageReference) async -> Bool {
+        guard CaptureUploadErrorClassifier.isAlreadyFinalized(error),
+              await fileExistsInStorage(ref) else {
+            return false
+        }
+        print("⚠️ [UploadService] Storage reported an already-finalized upload for \(ref.fullPath); treating as success")
+        return true
+    }
     #endif
 
     private func isCurrentAttempt(id: UUID, attempt: UUID) -> Bool {
@@ -732,5 +777,35 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.uploads[id] = failingRecord
             self.subject.send(.failed(failingRecord.request, error))
         }
+    }
+}
+
+enum CaptureUploadErrorClassifier {
+    static func isAlreadyFinalized(_ error: Error) -> Bool {
+        errorMessages(from: error).contains { message in
+            let normalized = message.lowercased()
+            return normalized.contains("already been finalized") || normalized.contains("already finalized")
+        }
+    }
+
+    private static func errorMessages(from error: Error) -> [String] {
+        let nsError = error as NSError
+        var messages: [String] = [nsError.localizedDescription]
+
+        if let failureReason = nsError.userInfo[NSLocalizedFailureReasonErrorKey] as? String {
+            messages.append(failureReason)
+        }
+        if let recoverySuggestion = nsError.userInfo[NSLocalizedRecoverySuggestionErrorKey] as? String {
+            messages.append(recoverySuggestion)
+        }
+        if let payload = nsError.userInfo["data"] as? Data,
+           let body = String(data: payload, encoding: .utf8) {
+            messages.append(body)
+        }
+        if let underlyingError = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            messages.append(contentsOf: errorMessages(from: underlyingError))
+        }
+
+        return messages
     }
 }

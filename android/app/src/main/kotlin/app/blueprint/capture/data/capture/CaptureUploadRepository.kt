@@ -465,7 +465,22 @@ class CaptureUploadRepository @Inject constructor(
                 }
             }
             uploadTask.addOnFailureListener { error ->
-                if (continuation.isActive) {
+                if (!continuation.isActive) {
+                    return@addOnFailureListener
+                }
+                if (CaptureUploadErrorClassifier.isAlreadyFinalized(error)) {
+                    storageReference.metadata
+                        .addOnSuccessListener {
+                            if (continuation.isActive) {
+                                continuation.resume(Unit)
+                            }
+                        }
+                        .addOnFailureListener {
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(error)
+                            }
+                        }
+                } else if (continuation.isActive) {
                     continuation.resumeWithException(error)
                 }
             }
