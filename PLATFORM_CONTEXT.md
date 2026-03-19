@@ -27,28 +27,30 @@ This platform is qualification-first.
 ### Product Stack
 
 1. primary product: qualification record / readiness decision / buyer-safe evidence bundle
-2. secondary product: privacy-safe preview generation and marketplace routing
-3. third product: scene memory / hosted runtime prep / deeper evaluation packages
+2. secondary product: site-specific world models grounded in captured locations for preview, simulation, and hosted demos
+3. third product: fallback provider previews, hosted runtime prep, and deeper evaluation packages
 4. fourth product: managed tuning, training data, licensing, and deployment support
 <!-- SHARED_PLATFORM_CONTEXT_END -->
 
-This repo is the capture-layer producer of the raw evidence contract.
+This repo is the authoritative middle of the product.
 
 ## What This Repo Owns
 
-`BlueprintCapture` owns:
+`BlueprintCapturePipeline` turns a finalized capture bundle into:
 
-- guided capture on iPhone and Meta glasses
-- capture coaching during recording
-- bundle finalization and upload
-- preservation of ARKit, motion, timing, and depth evidence when available
-- capture-side intake, task context, rights, and payout eligibility inputs
+- qualification artifacts and readiness decisions
+- buyer trust, rights/compliance, and recapture outputs
+- privacy-safe walkthrough media via on-demand GPU privacy services (SAM3, VIP)
+- internal world-model conditioning substrates and optional site-memory / evaluation artifacts
+- World Labs request, operation, and world manifests when fallback preview is requested
+- optional scene-memory and evaluation/runtime-prep artifacts when those lanes are explicitly requested
+- enforced sync back into `Blueprint-WebApp` with a durable `webapp_sync_result.json` artifact
 
-This repo does not decide qualification, readiness, rights approval, or hosted runtime launchability.
+Today, this repo is not only a qualification engine. It is the production bridge from capture evidence through privacy redaction, internal world-model conditioning, optional fallback provider preview, and automatic web app surfacing.
 
-## Canonical Output
+## Upstream Contract
 
-The app uploads the canonical raw bundle:
+The canonical upstream contract is the raw bundle uploaded by `BlueprintCapture`:
 
 ```text
 scenes/{scene_id}/captures/{capture_id}/raw/
@@ -62,53 +64,93 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   arkit/...
 ```
 
-The cloud bridge then materializes:
+Compatible triggers the repo accepts today:
 
-```text
-scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
-scenes/{scene_id}/captures/{capture_id}/qa_report.json
-scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
-```
+- bridge-produced Pub/Sub handoff payloads on `blueprint-capture-pipeline-handoff` (primary path in cloud mode)
+- materialized `capture_descriptor.json`
+- raw upload completion via `raw/capture_upload_complete.json` (storage trigger, secondary; standdown when bridge handoff is primary)
 
-and publishes the handoff to the `blueprint-capture-pipeline-handoff` Pub/Sub topic, which triggers the pipeline Cloud Run job.
+## Default Runtime Behavior
 
-## Current Default Product Behavior
+Product direction:
 
-The current phone and glasses flows request:
+- the end goal is a site-specific SWM-style world model grounded in Blueprint capture evidence and surfaced through the web app
+- World Labs is a fallback / bridge provider for preview generation, not the long-term product truth
 
-- `qualification`
-- `preview_simulation`
-- `deeper_evaluation` (automatically co-requested whenever `preview_simulation` is present)
+Current shipped runtime behavior:
 
-That means the default product intent today is:
+1. materialize the bundle and descriptor
+2. run qualification and capture-fidelity analysis (Gemini fidelity review included)
+3. call the SAM3 GPU service to detect and remove people; VIP inpaints the removed regions
+4. preserve ARKit depth when present, otherwise generate depth conditioning
+5. prepare internal world-model conditioning inputs and retrieval/geometry substrates
+6. when fallback preview is requested, prepare World Labs-compliant privacy-safe video input and submit/poll World Labs Marble 0.1-mini
+7. write preview manifests and sync artifact URIs into the web app (fail-closed, up to 5 retries when sync is required)
 
-- upload evidence for qualification
-- trigger privacy redaction (SAM3/VIP) and World Labs Marble world generation
-- prepare evaluation artifacts for hosted-runtime readiness
+Important boundaries:
 
-Every capture from either device goes through the full pipeline end-to-end: qualification → GPU privacy → World Labs → automatic web app surfacing.
+- `preview_simulation` currently maps most directly to provider-preview behavior, and it is not automatically normalized into `deeper_evaluation` by this repo's lane-routing code
+- hosted/runtime launch artifacts come from `scene_memory` and especially `evaluation_prep`
+- the internal retrieval-memory / alignment / splat-or-Cosmos synthesis path is the intended native direction, but today it remains opt-in / partial rather than the default production preview path
 
-## Important Boundary
+## Downstream Outputs
 
-This repo should be understood as:
+The main outputs this repo writes today are:
 
-- the producer of evidence and capture-side metadata
-- not the producer of hosted runtime artifacts
-- not the producer of `evaluation_prep/site_world_spec.json`
-- not the source of truth for readiness or buyer-visible launch state
+- qualification summaries and readiness decisions
+- buyer trust, capture quality, and rights/compliance summaries
+- privacy manifests, verification reports, privacy-safe walkthrough media, and depth manifests
+- internal retrieval-memory, geometry, and synthesis-conditioning artifacts when those lanes run
+- provider run manifests and preview manifests
+- World Labs request / operation / world manifests
+- `webapp_sync_result.json` — durable record of the sync attempt, status, and response
+- optional `scene_memory/*`
+- optional `evaluation_prep/*` including `site_world_spec.json`, `site_world_registration.json`, and `site_world_health.json`
 
-## Upload And Trigger Model
+## WebApp Boundary
 
-The upload service finalizes the bundle and writes the completion marker as part of the raw upload layout.
+This repo can push pipeline attachment metadata into `Blueprint-WebApp` through the internal sync endpoint.
 
-Downstream systems pick up the capture through the bridge-produced handoff on `blueprint-capture-pipeline-handoff` (primary). The storage trigger also routes raw upload completions to the same topic as a secondary path, so both flows converge on the same pipeline dispatcher.
+That sync is currently:
+
+- authenticated by shared token
+- enforced: `PIPELINE_SYNC_REQUIRED=true` means sync failure blocks pipeline completion
+- retried up to 5 times with 1000ms backoff before failing
+
+Pipeline completion is gated on successful WebApp attachment sync.
+
+## Operational Reality
+
+What is implemented and live today:
+
+- qualification with Gemini fidelity review
+- on-demand GPU privacy redaction via Cloud Run services (`sam3-detect`, `vip-inpaint`, `deepprivacy2-anonymize`) — idle at zero cost, spin up only during pipeline runs
+- World Labs Marble 0.1-mini fallback preview generation from privacy-safe video
+- automatic public site-world surfacing in the web app on every successful run, usually via attached pipeline/provider artifacts
+- optional hosted-runtime prep in deeper lanes (`scene_memory`, `evaluation_prep`)
+- retrieval-memory, frame-alignment, and splat/Cosmos validation lanes exist in-repo, but they are opt-in and not the default preview product
+- non-ARKit geometry staging exists for glasses / Android style captures via `video_to_world`, but it still depends on live GPU services and is not equivalent to a shipped site-faithful SWM runtime
+- iPhone LiDAR remains the strongest and most complete path in-repo; glasses remain internal-experimental for site-faithful world-model claims, Android is contract-supported but not yet covered by a dedicated alpha-readiness profile in this repo
+- local raw-bundle materialization is not fully caught up to the newer Capture-side sidecars / modality variants, so bridge-produced descriptors are the more faithful upstream handoff today
+
+What is not guaranteed by the default preview lane:
+
+- native site-specific SWM-style runtime output
+- runtime launchability
+- `site_world_spec.json`
+- `site_world_registration.json`
+- `site_world_health.json`
+- zero-shot Cosmos execution
+- WebApp-hosted internal SWM-style demo output from the retrieval/synthesis lanes
+
+Those belong to `evaluation_prep`, not to preview alone.
 
 ## Practical Rule For Agents In This Repo
 
 When changing this repo, optimize for:
 
-1. correct raw-bundle structure
-2. conservative rights and consent defaults
-3. preserving real sensor evidence instead of inferring it
-4. ensuring upload completion means the raw contract is truly ready
-5. keeping preview/runtime expectations out of the capture UX unless those downstream lanes are actually requested
+1. grounded qualification outputs
+2. fail-closed privacy behavior
+3. explicit separation between preview generation and hosted-runtime prep
+4. durable WebApp handoff records
+5. optional downstream lanes that never rewrite qualification truth

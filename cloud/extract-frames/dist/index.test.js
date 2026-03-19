@@ -143,15 +143,25 @@ test("buildWorldlabsPreviewFields reserves worldlabs uris when preview is reques
 test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest shape", () => {
     const merged = mergeManifestWithSidecars({
         scene_id: "scene-1",
-        capture_source: "android_phone",
+        capture_source: "android",
     }, {
         siteIdentity: { site_id: "site-123", site_id_source: "site_submission" },
         captureTopology: { capture_session_id: "sess-1", pass_id: "pass-1" },
         captureMode: { requested_mode: "site_world_candidate", resolved_mode: "site_world_candidate" },
+        routeAnchors: {
+            schema_version: "v1",
+            route_anchors: [{ anchor_id: "anchor_entry", anchor_type: "entry" }],
+        },
+        checkpointEvents: {
+            schema_version: "v1",
+            checkpoint_events: [{ anchor_id: "anchor_entry", pass_id: "pass-1", t_capture_sec: 1.0, completed: true }],
+        },
     });
     assert.equal(merged?.site_identity?.site_id, "site-123");
     assert.equal(merged?.capture_topology?.capture_session_id, "sess-1");
     assert.equal(merged?.capture_mode?.requested_mode, "site_world_candidate");
+    assert.equal(merged?.route_anchors?.route_anchors?.[0]?.anchor_id, "anchor_entry");
+    assert.equal(merged?.checkpoint_events?.checkpoint_events?.[0]?.anchor_id, "anchor_entry");
 });
 test("canonicalWorldModelCandidate defers non-ARKit world model promotion until geometry stage", () => {
     const result = canonicalWorldModelCandidate({
@@ -165,7 +175,7 @@ test("canonicalWorldModelCandidate defers non-ARKit world model promotion until 
         },
         processingProfile: "video_only",
         captureRights: { derived_scene_generation_allowed: true },
-        captureSource: "android_phone",
+        captureSource: "android",
     });
     assert.equal(result.candidate, false);
     assert.ok(result.reasoning.includes("awaiting_geometry_stage:true"));

@@ -111,9 +111,9 @@ test("evaluateQualityGate demotes degraded iPhone capture to tier2", () => {
     assert.equal(result.processingProfile, "video_only");
     assert.ok(result.warnings.includes("insufficient_arkit_alignment_demoted_to_tier2"));
 });
-test("evaluateQualityGate accepts android phone as explicit tier2 video-only capture", () => {
+test("evaluateQualityGate accepts android as explicit tier2 video-only capture", () => {
     const result = evaluateQualityGate({
-        captureSource: "android_phone",
+        captureSource: "android",
         manifestPresent: true,
         manifestValid: true,
         requiredFiles: { walkthrough: true, manifest: true },
@@ -122,7 +122,7 @@ test("evaluateQualityGate accepts android phone as explicit tier2 video-only cap
         p95PoseDeltaSec: null,
     });
     assert.equal(result.status, "passed");
-    assert.equal(result.captureTier, "tier2_android_phone");
+    assert.equal(result.captureTier, "tier2_android");
     assert.equal(result.processingProfile, "video_only");
     assert.equal(result.warnings.includes("unknown_capture_source_defaulted_to_tier2"), false);
 });

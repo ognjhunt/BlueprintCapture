@@ -220,6 +220,8 @@ export function mergeManifestWithSidecars(
     siteIdentity?: Record<string, unknown> | null;
     captureTopology?: Record<string, unknown> | null;
     captureMode?: Record<string, unknown> | null;
+    routeAnchors?: Record<string, unknown> | null;
+    checkpointEvents?: Record<string, unknown> | null;
   }
 ): Record<string, unknown> | null {
   const base = asRecord(manifest) || {};
@@ -228,6 +230,8 @@ export function mergeManifestWithSidecars(
     site_identity: asRecord(base.site_identity) || sidecars.siteIdentity || null,
     capture_topology: asRecord(base.capture_topology) || sidecars.captureTopology || null,
     capture_mode: asRecord(base.capture_mode) || sidecars.captureMode || null,
+    route_anchors: asRecord(base.route_anchors) || sidecars.routeAnchors || null,
+    checkpoint_events: asRecord(base.checkpoint_events) || sidecars.checkpointEvents || null,
   };
 }
 
@@ -545,6 +549,51 @@ function normalizedCaptureTopology(manifest: Record<string, unknown> | null): Re
     intended_pass_role: asString(raw.intended_pass_role) ?? "primary",
     entry_anchor_id: asString(raw.entry_anchor_id) ?? null,
     return_anchor_id: asString(raw.return_anchor_id) ?? null,
+    entry_anchor_t_capture_sec:
+      typeof raw.entry_anchor_t_capture_sec === "number" ? raw.entry_anchor_t_capture_sec : null,
+    entry_anchor_hold_duration_sec:
+      typeof raw.entry_anchor_hold_duration_sec === "number" ? raw.entry_anchor_hold_duration_sec : null,
+  };
+}
+
+function normalizedRouteAnchors(manifest: Record<string, unknown> | null): Record<string, unknown> | null {
+  const raw = asRecord(manifest?.route_anchors);
+  if (!raw) return null;
+  const routeAnchors = Array.isArray(raw.route_anchors)
+    ? raw.route_anchors
+        .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+        .map((item) => ({
+          anchor_id: asString(item.anchor_id) ?? null,
+          anchor_type: asString(item.anchor_type) ?? null,
+          label: asString(item.label) ?? null,
+          expected_observation: asString(item.expected_observation) ?? null,
+          required_in_primary_pass: item.required_in_primary_pass === true,
+          required_in_revisit_pass: item.required_in_revisit_pass === true,
+        }))
+    : [];
+  return {
+    schema_version: asString(raw.schema_version) ?? "v1",
+    route_anchors: routeAnchors,
+  };
+}
+
+function normalizedCheckpointEvents(manifest: Record<string, unknown> | null): Record<string, unknown> | null {
+  const raw = asRecord(manifest?.checkpoint_events);
+  if (!raw) return null;
+  const checkpointEvents = Array.isArray(raw.checkpoint_events)
+    ? raw.checkpoint_events
+        .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+        .map((item) => ({
+          anchor_id: asString(item.anchor_id) ?? null,
+          pass_id: asString(item.pass_id) ?? null,
+          t_capture_sec: typeof item.t_capture_sec === "number" ? item.t_capture_sec : null,
+          hold_duration_sec: typeof item.hold_duration_sec === "number" ? item.hold_duration_sec : null,
+          completed: item.completed === true,
+        }))
+    : [];
+  return {
+    schema_version: asString(raw.schema_version) ?? "v1",
+    checkpoint_events: checkpointEvents,
   };
 }
 
@@ -771,6 +820,8 @@ export const extractFrames = onObjectFinalized(
     const siteIdentityObjectName = `${pathInfo.rawPrefix}/site_identity.json`;
     const captureTopologyObjectName = `${pathInfo.rawPrefix}/capture_topology.json`;
     const captureModeObjectName = `${pathInfo.rawPrefix}/capture_mode.json`;
+    const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
+    const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
     const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
     const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
@@ -779,10 +830,14 @@ export const extractFrames = onObjectFinalized(
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
     const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
     const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
+    const sidecarRouteAnchors = await loadJsonObject(bucket, routeAnchorsObjectName, tmp);
+    const sidecarCheckpointEvents = await loadJsonObject(bucket, checkpointEventsObjectName, tmp);
     const manifest = mergeManifestWithSidecars(rawManifest, {
       siteIdentity: sidecarSiteIdentity,
       captureTopology: sidecarCaptureTopology,
       captureMode: sidecarCaptureMode,
+      routeAnchors: sidecarRouteAnchors,
+      checkpointEvents: sidecarCheckpointEvents,
     });
     const completionMarker =
       objectKind === "completion_marker"
@@ -1006,6 +1061,8 @@ export const extractFrames = onObjectFinalized(
     const captureRights = normalizedCaptureRights(manifest);
     const siteIdentity = normalizedSiteIdentity(manifest);
     const captureTopology = normalizedCaptureTopology(manifest);
+    const routeAnchors = normalizedRouteAnchors(manifest);
+    const checkpointEvents = normalizedCheckpointEvents(manifest);
     // worldModelCandidate is computed AFTER actualAvailability is known (see below).
     const routing = deriveRequestedRouting(manifest);
     const taskSiteContext = buildTaskSiteContext(manifest);
@@ -1124,6 +1181,8 @@ export const extractFrames = onObjectFinalized(
       capture_rights: captureRights,
       site_identity: siteIdentity,
       capture_topology: captureTopology,
+      route_anchors: routeAnchors,
+      checkpoint_events: checkpointEvents,
       capture_mode: captureMode,
       geometry_source: null,
       geometry_ready: false,
@@ -1139,6 +1198,15 @@ export const extractFrames = onObjectFinalized(
         required_spatial_conditioning: ["arkit_poses", "arkit_intrinsics"],
       },
       requested_lanes: routing.requestedLanes,
+      metadata: {
+        scene_memory_capture: sceneMemoryCapture,
+        capture_rights: captureRights,
+        site_identity: siteIdentity,
+        capture_topology: captureTopology,
+        route_anchors: routeAnchors,
+        checkpoint_events: checkpointEvents,
+        capture_mode: captureMode,
+      },
       ...worldlabsPreview,
       generated_at: new Date().toISOString(),
     };

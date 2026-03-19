@@ -194,12 +194,22 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
       siteIdentity: { site_id: "site-123", site_id_source: "site_submission" },
       captureTopology: { capture_session_id: "sess-1", pass_id: "pass-1" },
       captureMode: { requested_mode: "site_world_candidate", resolved_mode: "site_world_candidate" },
+      routeAnchors: {
+        schema_version: "v1",
+        route_anchors: [{ anchor_id: "anchor_entry", anchor_type: "entry" }],
+      },
+      checkpointEvents: {
+        schema_version: "v1",
+        checkpoint_events: [{ anchor_id: "anchor_entry", pass_id: "pass-1", t_capture_sec: 1.0, completed: true }],
+      },
     },
   );
 
   assert.equal((merged as any)?.site_identity?.site_id, "site-123");
   assert.equal((merged as any)?.capture_topology?.capture_session_id, "sess-1");
   assert.equal((merged as any)?.capture_mode?.requested_mode, "site_world_candidate");
+  assert.equal((merged as any)?.route_anchors?.route_anchors?.[0]?.anchor_id, "anchor_entry");
+  assert.equal((merged as any)?.checkpoint_events?.checkpoint_events?.[0]?.anchor_id, "anchor_entry");
 });
 
 test("canonicalWorldModelCandidate defers non-ARKit world model promotion until geometry stage", () => {
