@@ -60,7 +60,10 @@ struct CaptureBundleAndInferenceTests {
                 permissionDocumentURI: "https://example.com/permission.pdf",
                 consentScope: ["Sales floor", "Entry"],
                 consentNotes: ["Site owner approved downstream preview generation"]
-            )
+            ),
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         )
         let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
 
@@ -190,7 +193,10 @@ struct CaptureBundleAndInferenceTests {
             evidenceTier: nil,
             captureContextHint: nil,
             sceneMemory: SceneMemoryCaptureMetadata(continuityScore: 0.9),
-            captureRights: nil
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         )).withManualIntake(QualificationIntakePacket(
             workflowName: "Inbound walk",
             taskSteps: ["Enter aisle", "Walk route"],
@@ -256,7 +262,10 @@ struct CaptureBundleAndInferenceTests {
             evidenceTier: nil,
             captureContextHint: nil,
             sceneMemory: nil,
-            captureRights: nil
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -297,7 +306,10 @@ struct CaptureBundleAndInferenceTests {
             evidenceTier: nil,
             captureContextHint: "Test capture",
             sceneMemory: nil,
-            captureRights: nil
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -341,7 +353,10 @@ struct CaptureBundleAndInferenceTests {
             evidenceTier: nil,
             captureContextHint: "Packing area",
             sceneMemory: nil,
-            captureRights: nil
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         ))
 
         let outcome = await service.resolve(request: request)
@@ -474,7 +489,10 @@ struct CaptureBundleAndInferenceTests {
             evidenceTier: nil,
             captureContextHint: "Packing area",
             sceneMemory: nil,
-            captureRights: nil
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
         ))
 
         let service = CaptureIntakeInferenceService(

@@ -9,6 +9,8 @@ struct CaptureSessionView: View {
     @ObservedObject private var captureManager: VideoCaptureManager
     @State private var didAutoStart = false
     @State private var isEnding = false
+    @State private var isShowingPostCaptureSummary = false
+    @State private var dismissCaptureFlowAfterUploadStarts = false
     @State private var captureNotes = ""
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
@@ -121,14 +123,23 @@ struct CaptureSessionView: View {
             case .finished(let artifacts):
                 viewModel.handleRecordingFinished(artifacts: artifacts, targetId: targetId, reservationId: reservationId)
                 isEnding = false
+                isShowingPostCaptureSummary = true
             case .idle:
                 isEnding = false
+                isShowingPostCaptureSummary = false
             case .error:
                 isEnding = false
                 didAutoStart = false
+                isShowingPostCaptureSummary = false
             default:
                 break
             }
+        }
+        .onChange(of: viewModel.pendingCaptureRequest) { _, pendingRequest in
+            guard dismissCaptureFlowAfterUploadStarts, pendingRequest == nil else { return }
+            dismissCaptureFlowAfterUploadStarts = false
+            isShowingPostCaptureSummary = false
+            dismissAfterQueueingUpload()
         }
         .onChange(of: captureManager.qualityMonitor.steadiness) { oldValue, newValue in
             if oldValue != newValue {
@@ -145,22 +156,22 @@ struct CaptureSessionView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { captureManager.captureState.isFinished },
-            set: { if !$0 { completeAndDismiss() } }
-        )) {
+        .fullScreenCover(isPresented: $isShowingPostCaptureSummary) {
             let monitor = captureManager.qualityMonitor
             PostCaptureSummaryView(
                 duration: monitor.elapsedSeconds,
                 estimatedDataSizeMB: monitor.estimatedDataSizeMB,
                 spaceTitle: viewModel.currentTargetInfo?.name ?? viewModel.pendingCaptureTargetName ?? "Capture complete",
                 spaceAddress: viewModel.currentAddress,
+                actionState: viewModel.finishedCaptureActionState,
                 onUploadNow: {
                     viewModel.updatePendingCaptureNotes(captureNotes)
+                    dismissCaptureFlowAfterUploadStarts = true
                     viewModel.startPendingCaptureUpload()
                 },
                 onUploadLater: {
                     viewModel.updatePendingCaptureNotes(captureNotes)
+                    isShowingPostCaptureSummary = false
                     completeAndDismiss()
                 },
                 onExport: {
@@ -169,6 +180,7 @@ struct CaptureSessionView: View {
                 },
                 userNotes: $captureNotes
             )
+            .interactiveDismissDisabled(true)
             .sheet(item: $viewModel.shareSheetItem) { shareItem in
                 ShareSheet(items: [shareItem.url])
             }
@@ -371,6 +383,12 @@ struct CaptureSessionView: View {
     private func completeAndDismiss() {
         captureManager.stopSession()
         viewModel.clearFinishedCapture()
+        viewModel.step = .confirmLocation
+        dismiss()
+    }
+
+    private func dismissAfterQueueingUpload() {
+        captureManager.stopSession()
         viewModel.step = .confirmLocation
         dismiss()
     }

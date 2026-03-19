@@ -5,6 +5,7 @@ struct PostCaptureSummaryView: View {
     let estimatedDataSizeMB: Double
     let spaceTitle: String
     let spaceAddress: String?
+    let actionState: CaptureFlowViewModel.FinishedCaptureActionState
     let onUploadNow: () -> Void
     let onUploadLater: () -> Void
     let onExport: () -> Void
@@ -60,25 +61,60 @@ struct PostCaptureSummaryView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
 
+                    if let statusMessage {
+                        HStack(spacing: 10) {
+                            if isBusy {
+                                ProgressView()
+                                    .tint(Color(red: 0.22, green: 0.9, blue: 0.78))
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                            }
+
+                            Text(statusMessage)
+                                .font(.subheadline)
+                                .foregroundStyle(isBusy ? .white : .red.opacity(0.95))
+
+                            Spacer()
+                        }
+                        .padding(14)
+                        .background(backgroundTone, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                    }
+
                     // ── CTAs ─────────────────────────────────────────────
                     VStack(spacing: 10) {
                         // Primary — Upload
                         Button(action: onUploadNow) {
-                            Text("Upload")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 17)
-                                .background(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            HStack(spacing: 10) {
+                                if isPreparingUpload {
+                                    ProgressView()
+                                        .tint(.black)
+                                }
+                                Text(isPreparingUpload ? "Preparing upload…" : "Upload")
+                                    .font(.system(size: 17, weight: .semibold))
+                            }
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 17)
+                            .background(.white.opacity(isBusy ? 0.75 : 1.0))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                         }
+                        .disabled(isBusy)
+                        .accessibilityIdentifier("post-capture-upload")
 
                         // Secondary — Export / AirDrop
                         Button(action: onExport) {
                             HStack(spacing: 8) {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Text("Export bundle")
+                                if isExporting {
+                                    ProgressView()
+                                        .tint(.white)
+                                } else {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 15, weight: .semibold))
+                                }
+                                Text(isExporting ? "Preparing export…" : "Export bundle")
                                     .font(.system(size: 16, weight: .semibold))
                             }
                             .foregroundStyle(.white)
@@ -91,6 +127,8 @@ struct PostCaptureSummaryView: View {
                                     .stroke(Color(white: 0.2), lineWidth: 1)
                             )
                         }
+                        .disabled(isBusy)
+                        .accessibilityIdentifier("post-capture-export")
 
                         // Tertiary — save for later
                         Button(action: onUploadLater) {
@@ -98,6 +136,8 @@ struct PostCaptureSummaryView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(Color(white: 0.4))
                         }
+                        .disabled(isBusy)
+                        .accessibilityIdentifier("post-capture-save-later")
                         .padding(.top, 4)
                     }
                     .padding(.horizontal, 20)
@@ -141,6 +181,42 @@ struct PostCaptureSummaryView: View {
         }
         return String(format: "%.1f GB", estimatedDataSizeMB / 1024)
     }
+
+    private var isPreparingUpload: Bool {
+        if case .generatingIntake = actionState { return true }
+        return false
+    }
+
+    private var isExporting: Bool {
+        if case .exporting = actionState { return true }
+        return false
+    }
+
+    private var isBusy: Bool {
+        isPreparingUpload || isExporting
+    }
+
+    private var statusMessage: String? {
+        switch actionState {
+        case .idle:
+            return nil
+        case .generatingIntake:
+            return "Preparing your upload and returning you to the queue…"
+        case .exporting:
+            return "Finalizing the export bundle…"
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var backgroundTone: Color {
+        switch actionState {
+        case .failed:
+            return Color.red.opacity(0.12)
+        default:
+            return Color(white: 0.07)
+        }
+    }
 }
 
 #Preview {
@@ -149,6 +225,7 @@ struct PostCaptureSummaryView: View {
         estimatedDataSizeMB: 103.9,
         spaceTitle: "Current Location",
         spaceAddress: "1005 Crete St, Durham",
+        actionState: .idle,
         onUploadNow: {},
         onUploadLater: {},
         onExport: {},
