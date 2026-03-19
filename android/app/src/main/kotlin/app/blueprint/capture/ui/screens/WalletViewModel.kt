@@ -56,7 +56,7 @@ class WalletViewModel @Inject constructor(
     private val config = localConfigProvider.current()
     private val isRefreshing = MutableStateFlow(false)
 
-    private val profileFlow = authRepository.authState.flatMapLatest { user ->
+    private val profileFlow = authRepository.registeredAuthState.flatMapLatest { user ->
         contributorProfileRepository.observeProfile(user?.uid)
     }
 

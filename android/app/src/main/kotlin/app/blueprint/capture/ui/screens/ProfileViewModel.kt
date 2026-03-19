@@ -37,8 +37,8 @@ class ProfileViewModel @Inject constructor(
     private val draftState = MutableStateFlow(ProfileUiState())
 
     val uiState: StateFlow<ProfileUiState> = combine(
-        authRepository.authState,
-        authRepository.authState.flatMapLatest { user ->
+        authRepository.registeredAuthState,
+        authRepository.registeredAuthState.flatMapLatest { user ->
             contributorProfileRepository.observeProfile(user?.uid)
         },
         draftState,

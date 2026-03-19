@@ -34,8 +34,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         UserDeviceService.ensureTemporaryUser()
         UserDeviceService.printLocalUser()
 
-        // Start a new app session
-        AppSessionService.shared.startIfNeeded()
+        // Establish a Firebase-backed guest identity so Firestore guest reads/writes
+        // satisfy auth-based security rules before the app session starts.
+        UserDeviceService.ensureAnonymousFirebaseUserIfNeeded {
+            AppSessionService.shared.startIfNeeded()
+        }
         return true
     }
 

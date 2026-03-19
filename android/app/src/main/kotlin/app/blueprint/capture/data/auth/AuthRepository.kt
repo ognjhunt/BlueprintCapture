@@ -14,9 +14,13 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 @Singleton
 class AuthRepository @Inject constructor(
@@ -24,6 +28,8 @@ class AuthRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val firestore: FirebaseFirestore,
 ) {
+    private val repositoryScope = CoroutineScope(Dispatchers.IO)
+
     val authState: Flow<FirebaseUser?> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             trySend(firebaseAuth.currentUser)
@@ -32,6 +38,24 @@ class AuthRepository @Inject constructor(
         trySend(auth.currentUser)
         awaitClose { auth.removeAuthStateListener(listener) }
     }.distinctUntilChanged()
+
+    val registeredAuthState: Flow<FirebaseUser?> = authState
+        .map { user -> user?.takeUnless { it.isAnonymous } }
+        .distinctUntilChanged()
+
+    suspend fun ensureAnonymousSession() {
+        val currentUser = auth.currentUser
+        if (currentUser == null) {
+            val result = auth.signInAnonymously().awaitResult()
+            result.user?.let { user ->
+                bootstrapUserDocument(user, "Guest")
+            }
+            return
+        }
+        if (currentUser.isAnonymous) {
+            bootstrapUserDocument(currentUser, "Guest")
+        }
+    }
 
     suspend fun signIn(email: String, password: String) {
         auth.signInWithEmailAndPassword(email.trim(), password).awaitResult()
@@ -65,6 +89,9 @@ class AuthRepository @Inject constructor(
 
     fun signOut() {
         auth.signOut()
+        repositoryScope.launch {
+            runCatching { ensureAnonymousSession() }
+        }
     }
 
     fun currentUserId(): String? = auth.currentUser?.uid

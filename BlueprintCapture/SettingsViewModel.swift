@@ -43,10 +43,10 @@ class SettingsViewModel: ObservableObject {
     private let stripeService = StripeConnectService.shared
     
     init() {
-        isAuthenticated = Auth.auth().currentUser != nil
+        isAuthenticated = UserDeviceService.hasRegisteredAccount()
         NotificationCenter.default.addObserver(forName: .AuthStateDidChange, object: nil, queue: .main) { [weak self] _ in
             guard let self = self else { return }
-            self.isAuthenticated = Auth.auth().currentUser != nil
+            self.isAuthenticated = UserDeviceService.hasRegisteredAccount()
             Task { await self.loadUserData() }
         }
     }
@@ -57,7 +57,7 @@ class SettingsViewModel: ObservableObject {
         
         do {
             // If not authenticated, load only public-safe defaults and return
-            guard Auth.auth().currentUser != nil else {
+            guard UserDeviceService.hasRegisteredAccount() else {
                 self.profile = .placeholder
                 self.totalEarnings = 0
                 self.pendingPayout = 0
@@ -112,6 +112,7 @@ class SettingsViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             try Auth.auth().signOut()
+            UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
             NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
             await loadUserData()
         } catch {

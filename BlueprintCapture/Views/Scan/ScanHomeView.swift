@@ -606,7 +606,7 @@ struct ScanHomeView: View {
             payoutsReady = false
             return
         }
-        guard Auth.auth().currentUser != nil else { payoutsReady = false; return }
+        guard UserDeviceService.hasRegisteredAccount() else { payoutsReady = false; return }
         do {
             let state = try await StripeConnectService.shared.fetchAccountState()
             payoutsReady = state.isReadyForTransfers

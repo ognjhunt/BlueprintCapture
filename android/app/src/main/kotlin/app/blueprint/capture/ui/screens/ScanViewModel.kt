@@ -67,7 +67,7 @@ class ScanViewModel @Inject constructor(
     private val _alphaAddress = MutableStateFlow("Your current location")
 
     val uiState: StateFlow<ScanUiState> = combine(
-        authRepository.authState.flatMapLatest { user ->
+        authRepository.registeredAuthState.flatMapLatest { user ->
             contributorProfileRepository.observeProfile(user?.uid)
         },
         _userLocation.flatMapLatest { loc ->

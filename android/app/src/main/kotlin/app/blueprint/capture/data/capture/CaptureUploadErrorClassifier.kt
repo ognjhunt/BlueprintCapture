@@ -10,10 +10,10 @@ internal object CaptureUploadErrorClassifier {
     private fun errorMessages(error: Throwable?): Sequence<String> = sequence {
         var current = error
         while (current != null) {
-            current.message?.let(::yield)
+            current.message?.let { yield(it) }
             current.localizedMessage
                 ?.takeUnless { it == current.message }
-                ?.let(::yield)
+                ?.let { yield(it) }
             current = current.cause
         }
     }

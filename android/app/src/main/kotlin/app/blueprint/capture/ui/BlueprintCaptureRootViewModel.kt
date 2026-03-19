@@ -42,7 +42,7 @@ class BlueprintCaptureRootViewModel @Inject constructor(
             sessionPreferences.permissionsCompleted,
             sessionPreferences.glassesSetupCompleted,
         ) { onboarding, authSkip, invite, perms, glasses -> listOf(onboarding, authSkip, invite, perms, glasses) },
-        combine(authRepository.authState, selectedTab, activeCapture, captureUploadRepository.queue) { u, t, c, q -> listOf(u, t, c, q) },
+        combine(authRepository.registeredAuthState, selectedTab, activeCapture, captureUploadRepository.queue) { u, t, c, q -> listOf(u, t, c, q) },
     ) { flags, rest ->
         val onboardingComplete = flags[0] as Boolean
         val authSkipped = flags[1] as Boolean

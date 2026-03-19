@@ -8,6 +8,7 @@
 import Foundation
 import UIKit
 import FirebaseAuth
+import FirebaseFirestore
 
 final class UserDeviceService {
     private static let temporaryUserDefaultsKey = "temporaryUser"
@@ -21,6 +22,38 @@ final class UserDeviceService {
         }
         let user = ensureTemporaryUser()
         return user["tempID"] as? String ?? ""
+    }
+
+    static func hasRegisteredAccount() -> Bool {
+        guard let user = Auth.auth().currentUser else { return false }
+        return !user.isAnonymous
+    }
+
+    static func ensureAnonymousFirebaseUserIfNeeded(onReady: @escaping () -> Void = {}) {
+        if let currentUser = Auth.auth().currentUser {
+            if currentUser.isAnonymous {
+                bootstrapAnonymousUserDocument(for: currentUser, completion: onReady)
+            } else {
+                onReady()
+            }
+            return
+        }
+
+        Auth.auth().signInAnonymously { result, error in
+            if let error {
+                print("⚠️ [Auth] Anonymous sign-in failed: \(error.localizedDescription)")
+                onReady()
+                return
+            }
+            guard let user = result?.user else {
+                onReady()
+                return
+            }
+            bootstrapAnonymousUserDocument(for: user) {
+                NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+                onReady()
+            }
+        }
     }
 
     /// Ensures a temporary local user exists in UserDefaults and returns its document.
@@ -96,6 +129,48 @@ final class UserDeviceService {
         }
     }
 
+    private static func bootstrapAnonymousUserDocument(for user: FirebaseAuth.User, completion: @escaping () -> Void) {
+        let tempUser = ensureTemporaryUser()
+        let userRef = Firestore.firestore().collection("users").document(user.uid)
+        userRef.getDocument { snapshot, error in
+            if let error {
+                print("⚠️ [Auth] Failed to inspect anonymous user document: \(error.localizedDescription)")
+                completion()
+                return
+            }
+
+            var payload: [String: Any] = [
+                "uid": user.uid,
+                "email": "",
+                "name": tempUser["name"] as? String ?? "Guest",
+                "role": "guest",
+                "planType": "guest",
+                "updatedAt": FieldValue.serverTimestamp(),
+                "isAnonymous": true,
+            ]
+
+            if snapshot?.exists != true {
+                payload["createdAt"] = FieldValue.serverTimestamp()
+                payload["stats"] = [
+                    "totalCaptures": 0,
+                    "approvedCaptures": 0,
+                    "avgQuality": 0,
+                    "totalEarnings": 0,
+                    "availableBalance": 0,
+                    "referralEarningsCents": 0,
+                    "referralBonusCents": 0,
+                ]
+            }
+
+            userRef.setData(payload, merge: true) { writeError in
+                if let writeError {
+                    print("⚠️ [Auth] Failed to bootstrap anonymous user document: \(writeError.localizedDescription)")
+                }
+                completion()
+            }
+        }
+    }
+
     /// Mutates stored local user with provided fields.
     static func updateLocalUser(fields: [String: Any]) {
         var current = ensureTemporaryUser()
@@ -131,4 +206,3 @@ final class UserDeviceService {
         UserDefaults.standard.set(current, forKey: temporaryUserDefaultsKey)
     }
 }
-

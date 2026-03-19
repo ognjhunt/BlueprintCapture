@@ -40,10 +40,10 @@ final class WalletViewModel: ObservableObject {
     private var referralListener: ListenerRegistration?
 
     init() {
-        isAuthenticated = Auth.auth().currentUser != nil
+        isAuthenticated = UserDeviceService.hasRegisteredAccount()
         NotificationCenter.default.addObserver(forName: .AuthStateDidChange, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
-            self.isAuthenticated = Auth.auth().currentUser != nil
+            self.isAuthenticated = UserDeviceService.hasRegisteredAccount()
             if self.isAuthenticated {
                 self.attachReferralListener()
             } else {
@@ -58,7 +58,7 @@ final class WalletViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        guard Auth.auth().currentUser != nil else {
+        guard UserDeviceService.hasRegisteredAccount() else {
             totalEarnings = 0
             pendingPayout = 0
             scansCompleted = 0
@@ -104,6 +104,7 @@ final class WalletViewModel: ObservableObject {
     func signOut() async {
         do {
             try Auth.auth().signOut()
+            UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
             NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
         } catch {
             errorMessage = "Sign out failed."
@@ -113,7 +114,8 @@ final class WalletViewModel: ObservableObject {
     // MARK: - Referral earnings listener
 
     private func attachReferralListener() {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid,
+              UserDeviceService.hasRegisteredAccount() else { return }
         detachReferralListener()
         referralListener = Firestore.firestore()
             .collection("users")

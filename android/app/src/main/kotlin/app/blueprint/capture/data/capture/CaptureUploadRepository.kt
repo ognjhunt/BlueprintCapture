@@ -374,7 +374,6 @@ class CaptureUploadRepository @Inject constructor(
             "capture_id" to captureId,
             "scene_id" to sceneId,
             "creator_id" to (item.creatorId ?: "anonymous"),
-            "status" to "submitted",
             "capture_source" to item.captureSource,
             "submitted_at" to Timestamp(Date(submittedAtEpochMs)),
             "created_at" to Timestamp(Date()),
@@ -383,7 +382,6 @@ class CaptureUploadRepository @Inject constructor(
 
         item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
         item.siteSubmissionId?.takeIf(String::isNotBlank)?.let { payload["site_submission_id"] = it }
-        item.quotedPayoutCents?.let { payload["payout_cents"] = it }
         item.captureDurationMs?.let { payload["capture_duration_ms"] = it }
         if (item.requestedOutputs.isNotEmpty()) {
             payload["requested_outputs"] = item.requestedOutputs

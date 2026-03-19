@@ -26,7 +26,8 @@ final class ReferralViewModel: ObservableObject {
     }
 
     func load() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid,
+              UserDeviceService.hasRegisteredAccount() else { return }
 
         isLoading = true
         errorMessage = nil

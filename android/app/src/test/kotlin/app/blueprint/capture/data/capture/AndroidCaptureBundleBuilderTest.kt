@@ -54,7 +54,7 @@ class AndroidCaptureBundleBuilderTest {
         assertThat(context.zone).isEqualTo("Aisle 4")
 
         val hypothesis = json.decodeFromString<TaskHypothesis>(result.hypothesisFile.readText())
-        assertThat(hypothesis.source).isEqualTo("human_manual")
+        assertThat(hypothesis.source).isEqualTo(CaptureIntakeSource.Authoritative)
         assertThat(hypothesis.taskSteps).containsExactly("Enter", "Sweep").inOrder()
     }
 }

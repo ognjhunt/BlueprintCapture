@@ -14,7 +14,8 @@ final class LevelViewModel: ObservableObject {
     @Published var isLoading = false
 
     func load() async {
-        guard let uid = Auth.auth().currentUser?.uid else { return }
+        guard let uid = Auth.auth().currentUser?.uid,
+              UserDeviceService.hasRegisteredAccount() else { return }
         isLoading = true
 
         do {

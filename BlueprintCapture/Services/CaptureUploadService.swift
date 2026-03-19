@@ -685,8 +685,6 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             "scene_id": sceneId,
             "creator_id": request.metadata.creatorId,
             "job_id": request.metadata.jobId,
-            "status": "submitted",
-            "payout_cents": request.metadata.quotedPayoutCents ?? 0,
             "capture_source": request.metadata.captureSource.rawValue,
             "submitted_at": Timestamp(date: request.metadata.uploadedAt ?? Date()),
             "created_at": Timestamp(date: Date())
