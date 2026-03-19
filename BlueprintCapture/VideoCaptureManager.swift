@@ -104,6 +104,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     static let captureSchemaVersion = "2.0.0"
     static let captureSource = "iphone"
     static let captureTierHint = "tier1_iphone"
+    static let depthSnapshotIntervalSeconds: TimeInterval = 1.0
 
     static func deviceTimeSeconds(frameTimestamp: TimeInterval, firstFrameTimestamp: TimeInterval?) -> Double {
         let base = firstFrameTimestamp ?? frameTimestamp
@@ -212,6 +213,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var currentARKitArtifacts: RecordingArtifacts.ARKitArtifacts?
     private var arFrameCount: Int = 0
     private var arFirstFrameTimestamp: TimeInterval?
+    private var lastDepthSnapshotTimestamp: TimeInterval?
     // Entry anchor hold detection state (reset at startRecording)
     private(set) var detectedEntryAnchorHold: EntryAnchorHold?
     private var holdCandidateOrigin: simd_float3?
@@ -1102,14 +1104,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         // Persist a single depth representation per frame to keep raw bundle size bounded.
         // Prefer smoothed depth when available; otherwise fall back to the raw scene depth map.
-        if let depthMap = frame.smoothedDepthMap ?? frame.sceneDepthMap,
+        if let depthSnapshot = frame.depthSnapshot,
            let depthDirectory = arKit.depthDirectoryURL {
             let filename = "\(frameId).png"
             let fileURL = depthDirectory.appendingPathComponent(filename)
             do {
-                try writeDepthPNG(depthMap, to: fileURL)
+                try writeDepthPNG(depthSnapshot, to: fileURL)
                 let relative = relativePath(for: fileURL, relativeTo: artifacts.directoryURL)
-                if frame.smoothedDepthMap != nil {
+                if depthSnapshot.isSmoothed {
                     smoothedDepthFile = relative
                 } else {
                     sceneDepthFile = relative
@@ -1154,8 +1156,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         // Detect relocalization events: camera is in "limited/relocalizing" state.
         let isRelocalization = trackingStateStr == "limited" && trackingReasonStr == "relocalizing"
 
-        // Exposure metadata from the capture device (CVPixelBuffer has no exposure properties).
-        let capturedImage = frame.capturedImage
+        // Exposure metadata from the capture device (the raw pixel buffers are not retained here).
         let exposureDurationS: Double? = videoDevice.map { d in
             let s = d.exposureDuration.seconds
             return s > 0 ? s : nil
@@ -1164,10 +1165,6 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             let v = d.iso
             return v > 0 ? Double(v) : nil
         } ?? nil
-
-        // Sharpness estimate: Laplacian variance of a downsampled luma plane.
-        // Higher = sharper. Runs on a 64×64 thumbnail to keep CPU cost low.
-        let sharpness = Self.laplacianVariance(pixelBuffer: capturedImage)
 
         let entry = ARFrameLogEntry(
             frameIndex: frameIndex,
@@ -1185,7 +1182,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             relocalizationEvent: isRelocalization,
             exposureDurationS: exposureDurationS,
             iso: isoValue,
-            sharpnessScore: sharpness,
+            sharpnessScore: frame.sharpnessScore,
             anchorObservations: anchorObservations
         )
 
@@ -1334,9 +1331,15 @@ extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
 }
 
 // Snapshot of all data needed from an ARFrame extracted synchronously on the delegate callback
-// thread. Passing this struct to arDataQueue instead of the ARFrame itself ensures ARFrames are
-// released immediately after each delegate callback, preventing the "retaining N ARFrames" error
-// that causes ARKit to stop delivering camera images mid-recording.
+// thread. Passing only plain values to arDataQueue avoids retaining ARFrame-backed pixel buffers
+// across queue hops, which triggers the "retaining N ARFrames" warning and can stall capture.
+private struct DepthFrameSnapshot {
+    let width: Int
+    let height: Int
+    let millimeters: [UInt16]
+    let isSmoothed: Bool
+}
+
 private struct ARFrameData {
     let transform: simd_float4x4
     let intrinsics: simd_float3x3
@@ -1344,22 +1347,22 @@ private struct ARFrameData {
     let timestamp: TimeInterval
     let trackingState: ARCamera.TrackingState
     let worldMappingStatus: ARFrame.WorldMappingStatus
-    let capturedImage: CVPixelBuffer
-    let sceneDepthMap: CVPixelBuffer?
-    let smoothedDepthMap: CVPixelBuffer?
-    let confidenceMap: CVPixelBuffer?
+    let sharpnessScore: Double?
+    let depthSnapshot: DepthFrameSnapshot?
 
-    init(_ frame: ARFrame) {
+    init(
+        _ frame: ARFrame,
+        sharpnessScore: Double?,
+        depthSnapshot: DepthFrameSnapshot?
+    ) {
         transform = frame.camera.transform
         intrinsics = frame.camera.intrinsics
         imageResolution = frame.camera.imageResolution
         timestamp = frame.timestamp
         trackingState = frame.camera.trackingState
         worldMappingStatus = frame.worldMappingStatus
-        capturedImage = frame.capturedImage
-        sceneDepthMap = frame.sceneDepth?.depthMap
-        smoothedDepthMap = frame.smoothedSceneDepth?.depthMap
-        confidenceMap = frame.smoothedSceneDepth?.confidenceMap ?? frame.sceneDepth?.confidenceMap
+        self.sharpnessScore = sharpnessScore
+        self.depthSnapshot = depthSnapshot
     }
 }
 
@@ -1377,9 +1380,18 @@ extension VideoCaptureManager: ARSessionDelegate {
                 resolution: frame.camera.imageResolution
             )
         }
-        // Extract all data from the ARFrame synchronously before dispatching so that
-        // the ARFrame itself is released immediately rather than being held by the closure.
-        let snapshot = ARFrameData(frame)
+        let shouldPersistDepth = shouldPersistDepthSnapshot(at: frame.timestamp)
+        let depthSnapshot = shouldPersistDepth
+            ? Self.makeDepthSnapshot(
+                from: frame.smoothedSceneDepth?.depthMap ?? frame.sceneDepth?.depthMap,
+                isSmoothed: frame.smoothedSceneDepth != nil
+            )
+            : nil
+        let snapshot = ARFrameData(
+            frame,
+            sharpnessScore: nil,
+            depthSnapshot: depthSnapshot
+        )
         arDataQueue.async { [weak self] in
             self?.writeARFrame(snapshot)
         }
@@ -1597,6 +1609,7 @@ private extension VideoCaptureManager {
         arDataQueue.async { [weak self] in
             self?.arFrameCount = 0
             self?.arFirstFrameTimestamp = nil
+            self?.lastDepthSnapshotTimestamp = nil
             self?.exportedMeshAnchors.removeAll()
         }
     }
@@ -1794,6 +1807,53 @@ private extension VideoCaptureManager {
         return relative.isEmpty ? url.lastPathComponent : relative
     }
 
+    func shouldPersistDepthSnapshot(at timestamp: TimeInterval) -> Bool {
+        guard let lastSnapshotTimestamp = lastDepthSnapshotTimestamp else {
+            lastDepthSnapshotTimestamp = timestamp
+            return true
+        }
+        guard timestamp - lastSnapshotTimestamp >= Self.depthSnapshotIntervalSeconds else {
+            return false
+        }
+        lastDepthSnapshotTimestamp = timestamp
+        return true
+    }
+
+    static func makeDepthSnapshot(from pixelBuffer: CVPixelBuffer?, isSmoothed: Bool) -> DepthFrameSnapshot? {
+        guard let pixelBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+
+        let rowFloats = bytesPerRow / MemoryLayout<Float32>.size
+        let src = base.assumingMemoryBound(to: Float32.self)
+        var millimeters = [UInt16](repeating: 0, count: width * height)
+        millimeters.withUnsafeMutableBufferPointer { buffer in
+            guard let destination = buffer.baseAddress else { return }
+            for y in 0..<height {
+                let srcRow = src.advanced(by: y * rowFloats)
+                let dstRow = destination.advanced(by: y * width)
+                for x in 0..<width {
+                    let meters = srcRow[x]
+                    let mm = meters.isFinite && meters > 0 ? min(max(Int(meters * 1000.0), 0), 65535) : 0
+                    dstRow[x] = UInt16(mm)
+                }
+            }
+        }
+
+        return DepthFrameSnapshot(
+            width: width,
+            height: height,
+            millimeters: millimeters,
+            isSmoothed: isSmoothed
+        )
+    }
+
     func writeFloatPixelBuffer(_ pixelBuffer: CVPixelBuffer, to url: URL) throws {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -1876,6 +1936,25 @@ private extension VideoCaptureManager {
             height: height,
             bitsPerComponent: 16,
             bytesPerRow: width * MemoryLayout<UInt16>.size,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ), let image = ctx.makeImage() else {
+            throw CaptureError.pixelBufferEncodingFailed
+        }
+        let dest = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(dest, image, nil)
+        if !CGImageDestinationFinalize(dest) { throw CaptureError.pixelBufferEncodingFailed }
+    }
+
+    func writeDepthPNG(_ snapshot: DepthFrameSnapshot, to url: URL) throws {
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        var pixels = snapshot.millimeters
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: snapshot.width,
+            height: snapshot.height,
+            bitsPerComponent: 16,
+            bytesPerRow: snapshot.width * MemoryLayout<UInt16>.size,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.none.rawValue
         ), let image = ctx.makeImage() else {
