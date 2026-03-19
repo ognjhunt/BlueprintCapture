@@ -6,6 +6,9 @@ import FirebaseStorage
 #if canImport(FirebaseCore)
 import FirebaseCore
 #endif
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 #if canImport(FirebaseFirestore)
 import FirebaseFirestore
 #endif
@@ -675,6 +678,10 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     /// backend via the `updateCaptureStatus` Cloud Function.
     private func writeSubmissionRecord(for request: CaptureUploadRequest) {
         #if canImport(FirebaseFirestore)
+        guard Auth.auth().currentUser != nil else {
+            print("ℹ️ [UploadService] Skipping capture_submissions write until Firebase auth is available")
+            return
+        }
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let db = Firestore.firestore()

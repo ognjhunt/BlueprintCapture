@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import FirebaseAuth
 import FirebaseFirestore
 import CoreLocation
 
@@ -46,10 +47,14 @@ final class AppSessionService {
             "osVersion": UIDevice.current.systemVersion,
             "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         ]
-        sessions.document(sid).setData(doc, merge: true)
+        let remoteWritesEnabled = Auth.auth().currentUser != nil
+        if remoteWritesEnabled {
+            sessions.document(sid).setData(doc, merge: true)
+        }
 
         // Best-effort capture of start location when available
         Task {
+            guard remoteWritesEnabled else { return }
             if let coord = await OneShotLocationFetcher.fetch() {
                 let update: [String: Any] = [
                     "latitude": coord.latitude,
@@ -70,10 +75,12 @@ final class AppSessionService {
         let durationSec = Int(end.timeIntervalSince(start))
 
         SessionEventManager.shared.endSession(crash: reasonCrash, errorCode: nil)
-        sessions.document(sid).setData([
-            "endTime": Timestamp(date: end),
-            "duration": durationSec
-        ], merge: true)
+        if Auth.auth().currentUser != nil {
+            sessions.document(sid).setData([
+                "endTime": Timestamp(date: end),
+                "duration": durationSec
+            ], merge: true)
+        }
 
         currentSessionId = nil
         sessionStart = nil
@@ -85,4 +92,3 @@ final class AppSessionService {
         SessionEventManager.shared.logInteraction(kind: action, metadata: metadata)
     }
 }
-

@@ -1,4 +1,5 @@
 import Foundation
+import FirebaseAuth
 import FirebaseFirestore
 import UIKit
 
@@ -16,6 +17,7 @@ final class SessionEventManager {
     private var currentReferralBlueprintId: String?
     private var currentNetworkContext: String?
     private var currentNetworkSpeed: Double?
+    private var remoteWritesEnabled: Bool = false
     private var device: String { UIDevice.current.model }
     private var osVersion: String { UIDevice.current.systemVersion }
     private var appVersion: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown" }
@@ -40,6 +42,7 @@ final class SessionEventManager {
         currentReferralBlueprintId = referralBlueprintId
         currentNetworkContext = networkContext
         currentNetworkSpeed = networkSpeedKbps
+        remoteWritesEnabled = Auth.auth().currentUser != nil
 
         var doc = baseEventPayload(sessionId: sessionId, eventType: "sessionStart")
         doc["startTime"] = Timestamp(date: startDate)
@@ -52,7 +55,9 @@ final class SessionEventManager {
         }
         doc["interactionCount"] = 0
 
-        eventsCollection.document(sessionId).setData(doc)
+        if remoteWritesEnabled {
+            eventsCollection.document(sessionId).setData(doc)
+        }
         return sessionId
     }
 
@@ -82,6 +87,7 @@ final class SessionEventManager {
 
     func logQrScan(success: Bool, loadTimeMs: Int) {
         guard let sessionId = currentSessionId else { return }
+        guard remoteWritesEnabled else { return }
         var doc = baseEventPayload(sessionId: sessionId, eventType: "qrScan")
         doc["startTime"] = FieldValue.serverTimestamp()
         doc["loadTimeMs"] = loadTimeMs
@@ -101,6 +107,7 @@ final class SessionEventManager {
 
     func logInteraction(kind: String, metadata: [String: Any]? = nil) {
         guard let sessionId = currentSessionId else { return }
+        guard remoteWritesEnabled else { return }
         interactionCount += 1
         var doc = baseEventPayload(sessionId: sessionId, eventType: "interaction")
         doc["interactionKind"] = kind
@@ -124,6 +131,16 @@ final class SessionEventManager {
 
         // Determine returned (bool) by checking user doc once
         var returnedValue: Bool = false
+        guard remoteWritesEnabled else {
+            currentSessionId = nil
+            sessionStartTime = nil
+            interactionCount = 0
+            currentReferralBlueprintId = nil
+            currentNetworkContext = nil
+            currentNetworkSpeed = nil
+            return
+        }
+
         let userRef = db.collection("users").document(currentUserId)
         userRef.getDocument { [weak self] snap, _ in
             if let data = snap?.data() {
@@ -168,6 +185,7 @@ final class SessionEventManager {
 
     func logError(errorCode: String, metadata: [String: Any]? = nil) {
         guard let sessionId = currentSessionId else { return }
+        guard remoteWritesEnabled else { return }
         var doc = baseEventPayload(sessionId: sessionId, eventType: "error")
         doc["errorCode"] = errorCode
         if let metadata = metadata {

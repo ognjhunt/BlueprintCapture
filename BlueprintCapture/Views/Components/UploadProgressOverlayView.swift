@@ -39,37 +39,39 @@ struct UploadProgressOverlayView: View {
     }
 
     var body: some View {
-        if shouldShowOverlay, let upload = activeUpload {
-            VStack(spacing: 0) {
-                Spacer()
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            if shouldShowOverlay, let upload = activeUpload {
+                VStack(spacing: 0) {
+                    Spacer()
 
-                if isExpanded {
-                    expandedView(upload: upload)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .move(edge: .bottom).combined(with: .opacity)
-                        ))
-                } else {
-                    compactView(upload: upload)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                    if isExpanded {
+                        expandedView(upload: upload, now: timeline.date)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .bottom).combined(with: .opacity)
+                            ))
+                    } else {
+                        compactView(upload: upload, now: timeline.date)
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .opacity
+                            ))
+                    }
                 }
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 90) // Above tab bar
-            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
-            .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.url])
-            }
-            .alert("Export failed", isPresented: Binding(
-                get: { exportErrorMessage != nil },
-                set: { if !$0 { exportErrorMessage = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(exportErrorMessage ?? "Unable to export the finalized bundle.")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 90) // Above tab bar
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
+                .sheet(item: $shareItem) { item in
+                    ShareSheet(items: [item.url])
+                }
+                .alert("Export failed", isPresented: Binding(
+                    get: { exportErrorMessage != nil },
+                    set: { if !$0 { exportErrorMessage = nil } }
+                )) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(exportErrorMessage ?? "Unable to export the finalized bundle.")
+                }
             }
         }
     }
@@ -77,7 +79,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Compact View (Pill)
 
     @ViewBuilder
-    private func compactView(upload: UploadQueueViewModel.UploadStatus) -> some View {
+    private func compactView(upload: UploadQueueViewModel.UploadStatus, now: Date) -> some View {
         Button {
             withAnimation { isExpanded = true }
         } label: {
@@ -94,7 +96,8 @@ struct UploadProgressOverlayView: View {
                         .foregroundStyle(.white)
 
                     if case .uploading(let progress) = upload.state {
-                        Text("\(Int(progress * 100))% complete")
+                        let eta = etaText(for: upload, now: now)
+                        Text(eta.map { "\(Int(progress * 100))% complete • \($0)" } ?? "\(Int(progress * 100))% complete")
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.7))
                     }
@@ -130,7 +133,7 @@ struct UploadProgressOverlayView: View {
     // MARK: - Expanded View (Card)
 
     @ViewBuilder
-    private func expandedView(upload: UploadQueueViewModel.UploadStatus) -> some View {
+    private func expandedView(upload: UploadQueueViewModel.UploadStatus, now: Date) -> some View {
         VStack(spacing: 0) {
             // Drag handle
             RoundedRectangle(cornerRadius: 2.5)
@@ -174,7 +177,7 @@ struct UploadProgressOverlayView: View {
                 }
 
                 // State-specific content
-                stateContent(for: upload)
+                stateContent(for: upload, now: now)
 
                 // Action buttons
                 actionButtons(for: upload)
@@ -204,12 +207,12 @@ struct UploadProgressOverlayView: View {
     // MARK: - State Content
 
     @ViewBuilder
-    private func stateContent(for upload: UploadQueueViewModel.UploadStatus) -> some View {
+    private func stateContent(for upload: UploadQueueViewModel.UploadStatus, now: Date) -> some View {
         switch upload.state {
         case .queued:
             queuedContent()
         case .uploading(let progress):
-            uploadingContent(progress: progress)
+            uploadingContent(progress: progress, etaText: etaText(for: upload, now: now))
         case .completed:
             completedContent(for: upload)
         case .failed(let message):
@@ -237,7 +240,7 @@ struct UploadProgressOverlayView: View {
     }
 
     @ViewBuilder
-    private func uploadingContent(progress: Double) -> some View {
+    private func uploadingContent(progress: Double, etaText: String?) -> some View {
         VStack(spacing: 16) {
             // Progress bar
             VStack(alignment: .leading, spacing: 8) {
@@ -275,10 +278,18 @@ struct UploadProgressOverlayView: View {
             }
 
             // Info text
-            Text("Keep the app open for fastest upload. You can browse other tabs while this completes.")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                if let etaText {
+                    Text(etaText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                }
+
+                Text("Keep the app open for fastest upload. You can browse other tabs while this completes.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(16)
         .background(
@@ -306,7 +317,7 @@ struct UploadProgressOverlayView: View {
                     .font(.headline)
                     .foregroundStyle(.white)
 
-                Text("We're now processing your capture and running quality checks.")
+                Text("Capture delivered. Blueprint is running quality checks and getting this ready for review.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -514,7 +525,7 @@ struct UploadProgressOverlayView: View {
         case .uploading:
             return "Uploading capture"
         case .completed:
-            return "Processing capture"
+            return "Capture delivered"
         case .failed:
             return "Upload failed"
         }
@@ -527,10 +538,38 @@ struct UploadProgressOverlayView: View {
         case .uploading:
             return "Uploading Capture"
         case .completed:
-            return "Processing Your Capture"
+            return "Capture Delivered"
         case .failed:
             return "Upload Failed"
         }
+    }
+
+    private func etaText(for upload: UploadQueueViewModel.UploadStatus, now: Date) -> String? {
+        guard case .uploading(let progress) = upload.state,
+              progress > 0.02,
+              progress < 0.995,
+              let startedAt = upload.uploadStartedAt else {
+            return nil
+        }
+        let elapsed = now.timeIntervalSince(startedAt)
+        guard elapsed > 2 else { return nil }
+        let totalEstimate = elapsed / progress
+        let remaining = totalEstimate - elapsed
+        guard remaining.isFinite, remaining > 2 else { return nil }
+        return "About \(formatDuration(remaining)) left"
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let rounded = Int(seconds.rounded())
+        if rounded < 60 {
+            return "\(rounded)s"
+        }
+        let minutes = rounded / 60
+        let secs = rounded % 60
+        if minutes < 10 {
+            return secs == 0 ? "\(minutes)m" : "\(minutes)m \(secs)s"
+        }
+        return "\(minutes)m"
     }
 }
 

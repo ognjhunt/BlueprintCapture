@@ -34,6 +34,7 @@ final class UploadQueueViewModel: ObservableObject {
             metadata: request.metadata,
             packageURL: request.packageURL,
             state: .queued,
+            uploadStartedAt: nil,
             targetName: targetName,
             estimatedPayoutRange: estimatedPayoutRange
         )
@@ -107,8 +108,8 @@ final class UploadQueueViewModel: ObservableObject {
     }
 
     func simulateUITestUpload(for job: ScanJob) {
-        let now = Date()
-        let metadata = CaptureUploadMetadata(
+            let now = Date()
+            let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: job.id,
             reservationId: nil,
@@ -152,6 +153,7 @@ final class UploadQueueViewModel: ObservableObject {
             metadata: metadata,
             packageURL: FileManager.default.temporaryDirectory.appendingPathComponent("ui-test-\(metadata.id.uuidString)", isDirectory: true),
             state: .uploading(progress: 0.42),
+            uploadStartedAt: now.addingTimeInterval(-32),
             targetName: job.title,
             estimatedPayoutRange: job.payoutDollars...job.payoutDollars
         )
@@ -179,17 +181,26 @@ final class UploadQueueViewModel: ObservableObject {
         let records = store.load()
         guard !records.isEmpty else { return }
 
+        var activeRecords: [PendingUploadRecord] = []
         for r in records {
             let url = URL(fileURLWithPath: r.packagePath)
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                continue
+            }
             let request = CaptureUploadRequest(packageURL: url, metadata: r.metadata)
             uploadStatusMap[r.id] = UploadStatus(
                 metadata: r.metadata,
                 packageURL: url,
                 state: .queued,
+                uploadStartedAt: nil,
                 targetName: r.targetName,
                 estimatedPayoutRange: r.estimatedPayoutRange
             )
+            activeRecords.append(r)
             uploadService.enqueue(request)
+        }
+        if activeRecords.count != records.count {
+            store.save(activeRecords)
         }
         refreshUploadStatuses()
     }
@@ -227,6 +238,7 @@ final class UploadQueueViewModel: ObservableObject {
                     metadata: request.metadata,
                     packageURL: request.packageURL,
                     state: .queued,
+                    uploadStartedAt: nil,
                     targetName: nil,
                     estimatedPayoutRange: nil
                 )
@@ -235,6 +247,9 @@ final class UploadQueueViewModel: ObservableObject {
         case .progress(let id, let progress):
             guard var status = uploadStatusMap[id] else { break }
             status.state = .uploading(progress: progress)
+            if status.uploadStartedAt == nil {
+                status.uploadStartedAt = Date()
+            }
             uploadStatusMap[id] = status
 
         case .completed(let request):
@@ -290,6 +305,7 @@ extension UploadQueueViewModel {
         var metadata: CaptureUploadMetadata
         let packageURL: URL
         var state: State
+        var uploadStartedAt: Date?
         var targetName: String?
         var estimatedPayoutRange: ClosedRange<Int>?
 

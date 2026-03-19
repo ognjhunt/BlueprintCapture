@@ -33,11 +33,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
@@ -50,6 +52,7 @@ import app.blueprint.capture.ui.theme.BlueprintSurfaceRaised
 import app.blueprint.capture.ui.theme.BlueprintSuccess
 import app.blueprint.capture.ui.theme.BlueprintTextMuted
 import app.blueprint.capture.ui.theme.BlueprintWarning
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 @Composable
@@ -61,6 +64,7 @@ fun UploadQueueOverlay(
     onCancel: (String) -> Unit,
 ) {
     if (items.isEmpty()) return
+    val nowEpochMs = rememberNowEpochMs()
 
     val sortedItems = remember(items) {
         items.sortedWith(
@@ -83,6 +87,7 @@ fun UploadQueueOverlay(
         ) {
             CompactUploadPill(
                 item = primaryItem,
+                nowEpochMs = nowEpochMs,
                 onExpand = { expanded = true },
             )
         }
@@ -93,8 +98,9 @@ fun UploadQueueOverlay(
             exit = slideOutVertically { it / 2 } + fadeOut(),
         ) {
             ExpandedUploadCard(
-                primaryItem = primaryItem,
-                historyItems = historyItems,
+                    primaryItem = primaryItem,
+                    nowEpochMs = nowEpochMs,
+                    historyItems = historyItems,
                 onStartUpload = onStartUpload,
                 onRetry = onRetry,
                 onDismiss = {
@@ -111,6 +117,7 @@ fun UploadQueueOverlay(
 @Composable
 private fun CompactUploadPill(
     item: UploadQueueItem,
+    nowEpochMs: Long,
     onExpand: () -> Unit,
 ) {
     Surface(
@@ -133,7 +140,7 @@ private fun CompactUploadPill(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(statusTitle(item), color = Color.White)
-                Text(statusSubtitle(item), color = BlueprintTextMuted)
+                Text(statusSubtitle(item, nowEpochMs), color = BlueprintTextMuted)
             }
             if (item.status == UploadQueueStatus.Uploading) {
                 Text("${(item.progress * 100f).roundToInt()}%", color = Color.White)
@@ -150,6 +157,7 @@ private fun CompactUploadPill(
 @Composable
 private fun ExpandedUploadCard(
     primaryItem: UploadQueueItem,
+    nowEpochMs: Long,
     historyItems: List<UploadQueueItem>,
     onStartUpload: (String) -> Unit,
     onRetry: (String) -> Unit,
@@ -207,7 +215,7 @@ private fun ExpandedUploadCard(
                 }
             }
 
-            PrimaryStatusContent(primaryItem)
+            PrimaryStatusContent(primaryItem, nowEpochMs)
 
             ActionRow(
                 item = primaryItem,
@@ -221,10 +229,11 @@ private fun ExpandedUploadCard(
             if (historyItems.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Recent uploads", color = Color.White)
-                    historyItems.forEach { item ->
-                        HistoryRow(
-                            item = item,
-                            onStartUpload = onStartUpload,
+                historyItems.forEach { item ->
+                    HistoryRow(
+                        item = item,
+                        nowEpochMs = nowEpochMs,
+                        onStartUpload = onStartUpload,
                             onRetry = onRetry,
                             onDismiss = onDismiss,
                         )
@@ -236,7 +245,7 @@ private fun ExpandedUploadCard(
 }
 
 @Composable
-private fun PrimaryStatusContent(item: UploadQueueItem) {
+private fun PrimaryStatusContent(item: UploadQueueItem, nowEpochMs: Long) {
     when (item.status) {
         UploadQueueStatus.Saved -> StatusPanel(
             accent = Color.White.copy(alpha = 0.05f),
@@ -256,8 +265,9 @@ private fun PrimaryStatusContent(item: UploadQueueItem) {
 
         UploadQueueStatus.Uploading -> StatusPanel(
             accent = Color.White.copy(alpha = 0.05f),
-            title = "Uploading capture",
-            body = "Keep the app open for the fastest upload. You can still move between tabs while this finishes.",
+            title = "Uploading your capture",
+            body = uploadEtaText(item, nowEpochMs)
+                ?: "Keep the app open for the fastest upload. You can still move between tabs while this finishes.",
             progress = item.progress,
             progressLabel = "${(item.progress * 100f).roundToInt()}%",
         )
@@ -271,8 +281,8 @@ private fun PrimaryStatusContent(item: UploadQueueItem) {
 
         UploadQueueStatus.Completed -> StatusPanel(
             accent = BlueprintSuccess.copy(alpha = 0.16f),
-            title = "Upload complete",
-            body = "Your capture has been submitted for review and payout checks.",
+            title = "Capture delivered",
+            body = "Nice work. Your walkthrough is uploaded and queued for review.",
             payout = item.quotedPayoutCents,
         )
 
@@ -408,6 +418,7 @@ private fun ActionRow(
 @Composable
 private fun HistoryRow(
     item: UploadQueueItem,
+    nowEpochMs: Long,
     onStartUpload: (String) -> Unit,
     onRetry: (String) -> Unit,
     onDismiss: (String) -> Unit,
@@ -429,7 +440,7 @@ private fun HistoryRow(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(item.label, color = Color.White)
-                Text(statusSubtitle(item), color = BlueprintTextMuted)
+                Text(statusSubtitle(item, nowEpochMs), color = BlueprintTextMuted)
             }
             StatusIcon(item.status)
         }
@@ -513,17 +524,59 @@ private fun headerTitle(item: UploadQueueItem): String {
         -> "Preparing Upload"
         UploadQueueStatus.Uploading -> "Uploading Capture"
         UploadQueueStatus.Registering -> "Registering Capture"
-        UploadQueueStatus.Completed -> "Processing Your Capture"
+        UploadQueueStatus.Completed -> "Capture Delivered"
         UploadQueueStatus.Failed -> "Upload Failed"
     }
 }
 
-private fun statusSubtitle(item: UploadQueueItem): String {
+private fun statusSubtitle(item: UploadQueueItem, nowEpochMs: Long): String {
     return when (item.status) {
         UploadQueueStatus.Saved -> item.detail.ifBlank { "Saved on this device" }
-        UploadQueueStatus.Uploading -> "${(item.progress * 100f).roundToInt()}% complete"
-        UploadQueueStatus.Completed -> item.detail.ifBlank { "Submitted for review" }
+        UploadQueueStatus.Uploading -> {
+            val percent = "${(item.progress * 100f).roundToInt()}% complete"
+            uploadEtaText(item, nowEpochMs)?.let { "$percent • $it" } ?: percent
+        }
+        UploadQueueStatus.Completed -> item.detail.ifBlank { "Uploaded and ready for review" }
         else -> item.detail.ifBlank { item.status.name }
+    }
+}
+
+@Composable
+private fun rememberNowEpochMs(): Long {
+    val now = remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            now.longValue = System.currentTimeMillis()
+        }
+    }
+    return now.longValue
+}
+
+private fun uploadEtaText(item: UploadQueueItem, nowEpochMs: Long): String? {
+    if (item.status != UploadQueueStatus.Uploading) return null
+    val startedAt = item.lastAttemptEpochMs ?: return null
+    val progress = item.progress
+    if (progress <= 0.02f || progress >= 0.995f) return null
+    val elapsedMs = nowEpochMs - startedAt
+    if (elapsedMs <= 2_000L) return null
+    val totalMs = (elapsedMs / progress).toLong()
+    val remainingMs = totalMs - elapsedMs
+    if (remainingMs <= 2_000L) return null
+    return "About ${formatDuration(remainingMs)} left"
+}
+
+private fun formatDuration(durationMs: Long): String {
+    val totalSeconds = (durationMs / 1000L).coerceAtLeast(1L)
+    if (totalSeconds < 60L) {
+        return "${totalSeconds}s"
+    }
+    val minutes = totalSeconds / 60L
+    val seconds = totalSeconds % 60L
+    return if (minutes < 10L && seconds != 0L) {
+        "${minutes}m ${seconds}s"
+    } else {
+        "${minutes}m"
     }
 }
 
