@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 
 // MARK: - API Service
 
@@ -169,6 +172,27 @@ final class APIService {
         _ = try await perform(request: request, expecting: 200)
     }
 
+    func submitRobotTeamDemand(_ payload: RobotTeamDemandIntakePayload) async throws -> DemandSignalSubmissionReceipt {
+        var request = try makeRequest(path: "v1/demand/robot-team-requests", method: "POST")
+        request.httpBody = try encoder.encode(payload)
+        let data = try await perform(request: request, expecting: 201)
+        return try decoder.decode(DemandSignalSubmissionReceipt.self, from: data)
+    }
+
+    func submitSiteOperatorDemand(_ payload: SiteOperatorDemandIntakePayload) async throws -> DemandSignalSubmissionReceipt {
+        var request = try makeRequest(path: "v1/demand/site-operator-submissions", method: "POST")
+        request.httpBody = try encoder.encode(payload)
+        let data = try await perform(request: request, expecting: 201)
+        return try decoder.decode(DemandSignalSubmissionReceipt.self, from: data)
+    }
+
+    func fetchDemandOpportunityFeed(_ requestPayload: DemandOpportunityFeedRequest) async throws -> DemandOpportunityFeedResponse {
+        var request = try makeRequest(path: "v1/opportunities/feed", method: "POST")
+        request.httpBody = try encoder.encode(requestPayload)
+        let data = try await perform(request: request, expecting: 200)
+        return try decoder.decode(DemandOpportunityFeedResponse.self, from: data)
+    }
+
     // MARK: Helpers
     private func baseURL() throws -> URL {
         guard let url = AppConfig.backendBaseURL() else {
@@ -199,13 +223,37 @@ final class APIService {
     }
 
     private func performWithStatus(request: URLRequest) async throws -> (Data, Int) {
-        let (data, response) = try await session.data(for: request)
+        var authorizedRequest = request
+        if let token = try await currentFirebaseIdToken() {
+            authorizedRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: authorizedRequest)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.invalidResponse(statusCode: -1)
         }
         return (data, http.statusCode)
     }
+
+    private func currentFirebaseIdToken() async throws -> String? {
+        #if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return nil }
+        return try await withCheckedThrowingContinuation { continuation in
+            user.getIDToken { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: token)
+            }
+        }
+        #else
+        return nil
+        #endif
+    }
 }
+
+extension APIService: DemandIntelligenceServiceProtocol {}
 
 // MARK: - DTOs & Models
 

@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @Singleton
 class AuthRepository @Inject constructor(
@@ -105,6 +106,10 @@ class AuthRepository @Inject constructor(
     }
 
     fun currentUserId(): String? = auth.currentUser?.uid
+
+    suspend fun currentIdToken(forceRefresh: Boolean = false): String? {
+        return auth.currentUser?.getIdToken(forceRefresh)?.await()?.token
+    }
 
     // ---------------------------------------------------------------------------
     // Referral code guarantee (mirrors iOS ReferralService.ensureReferralCode)

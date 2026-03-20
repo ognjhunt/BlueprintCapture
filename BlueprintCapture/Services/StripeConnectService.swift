@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 
 struct StripeAccountLinks: Codable {
     let onboardingURL: URL
@@ -191,10 +194,15 @@ final class StripeConnectService {
 
     @discardableResult
     private func perform(request: URLRequest) async throws -> Data {
-        print("[Stripe] Performing request: \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "N/A")")
+        var authorizedRequest = request
+        if let token = try await currentFirebaseIdToken() {
+            authorizedRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        print("[Stripe] Performing request: \(authorizedRequest.httpMethod ?? "GET") \(authorizedRequest.url?.absoluteString ?? "N/A")")
         
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: authorizedRequest)
             guard let http = response as? HTTPURLResponse else {
                 print("[Stripe] ✗ Invalid response type (not HTTP)")
                 throw StripeConnectError.invalidResponse(status: -1)
@@ -220,6 +228,23 @@ final class StripeConnectService {
             print("[Stripe] ✗ Network error in perform: \(error.localizedDescription)")
             throw StripeConnectError.networkError(error)
         }
+    }
+
+    private func currentFirebaseIdToken() async throws -> String? {
+        #if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else { return nil }
+        return try await withCheckedThrowingContinuation { continuation in
+            user.getIDToken { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: token)
+            }
+        }
+        #else
+        return nil
+        #endif
     }
 }
 

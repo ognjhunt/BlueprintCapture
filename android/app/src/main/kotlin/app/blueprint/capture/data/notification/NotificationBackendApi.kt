@@ -1,6 +1,7 @@
 package app.blueprint.capture.data.notification
 
 import app.blueprint.capture.data.config.LocalConfigProvider
+import app.blueprint.capture.data.auth.AuthRepository
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,6 +17,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 @Singleton
 class NotificationBackendApi @Inject constructor(
     private val localConfigProvider: LocalConfigProvider,
+    private val authRepository: AuthRepository,
 ) {
     sealed class ApiError(message: String) : IOException(message) {
         data object MissingBaseUrl :
@@ -122,6 +124,9 @@ class NotificationBackendApi @Inject constructor(
             .header("Accept", "application/json")
             .header("X-Blueprint-Creator-Id", creatorId)
             .apply {
+                authRepository.currentIdToken()?.let { token ->
+                    header("Authorization", "Bearer $token")
+                }
                 if (body != null) {
                     header("Content-Type", "application/json")
                 }
