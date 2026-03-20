@@ -45,7 +45,9 @@ final class JobsRepository: JobsRepositoryProtocol {
                 .whereField("active", isEqualTo: true)
                 .limit(to: max(1, min(limit, 200)))
                 .getDocuments()
-            return snap.documents.compactMap { decode(docId: $0.documentID, data: $0.data()) }
+            return snap.documents
+                .compactMap { decode(docId: $0.documentID, data: $0.data()) }
+                .filter { $0.isDiscoverableInMarketplace }
         } catch {
             let ns = error as NSError
             if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 7 {
@@ -98,6 +100,11 @@ final class JobsRepository: JobsRepositoryProtocol {
         return url
     }
 
+    private func toMarketplaceState(_ value: Any?) -> ScanJob.MarketplaceState? {
+        guard let raw = value as? String else { return nil }
+        return ScanJob.MarketplaceState(rawValue: raw)
+    }
+
     private func decode(docId: String, data: [String: Any]) -> ScanJob? {
         guard
             let title = data["title"] as? String,
@@ -107,6 +114,10 @@ final class JobsRepository: JobsRepositoryProtocol {
             let payoutCents = toInt(data["payout_cents"]),
             let estMinutes = toInt(data["est_minutes"])
         else {
+            return nil
+        }
+
+        guard abs(lat) <= 90, abs(lng) <= 180, !(lat == 0 && lng == 0) else {
             return nil
         }
 
@@ -147,6 +158,7 @@ final class JobsRepository: JobsRepositoryProtocol {
             priorityWeight: toDouble(data["priority_weight"]) ?? 1.0,
             regionId: data["region_id"] as? String,
             jobType: ScanJob.JobType(rawValue: (data["task_type"] as? String) ?? "") ?? .curatedNearby,
+            marketplaceState: toMarketplaceState(data["marketplace_state"] ?? data["capture_job_state"]),
             buyerRequestId: data["buyer_request_id"] as? String,
             siteSubmissionId: data["site_submission_id"] as? String,
             quotedPayoutCents: toInt(data["quoted_payout_cents"]),

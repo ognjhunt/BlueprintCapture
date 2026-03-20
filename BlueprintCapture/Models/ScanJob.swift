@@ -9,6 +9,29 @@ struct ScanJob: Identifiable, Equatable {
         case operatorApprovedOnDemand = "operator_approved_on_demand"
     }
 
+    enum MarketplaceState: String, Equatable {
+        case draft
+        case approvedForMarketplace = "approved_for_marketplace"
+        case claimable
+        case reserved
+        case inProgress = "in_progress"
+        case uploaded
+        case underReview = "under_review"
+        case approved
+        case paid
+        case needsRecapture = "needs_recapture"
+        case cancelled
+
+        var isDiscoverable: Bool {
+            switch self {
+            case .approvedForMarketplace, .claimable, .reserved, .inProgress, .needsRecapture:
+                return true
+            case .draft, .uploaded, .underReview, .approved, .paid, .cancelled:
+                return false
+            }
+        }
+    }
+
     let id: String // Firestore doc id (jobId) and pipeline `scene_id`
 
     // Required fields
@@ -35,6 +58,7 @@ struct ScanJob: Identifiable, Equatable {
     let priorityWeight: Double
     let regionId: String?
     let jobType: JobType
+    let marketplaceState: MarketplaceState? = nil
     let buyerRequestId: String?
     let siteSubmissionId: String?
     let quotedPayoutCents: Int?
@@ -71,6 +95,10 @@ struct ScanJob: Identifiable, Equatable {
 
     var payoutDollars: Int {
         max(0, payoutCents / 100)
+    }
+
+    var isDiscoverableInMarketplace: Bool {
+        marketplaceState?.isDiscoverable ?? true
     }
 
     var primaryImageURL: URL? {

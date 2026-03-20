@@ -181,6 +181,7 @@ final class StripeConnectService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("ios", forHTTPHeaderField: "X-Blueprint-Native-Client")
         if method == "POST" || method == "PUT" {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }

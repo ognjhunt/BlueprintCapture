@@ -183,6 +183,7 @@ final class APIService {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(UserDeviceService.resolvedUserId(), forHTTPHeaderField: "X-Blueprint-Creator-Id")
+        request.setValue("ios", forHTTPHeaderField: "X-Blueprint-Native-Client")
         if method == "POST" || method == "PUT" {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
