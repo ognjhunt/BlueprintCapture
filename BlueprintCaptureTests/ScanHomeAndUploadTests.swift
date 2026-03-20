@@ -52,6 +52,17 @@ struct ScanHomeAndUploadTests {
         #expect(ranked.first?.job.id == "ready")
     }
 
+    @Test @MainActor func scanHome_prefersHigherOpportunityScoreAfterReadyAndSpecial() async throws {
+        let user = CLLocation(latitude: 0, longitude: 0)
+        let now = Date()
+
+        let lower = makeJob(id: "lower", title: "Lower", address: "L", lat: 0.002, lng: 0, updatedAt: now).withDemand(opportunityScore: 0.4)
+        let higher = makeJob(id: "higher", title: "Higher", address: "H", lat: 0.0021, lng: 0, updatedAt: now).withDemand(opportunityScore: 0.9)
+
+        let ranked = ScanHomeViewModel.rankJobsForFeed(jobs: [lower, higher], userLocation: user, feedRadiusMeters: 10 * 1609.34)
+        #expect(ranked.first?.job.id == "higher")
+    }
+
     @Test @MainActor func scanHome_derivesPermissionTierFromRightsSignals() async throws {
         let now = Date()
 
@@ -349,6 +360,72 @@ struct ScanHomeAndUploadTests {
         }
 
         #expect(targets.completedTargetIds.contains("job_123"))
+    }
+}
+
+private extension ScanJob {
+    func withDemand(opportunityScore: Double? = nil, demandScore: Double? = nil) -> ScanJob {
+        ScanJob(
+            id: id,
+            title: title,
+            address: address,
+            lat: lat,
+            lng: lng,
+            payoutCents: payoutCents,
+            estMinutes: estMinutes,
+            active: active,
+            updatedAt: updatedAt,
+            thumbnailURL: thumbnailURL,
+            heroImageURL: heroImageURL,
+            category: category,
+            instructions: instructions,
+            allowedAreas: allowedAreas,
+            restrictedAreas: restrictedAreas,
+            permissionDocURL: permissionDocURL,
+            checkinRadiusM: checkinRadiusM,
+            alertRadiusM: alertRadiusM,
+            priority: priority,
+            priorityWeight: priorityWeight,
+            regionId: regionId,
+            jobType: jobType,
+            marketplaceState: marketplaceState,
+            buyerRequestId: buyerRequestId,
+            siteSubmissionId: siteSubmissionId,
+            quotedPayoutCents: quotedPayoutCents,
+            dueWindow: dueWindow,
+            approvalRequirements: approvalRequirements,
+            recaptureReason: recaptureReason,
+            rightsChecklist: rightsChecklist,
+            rightsProfile: rightsProfile,
+            requestedOutputs: requestedOutputs,
+            workflowName: workflowName,
+            workflowSteps: workflowSteps,
+            targetKPI: targetKPI,
+            zone: zone,
+            shift: shift,
+            owner: owner,
+            facilityTemplate: facilityTemplate,
+            benchmarkStations: benchmarkStations,
+            lightingWindows: lightingWindows,
+            movableObstacles: movableObstacles,
+            floorConditionNotes: floorConditionNotes,
+            reflectiveSurfaceNotes: reflectiveSurfaceNotes,
+            accessRules: accessRules,
+            adjacentSystems: adjacentSystems,
+            privacyRestrictions: privacyRestrictions,
+            securityRestrictions: securityRestrictions,
+            knownBlockers: knownBlockers,
+            nonRoutineModes: nonRoutineModes,
+            peopleTrafficNotes: peopleTrafficNotes,
+            captureRestrictions: captureRestrictions,
+            siteType: siteType,
+            demandScore: demandScore ?? self.demandScore,
+            opportunityScore: opportunityScore ?? self.opportunityScore,
+            demandSummary: demandSummary,
+            rankingExplanation: rankingExplanation,
+            demandSourceKinds: demandSourceKinds,
+            suggestedWorkflows: suggestedWorkflows
+        )
     }
 }
 

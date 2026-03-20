@@ -110,6 +110,14 @@ data class ScanTarget(
     val targetAvailability: TargetAvailabilityStatus = TargetAvailabilityStatus.Available,
     // Venue permission classification
     val venuePermission: VenuePermission = VenuePermission.Unknown,
+    // Demand-intelligence metadata
+    val siteType: String? = null,
+    val demandScore: Double? = null,
+    val opportunityScore: Double? = null,
+    val demandSummary: String? = null,
+    val rankingExplanation: String? = null,
+    val demandSourceKinds: List<String> = emptyList(),
+    val suggestedWorkflows: List<String> = emptyList(),
 )
 
 @Serializable

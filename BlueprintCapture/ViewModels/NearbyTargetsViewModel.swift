@@ -69,6 +69,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let placesAutocomplete: PlacesAutocompleteServiceProtocol
     private let notifications: NotificationServiceProtocol
     private let recordingPolicyService: RecordingPolicyService
+    private let demandIntelligenceService: DemandIntelligenceServiceProtocol
 
     // Data
     private var pricing: [SKU: SkuPricing] = defaultPricing
@@ -93,7 +94,8 @@ final class NearbyTargetsViewModel: ObservableObject {
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
          placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
          notifications: NotificationServiceProtocol = NotificationService(),
-         recordingPolicyService: RecordingPolicyService = .shared) {
+         recordingPolicyService: RecordingPolicyService = .shared,
+         demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared) {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
@@ -105,6 +107,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.placesAutocomplete = placesAutocomplete
         self.notifications = notifications
         self.recordingPolicyService = recordingPolicyService
+        self.demandIntelligenceService = demandIntelligenceService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -784,6 +787,30 @@ extension NearbyTargetsViewModel {
             )
             if !nearbyPlaces.isEmpty {
                 print("✅ [Places Nearby] Found \(nearbyPlaces.count) places")
+                if AppConfig.hasBackendBaseURL() {
+                    let response = try? await demandIntelligenceService.fetchDemandOpportunityFeed(
+                        DemandOpportunityFeedRequest(
+                            lat: loc.coordinate.latitude,
+                            lng: loc.coordinate.longitude,
+                            radiusMeters: radiusMeters,
+                            limit: limit,
+                            candidatePlaces: nearbyPlaces.map {
+                                OpportunityCandidatePlace(
+                                    placeId: $0.placeId,
+                                    displayName: $0.displayName,
+                                    formattedAddress: $0.formattedAddress,
+                                    lat: $0.lat,
+                                    lng: $0.lng,
+                                    placeTypes: $0.types ?? []
+                                )
+                            }
+                        )
+                    )
+                    if let ranked = response?.nearbyOpportunities, !ranked.isEmpty {
+                        print("✅ [Demand Feed] Ranked \(ranked.count) nearby opportunities")
+                        return mapRankedNearbyOpportunities(ranked, fallbackSKU: .B)
+                    }
+                }
                 return mapDetailsToTargets(details: nearbyPlaces, fallbackSKU: .B, candidateScores: [:])
             } else {
                 print("⚠️  [Places Nearby] No places returned")
@@ -809,6 +836,23 @@ extension NearbyTargetsViewModel {
                 demandScore: demand ?? dynamicDemand(forTypes: d.types ?? []),
                 sizeSqFt: nil,
                 category: d.types?.first,
+                computedDistanceMeters: nil
+            )
+        }
+    }
+
+    private func mapRankedNearbyOpportunities(_ ranked: [RankedNearbyOpportunity], fallbackSKU: SKU) -> [Target] {
+        ranked.map { item in
+            Target(
+                id: item.placeId,
+                displayName: item.displayName,
+                sku: fallbackSKU,
+                lat: item.lat,
+                lng: item.lng,
+                address: item.formattedAddress,
+                demandScore: item.demandScore,
+                sizeSqFt: nil,
+                category: item.siteType ?? item.placeTypes.first,
                 computedDistanceMeters: nil
             )
         }

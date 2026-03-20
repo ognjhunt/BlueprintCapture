@@ -72,6 +72,13 @@ class ScanTargetsRepository @Inject constructor(
                         val lng = doc.numberDouble("lng") ?: doc.numberDouble("longitude")
                         val priorityWeight = doc.numberDouble("priority_weight") ?: 0.0
                         val checkinRadiusM = doc.number("checkin_radius_m") ?: 150
+                        val demandScore = doc.numberDouble("demand_score")
+                        val opportunityScore = doc.numberDouble("opportunity_score")
+                        val demandSummary = doc.getString("demand_summary")
+                        val rankingExplanation = doc.getString("ranking_explanation")
+                        val demandSourceKinds = doc.stringList("demand_source_kinds")
+                        val suggestedWorkflows = doc.stringList("suggested_workflows")
+                        val siteType = doc.getString("site_type")
 
                         // Compute distance when user location + job coordinates are both available
                         val distanceM: Double? = if (lat != null && lng != null && userLocation != null) {
@@ -128,6 +135,13 @@ class ScanTargetsRepository @Inject constructor(
                             priorityWeight = priorityWeight,
                             checkinRadiusM = checkinRadiusM,
                             venuePermission = venuePermission,
+                            siteType = siteType,
+                            demandScore = demandScore,
+                            opportunityScore = opportunityScore,
+                            demandSummary = demandSummary,
+                            rankingExplanation = rankingExplanation,
+                            demandSourceKinds = demandSourceKinds,
+                            suggestedWorkflows = suggestedWorkflows,
                         )
                     }
 
@@ -143,14 +157,16 @@ class ScanTargetsRepository @Inject constructor(
         /**
          * iOS-parity feed ranking (mirrors rankJobsForFeed in ScanHomeViewModel.swift):
          * 1. readyNow (within check-in radius) first
-         * 2. Higher priorityWeight
-         * 3. Higher quoted payout
-         * 4. Closer distance (when location available)
-         * 5. Alphabetical job ID tiebreaker
+         * 2. Higher backend opportunity score / demand score
+         * 3. Higher priorityWeight
+         * 4. Higher quoted payout
+         * 5. Closer distance (when location available)
+         * 6. Alphabetical job ID tiebreaker
          */
         fun rankForFeed(targets: List<ScanTarget>, userLocation: Location?): List<ScanTarget> =
             targets.sortedWith(
                 compareByDescending<ScanTarget> { it.readyNow }
+                    .thenByDescending { it.opportunityScore ?: it.demandScore ?: -1.0 }
                     .thenByDescending { it.priorityWeight }
                     .thenByDescending { it.quotedPayoutCents ?: 0 }
                     .thenBy { target ->

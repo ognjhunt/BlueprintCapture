@@ -237,6 +237,7 @@ final class ScanHomeViewModel: ObservableObject {
     private let locationService: LocationServiceProtocol
     private let alertsManager: NearbyAlertsManager
     private let captureHistoryService: CaptureHistoryServiceProtocol
+    private let demandIntelligenceService: DemandIntelligenceServiceProtocol
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
 
@@ -245,13 +246,15 @@ final class ScanHomeViewModel: ObservableObject {
         targetStateService: TargetStateServiceProtocol = TargetStateService(),
         locationService: LocationServiceProtocol = LocationService(),
         alertsManager: NearbyAlertsManager,
-        captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared
+        captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared,
+        demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService
         self.locationService = locationService
         self.alertsManager = alertsManager
         self.captureHistoryService = captureHistoryService
+        self.demandIntelligenceService = demandIntelligenceService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -282,7 +285,7 @@ final class ScanHomeViewModel: ObservableObject {
 
         state = .loading
         do {
-            let jobs = try await jobsRepository.fetchActiveJobs(limit: 200)
+            let jobs = try await fetchRankedJobs(userLocation: loc)
             let ranked = Self.rankJobsForFeed(jobs: jobs, userLocation: loc, feedRadiusMeters: feedRadiusMeters)
             let jobIds = ranked.map { $0.job.id }
             let states = await targetStateService.batchFetchStates(for: jobIds)
@@ -486,6 +489,31 @@ final class ScanHomeViewModel: ObservableObject {
             previewSource: .mapSnapshot
         )
     }
+
+    private func fetchRankedJobs(userLocation: CLLocation) async throws -> [ScanJob] {
+        guard AppConfig.hasBackendBaseURL() else {
+            return try await jobsRepository.fetchActiveJobs(limit: 200)
+        }
+
+        let request = DemandOpportunityFeedRequest(
+            lat: userLocation.coordinate.latitude,
+            lng: userLocation.coordinate.longitude,
+            radiusMeters: Int(feedRadiusMeters.rounded()),
+            limit: 200,
+            candidatePlaces: []
+        )
+
+        do {
+            let response = try await demandIntelligenceService.fetchDemandOpportunityFeed(request)
+            if !response.captureJobs.isEmpty {
+                return response.captureJobs
+            }
+        } catch {
+            print("⚠️ [ScanHome] Demand opportunity feed failed, falling back to Firestore jobs: \(error.localizedDescription)")
+        }
+
+        return try await jobsRepository.fetchActiveJobs(limit: 200)
+    }
 }
 
 extension ScanHomeViewModel {
@@ -503,6 +531,10 @@ extension ScanHomeViewModel {
             let lhsSpecial = captureOpportunityKind(for: lhs.job) == .special
             let rhsSpecial = captureOpportunityKind(for: rhs.job) == .special
             if lhsSpecial != rhsSpecial { return lhsSpecial && !rhsSpecial }
+
+            let lhsOpportunity = lhs.job.opportunityScore ?? lhs.job.demandScore ?? -1
+            let rhsOpportunity = rhs.job.opportunityScore ?? rhs.job.demandScore ?? -1
+            if lhsOpportunity != rhsOpportunity { return lhsOpportunity > rhsOpportunity }
 
             if lhs.job.priority != rhs.job.priority { return lhs.job.priority > rhs.job.priority }
             if lhs.job.payoutCents != rhs.job.payoutCents { return lhs.job.payoutCents > rhs.job.payoutCents }

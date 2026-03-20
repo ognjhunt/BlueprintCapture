@@ -2,14 +2,14 @@ import Foundation
 import CoreLocation
 
 /// A curated scan opportunity defined by the backend (Firestore: `capture_jobs`).
-struct ScanJob: Identifiable, Equatable {
-    enum JobType: String, Equatable {
+struct ScanJob: Identifiable, Codable, Equatable {
+    enum JobType: String, Codable, Equatable {
         case curatedNearby = "curated_nearby"
         case buyerRequestedSpecialTask = "buyer_requested_special_task"
         case operatorApprovedOnDemand = "operator_approved_on_demand"
     }
 
-    enum MarketplaceState: String, Equatable {
+    enum MarketplaceState: String, Codable, Equatable {
         case draft
         case approvedForMarketplace = "approved_for_marketplace"
         case claimable
@@ -58,7 +58,7 @@ struct ScanJob: Identifiable, Equatable {
     let priorityWeight: Double
     let regionId: String?
     let jobType: JobType
-    let marketplaceState: MarketplaceState? = nil
+    let marketplaceState: MarketplaceState?
     let buyerRequestId: String?
     let siteSubmissionId: String?
     let quotedPayoutCents: Int?
@@ -88,6 +88,135 @@ struct ScanJob: Identifiable, Equatable {
     let nonRoutineModes: [String]
     let peopleTrafficNotes: [String]
     let captureRestrictions: [String]
+    let siteType: String?
+    let demandScore: Double?
+    let opportunityScore: Double?
+    let demandSummary: String?
+    let rankingExplanation: String?
+    let demandSourceKinds: [String]
+    let suggestedWorkflows: [String]
+
+    init(
+        id: String,
+        title: String,
+        address: String,
+        lat: Double,
+        lng: Double,
+        payoutCents: Int,
+        estMinutes: Int,
+        active: Bool,
+        updatedAt: Date,
+        thumbnailURL: URL?,
+        heroImageURL: URL?,
+        category: String?,
+        instructions: [String],
+        allowedAreas: [String],
+        restrictedAreas: [String],
+        permissionDocURL: URL?,
+        checkinRadiusM: Int,
+        alertRadiusM: Int,
+        priority: Int,
+        priorityWeight: Double,
+        regionId: String?,
+        jobType: JobType,
+        marketplaceState: MarketplaceState? = nil,
+        buyerRequestId: String?,
+        siteSubmissionId: String?,
+        quotedPayoutCents: Int?,
+        dueWindow: String?,
+        approvalRequirements: [String],
+        recaptureReason: String?,
+        rightsChecklist: [String],
+        rightsProfile: String?,
+        requestedOutputs: [String],
+        workflowName: String?,
+        workflowSteps: [String],
+        targetKPI: String?,
+        zone: String?,
+        shift: String?,
+        owner: String?,
+        facilityTemplate: String?,
+        benchmarkStations: [String],
+        lightingWindows: [String],
+        movableObstacles: [String],
+        floorConditionNotes: [String],
+        reflectiveSurfaceNotes: [String],
+        accessRules: [String],
+        adjacentSystems: [String],
+        privacyRestrictions: [String],
+        securityRestrictions: [String],
+        knownBlockers: [String],
+        nonRoutineModes: [String],
+        peopleTrafficNotes: [String],
+        captureRestrictions: [String],
+        siteType: String? = nil,
+        demandScore: Double? = nil,
+        opportunityScore: Double? = nil,
+        demandSummary: String? = nil,
+        rankingExplanation: String? = nil,
+        demandSourceKinds: [String] = [],
+        suggestedWorkflows: [String] = []
+    ) {
+        self.id = id
+        self.title = title
+        self.address = address
+        self.lat = lat
+        self.lng = lng
+        self.payoutCents = payoutCents
+        self.estMinutes = estMinutes
+        self.active = active
+        self.updatedAt = updatedAt
+        self.thumbnailURL = thumbnailURL
+        self.heroImageURL = heroImageURL
+        self.category = category
+        self.instructions = instructions
+        self.allowedAreas = allowedAreas
+        self.restrictedAreas = restrictedAreas
+        self.permissionDocURL = permissionDocURL
+        self.checkinRadiusM = checkinRadiusM
+        self.alertRadiusM = alertRadiusM
+        self.priority = priority
+        self.priorityWeight = priorityWeight
+        self.regionId = regionId
+        self.jobType = jobType
+        self.marketplaceState = marketplaceState
+        self.buyerRequestId = buyerRequestId
+        self.siteSubmissionId = siteSubmissionId
+        self.quotedPayoutCents = quotedPayoutCents
+        self.dueWindow = dueWindow
+        self.approvalRequirements = approvalRequirements
+        self.recaptureReason = recaptureReason
+        self.rightsChecklist = rightsChecklist
+        self.rightsProfile = rightsProfile
+        self.requestedOutputs = requestedOutputs
+        self.workflowName = workflowName
+        self.workflowSteps = workflowSteps
+        self.targetKPI = targetKPI
+        self.zone = zone
+        self.shift = shift
+        self.owner = owner
+        self.facilityTemplate = facilityTemplate
+        self.benchmarkStations = benchmarkStations
+        self.lightingWindows = lightingWindows
+        self.movableObstacles = movableObstacles
+        self.floorConditionNotes = floorConditionNotes
+        self.reflectiveSurfaceNotes = reflectiveSurfaceNotes
+        self.accessRules = accessRules
+        self.adjacentSystems = adjacentSystems
+        self.privacyRestrictions = privacyRestrictions
+        self.securityRestrictions = securityRestrictions
+        self.knownBlockers = knownBlockers
+        self.nonRoutineModes = nonRoutineModes
+        self.peopleTrafficNotes = peopleTrafficNotes
+        self.captureRestrictions = captureRestrictions
+        self.siteType = siteType
+        self.demandScore = demandScore
+        self.opportunityScore = opportunityScore
+        self.demandSummary = demandSummary
+        self.rankingExplanation = rankingExplanation
+        self.demandSourceKinds = demandSourceKinds
+        self.suggestedWorkflows = suggestedWorkflows
+    }
 
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat, longitude: lng)

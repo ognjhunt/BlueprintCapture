@@ -26,6 +26,17 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import {
+  annotateCaptureJobs,
+  buildDemandSignalsForRobotTeamRequest,
+  buildDemandSignalsForSiteOperatorSubmission,
+  rankNearbyOpportunities,
+  type CaptureJobApiRecord,
+  type DemandOpportunityFeedRequest,
+  type DemandSignalDocument,
+  type RobotTeamDemandRequestPayload,
+  type SiteOperatorDemandSubmissionPayload,
+} from "./demand-opportunities.js";
 
 if (getApps().length === 0) initializeApp();
 
@@ -264,4 +275,236 @@ export const updateCaptureStatus = onRequest(
       res.status(500).json({ error: "Internal error" });
     }
   }
+);
+
+type FirestoreJobDoc = { id: string; data: Record<string, unknown> };
+
+function parseRequestBody<T>(body: unknown): T | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  return body as T;
+}
+
+async function loadActiveDemandSignals(): Promise<DemandSignalDocument[]> {
+  const snapshot = await db.collection("demand_signals").limit(500).get();
+  return snapshot.docs.map((doc) => {
+    const data = doc.data();
+    const expiresAtRaw = data["freshness_expires_at"];
+    const freshnessExpiresAt =
+      expiresAtRaw instanceof Timestamp
+        ? expiresAtRaw.toDate().toISOString()
+        : typeof expiresAtRaw === "string"
+          ? expiresAtRaw
+          : undefined;
+
+    return {
+      id: doc.id,
+      source_type: String(data["source_type"] ?? "unknown"),
+      source_ref: typeof data["source_ref"] === "string" ? data["source_ref"] : undefined,
+      site_type: String(data["site_type"] ?? "unknown"),
+      workflow: typeof data["workflow"] === "string" ? data["workflow"] : undefined,
+      company_id: typeof data["company_id"] === "string" ? data["company_id"] : undefined,
+      geo_scope: typeof data["geo_scope"] === "string" ? data["geo_scope"] : undefined,
+      strength:
+        data["strength"] === "critical" ||
+        data["strength"] === "high" ||
+        data["strength"] === "medium" ||
+        data["strength"] === "low"
+          ? data["strength"]
+          : "medium",
+      confidence: typeof data["confidence"] === "number" ? data["confidence"] : 0.7,
+      freshness_expires_at: freshnessExpiresAt,
+      citations: Array.isArray(data["citations"]) ? data["citations"].filter((v): v is string => typeof v === "string") : [],
+      demand_source_kinds: Array.isArray(data["demand_source_kinds"])
+        ? data["demand_source_kinds"].filter((v): v is DemandSignalDocument["demand_source_kinds"][number] => typeof v === "string")
+        : ["inferred_signal"],
+      summary: typeof data["summary"] === "string" ? data["summary"] : undefined,
+    } satisfies DemandSignalDocument;
+  });
+}
+
+async function loadActiveCaptureJobs(): Promise<FirestoreJobDoc[]> {
+  const snapshot = await db.collection("capture_jobs").where("active", "==", true).limit(200).get();
+  return snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() as Record<string, unknown> }));
+}
+
+async function refreshCaptureJobDemandSnapshots(signals: DemandSignalDocument[]): Promise<void> {
+  const jobs = await loadActiveCaptureJobs();
+  if (jobs.length === 0) return;
+
+  const annotated = annotateCaptureJobs(
+    jobs,
+    signals,
+    { lat: 37.7749, lng: -122.4194 },
+    1000 * 1609.34,
+    200,
+  );
+
+  const byId = new Map<string, CaptureJobApiRecord>(annotated.map((job) => [job.id, job]));
+  const batch = db.batch();
+  let updateCount = 0;
+
+  for (const job of jobs) {
+    const annotation = byId.get(job.id);
+    if (!annotation) continue;
+    batch.set(
+      db.collection("capture_jobs").doc(job.id),
+      {
+        site_type: annotation.siteType ?? null,
+        demand_score: annotation.demandScore ?? null,
+        opportunity_score: annotation.opportunityScore ?? null,
+        demand_summary: annotation.demandSummary ?? null,
+        ranking_explanation: annotation.rankingExplanation ?? null,
+        demand_source_kinds: annotation.demandSourceKinds,
+        suggested_workflows: annotation.suggestedWorkflows,
+        updated_at: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    updateCount += 1;
+  }
+
+  if (updateCount > 0) {
+    await batch.commit();
+    logger.info("capture_jobs demand snapshots refreshed", { updatedJobs: updateCount });
+  }
+}
+
+export const submitRobotTeamDemand = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const payload = parseRequestBody<RobotTeamDemandRequestPayload>(req.body);
+    if (!payload?.company_name || !Array.isArray(payload.site_types) || payload.site_types.length === 0) {
+      res.status(400).json({ error: "company_name and site_types are required" });
+      return;
+    }
+
+    const submissionRef = db.collection("robot_team_requests").doc();
+    const createdAt = Timestamp.now();
+    const signals = buildDemandSignalsForRobotTeamRequest(submissionRef.id, payload);
+    const batch = db.batch();
+
+    batch.set(submissionRef, {
+      ...payload,
+      created_at: createdAt,
+      updated_at: createdAt,
+      source_type: "robot_team_request",
+    });
+
+    for (const signal of signals) {
+      batch.set(db.collection("demand_signals").doc(signal.id), {
+        ...signal,
+        created_at: createdAt,
+        updated_at: createdAt,
+        freshness_expires_at: signal.freshness_expires_at ? Timestamp.fromDate(new Date(signal.freshness_expires_at)) : null,
+      });
+    }
+
+    try {
+      await batch.commit();
+      await refreshCaptureJobDemandSnapshots(await loadActiveDemandSignals());
+      res.status(201).json({
+        submission_id: submissionRef.id,
+        demand_signal_ids: signals.map((signal) => signal.id),
+        created_at: createdAt.toDate().toISOString(),
+      });
+    } catch (error) {
+      logger.error("Failed to persist robot team demand request", { error });
+      res.status(500).json({ error: "Internal error" });
+    }
+  },
+);
+
+export const submitSiteOperatorDemand = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const payload = parseRequestBody<SiteOperatorDemandSubmissionPayload>(req.body);
+    if (!payload?.operator_name || !payload.site_name || !payload.site_address || !Array.isArray(payload.site_types) || payload.site_types.length === 0) {
+      res.status(400).json({ error: "operator_name, site_name, site_address, and site_types are required" });
+      return;
+    }
+
+    const submissionRef = db.collection("site_operator_submissions").doc();
+    const createdAt = Timestamp.now();
+    const signals = buildDemandSignalsForSiteOperatorSubmission(submissionRef.id, payload);
+    const batch = db.batch();
+
+    batch.set(submissionRef, {
+      ...payload,
+      created_at: createdAt,
+      updated_at: createdAt,
+      source_type: "site_operator_submission",
+    });
+
+    for (const signal of signals) {
+      batch.set(db.collection("demand_signals").doc(signal.id), {
+        ...signal,
+        created_at: createdAt,
+        updated_at: createdAt,
+        freshness_expires_at: signal.freshness_expires_at ? Timestamp.fromDate(new Date(signal.freshness_expires_at)) : null,
+      });
+    }
+
+    try {
+      await batch.commit();
+      await refreshCaptureJobDemandSnapshots(await loadActiveDemandSignals());
+      res.status(201).json({
+        submission_id: submissionRef.id,
+        demand_signal_ids: signals.map((signal) => signal.id),
+        created_at: createdAt.toDate().toISOString(),
+      });
+    } catch (error) {
+      logger.error("Failed to persist site operator demand submission", { error });
+      res.status(500).json({ error: "Internal error" });
+    }
+  },
+);
+
+export const demandOpportunityFeed = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    const payload = parseRequestBody<DemandOpportunityFeedRequest>(req.body);
+    if (!payload || typeof payload.lat !== "number" || typeof payload.lng !== "number") {
+      res.status(400).json({ error: "lat and lng are required" });
+      return;
+    }
+
+    try {
+      const signals = await loadActiveDemandSignals();
+      const jobs = await loadActiveCaptureJobs();
+      const radiusMeters = Math.max(100, Math.min(payload.radius_m ?? 16093, 160934));
+      const limit = Math.max(1, Math.min(payload.limit ?? 25, 200));
+      const captureJobs = annotateCaptureJobs(
+        jobs,
+        signals,
+        { lat: payload.lat, lng: payload.lng },
+        radiusMeters,
+        limit,
+      );
+      const nearbyOpportunities = rankNearbyOpportunities(payload, signals);
+
+      res.status(200).json({
+        generated_at: new Date().toISOString(),
+        nearby_opportunities: nearbyOpportunities,
+        capture_jobs: captureJobs,
+      });
+    } catch (error) {
+      logger.error("Failed to generate demand opportunity feed", { error });
+      res.status(500).json({ error: "Internal error" });
+    }
+  },
 );

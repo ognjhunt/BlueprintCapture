@@ -12,7 +12,10 @@ import app.blueprint.capture.data.capture.CaptureHistoryRepository
 import app.blueprint.capture.data.capture.SubmissionSummary
 import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.DemandOpportunityFeedRequest
 import app.blueprint.capture.data.model.DemoData
+import app.blueprint.capture.data.model.OpportunityCandidatePlace
+import app.blueprint.capture.data.model.RankedNearbyOpportunity
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.data.model.TargetAvailabilityStatus
 import app.blueprint.capture.data.notification.GeofenceJobTarget
@@ -20,6 +23,7 @@ import app.blueprint.capture.data.notification.GeofenceManager
 import app.blueprint.capture.data.places.NearbyPlace
 import app.blueprint.capture.data.places.PlacesRepository
 import app.blueprint.capture.data.profile.ContributorProfileRepository
+import app.blueprint.capture.data.opportunities.DemandIntelligenceBackendApi
 import app.blueprint.capture.data.targets.ScanTargetsRepository
 import app.blueprint.capture.data.targets.TargetStateRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -54,13 +58,14 @@ data class ScanUiState(
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ScanViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    authRepository: AuthRepository,
+    private val authRepository: AuthRepository,
     contributorProfileRepository: ContributorProfileRepository,
     private val scanTargetsRepository: ScanTargetsRepository,
     private val targetStateRepository: TargetStateRepository,
     private val historyRepository: CaptureHistoryRepository,
     private val geofenceManager: GeofenceManager,
     private val placesRepository: PlacesRepository,
+    private val demandIntelligenceBackendApi: DemandIntelligenceBackendApi,
     localConfigProvider: LocalConfigProvider,
 ) : ViewModel() {
 
@@ -68,7 +73,7 @@ class ScanViewModel @Inject constructor(
     private val _userLocation = MutableStateFlow<Location?>(null)
     private val _feedRefreshToken = MutableStateFlow(0)
     private val _submissionSummary = MutableStateFlow(SubmissionSummary())
-    private val _nearbyPlaces = MutableStateFlow<List<NearbyPlace>>(emptyList())
+    private val _nearbyTargets = MutableStateFlow<List<ScanTarget>>(emptyList())
     private val _isRefreshing = MutableStateFlow(false)
 
     // Reverse-geocoded street address for the alpha current-location card.
@@ -85,8 +90,8 @@ class ScanViewModel @Inject constructor(
         },
         _submissionSummary,
         _alphaAddress,
-        _nearbyPlaces,
-    ) { profile, rawTargets, summary, alphaAddr, nearbyPlaces ->
+        _nearbyTargets,
+    ) { profile, rawTargets, summary, alphaAddr, nearbyTargets ->
         // Always pin the alpha current-location card first. Nearby POIs are a separate
         // supplemental rail source, matching iOS where dynamic local places are appended
         // after the live jobs instead of replacing the approved alpha card.
@@ -94,8 +99,7 @@ class ScanViewModel @Inject constructor(
             buildAlphaCurrentLocationTarget(loc, alphaAddr)
         }
         val primaryTargets = listOfNotNull(alphaItem) + rawTargets
-        val discoveredNearbyTargets = nearbyPlaces
-            .mapNotNull { place -> _userLocation.value?.let { location -> place.toNearbyScanTarget(location) } }
+        val discoveredNearbyTargets = nearbyTargets
             .filterNot { supplemental ->
                 primaryTargets.any { existing -> existing.isSamePhysicalPlaceAs(supplemental) }
             }
@@ -217,16 +221,50 @@ class ScanViewModel @Inject constructor(
     }
 
     private fun refreshNearbyPlaces(location: Location, force: Boolean = false) {
-        if (!config.hasPlaces) {
-            _nearbyPlaces.value = emptyList()
+        if (!config.hasPlaces && !config.hasBackend) {
+            _nearbyTargets.value = emptyList()
             return
         }
-        if (!force && lastNearbyDiscoveryLocation?.isWithinMeters(location, 250f) == true && _nearbyPlaces.value.isNotEmpty()) {
+        if (!force && lastNearbyDiscoveryLocation?.isWithinMeters(location, 250f) == true && _nearbyTargets.value.isNotEmpty()) {
             return
         }
         lastNearbyDiscoveryLocation = location
         viewModelScope.launch {
-            _nearbyPlaces.value = placesRepository.searchNearby(location)
+            val places = if (config.hasPlaces) placesRepository.searchNearby(location) else emptyList()
+            val ranked = fetchRankedNearbyTargets(location, places)
+            _nearbyTargets.value = if (ranked.isNotEmpty()) ranked else places.map { it.toNearbyScanTarget(location) }
+        }
+    }
+
+    private suspend fun fetchRankedNearbyTargets(location: Location, places: List<NearbyPlace>): List<ScanTarget> {
+        if (!config.hasBackend || places.isEmpty()) return emptyList()
+
+        val creatorId = authRepository.currentUserId() ?: return emptyList()
+        return runCatching {
+            val response = demandIntelligenceBackendApi.fetchDemandOpportunityFeed(
+                creatorId = creatorId,
+                requestPayload = DemandOpportunityFeedRequest(
+                    lat = location.latitude,
+                    lng = location.longitude,
+                    radiusMeters = 4_000,
+                    limit = 8,
+                    candidatePlaces = places.map { place ->
+                        OpportunityCandidatePlace(
+                            placeId = place.placeId,
+                            displayName = place.name,
+                            formattedAddress = place.address,
+                            lat = place.lat,
+                            lng = place.lng,
+                            placeTypes = place.types,
+                        )
+                    },
+                ),
+            )
+            response.nearbyOpportunities.map { opportunity ->
+                opportunity.toNearbyScanTarget(location)
+            }
+        }.getOrElse {
+            emptyList()
         }
     }
 
@@ -334,6 +372,68 @@ private fun NearbyPlace.toNearbyScanTarget(userLocation: Location): ScanTarget {
         quotedPayoutCents = metadata.payoutCents,
         lat = lat,
         lng = lng,
+        siteType = metadata.categoryLabel.lowercase(Locale.US),
+    )
+}
+
+private fun RankedNearbyOpportunity.toNearbyScanTarget(userLocation: Location): ScanTarget {
+    val targetLocation = Location("ranked-nearby-place").apply {
+        latitude = lat
+        longitude = lng
+    }
+    val distanceMeters = userLocation.distanceTo(targetLocation).toDouble()
+    val metadata = nearbyMetadata(placeTypes, siteType, demandScore)
+    val workflowChecklist = if (suggestedWorkflows.isNotEmpty()) {
+        suggestedWorkflows.map { workflow ->
+            "Capture enough coverage to assess ${workflow.replace('_', ' ')}."
+        }
+    } else {
+        listOf(
+            "Capture only common areas and accessible circulation paths.",
+            "Avoid faces, screens, paperwork, and restricted zones.",
+            "If staff objects or signage restricts access, stop and submit for review instead.",
+        )
+    }
+
+    return ScanTarget(
+        id = "poi-$placeId",
+        title = displayName,
+        subtitle = condensedAddress(formattedAddress.orEmpty()).ifBlank { displayName },
+        payoutText = metadata.payoutText,
+        distanceText = ScanTargetsRepository.formatDistanceMiles(distanceMeters),
+        readyNow = false,
+        addressText = condensedAddress(formattedAddress.orEmpty()).ifBlank { displayName },
+        categoryLabel = metadata.categoryLabel,
+        estimatedMinutes = metadata.estimatedMinutes,
+        permissionTone = CapturePermissionTone.Review,
+        detailChecklist = workflowChecklist,
+        workflowName = suggestedWorkflows.firstOrNull()?.replace('_', ' ') ?: "Nearby space review",
+        workflowSteps = suggestedWorkflows.ifEmpty {
+            listOf(
+                "Start at the public entry or main approach.",
+                "Walk the accessible common areas in one continuous pass.",
+                "Pause at major transitions and call out blocked or restricted areas.",
+            )
+        },
+        requestedOutputs = listOf("qualification", "review_intake"),
+        quotedPayoutCents = metadata.payoutCents,
+        lat = lat,
+        lng = lng,
+        siteType = siteType,
+        demandScore = demandScore,
+        opportunityScore = opportunityScore,
+        demandSummary = demandSummary,
+        rankingExplanation = rankingExplanation,
+        demandSourceKinds = demandSourceKinds.map { kind ->
+            when (kind) {
+                app.blueprint.capture.data.model.DemandSourceKind.ExplicitRequest -> "explicit_request"
+                app.blueprint.capture.data.model.DemandSourceKind.OperatorOffer -> "operator_offer"
+                app.blueprint.capture.data.model.DemandSourceKind.CitedWebSignal -> "cited_web_signal"
+                app.blueprint.capture.data.model.DemandSourceKind.InferredSignal -> "inferred_signal"
+                app.blueprint.capture.data.model.DemandSourceKind.InternalBehavioralSignal -> "internal_behavioral_signal"
+            }
+        },
+        suggestedWorkflows = suggestedWorkflows,
     )
 }
 
@@ -344,12 +444,28 @@ private data class NearbyPresentation(
     val estimatedMinutes: Int,
 )
 
-private fun nearbyMetadata(types: List<String>): NearbyPresentation {
-    val normalized = types.map { it.lowercase(Locale.US) }.toSet()
-    return when {
-        normalized.any { it in setOf("store", "shopping_mall", "department_store", "supermarket") } ->
+private fun nearbyMetadata(
+    types: List<String>,
+    siteType: String? = null,
+    demandScore: Double? = null,
+): NearbyPresentation {
+    val normalized = (types + listOfNotNull(siteType)).map { it.lowercase(Locale.US) }.toSet()
+    val scoreMultiplier = when {
+        (demandScore ?: 0.0) >= 0.8 -> 1.2
+        (demandScore ?: 0.0) >= 0.6 -> 1.1
+        (demandScore ?: 0.0) >= 0.4 -> 1.0
+        else -> 0.9
+    }
+    val base = when {
+        normalized.any { it in setOf("warehouse", "distribution_center", "logistics") } ->
+            NearbyPresentation("WAREHOUSE", "$70", 7_000, 35)
+        normalized.any { it in setOf("manufacturing", "factory", "industrial") } ->
+            NearbyPresentation("MANUFACTURING", "$75", 7_500, 40)
+        normalized.any { it in setOf("store", "shopping_mall", "department_store", "supermarket", "retail", "grocery") } ->
             NearbyPresentation("RETAIL", "$40", 4_000, 25)
-        normalized.any { it in setOf("hotel", "lodging") } ->
+        normalized.contains("convenience_store") ->
+            NearbyPresentation("CONVENIENCE", "$28", 2_800, 18)
+        normalized.any { it in setOf("hotel", "lodging", "hospitality") } ->
             NearbyPresentation("HOSPITALITY", "$80", 8_000, 40)
         normalized.contains("parking") ->
             NearbyPresentation("PARKING", "$30", 3_000, 20)
@@ -369,6 +485,11 @@ private fun nearbyMetadata(types: List<String>): NearbyPresentation {
             NearbyPresentation("CAMPUS", "$55", 5_500, 35)
         else -> NearbyPresentation("COMMERCIAL", "$45", 4_500, 30)
     }
+    val adjustedCents = (base.payoutCents * scoreMultiplier).toInt()
+    return base.copy(
+        payoutText = "$${adjustedCents / 100}",
+        payoutCents = adjustedCents,
+    )
 }
 
 private fun condensedAddress(address: String): String {

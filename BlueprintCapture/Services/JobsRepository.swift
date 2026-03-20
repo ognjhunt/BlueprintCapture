@@ -187,7 +187,14 @@ final class JobsRepository: JobsRepositoryProtocol {
             knownBlockers: toStringArray(data["known_blockers"]),
             nonRoutineModes: toStringArray(data["non_routine_modes"]),
             peopleTrafficNotes: toStringArray(data["people_traffic_notes"]),
-            captureRestrictions: toStringArray(data["capture_restrictions"])
+            captureRestrictions: toStringArray(data["capture_restrictions"]),
+            siteType: data["site_type"] as? String,
+            demandScore: toDouble(data["demand_score"]),
+            opportunityScore: toDouble(data["opportunity_score"]),
+            demandSummary: data["demand_summary"] as? String,
+            rankingExplanation: data["ranking_explanation"] as? String,
+            demandSourceKinds: toStringArray(data["demand_source_kinds"]),
+            suggestedWorkflows: toStringArray(data["suggested_workflows"])
         )
     }
 
