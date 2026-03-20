@@ -7,10 +7,11 @@ import RealityKit
 struct CaptureSessionView: View {
     @ObservedObject var viewModel: CaptureFlowViewModel
     @ObservedObject private var captureManager: VideoCaptureManager
-    @State private var didAutoStart = false
+    @State private var didPrepareSession = false
     @State private var isEnding = false
     @State private var isShowingPostCaptureSummary = false
     @State private var dismissCaptureFlowAfterUploadStarts = false
+    @State private var queuedWorkflowPassStart = false
     @State private var captureNotes = ""
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
@@ -55,12 +56,59 @@ struct CaptureSessionView: View {
 
                     CaptureInfoBadgesView(monitor: captureManager.qualityMonitor)
                         .padding(.horizontal)
+
+                    SiteWorldLiveGuidanceView(
+                        passBrief: viewModel.currentSiteWorldPassBrief,
+                        chips: viewModel.liveStatusChips(
+                            for: captureManager.qualityMonitor,
+                            entryHold: captureManager.detectedEntryAnchorHold,
+                            anchorEvents: captureManager.semanticAnchorEvents
+                        ),
+                        prompt: viewModel.livePrompt(
+                            for: captureManager.qualityMonitor,
+                            entryHold: captureManager.detectedEntryAnchorHold,
+                            anchorEvents: captureManager.semanticAnchorEvents
+                        ),
+                        supportPrompts: viewModel.liveSupportPrompts(
+                            for: captureManager.qualityMonitor,
+                            anchorEvents: captureManager.semanticAnchorEvents
+                        )
+                    )
+                    .padding(.horizontal)
+
+                    CaptureAnchorToolsView(
+                        plannedPassRole: viewModel.currentPlannedPassRole,
+                        highlightedAnchorTypes: viewModel.highlightedAnchorTypesForCurrentPass,
+                        onMarkAnchor: { anchorType in
+                            captureManager.markSemanticAnchor(anchorType)
+                        }
+                    )
+                    .padding(.horizontal)
                 }
 
                 // Upload progress overlay (if any)
                 if !viewModel.uploadStatuses.isEmpty {
                     uploadStatusList
                         .padding(.horizontal)
+                }
+
+                if shouldShowWorkflowBriefing {
+                    SiteWorldPreflightCard(
+                        scale: $viewModel.siteWorldSiteScale,
+                        criticalZoneOptions: viewModel.siteWorldCriticalZoneOptions,
+                        selectedCriticalZones: viewModel.selectedCriticalZoneAnchors,
+                        routePlan: viewModel.siteWorldRoutePlanSummary,
+                        requiredRules: viewModel.siteWorldRequiredRules,
+                        optionalRules: viewModel.siteWorldOptionalRules,
+                        passBrief: viewModel.currentSiteWorldPassBrief,
+                        onToggleCriticalZone: { anchorType in
+                            viewModel.setCriticalZone(anchorType, enabled: !viewModel.selectedCriticalZoneAnchors.contains(anchorType))
+                        },
+                        onStart: {
+                            startCurrentPass()
+                        }
+                    )
+                    .padding(.horizontal)
                 }
 
                 Spacer()
@@ -129,7 +177,6 @@ struct CaptureSessionView: View {
                 isShowingPostCaptureSummary = false
             case .error:
                 isEnding = false
-                didAutoStart = false
                 isShowingPostCaptureSummary = false
             default:
                 break
@@ -141,6 +188,13 @@ struct CaptureSessionView: View {
             isShowingPostCaptureSummary = false
             dismissAfterQueueingUpload()
         }
+        .onChange(of: isShowingPostCaptureSummary) { _, isPresented in
+            guard !isPresented, queuedWorkflowPassStart else { return }
+            queuedWorkflowPassStart = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                startCurrentPass()
+            }
+        }
         .onChange(of: captureManager.qualityMonitor.steadiness) { oldValue, newValue in
             if oldValue != newValue {
                 hapticFeedback.impactOccurred()
@@ -151,7 +205,7 @@ struct CaptureSessionView: View {
         }
         .onAppear {
             UIApplication.shared.isIdleTimerDisabled = true
-            autoStartRecordingIfNeeded()
+            prepareSessionIfNeeded()
         }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
@@ -164,6 +218,13 @@ struct CaptureSessionView: View {
                 spaceTitle: viewModel.currentTargetInfo?.name ?? viewModel.pendingCaptureTargetName ?? "Capture complete",
                 spaceAddress: viewModel.currentAddress,
                 actionState: viewModel.finishedCaptureActionState,
+                workflowReview: viewModel.pendingSiteWorldPassReview,
+                onContinueWorkflow: {
+                    viewModel.updatePendingCaptureNotes(captureNotes)
+                    viewModel.prepareForNextWorkflowPass()
+                    queuedWorkflowPassStart = true
+                    isShowingPostCaptureSummary = false
+                },
                 onUploadNow: {
                     viewModel.updatePendingCaptureNotes(captureNotes)
                     dismissCaptureFlowAfterUploadStarts = true
@@ -213,23 +274,33 @@ struct CaptureSessionView: View {
         }
     }
 
+    private var shouldShowWorkflowBriefing: Bool {
+        !captureManager.captureState.isRecording && !isShowingPostCaptureSummary
+    }
+
     private func handleEndTapped() {
         guard !isEnding else { return }
         endSession()
     }
 
-    private func autoStartRecordingIfNeeded() {
-        guard !didAutoStart else { return }
-        didAutoStart = true
-        print("🎬 [Capture] View appeared — auto start flow")
-        // Ensure the session is configured and running, then start recording automatically
+    private func prepareSessionIfNeeded() {
+        guard !didPrepareSession else { return }
+        didPrepareSession = true
+        print("🎬 [Capture] View appeared — preparing capture session")
         if !captureManager.session.isRunning {
-            print("🎥 [Capture] Starting AVCaptureSession…")
             captureManager.configureSession()
             captureManager.startSession()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            print("⏺️ [Capture] Auto-start recording…")
+    }
+
+    private func startCurrentPass() {
+        guard !captureManager.captureState.isRecording else { return }
+        viewModel.configureSiteWorldWorkflow()
+        prepareSessionIfNeeded()
+        if !captureManager.session.isRunning {
+            captureManager.startSession()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             captureManager.startRecording()
         }
     }
@@ -237,17 +308,8 @@ struct CaptureSessionView: View {
     private func retryRecording() {
         guard !captureManager.captureState.isRecording else { return }
         print("🔄 [Capture] Retry Recording tapped")
-        didAutoStart = true
         captureManager.configureSession()
-
-        if !captureManager.session.isRunning {
-            captureManager.startSession()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                captureManager.startRecording()
-            }
-        } else {
-            captureManager.startRecording()
-        }
+        startCurrentPass()
     }
 
     private var uploadStatusList: some View {
@@ -352,7 +414,7 @@ struct CaptureSessionView: View {
         if case .finished = captureManager.captureState {
             return "Done"
         }
-        return isEnding ? "Ending…" : "End Session"
+        return isEnding ? "Ending…" : "Finish Pass"
     }
 
     private var buttonIcon: String {
@@ -374,6 +436,7 @@ struct CaptureSessionView: View {
             captureManager.stopRecording()
         } else {
             print("ℹ️ [Capture] No active recording when ending session")
+            viewModel.resetSiteWorldWorkflowSession()
             viewModel.step = .confirmLocation
             dismiss()
         }
@@ -382,6 +445,7 @@ struct CaptureSessionView: View {
 
     private func completeAndDismiss() {
         captureManager.stopSession()
+        viewModel.resetSiteWorldWorkflowSession()
         viewModel.clearFinishedCapture()
         viewModel.step = .confirmLocation
         dismiss()
@@ -389,6 +453,7 @@ struct CaptureSessionView: View {
 
     private func dismissAfterQueueingUpload() {
         captureManager.stopSession()
+        viewModel.resetSiteWorldWorkflowSession()
         viewModel.step = .confirmLocation
         dismiss()
     }
@@ -525,6 +590,217 @@ private struct CaptureGuidanceTip {
     let text: String
 }
 
+private struct SiteWorldPreflightCard: View {
+    @Binding var scale: SiteWorldSiteScale
+    let criticalZoneOptions: [CaptureSemanticAnchorType]
+    let selectedCriticalZones: Set<CaptureSemanticAnchorType>
+    let routePlan: [String]
+    let requiredRules: [String]
+    let optionalRules: [String]
+    let passBrief: SiteWorldPassBrief
+    let onToggleCriticalZone: (CaptureSemanticAnchorType) -> Void
+    let onStart: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Site World Candidate")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.white)
+                Text(passBrief.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                Text(passBrief.summary)
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Site size")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                HStack(spacing: 8) {
+                    ForEach(SiteWorldSiteScale.allCases) { option in
+                        Button {
+                            scale = option
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(option.title)
+                                    .font(.caption.weight(.semibold))
+                                Text(option.subtitle)
+                                    .font(.caption2)
+                                    .foregroundStyle(.white.opacity(0.75))
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(scale == option ? BlueprintTheme.brandTeal.opacity(0.32) : Color.white.opacity(0.10))
+                            )
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Critical zones")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(criticalZoneOptions, id: \.rawValue) { anchorType in
+                            let isSelected = selectedCriticalZones.contains(anchorType)
+                            Button {
+                                onToggleCriticalZone(anchorType)
+                            } label: {
+                                Text(anchorType.displayLabel)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(isSelected ? BlueprintTheme.brandTeal.opacity(0.35) : Color.white.opacity(0.12))
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+
+            SiteWorldBulletSection(title: "Route plan", items: routePlan)
+            SiteWorldBulletSection(title: "Required", items: requiredRules)
+            SiteWorldBulletSection(title: "Optional", items: optionalRules)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Operator prompts")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                ForEach(passBrief.exactPrompts.prefix(2), id: \.self) { prompt in
+                    Text("\"\(prompt)\"")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.84))
+                }
+            }
+
+            Button(action: onStart) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Start \(passBrief.title)")
+                            .font(.headline.weight(.semibold))
+                        Text("Checkpoint target: \(passBrief.requiredCheckpointTarget)")
+                            .font(.caption)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.right.circle.fill")
+                        .font(.title3)
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white)
+                )
+            }
+        }
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color.black.opacity(0.72))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct SiteWorldBulletSection: View {
+    let title: String
+    let items: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.72))
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(Color.white.opacity(0.5))
+                        .frame(width: 5, height: 5)
+                        .padding(.top, 6)
+                    Text(item)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.84))
+                }
+            }
+        }
+    }
+}
+
+private struct SiteWorldLiveGuidanceView: View {
+    let passBrief: SiteWorldPassBrief
+    let chips: [String]
+    let prompt: String
+    let supportPrompts: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(passBrief.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(passBrief.summary)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                Spacer()
+                Text("Target \(passBrief.requiredCheckpointTarget)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(chips, id: \.self) { chip in
+                        Text(chip)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.white.opacity(0.12))
+                            )
+                    }
+                }
+            }
+
+            Text(prompt)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(supportPrompts, id: \.self) { supportPrompt in
+                    Text(supportPrompt)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
+        )
+    }
+}
+
 private extension VideoCaptureManager.CaptureState {
     var isRecording: Bool {
         if case .recording = self { return true }
@@ -533,6 +809,77 @@ private extension VideoCaptureManager.CaptureState {
     var isFinished: Bool {
         if case .finished = self { return true }
         return false
+    }
+}
+
+private struct CaptureAnchorToolsView: View {
+    let plannedPassRole: String
+    let highlightedAnchorTypes: Set<CaptureSemanticAnchorType>
+    let onMarkAnchor: (CaptureSemanticAnchorType) -> Void
+
+    private let anchorTypes: [CaptureSemanticAnchorType] = [
+        .entrance,
+        .doorway,
+        .corridorIntersection,
+        .dockTurn,
+        .handoffPoint,
+        .controlPanel,
+        .floorTransition,
+        .restrictedBoundary,
+        .exitPoint,
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Pass: \(passRoleLabel)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                Text("Mark anchors to help overlap and relocalization")
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(anchorTypes, id: \.rawValue) { anchorType in
+                        Button {
+                            onMarkAnchor(anchorType)
+                        } label: {
+                            Text(anchorType.displayLabel)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 8)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(highlightedAnchorTypes.contains(anchorType) ? BlueprintTheme.brandTeal.opacity(0.35) : Color.white.opacity(0.14))
+                                )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .environment(\.colorScheme, .dark)
+        )
+    }
+
+    private var passRoleLabel: String {
+        switch plannedPassRole {
+        case "loop_closure":
+            return "Loop Closure"
+        case "critical_zone_revisit":
+            return "Critical Revisit"
+        case "revisit":
+            return "Revisit"
+        default:
+            return "Primary"
+        }
     }
 }
 

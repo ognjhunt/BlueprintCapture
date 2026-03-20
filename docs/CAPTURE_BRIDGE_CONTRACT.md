@@ -2,6 +2,8 @@
 
 This document defines the bridge contract emitted by [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts).
 
+For the canonical upstream raw iPhone bundle contract, see [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md). This bridge document remains the compatibility and downstream materialization contract.
+
 ## Input Paths
 
 Canonical:

@@ -51,7 +51,7 @@ export function parsePoseRows(content) {
     const legacyBaseTimestamp = legacyTimestampRows.length > 0 ? legacyTimestampRows[0] : undefined;
     return rows.map((row) => {
         const frameIdRaw = typeof row.frame_id === "string" ? row.frame_id : undefined;
-        const frameIndexRaw = toFiniteNumber(row.frameIndex);
+        const frameIndexRaw = toFiniteNumber(row.frame_index ?? row.frameIndex);
         const frameId = frameIdRaw ??
             (frameIndexRaw !== undefined ? zeroPad(Math.max(0, Math.floor(frameIndexRaw)) + 1, 6) : undefined);
         const tDeviceSecRaw = toFiniteNumber(row.t_device_sec);

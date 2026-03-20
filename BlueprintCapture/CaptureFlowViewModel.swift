@@ -58,6 +58,80 @@ private func normalizeRequestedOutputs(_ outputs: [String]) -> [String] {
     return normalized
 }
 
+enum SiteWorldSiteScale: String, CaseIterable, Identifiable {
+    case smallSimple = "small_simple"
+    case medium
+    case multiZone = "multi_zone"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .smallSimple:
+            return "Small / Simple"
+        case .medium:
+            return "Medium"
+        case .multiZone:
+            return "Multi-zone"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .smallSimple:
+            return "Single route with one clean return"
+        case .medium:
+            return "Main spine with shared checkpoints"
+        case .multiZone:
+            return "Hub-and-spoke zones with returns"
+        }
+    }
+}
+
+enum SiteWorldReviewTone: String, Equatable {
+    case ready
+    case caution
+    case actionRequired
+
+    var title: String {
+        switch self {
+        case .ready:
+            return "Ready"
+        case .caution:
+            return "Needs Next Pass"
+        case .actionRequired:
+            return "Needs Recapture"
+        }
+    }
+}
+
+struct SiteWorldPassBrief: Equatable {
+    let role: String
+    let title: String
+    let summary: String
+    let requiredCheckpointTarget: Int
+    let requiredPrompt: String
+    let exactPrompts: [String]
+}
+
+struct SiteWorldPassReview: Equatable {
+    let passAttemptIndex: Int
+    let passRole: String
+    let title: String
+    let tone: SiteWorldReviewTone
+    let score: Int
+    let summary: String
+    let completedItems: [String]
+    let missingItems: [String]
+    let weakSignalSummary: String?
+    let nextActionLabel: String?
+    let canFinishWorkflow: Bool
+    let shouldAdvanceWorkflow: Bool
+    let completedRequiredPasses: Int
+    let totalRequiredPasses: Int
+    let exactPrompts: [String]
+}
+
 @MainActor
 final class CaptureFlowViewModel: NSObject, ObservableObject {
     enum Step {
@@ -99,6 +173,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var shareSheetItem: ShareSheetItem?
     @Published var spaceContextNotes: String = ""
     @Published var confirmedCaptureGuidelines = false
+    @Published var siteWorldSiteScale: SiteWorldSiteScale = .medium
+    @Published var selectedCriticalZoneAnchors: Set<CaptureSemanticAnchorType> = []
+    @Published private(set) var siteWorldWorkflowConfigured = false
+    @Published private(set) var pendingSiteWorldPassReview: SiteWorldPassReview?
+    @Published private(set) var completedWorkflowPassCount: Int = 0
 
     /// Stores current target info for the active capture session (set before starting capture)
     var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
@@ -121,13 +200,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let openCaptureSiteId: String = UUID().uuidString
 
     /// Shared across all recordings in a single app session (multiple passes at one facility visit).
-    private let captureSessionId: String = UUID().uuidString
+    private let siteVisitId: String = UUID().uuidString
 
     /// Stable route ID for this session. Shared across passes of the same intended path.
     private let captureRouteId: String = UUID().uuidString
 
-    /// Tracks how many recordings have been made in this session, for pass_index.
-    private var capturePassIndex: Int = 0
+    /// Tracks how many recording attempts have been made in this session.
+    private var capturePassAttemptIndex: Int = 0
 
     private let uploadService: CaptureUploadServiceProtocol
     private let targetStateService: TargetStateServiceProtocol
@@ -139,6 +218,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var searchDebounceTask: Task<Void, Never>?
     private var currentSearchQuery: String = ""
     private var pendingPostCaptureAction: PendingPostCaptureAction?
+    private var selectedAddressResult: AddressResult?
 
     init(flowMode: FlowMode = .standard,
          uploadService: CaptureUploadServiceProtocol = CaptureUploadService.shared,
@@ -211,6 +291,58 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             "Capture only common areas you can visibly access.",
             "Avoid faces, screens, paperwork, and posted private information.",
             "Respect restricted zones and any on-site staff direction."
+        ]
+    }
+
+    var siteWorldCriticalZoneOptions: [CaptureSemanticAnchorType] {
+        [.dockTurn, .handoffPoint, .floorTransition, .restrictedBoundary, .controlPanel]
+    }
+
+    var siteWorldRoutePlanSummary: [String] {
+        switch siteWorldSiteScale {
+        case .smallSimple:
+            return [
+                "Lock at the entrance, capture one clean outbound route, then return on the same path.",
+                "Pause once at the far end and once at a shared threshold before closing the loop."
+            ]
+        case .medium:
+            return [
+                "Lock at the entrance, follow the main spine, and pause at every doorway or intersection that branches the route.",
+                "Add a reverse-direction revisit before the final loop closure."
+            ]
+        case .multiZone:
+            return [
+                "Lock at the entrance, use one hub or spine, and treat each zone as an out-and-back branch.",
+                "Do not leave a zone until you have a shared threshold checkpoint and a return to the hub."
+            ]
+        }
+    }
+
+    var siteWorldRequiredRules: [String] {
+        var rules = [
+            "Entrance lock: hold still at the entry for 3 seconds before walking.",
+            "Shared checkpoints: stop at doorway, intersection, dock turn, or other topology changes.",
+            "Weak signal recovery: if tracking degrades, stop and reacquire fixed structure before continuing."
+        ]
+        switch siteWorldSiteScale {
+        case .smallSimple:
+            rules.append("Loop close back to the entry or main starting threshold.")
+        case .medium:
+            rules.append("Run one reverse revisit on the main spine before closing the loop.")
+        case .multiZone:
+            rules.append("Return to the hub or spine after each zone before moving to the next one.")
+        }
+        if !selectedCriticalZoneAnchors.isEmpty {
+            rules.append("Revisit every selected critical zone from the opposite direction before finishing.")
+        }
+        return rules
+    }
+
+    var siteWorldOptionalRules: [String] {
+        [
+            "Add manual notes only when access limits or unusual constraints matter downstream.",
+            "Mark extra checkpoints if a space is visually repetitive, but do not wander just to raise the count.",
+            "Take an extra static sweep only when you are already at a strong shared checkpoint."
         ]
     }
 
@@ -342,7 +474,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                         title: title,
                         subtitle: subtitle,
                         completionTitle: title,
-                        completionSubtitle: subtitle
+                        completionSubtitle: subtitle,
+                        placeId: s.placeId,
+                        formattedAddress: d?.formattedAddress ?? subtitle,
+                        lat: d?.lat,
+                        lng: d?.lng,
+                        accuracyM: nil,
+                        placeTypes: d?.types ?? s.types
                     )
                 }
                 print("✅ [Autocomplete] Displaying \(mapped.count) search results")
@@ -375,7 +513,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                     title: title,
                     subtitle: subtitle,
                     completionTitle: title,
-                    completionSubtitle: subtitle
+                    completionSubtitle: subtitle,
+                    placeId: nil,
+                    formattedAddress: mapItem.placemark.title,
+                    lat: mapItem.placemark.location?.coordinate.latitude,
+                    lng: mapItem.placemark.location?.coordinate.longitude,
+                    accuracyM: mapItem.placemark.location?.horizontalAccuracy,
+                    placeTypes: []
                 )
             }
             print("📍 [MapKit] Displaying \(results.count) search results")
@@ -387,8 +531,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
     
     func selectAddress(_ result: AddressResult) {
-        currentAddress = "\(result.title), \(result.subtitle)"
+        currentAddress = result.formattedAddress ?? "\(result.title), \(result.subtitle)"
         addressSearchResults = []
+        selectedAddressResult = result
         // Clear session token on selection (matching React solution approach)
         placesSessionToken = nil
     }
@@ -478,29 +623,75 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         let siteIdentity = SiteIdentity(
             siteId: siteId,
             siteIdSource: siteIdSource,
-            placeId: nil,
+            placeId: selectedAddressResult?.placeId,
             siteName: currentTargetInfo?.name ?? reviewSeed?.title,
             addressFull: currentAddress,
-            geo: nil,
+            geo: selectedAddressResult?.lat.flatMap { latitude in
+                selectedAddressResult?.lng.map { longitude in
+                    SiteGeoPoint(
+                        latitude: latitude,
+                        longitude: longitude,
+                        accuracyM: selectedAddressResult?.accuracyM ?? 25.0
+                    )
+                }
+            },
             buildingId: nil,
             floorId: nil,
             roomId: nil,
             zoneId: nil
         )
 
-        // Increment pass index per recording within this session.
-        capturePassIndex += 1
+        siteWorldWorkflowConfigured = true
+        capturePassAttemptIndex += 1
         let hold = captureManager.detectedEntryAnchorHold
+        let passRole = currentPlannedPassRole
+        let coordinateFrameSessionId = captureManager.latestRecordingSessionId
+        let passReview = buildSiteWorldPassReview(
+            passAttemptIndex: capturePassAttemptIndex,
+            passRole: passRole,
+            hold: hold,
+            anchorEvents: captureManager.semanticAnchorEvents,
+            monitor: captureManager.qualityMonitor
+        )
+        let completedRequiredPasses = completedWorkflowPassCount + (passReview.shouldAdvanceWorkflow ? 1 : 0)
+        let totalRequiredPasses = workflowPassSequence().count
+        let pendingReview = SiteWorldPassReview(
+            passAttemptIndex: passReview.passAttemptIndex,
+            passRole: passReview.passRole,
+            title: passReview.title,
+            tone: passReview.tone,
+            score: passReview.score,
+            summary: passReview.summary,
+            completedItems: passReview.completedItems,
+            missingItems: passReview.missingItems,
+            weakSignalSummary: passReview.weakSignalSummary,
+            nextActionLabel: nextWorkflowActionLabel(
+                after: passRole,
+                shouldAdvance: passReview.shouldAdvanceWorkflow,
+                hasWeakSignalConcern: captureManager.qualityMonitor.hasWeakSignalConcern
+            ),
+            canFinishWorkflow: completedRequiredPasses >= totalRequiredPasses && !captureManager.qualityMonitor.hasWeakSignalConcern,
+            shouldAdvanceWorkflow: passReview.shouldAdvanceWorkflow,
+            completedRequiredPasses: min(completedRequiredPasses, totalRequiredPasses),
+            totalRequiredPasses: totalRequiredPasses,
+            exactPrompts: passReview.exactPrompts
+        )
+        if passReview.shouldAdvanceWorkflow {
+            completedWorkflowPassCount = min(completedRequiredPasses, totalRequiredPasses)
+        }
         let captureTopology = CaptureTopologyMetadata(
-            captureSessionId: captureSessionId,
+            captureSessionId: siteVisitId,
             routeId: captureRouteId,
             passId: UUID().uuidString,
-            passIndex: capturePassIndex,
-            intendedPassRole: "primary",
+            passIndex: capturePassAttemptIndex,
+            intendedPassRole: passRole,
             entryAnchorId: hold?.anchorId,
-            returnAnchorId: nil,
+            returnAnchorId: passRole == "loop_closure" && captureManager.semanticAnchorEvents.contains(where: { $0.anchorType == .entrance || $0.anchorType == .exitPoint }) ? "semantic_entrance" : nil,
             entryAnchorTCaptureSec: hold?.tCaptureSec,
-            entryAnchorHoldDurationSec: hold?.durationSec
+            entryAnchorHoldDurationSec: hold?.durationSec,
+            siteVisitId: siteVisitId,
+            coordinateFrameSessionId: coordinateFrameSessionId,
+            arkitSessionId: coordinateFrameSessionId
         )
 
         // iPhone captures default to requesting site_world_candidate mode.
@@ -533,12 +724,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             intakeMetadata: nil,
             taskHypothesis: nil,
             scaffoldingPacket: CaptureScaffoldingPacket(
-                scaffoldingUsed: [],
-                coveragePlan: [
-                    "Capture primary route plus each workcell boundary.",
-                    "Pause at narrow aisles, thresholds, dock turns, and handoff points.",
-                    "Record restricted-zone boundaries and any failure-prone floor transitions."
-                ],
+                scaffoldingUsed: siteWorldScaffoldingUsed(for: passRole),
+                coveragePlan: siteWorldCoveragePlan(for: passRole),
                 calibrationAssets: [],
                 scaleAnchorAssets: [],
                 checkpointAssets: [],
@@ -548,11 +735,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             evidenceTier: nil,
             captureContextHint: contextParts.compactMap { $0 }.joined(separator: " | ").nilIfEmpty,
             sceneMemory: SceneMemoryCaptureMetadata(
-                continuityScore: nil,
+                continuityScore: Double(pendingReview.score) / 100.0,
                 lightingConsistency: "unknown",
                 dynamicObjectDensity: "unknown",
-                operatorNotes: spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { [$0] } ?? [],
-                inaccessibleAreas: []
+                operatorNotes: siteWorldOperatorNotes(from: pendingReview),
+                inaccessibleAreas: [],
+                semanticAnchorsObserved: Array(Set(captureManager.semanticAnchorEvents.map { $0.anchorType.rawValue })).sorted(),
+                relocalizationCount: captureManager.qualityMonitor.relocalizationCount,
+                overlapCheckpointCount: captureManager.semanticAnchorEvents.count
             ),
             captureRights: CaptureRightsMetadata(
                 derivedSceneGenerationAllowed: !isSpaceReviewMode,
@@ -565,16 +755,377 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             ),
             siteIdentity: siteIdentity,
             captureTopology: captureTopology,
-            captureMode: captureMode
+            captureMode: captureMode,
+            semanticAnchors: captureManager.semanticAnchorEvents
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
 
         pendingCaptureRequest = request
+        pendingSiteWorldPassReview = pendingReview
         pendingCaptureTargetName = currentTargetInfo?.name ?? reviewSeed?.title
         pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
         finishedCaptureActionState = .idle
         currentTargetInfo = nil
         print("📦 [CaptureFlowViewModel] Pending capture ready jobId=\(jobId) id=\(metadata.id)")
+    }
+
+    var currentPlannedPassRole: String {
+        plannedPassRole(for: completedWorkflowPassCount + 1)
+    }
+
+    var currentSiteWorldPassBrief: SiteWorldPassBrief {
+        passBrief(for: currentPlannedPassRole)
+    }
+
+    var highlightedAnchorTypesForCurrentPass: Set<CaptureSemanticAnchorType> {
+        switch currentPlannedPassRole {
+        case "revisit":
+            return Set([CaptureSemanticAnchorType.entrance, .doorway, .corridorIntersection, .exitPoint]).union(selectedCriticalZoneAnchors)
+        case "loop_closure":
+            return Set([CaptureSemanticAnchorType.entrance, .doorway, .corridorIntersection, .exitPoint])
+        case "critical_zone_revisit":
+            return selectedCriticalZoneAnchors.isEmpty
+                ? Set(siteWorldCriticalZoneOptions)
+                : selectedCriticalZoneAnchors
+        default:
+            return Set([CaptureSemanticAnchorType.doorway, .corridorIntersection, .dockTurn, .handoffPoint, .floorTransition, .restrictedBoundary]).union(selectedCriticalZoneAnchors)
+        }
+    }
+
+    func configureSiteWorldWorkflow() {
+        siteWorldWorkflowConfigured = true
+    }
+
+    func setCriticalZone(_ anchorType: CaptureSemanticAnchorType, enabled: Bool) {
+        if enabled {
+            selectedCriticalZoneAnchors.insert(anchorType)
+        } else {
+            selectedCriticalZoneAnchors.remove(anchorType)
+        }
+    }
+
+    func prepareForNextWorkflowPass() {
+        pendingCaptureRequest = nil
+        pendingCaptureTargetName = nil
+        pendingCapturePayoutRange = nil
+        finishedCaptureActionState = .idle
+        manualIntakeDraft = nil
+        pendingPostCaptureAction = nil
+        pendingSiteWorldPassReview = nil
+    }
+
+    func resetSiteWorldWorkflowSession() {
+        siteWorldWorkflowConfigured = false
+        pendingSiteWorldPassReview = nil
+        completedWorkflowPassCount = 0
+        capturePassAttemptIndex = 0
+        selectedCriticalZoneAnchors = []
+        siteWorldSiteScale = .medium
+    }
+
+    func livePrompt(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, anchorEvents: [CaptureSemanticAnchorEvent]) -> String {
+        if entryHold == nil {
+            return "Stand at the main entry point. Hold still for 3 seconds. Slowly pan left, center, right. Keep the door frame, floor edge, and nearby wall in view."
+        }
+        if let recoveryPrompt = monitor.recoveryPrompt {
+            return recoveryPrompt
+        }
+        let sharedCheckpointCount = anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count
+        let target = currentSiteWorldPassBrief.requiredCheckpointTarget
+        switch currentPlannedPassRole {
+        case "revisit":
+            return "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone."
+        case "loop_closure":
+            return "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds."
+        case "critical_zone_revisit":
+            return "Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction."
+        default:
+            if sharedCheckpointCount < target {
+                return "At the next doorway or intersection, stop at the threshold. Show left frame, center opening, right frame. Then continue."
+            }
+            if let lastCheckpointT = anchorEvents.compactMap(\.tCaptureSec).max(),
+               monitor.elapsedSeconds - lastCheckpointT > 35 {
+                return "Before leaving this shared area, pause and show the last checkpoint again for 2 seconds."
+            }
+            return currentSiteWorldPassBrief.requiredPrompt
+        }
+    }
+
+    func liveSupportPrompts(for monitor: CaptureQualityMonitor, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
+        var prompts = ["Prefer fixed building structure. Avoid following people, forklifts, carts, or temporary pallets."]
+        if !selectedCriticalZoneAnchors.isEmpty {
+            let remainingCritical = selectedCriticalZoneAnchors.subtracting(Set(anchorEvents.map(\.anchorType)))
+            if !remainingCritical.isEmpty {
+                let labels = remainingCritical.map(\.displayLabel).sorted().joined(separator: ", ")
+                prompts.append("Still need critical zones: \(labels).")
+            }
+        }
+        if monitor.hasWeakSignalConcern {
+            prompts.append("Weak segment detected. Reacquire a recent checkpoint before moving deeper into the site.")
+        } else {
+            prompts.append("Shared checkpoints: \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
+        }
+        return Array(prompts.prefix(2))
+    }
+
+    func liveStatusChips(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
+        var chips: [String] = []
+        chips.append(entryHold == nil ? "Entry lock pending" : "Entry locked")
+        chips.append("Checkpoints \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
+        if monitor.hasWeakSignalConcern {
+            chips.append("Weak signal \(Int(monitor.limitedTrackingSeconds))s")
+        }
+        if !selectedCriticalZoneAnchors.isEmpty {
+            let matched = selectedCriticalZoneAnchors.intersection(Set(anchorEvents.map(\.anchorType))).count
+            chips.append("Critical \(matched)/\(selectedCriticalZoneAnchors.count)")
+        }
+        return chips
+    }
+
+    private func plannedPassRole(for stageIndex: Int) -> String {
+        let roles = workflowPassSequence()
+        guard !roles.isEmpty else { return "primary" }
+        let clampedIndex = min(max(stageIndex - 1, 0), roles.count - 1)
+        return roles[clampedIndex]
+    }
+
+    private func workflowPassSequence() -> [String] {
+        var roles: [String]
+        switch siteWorldSiteScale {
+        case .smallSimple:
+            roles = ["primary", "loop_closure"]
+        case .medium, .multiZone:
+            roles = ["primary", "revisit", "loop_closure"]
+        }
+        if !selectedCriticalZoneAnchors.isEmpty {
+            roles.append("critical_zone_revisit")
+        }
+        return roles
+    }
+
+    private var sharedCheckpointAnchorTypes: Set<CaptureSemanticAnchorType> {
+        [.doorway, .corridorIntersection, .dockTurn, .handoffPoint, .floorTransition, .restrictedBoundary]
+    }
+
+    private func passBrief(for role: String) -> SiteWorldPassBrief {
+        switch role {
+        case "revisit":
+            return SiteWorldPassBrief(
+                role: role,
+                title: "Revisit Pass",
+                summary: "Reverse through shared checkpoints before closing the route.",
+                requiredCheckpointTarget: max(1, currentCheckpointTarget / 2),
+                requiredPrompt: "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone.",
+                exactPrompts: [
+                    "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone.",
+                    "Pause at the intersection. Sweep each branch briefly, then continue down your chosen path."
+                ]
+            )
+        case "loop_closure":
+            return SiteWorldPassBrief(
+                role: role,
+                title: "Loop Closure",
+                summary: "Return to the entrance or hub and match the starting view.",
+                requiredCheckpointTarget: 1,
+                requiredPrompt: "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds.",
+                exactPrompts: [
+                    "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds.",
+                    "Before leaving this shared area, pause and show the last checkpoint again for 2 seconds."
+                ]
+            )
+        case "critical_zone_revisit":
+            return SiteWorldPassBrief(
+                role: role,
+                title: "Critical Zone Revisit",
+                summary: "Reacquire operationally critical boundaries and handoff geometry.",
+                requiredCheckpointTarget: max(1, selectedCriticalZoneAnchors.count),
+                requiredPrompt: "Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction.",
+                exactPrompts: [
+                    "This is a critical zone. Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction.",
+                    "Match the earlier view within a few steps. Hold briefly. Show the same threshold or boundary geometry again."
+                ]
+            )
+        default:
+            return SiteWorldPassBrief(
+                role: "primary",
+                title: "Primary Route",
+                summary: primaryPassSummary,
+                requiredCheckpointTarget: currentCheckpointTarget,
+                requiredPrompt: "Walk forward slowly. Pause at every major threshold or branch before moving on.",
+                exactPrompts: [
+                    "Stand at the main entry point. Hold still for 3 seconds. Slowly pan left, center, right. Keep the door frame, floor edge, and nearby wall in view.",
+                    "At this doorway, stop at the threshold. Show left frame, center opening, right frame. Then continue."
+                ]
+            )
+        }
+    }
+
+    private var currentCheckpointTarget: Int {
+        switch siteWorldSiteScale {
+        case .smallSimple:
+            return 2
+        case .medium:
+            return 4
+        case .multiZone:
+            return 6
+        }
+    }
+
+    private var primaryPassSummary: String {
+        switch siteWorldSiteScale {
+        case .smallSimple:
+            return "One clean outbound route, one far-end checkpoint, then return to the start."
+        case .medium:
+            return "Cover the main spine and pause at doorways, intersections, and shared thresholds."
+        case .multiZone:
+            return "Use a hub or spine and capture each zone as an out-and-back branch."
+        }
+    }
+
+    private func siteWorldCoveragePlan(for passRole: String) -> [String] {
+        var plan = siteWorldRoutePlanSummary
+        plan.append(passBrief(for: passRole).summary)
+        if !selectedCriticalZoneAnchors.isEmpty {
+            let labels = selectedCriticalZoneAnchors.map(\.displayLabel).sorted().joined(separator: ", ")
+            plan.append("Critical zone revisits requested for: \(labels).")
+        }
+        return plan
+    }
+
+    private func siteWorldScaffoldingUsed(for passRole: String) -> [String] {
+        var scaffolding = ["site_world_candidate", "entry_anchor_hold", "shared_checkpoint_prompts", "pass_role_\(passRole)"]
+        if siteWorldSiteScale == .multiZone {
+            scaffolding.append("hub_return_plan")
+        }
+        if !selectedCriticalZoneAnchors.isEmpty {
+            scaffolding.append("critical_zone_revisits")
+        }
+        return scaffolding
+    }
+
+    private func siteWorldOperatorNotes(from review: SiteWorldPassReview) -> [String] {
+        var notes = spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty.map { [$0] } ?? []
+        notes.append("site_world_scale:\(siteWorldSiteScale.rawValue)")
+        if !selectedCriticalZoneAnchors.isEmpty {
+            notes.append("critical_zones:\(selectedCriticalZoneAnchors.map(\.rawValue).sorted().joined(separator: ","))")
+        }
+        if let weakSignalSummary = review.weakSignalSummary {
+            notes.append(weakSignalSummary)
+        }
+        return notes
+    }
+
+    private func buildSiteWorldPassReview(
+        passAttemptIndex: Int,
+        passRole: String,
+        hold: VideoCaptureManager.EntryAnchorHold?,
+        anchorEvents: [CaptureSemanticAnchorEvent],
+        monitor: CaptureQualityMonitor
+    ) -> SiteWorldPassReview {
+        let brief = passBrief(for: passRole)
+        let anchorTypes = Set(anchorEvents.map(\.anchorType))
+        let sharedCheckpointCount = anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count
+        let criticalMatches = selectedCriticalZoneAnchors.intersection(anchorTypes)
+        let hasLoopClosureAnchor = anchorTypes.contains(.entrance) || anchorTypes.contains(.exitPoint) || hold != nil
+        var completedItems: [String] = []
+        var missingItems: [String] = []
+
+        if hold != nil {
+            completedItems.append("Entrance localization hold captured.")
+        } else {
+            missingItems.append("Entrance localization hold is required before the route counts.")
+        }
+
+        switch passRole {
+        case "revisit":
+            if sharedCheckpointCount >= brief.requiredCheckpointTarget {
+                completedItems.append("Reverse-direction shared checkpoints captured.")
+            } else {
+                missingItems.append("Reacquire at least \(brief.requiredCheckpointTarget) doorway or intersection checkpoints in reverse.")
+            }
+        case "loop_closure":
+            if hasLoopClosureAnchor {
+                completedItems.append("Loop closure returned to the entrance or shared endpoint.")
+            } else {
+                missingItems.append("Return to the original entrance or shared endpoint before finishing this pass.")
+            }
+        case "critical_zone_revisit":
+            if selectedCriticalZoneAnchors.isEmpty || !criticalMatches.isEmpty {
+                completedItems.append("Critical zone revisit captured.")
+            } else {
+                let labels = selectedCriticalZoneAnchors.map(\.displayLabel).sorted().joined(separator: ", ")
+                missingItems.append("Revisit one of the selected critical zones: \(labels).")
+            }
+        default:
+            if sharedCheckpointCount >= brief.requiredCheckpointTarget {
+                completedItems.append("Shared checkpoint target met.")
+            } else {
+                missingItems.append("Capture \(brief.requiredCheckpointTarget) shared checkpoints at doorways, intersections, or thresholds.")
+            }
+        }
+
+        let weakSignalSummary: String? = {
+            guard monitor.limitedTrackingSeconds > 0 || monitor.relocalizationCount > 0 else { return nil }
+            return "weak_signal:\(Int(monitor.limitedTrackingSeconds))s limited, \(monitor.relocalizationCount) relocalizations"
+        }()
+        if monitor.hasWeakSignalConcern {
+            missingItems.append("Tracking degraded long enough to require a targeted recapture before finishing.")
+        } else if monitor.limitedTrackingSeconds > 0 {
+            completedItems.append("Tracking recovered without blocking the route.")
+        }
+
+        let shouldAdvance = missingItems.isEmpty
+        let score = max(20, min(100, 100 - (missingItems.count * 18) - Int(monitor.limitedTrackingSeconds.rounded())))
+        let tone: SiteWorldReviewTone = missingItems.isEmpty ? .ready : (monitor.hasWeakSignalConcern ? .actionRequired : .caution)
+
+        return SiteWorldPassReview(
+            passAttemptIndex: passAttemptIndex,
+            passRole: passRole,
+            title: brief.title,
+            tone: tone,
+            score: score,
+            summary: brief.summary,
+            completedItems: completedItems,
+            missingItems: missingItems,
+            weakSignalSummary: weakSignalSummary,
+            nextActionLabel: nil,
+            canFinishWorkflow: false,
+            shouldAdvanceWorkflow: shouldAdvance,
+            completedRequiredPasses: completedWorkflowPassCount,
+            totalRequiredPasses: workflowPassSequence().count,
+            exactPrompts: brief.exactPrompts
+        )
+    }
+
+    private func nextWorkflowActionLabel(after passRole: String, shouldAdvance: Bool, hasWeakSignalConcern: Bool) -> String? {
+        if hasWeakSignalConcern {
+            return passRole == "critical_zone_revisit" ? "Recapture weak segment" : "Recapture weak segments"
+        }
+        guard shouldAdvance else {
+            switch passRole {
+            case "loop_closure":
+                return "Retry loop closure"
+            case "critical_zone_revisit":
+                return "Retry critical zone revisit"
+            default:
+                return "Retake \(passBrief(for: passRole).title.lowercased())"
+            }
+        }
+
+        let nextRole = plannedPassRole(for: completedWorkflowPassCount + 2)
+        if completedWorkflowPassCount + 1 >= workflowPassSequence().count {
+            return nil
+        }
+        switch nextRole {
+        case "revisit":
+            return "Start revisit pass"
+        case "loop_closure":
+            return "Start loop closure"
+        case "critical_zone_revisit":
+            return "Revisit critical zones"
+        default:
+            return "Start next pass"
+        }
     }
 
     func startPendingCaptureUpload() {
@@ -605,6 +1156,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         finishedCaptureActionState = .idle
         manualIntakeDraft = nil
         pendingPostCaptureAction = nil
+        pendingSiteWorldPassReview = nil
         if isSpaceReviewMode {
             confirmedCaptureGuidelines = false
         }
@@ -822,6 +1374,12 @@ struct AddressResult: Identifiable {
     let subtitle: String
     let completionTitle: String
     let completionSubtitle: String
+    let placeId: String?
+    let formattedAddress: String?
+    let lat: Double?
+    let lng: Double?
+    let accuracyM: Double?
+    let placeTypes: [String]
 }
 
 private extension String {
@@ -839,7 +1397,10 @@ private extension CaptureUploadMetadata {
             lightingConsistency: sceneMemory?.lightingConsistency,
             dynamicObjectDensity: sceneMemory?.dynamicObjectDensity,
             operatorNotes: noteItems,
-            inaccessibleAreas: sceneMemory?.inaccessibleAreas ?? []
+            inaccessibleAreas: sceneMemory?.inaccessibleAreas ?? [],
+            semanticAnchorsObserved: sceneMemory?.semanticAnchorsObserved ?? [],
+            relocalizationCount: sceneMemory?.relocalizationCount,
+            overlapCheckpointCount: sceneMemory?.overlapCheckpointCount
         )
         let baseParts = (captureContextHint ?? "")
             .split(separator: "|")
@@ -878,7 +1439,8 @@ private extension CaptureUploadMetadata {
             captureRights: captureRights,
             siteIdentity: siteIdentity,
             captureTopology: captureTopology,
-            captureMode: captureMode
+            captureMode: captureMode,
+            semanticAnchors: semanticAnchors
         )
     }
 }

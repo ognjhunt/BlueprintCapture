@@ -135,9 +135,6 @@ fun CaptureSessionScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
-    var didAutoStartRecorder by remember(capture.targetId, capture.jobId, capture.label, capture.autoStartRecorder) {
-        mutableStateOf(false)
-    }
     var isRecording by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var captureStartEpochMs by remember { mutableLongStateOf(0L) }
@@ -162,6 +159,8 @@ fun CaptureSessionScreen(
         pendingRecorderLaunch = false
         if (reviewDraft != null) {
             viewModel.discardPendingCapture()
+        } else {
+            viewModel.resetSiteWorldWorkflowSession()
         }
         onClose()
     }
@@ -198,6 +197,7 @@ fun CaptureSessionScreen(
 
     LaunchedEffect(uiState.queuedUploadId, uiState.savedUploadId) {
         if (uiState.queuedUploadId != null || uiState.savedUploadId != null) {
+            viewModel.resetSiteWorldWorkflowSession()
             onClose()
         }
     }
@@ -206,58 +206,6 @@ fun CaptureSessionScreen(
         val exportSharePath = uiState.exportSharePath ?: return@LaunchedEffect
         shareExportArtifact(context, File(exportSharePath))
         viewModel.consumeExportShare()
-    }
-
-    LaunchedEffect(showRecorder, capture.autoStartRecorder, permissionsGranted, videoCapture, isRecording, uiState.reviewDraft) {
-        if (!showRecorder || !capture.autoStartRecorder || !permissionsGranted || videoCapture == null || isRecording || uiState.reviewDraft != null) {
-            if (!showRecorder) {
-                didAutoStartRecorder = false
-            }
-            return@LaunchedEffect
-        }
-        if (!didAutoStartRecorder) {
-            didAutoStartRecorder = true
-            val captureUseCase = videoCapture ?: return@LaunchedEffect
-            val outputFile = createRecordingFile(context)
-            captureStartEpochMs = System.currentTimeMillis()
-            elapsedSeconds = 0L
-            cameraError = null
-
-            var pendingRecording = captureUseCase.output.prepareRecording(
-                context,
-                FileOutputOptions.Builder(outputFile).build(),
-            )
-            pendingRecording = pendingRecording.withAudioEnabled()
-
-            recording = pendingRecording.start(mainExecutor) { event ->
-                when (event) {
-                    is VideoRecordEvent.Start -> {
-                        isRecording = true
-                    }
-
-                    is VideoRecordEvent.Status -> {
-                        elapsedSeconds = event.recordingStats.recordedDurationNanos / 1_000_000_000L
-                    }
-
-                    is VideoRecordEvent.Finalize -> {
-                        isRecording = false
-                        recording = null
-                        if (event.hasError()) {
-                            outputFile.delete()
-                            cameraError = event.cause?.message
-                                ?: "Recording failed before the file finalized."
-                        } else {
-                            viewModel.prepareRecordedCapture(
-                                capture = capture,
-                                recordingFile = outputFile,
-                                captureStartEpochMs = captureStartEpochMs,
-                                captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 
     DisposableEffect(showRecorder, permissionsGranted, lifecycleOwner, previewView) {
@@ -311,6 +259,7 @@ fun CaptureSessionScreen(
             uiState = uiState,
             draft = reviewDraft,
             onClose = ::closeSession,
+            onContinueWorkflow = viewModel::continueWorkflowFromReview,
             onWorkflowNameChanged = viewModel::updateWorkflowName,
             onTaskStepsChanged = viewModel::updateTaskSteps,
             onZoneChanged = viewModel::updateZone,
@@ -332,6 +281,11 @@ fun CaptureSessionScreen(
             isRecording = isRecording,
             elapsedSeconds = elapsedSeconds,
             videoCapture = videoCapture,
+            passBrief = viewModel.currentSiteWorldPassBrief,
+            routePlan = viewModel.siteWorldRoutePlanSummary,
+            requiredRules = viewModel.siteWorldRequiredRules,
+            optionalRules = viewModel.siteWorldOptionalRules,
+            highlightedAnchorTypes = viewModel.highlightedAnchorTypesForCurrentPass,
             onClose = {
                 if (hasDetailsSurface) {
                     pendingRecorderLaunch = false
@@ -344,8 +298,14 @@ fun CaptureSessionScreen(
                 pendingRecorderLaunch = true
                 permissionLauncher.launch(REQUIRED_CAPTURE_PERMISSIONS)
             },
+            onUpdateSiteScale = viewModel::updateSiteWorldSiteScale,
+            onToggleCriticalZone = viewModel::toggleCriticalZone,
+            onMarkAnchor = viewModel::markSiteWorldAnchor,
+            onMarkEntryLock = viewModel::markSiteWorldEntryLock,
+            onMarkWeakSignal = viewModel::noteWeakSignalSegment,
             onStartRecording = {
                 val captureUseCase = videoCapture ?: return@RecorderScreen
+                viewModel.beginWorkflowRecordingPass()
                 val outputFile = createRecordingFile(context)
                 captureStartEpochMs = System.currentTimeMillis()
                 elapsedSeconds = 0L
@@ -374,11 +334,11 @@ fun CaptureSessionScreen(
                                 outputFile.delete()
                                 cameraError = event.cause?.message
                                     ?: "Recording failed before the file finalized."
-                            } else {
-                                viewModel.prepareRecordedCapture(
-                                    capture = capture,
-                                    recordingFile = outputFile,
-                                    captureStartEpochMs = captureStartEpochMs,
+                        } else {
+                            viewModel.prepareRecordedCapture(
+                                capture = capture,
+                                recordingFile = outputFile,
+                                captureStartEpochMs = captureStartEpochMs,
                                     captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
                                 )
                             }
@@ -851,11 +811,64 @@ private fun RecorderScreen(
     isRecording: Boolean,
     elapsedSeconds: Long,
     videoCapture: VideoCapture<Recorder>?,
+    passBrief: SiteWorldPassBrief,
+    routePlan: List<String>,
+    requiredRules: List<String>,
+    optionalRules: List<String>,
+    highlightedAnchorTypes: Set<SiteWorldAnchorType>,
     onClose: () -> Unit,
     onRequestPermissions: () -> Unit,
+    onUpdateSiteScale: (SiteWorldSiteScale) -> Unit,
+    onToggleCriticalZone: (SiteWorldAnchorType) -> Unit,
+    onMarkAnchor: (SiteWorldAnchorType) -> Unit,
+    onMarkEntryLock: () -> Unit,
+    onMarkWeakSignal: () -> Unit,
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
 ) {
+    val workflowState = uiState.siteWorldRecordingState
+    val livePrompt = remember(
+        workflowState,
+        passBrief,
+        uiState.siteWorldCriticalZones,
+    ) {
+        when {
+            !workflowState.entryLocked ->
+                "Stand at the main entry point. Hold still for 3 seconds. Slowly pan left, center, right. Keep the door frame, floor edge, and nearby wall in view."
+            workflowState.weakSignalEvents > 0 ->
+                "Weak segment flagged. Reacquire fixed structure before moving deeper into the site."
+            passBrief.role == "revisit" ->
+                "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone."
+            passBrief.role == "loop_closure" ->
+                "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds."
+            passBrief.role == "critical_zone_revisit" ->
+                "Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction."
+            else ->
+                "At the next doorway or intersection, stop at the threshold. Show left frame, center opening, right frame. Then continue."
+        }
+    }
+    val liveSupportPrompts = remember(workflowState, uiState.siteWorldCriticalZones) {
+        buildList {
+            add("Prefer fixed building structure. Avoid following people, carts, pallets, or temporary clutter.")
+            if (uiState.siteWorldCriticalZones.isNotEmpty()) {
+                val remaining = uiState.siteWorldCriticalZones.subtract(workflowState.markedAnchors.toSet())
+                if (remaining.isNotEmpty()) {
+                    add("Still need critical zones: ${remaining.joinToString(", ") { it.label }}.")
+                }
+            }
+        }.take(2)
+    }
+    val checkpointCount = workflowState.markedAnchors.count {
+        it in setOf(
+            SiteWorldAnchorType.Doorway,
+            SiteWorldAnchorType.Intersection,
+            SiteWorldAnchorType.DockTurn,
+            SiteWorldAnchorType.HandoffPoint,
+            SiteWorldAnchorType.FloorTransition,
+            SiteWorldAnchorType.RestrictedBoundary,
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -932,7 +945,8 @@ private fun RecorderScreen(
                     Text(
                         when {
                             !permissionsGranted -> "Camera and microphone access are required before Android can record the walkthrough."
-                            else -> "Record the walkthrough first. Review and queueing still happen after the recording finishes."
+                            isRecording -> livePrompt
+                            else -> "Plan the route, then start the next pass when you are ready."
                         },
                         color = BlueprintTextMuted,
                     )
@@ -958,6 +972,43 @@ private fun RecorderScreen(
                         Text(message, color = BlueprintTextMuted)
                     }
                 }
+
+                if (!isRecording) {
+                    SiteWorldPreflightCard(
+                        siteScale = uiState.siteWorldSiteScale,
+                        criticalZoneOptions = listOf(
+                            SiteWorldAnchorType.DockTurn,
+                            SiteWorldAnchorType.HandoffPoint,
+                            SiteWorldAnchorType.ControlPanel,
+                            SiteWorldAnchorType.FloorTransition,
+                            SiteWorldAnchorType.RestrictedBoundary,
+                        ),
+                        selectedCriticalZones = uiState.siteWorldCriticalZones,
+                        routePlan = routePlan,
+                        requiredRules = requiredRules,
+                        optionalRules = optionalRules,
+                        passBrief = passBrief,
+                        onUpdateSiteScale = onUpdateSiteScale,
+                        onToggleCriticalZone = onToggleCriticalZone,
+                    )
+                } else {
+                    SiteWorldLiveGuidanceCard(
+                        passBrief = passBrief,
+                        checkpointCount = checkpointCount,
+                        entryLocked = workflowState.entryLocked,
+                        weakSignalEvents = workflowState.weakSignalEvents,
+                        criticalZoneCount = uiState.siteWorldCriticalZones.size,
+                        matchedCriticalZones = uiState.siteWorldCriticalZones.intersect(workflowState.markedAnchors.toSet()).size,
+                        prompt = livePrompt,
+                        supportPrompts = liveSupportPrompts,
+                    )
+                    SiteWorldAnchorToolCard(
+                        highlightedAnchorTypes = highlightedAnchorTypes,
+                        onMarkAnchor = onMarkAnchor,
+                        onMarkEntryLock = onMarkEntryLock,
+                        onMarkWeakSignal = onMarkWeakSignal,
+                    )
+                }
             }
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -982,7 +1033,7 @@ private fun RecorderScreen(
                         }
                     }
 
-                    !isRecording && !capture.autoStartRecorder -> {
+                    !isRecording -> {
                         Button(
                             onClick = onStartRecording,
                             enabled = videoCapture != null && !isBusy,
@@ -996,16 +1047,6 @@ private fun RecorderScreen(
                         }
                     }
 
-                    !isRecording && capture.autoStartRecorder -> {
-                        SurfaceCard {
-                            Text("Preparing camera")
-                            Text(
-                                "Opening the camera and starting capture automatically.",
-                                color = BlueprintTextMuted,
-                            )
-                        }
-                    }
-
                     else -> {
                         Button(
                             onClick = onStopRecording,
@@ -1016,7 +1057,7 @@ private fun RecorderScreen(
                                 contentColor = BlueprintBlack,
                             ),
                         ) {
-                            Text("Finish capture and review")
+                            Text("Finish pass and review")
                         }
                     }
                 }
@@ -1030,6 +1071,7 @@ private fun ReviewScreen(
     uiState: CaptureSessionUiState,
     draft: CaptureReviewDraft,
     onClose: () -> Unit,
+    onContinueWorkflow: () -> Unit,
     onWorkflowNameChanged: (String) -> Unit,
     onTaskStepsChanged: (String) -> Unit,
     onZoneChanged: (String) -> Unit,
@@ -1046,6 +1088,7 @@ private fun ReviewScreen(
 
     val spaceTitle = draft.capture.label.ifBlank { "Capture complete" }
     val spaceAddress = draft.capture.addressText?.ifBlank { null }
+    val workflowReview = draft.siteWorldReview
 
     // Duration + size for the summary card
     val durationSec = draft.captureDurationMs / 1_000L
@@ -1163,6 +1206,11 @@ private fun ReviewScreen(
                 ReviewSummaryRow("Size", sizeLabel)
             }
 
+            workflowReview?.let { review ->
+                Spacer(modifier = Modifier.height(12.dp))
+                SiteWorldReviewCard(review = review)
+            }
+
             // ── Manual intake (only when AI couldn't resolve) ─────────
             if (needsManualEntry) {
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1259,6 +1307,25 @@ private fun ReviewScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (workflowReview?.nextActionLabel != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(BlueprintTeal)
+                        .clickable(enabled = !isBusy, onClick = onContinueWorkflow)
+                        .padding(vertical = 17.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        workflowReview.nextActionLabel,
+                        color = BlueprintBlack,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+
             // Primary — Upload
             Box(
                 modifier = Modifier
@@ -1328,6 +1395,201 @@ private fun ReviewSummaryRow(label: String, value: String) {
     ) {
         Text(label, color = Color(0xFF666666), fontSize = 15.sp)
         Text(value, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun SiteWorldPreflightCard(
+    siteScale: SiteWorldSiteScale,
+    criticalZoneOptions: List<SiteWorldAnchorType>,
+    selectedCriticalZones: Set<SiteWorldAnchorType>,
+    routePlan: List<String>,
+    requiredRules: List<String>,
+    optionalRules: List<String>,
+    passBrief: SiteWorldPassBrief,
+    onUpdateSiteScale: (SiteWorldSiteScale) -> Unit,
+    onToggleCriticalZone: (SiteWorldAnchorType) -> Unit,
+) {
+    SurfaceCard {
+        Text("Site World Candidate")
+        Text(passBrief.title, color = BlueprintTeal)
+        Text(passBrief.summary, color = BlueprintTextMuted)
+
+        Text("Site size", color = BlueprintSectionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                SiteWorldSiteScale.SmallSimple,
+                SiteWorldSiteScale.Medium,
+                SiteWorldSiteScale.MultiZone,
+            ).forEach { scale ->
+                FilterChip(
+                    label = when (scale) {
+                        SiteWorldSiteScale.SmallSimple -> "Small"
+                        SiteWorldSiteScale.Medium -> "Medium"
+                        SiteWorldSiteScale.MultiZone -> "Multi-zone"
+                    },
+                    selected = siteScale == scale,
+                    onClick = { onUpdateSiteScale(scale) },
+                )
+            }
+        }
+
+        Text("Critical zones", color = BlueprintSectionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            criticalZoneOptions.chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { anchor ->
+                        FilterChip(
+                            label = anchor.label,
+                            selected = selectedCriticalZones.contains(anchor),
+                            onClick = { onToggleCriticalZone(anchor) },
+                        )
+                    }
+                }
+            }
+        }
+
+        SiteWorldListSection("Route plan", routePlan)
+        SiteWorldListSection("Required", requiredRules)
+        SiteWorldListSection("Optional", optionalRules)
+        SiteWorldListSection("Operator prompts", passBrief.exactPrompts.take(2).map { "\"$it\"" })
+    }
+}
+
+@Composable
+private fun SiteWorldLiveGuidanceCard(
+    passBrief: SiteWorldPassBrief,
+    checkpointCount: Int,
+    entryLocked: Boolean,
+    weakSignalEvents: Int,
+    criticalZoneCount: Int,
+    matchedCriticalZones: Int,
+    prompt: String,
+    supportPrompts: List<String>,
+) {
+    SurfaceCard {
+        Text(passBrief.title)
+        Text(passBrief.summary, color = BlueprintTextMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(label = if (entryLocked) "Entry locked" else "Entry lock pending", selected = entryLocked, onClick = {})
+            FilterChip(
+                label = "Checkpoints $checkpointCount/${passBrief.requiredCheckpointTarget}",
+                selected = checkpointCount >= passBrief.requiredCheckpointTarget,
+                onClick = {},
+            )
+            if (criticalZoneCount > 0) {
+                FilterChip(
+                    label = "Critical $matchedCriticalZones/$criticalZoneCount",
+                    selected = matchedCriticalZones >= criticalZoneCount,
+                    onClick = {},
+                )
+            }
+            if (weakSignalEvents > 0) {
+                FilterChip(label = "Weak $weakSignalEvents", selected = true, onClick = {})
+            }
+        }
+        Text(prompt, color = BlueprintTextPrimary, fontWeight = FontWeight.SemiBold)
+        supportPrompts.forEach { item ->
+            Text(item, color = BlueprintTextMuted, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun SiteWorldAnchorToolCard(
+    highlightedAnchorTypes: Set<SiteWorldAnchorType>,
+    onMarkAnchor: (SiteWorldAnchorType) -> Unit,
+    onMarkEntryLock: () -> Unit,
+    onMarkWeakSignal: () -> Unit,
+) {
+    SurfaceCard {
+        Text("Checkpoints")
+        Text("Mark anchors to improve overlap, revisits, and loop closure.", color = BlueprintTextMuted)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(label = "Lock entry", selected = true, onClick = onMarkEntryLock)
+            FilterChip(label = "Weak segment", selected = false, onClick = onMarkWeakSignal)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                SiteWorldAnchorType.Doorway,
+                SiteWorldAnchorType.Intersection,
+                SiteWorldAnchorType.DockTurn,
+                SiteWorldAnchorType.HandoffPoint,
+                SiteWorldAnchorType.ControlPanel,
+                SiteWorldAnchorType.FloorTransition,
+                SiteWorldAnchorType.RestrictedBoundary,
+                SiteWorldAnchorType.ExitPoint,
+            ).chunked(3).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { anchor ->
+                        FilterChip(
+                            label = anchor.label,
+                            selected = highlightedAnchorTypes.contains(anchor),
+                            onClick = { onMarkAnchor(anchor) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SiteWorldReviewCard(review: SiteWorldPassReview) {
+    SurfaceCard {
+        Text(review.title)
+        Text(review.summary, color = BlueprintTextMuted)
+        Text(
+            text = "${review.completedRequiredPasses}/${review.totalRequiredPasses} passes complete · ${review.score}",
+            color = when (review.tone) {
+                SiteWorldReviewTone.Ready -> BlueprintSuccess
+                SiteWorldReviewTone.Caution -> BlueprintAccent
+                SiteWorldReviewTone.ActionRequired -> BlueprintError
+            },
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (review.completedItems.isNotEmpty()) {
+            SiteWorldListSection("Completed", review.completedItems)
+        }
+        if (review.missingItems.isNotEmpty()) {
+            SiteWorldListSection("Still needed", review.missingItems)
+        }
+        review.weakSignalSummary?.let {
+            Text(it.replace("weak_signal_events:", "Weak signal events: "), color = BlueprintTextMuted, fontSize = 13.sp)
+        }
+    }
+}
+
+@Composable
+private fun SiteWorldListSection(title: String, items: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, color = BlueprintSectionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        items.forEach { item ->
+            Text("• $item", color = BlueprintTextSecondary, fontSize = 13.sp, lineHeight = 18.sp)
+        }
+    }
+}
+
+@Composable
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (selected) BlueprintTeal.copy(alpha = 0.28f) else Color(0xFF1A1A1A))
+            .border(1.dp, if (selected) BlueprintTeal.copy(alpha = 0.5f) else BlueprintBorder, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = label,
+            color = BlueprintTextPrimary,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        )
     }
 }
 

@@ -1,4 +1,8 @@
 import Foundation
+import AVFoundation
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
 #if canImport(ZIPFoundation)
 import ZIPFoundation
 #endif
@@ -423,6 +427,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let siteIdentity: SiteIdentity?
         let captureTopology: CaptureTopologyMetadata?
         let captureMode: CaptureModeMetadata?
+        let semanticAnchors: [CaptureSemanticAnchorEvent]
         let capturedAt: String
     }
 
@@ -461,8 +466,45 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let checkpointEvents: [CheckpointEvent]
     }
 
+    private struct RelocalizationEventsFile: Codable {
+        struct RelocalizationEvent: Codable {
+            let startFrameId: String?
+            let endFrameId: String?
+            let startTCaptureSec: Double?
+            let endTCaptureSec: Double?
+            let frameCount: Int
+        }
+        let schemaVersion: String
+        let relocalizationEvents: [RelocalizationEvent]
+    }
+
+    private struct RecordingSessionFile: Codable {
+        let schemaVersion: String
+        let siteVisitId: String?
+        let routeId: String?
+        let passId: String?
+        let passIndex: Int?
+        let passRole: String?
+        let coordinateFrameSessionId: String?
+        let arkitSessionId: String?
+        let capturedAt: String
+    }
+
+    private struct OverlapGraphFile: Codable {
+        let schemaVersion: String
+        let siteVisitId: String?
+        let routeId: String?
+        let passId: String?
+        let passRole: String?
+        let coordinateFrameSessionId: String?
+        let observedAnchorIds: [String]
+        let semanticAnchorIds: [String]
+        let relocalizationEventCount: Int
+    }
+
     private let completionMarkerFilename = "capture_upload_complete.json"
     private let taskHypothesisFilename = "task_hypothesis.json"
+    private let captureModeFilename = "capture_mode.json"
     private let fileManager = FileManager.default
 
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
@@ -494,7 +536,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             lightingConsistency: normalizedSceneValue(metadata?.lightingConsistency),
             dynamicObjectDensity: normalizedSceneValue(metadata?.dynamicObjectDensity),
             operatorNotes: metadata?.operatorNotes ?? [],
-            inaccessibleAreas: metadata?.inaccessibleAreas ?? []
+            inaccessibleAreas: metadata?.inaccessibleAreas ?? [],
+            semanticAnchorsObserved: metadata?.semanticAnchorsObserved ?? [],
+            relocalizationCount: metadata?.relocalizationCount,
+            overlapCheckpointCount: metadata?.overlapCheckpointCount
         )
     }
 
@@ -643,6 +688,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "sensor_availability": evidence.sensorAvailability,
             "operator_notes": normalized.operatorNotes,
             "inaccessible_areas": normalized.inaccessibleAreas,
+            "semantic_anchors_observed": normalized.semanticAnchorsObserved,
+            "relocalization_count": normalized.relocalizationCount as Any,
+            "overlap_checkpoint_count": normalized.overlapCheckpointCount as Any,
             "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
             "world_model_candidate_reasoning": CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
             "motion_provenance": evidence.motionProvenance as Any,
@@ -675,6 +723,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
         let evidence = inspectEvidence(in: directory, request: request)
+        let topology = effectiveCaptureTopology(for: request, directory: directory)
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
@@ -712,9 +761,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         if let siteIdentity = request.metadata.siteIdentity {
             json["site_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(siteIdentity))
         }
-        if let topology = request.metadata.captureTopology {
-            json["capture_topology"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(topology))
-        }
+        json["capture_topology"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(topology))
         if let captureMode = request.metadata.captureMode {
             // Resolve the mode based on actual evidence at finalization time.
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
@@ -767,17 +814,30 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     private func materializeSupplementalFiles(in directory: URL, request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws {
         let encoder = JSONEncoder.snakeCase
         let evidence = inspectEvidence(in: directory, request: request)
+        let topology = effectiveCaptureTopology(for: request, directory: directory)
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
 
-        if let intakePacket = request.metadata.intakePacket {
-            let intakeURL = directory.appendingPathComponent("intake_packet.json")
-            try encoder.encode(intakePacket).write(to: intakeURL, options: .atomic)
-        }
+        let intakePacket = request.metadata.intakePacket ?? QualificationIntakePacket()
+        let intakeURL = directory.appendingPathComponent("intake_packet.json")
+        try encoder.encode(intakePacket).write(to: intakeURL, options: .atomic)
 
         let intakeMetadata = request.metadata.intakeMetadata
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
         let taskHypothesis = request.metadata.taskHypothesis ?? synthesizedTaskHypothesis(for: request)
+        let resolvedCaptureMode: CaptureModeMetadata? = request.metadata.captureMode.map { captureMode in
+            let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
+                ? "site_world_candidate"
+                : "qualification_only"
+            let downgradeReason: String? = (captureMode.requestedMode == "site_world_candidate" && resolvedMode == "qualification_only")
+                ? "insufficient_arkit_evidence"
+                : nil
+            return CaptureModeMetadata(
+                requestedMode: captureMode.requestedMode,
+                resolvedMode: resolvedMode,
+                downgradeReason: downgradeReason
+            )
+        }
         let context = CaptureContextFile(
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
@@ -828,8 +888,9 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
             worldModelCandidateReasoning: CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
             siteIdentity: request.metadata.siteIdentity,
-            captureTopology: request.metadata.captureTopology,
-            captureMode: request.metadata.captureMode,
+            captureTopology: topology,
+            captureMode: resolvedCaptureMode,
+            semanticAnchors: request.metadata.semanticAnchors,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let contextURL = directory.appendingPathComponent("capture_context.json")
@@ -841,16 +902,30 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             try encoder.encode(siteIdentity).write(to: siteIdentityURL, options: .atomic)
         }
 
-        // Write standalone capture_topology.json.
-        if let topology = request.metadata.captureTopology {
-            let topologyURL = directory.appendingPathComponent("capture_topology.json")
-            try encoder.encode(topology).write(to: topologyURL, options: .atomic)
+        let topologyURL = directory.appendingPathComponent("capture_topology.json")
+        try encoder.encode(topology).write(to: topologyURL, options: .atomic)
+        if let captureMode = resolvedCaptureMode {
+            let captureModeURL = directory.appendingPathComponent(captureModeFilename)
+            try encoder.encode(captureMode).write(to: captureModeURL, options: .atomic)
         }
 
-        // Write route_anchors.json — fixed v1 entry anchor definition.
+        let semanticAnchors = request.metadata.semanticAnchors
+
+        // Write route_anchors.json from entry anchor plus any semantic anchors observed during capture.
+        let semanticRouteAnchors = semanticAnchors.reduce(into: [String: RouteAnchorsFile.RouteAnchor]()) { anchors, event in
+            let anchorId = event.id
+            anchors[anchorId] = RouteAnchorsFile.RouteAnchor(
+                anchorId: anchorId,
+                anchorType: event.anchorType.rawValue,
+                label: event.label ?? event.anchorType.displayLabel,
+                expectedObservation: "tap_marker",
+                requiredInPrimaryPass: false,
+                requiredInRevisitPass: true
+            )
+        }
         let routeAnchors = RouteAnchorsFile(
             schemaVersion: "v1",
-            routeAnchors: [
+            routeAnchors: ([
                 RouteAnchorsFile.RouteAnchor(
                     anchorId: "anchor_entry",
                     anchorType: "entry",
@@ -859,24 +934,32 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                     requiredInPrimaryPass: true,
                     requiredInRevisitPass: true
                 )
-            ]
+            ] + semanticRouteAnchors.values.sorted { $0.anchorId < $1.anchorId })
         )
         let routeAnchorsURL = directory.appendingPathComponent("route_anchors.json")
         try encoder.encode(routeAnchors).write(to: routeAnchorsURL, options: .atomic)
 
-        // Write checkpoint_events.json — one event if entry hold was detected, else empty.
-        let topology = request.metadata.captureTopology
+        // Write checkpoint_events.json from entry hold plus semantic checkpoints.
         var checkpointEvents: [CheckpointEventsFile.CheckpointEvent] = []
-        if let passId = topology?.passId,
-           let tCaptureSec = topology?.entryAnchorTCaptureSec,
-           let holdDuration = topology?.entryAnchorHoldDurationSec {
+        if let tCaptureSec = topology.entryAnchorTCaptureSec,
+           let holdDuration = topology.entryAnchorHoldDurationSec {
             checkpointEvents.append(CheckpointEventsFile.CheckpointEvent(
                 anchorId: "anchor_entry",
-                passId: passId,
+                passId: topology.passId,
                 tCaptureSec: tCaptureSec,
                 holdDurationSec: holdDuration,
                 completed: true
             ))
+        }
+        checkpointEvents += semanticAnchors.compactMap { event in
+            guard let tCaptureSec = event.tCaptureSec else { return nil }
+            return CheckpointEventsFile.CheckpointEvent(
+                anchorId: event.id,
+                passId: topology.passId,
+                tCaptureSec: tCaptureSec,
+                holdDurationSec: 0.0,
+                completed: true
+            )
         }
         let checkpointEventsFile = CheckpointEventsFile(
             schemaVersion: "v1",
@@ -884,6 +967,47 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         )
         let checkpointEventsURL = directory.appendingPathComponent("checkpoint_events.json")
         try encoder.encode(checkpointEventsFile).write(to: checkpointEventsURL, options: .atomic)
+
+        let semanticAnchorsURL = directory.appendingPathComponent("semantic_anchors.json")
+        try encoder.encode(semanticAnchors).write(to: semanticAnchorsURL, options: .atomic)
+
+        let recordingSession = RecordingSessionFile(
+            schemaVersion: "v1",
+            siteVisitId: topology.siteVisitId ?? topology.captureSessionId,
+            routeId: topology.routeId,
+            passId: topology.passId,
+            passIndex: topology.passIndex,
+            passRole: topology.intendedPassRole,
+            coordinateFrameSessionId: topology.coordinateFrameSessionId ?? topology.captureSessionId,
+            arkitSessionId: topology.arkitSessionId ?? topology.coordinateFrameSessionId,
+            capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
+        )
+        let recordingSessionURL = directory.appendingPathComponent("recording_session.json")
+        try encoder.encode(recordingSession).write(to: recordingSessionURL, options: .atomic)
+
+        let relocalizationEvents = groupedRelocalizationEvents(in: directory)
+        let relocalizationEventsFile = RelocalizationEventsFile(
+            schemaVersion: "v1",
+            relocalizationEvents: relocalizationEvents
+        )
+        let relocalizationEventsURL = directory.appendingPathComponent("relocalization_events.json")
+        try encoder.encode(relocalizationEventsFile).write(to: relocalizationEventsURL, options: .atomic)
+
+        let overlapGraph = OverlapGraphFile(
+            schemaVersion: "v1",
+            siteVisitId: topology.siteVisitId ?? topology.captureSessionId,
+            routeId: topology.routeId,
+            passId: topology.passId,
+            passRole: topology.intendedPassRole,
+            coordinateFrameSessionId: topology.coordinateFrameSessionId ?? topology.captureSessionId,
+            observedAnchorIds: Array(Set(checkpointEvents.map(\.anchorId))).sorted(),
+            semanticAnchorIds: Array(Set(semanticAnchors.map(\.id))).sorted(),
+            relocalizationEventCount: relocalizationEvents.reduce(0) { $0 + $1.frameCount }
+        )
+        let overlapGraphURL = directory.appendingPathComponent("overlap_graph.json")
+        try encoder.encode(overlapGraph).write(to: overlapGraphURL, options: .atomic)
+
+        try writeARKitDerivedSidecars(in: directory, coordinateFrameSessionId: topology.coordinateFrameSessionId ?? topology.captureSessionId)
 
         let taskHypothesisURL = directory.appendingPathComponent(taskHypothesisFilename)
         try encoder.encode(taskHypothesis).write(to: taskHypothesisURL, options: .atomic)
@@ -897,12 +1021,603 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         )
         let completionURL = directory.appendingPathComponent(completionMarkerFilename)
         try encoder.encode(completion).write(to: completionURL, options: .atomic)
+
+        try writeV3SupplementalFiles(
+            in: directory,
+            request: request,
+            topology: topology,
+            rights: normalizedRights
+        )
     }
 
     private func synthesizedTaskHypothesis(for request: CaptureUploadRequest) -> CaptureTaskHypothesis {
         let packet = request.metadata.intakePacket ?? QualificationIntakePacket()
         let metadata = request.metadata.intakeMetadata ?? CaptureIntakeMetadata(source: .authoritative)
         return CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
+    }
+
+    private func effectiveCaptureTopology(for request: CaptureUploadRequest, directory: URL) -> CaptureTopologyMetadata {
+        if let topology = request.metadata.captureTopology {
+            return topology
+        }
+
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        let manifestObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
+        let arkitFramesURL = directory.appendingPathComponent("arkit/frames.jsonl")
+        let firstFrame = readJSONLines(from: arkitFramesURL).first
+        let coordinateFrameSessionId =
+            stringValue(in: firstFrame ?? [:], keys: ["coordinate_frame_session_id", "coordinateFrameSessionId"])
+            ?? manifestObject?["coordinate_frame_session_id"] as? String
+            ?? request.metadata.semanticAnchors.first?.coordinateFrameSessionId
+            ?? CaptureBundleContext.captureIdentifier(for: request)
+
+        let captureSessionId = request.metadata.siteSubmissionId
+            ?? request.metadata.captureJobId
+            ?? request.metadata.jobId
+
+        return CaptureTopologyMetadata(
+            captureSessionId: captureSessionId,
+            routeId: "route_unknown",
+            passId: "pass_primary_1",
+            passIndex: 1,
+            intendedPassRole: "primary",
+            entryAnchorId: "anchor_entry",
+            returnAnchorId: nil,
+            entryAnchorTCaptureSec: nil,
+            entryAnchorHoldDurationSec: nil,
+            siteVisitId: captureSessionId,
+            coordinateFrameSessionId: coordinateFrameSessionId,
+            arkitSessionId: coordinateFrameSessionId
+        )
+    }
+
+    private func writeV3SupplementalFiles(
+        in directory: URL,
+        request: CaptureUploadRequest,
+        topology: CaptureTopologyMetadata,
+        rights: CaptureRightsMetadata
+    ) throws {
+        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+
+        let rightsConsent: [String: Any] = [
+            "schema_version": "v1",
+            "scene_id": sceneId,
+            "capture_id": captureId,
+            "consent_status": rights.consentStatus.rawValue,
+            "capture_basis": rights.consentStatus == .documented ? "site_operator_permission" : "unknown",
+            "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
+            "data_licensing_allowed": rights.dataLicensingAllowed,
+            "capture_contributor_payout_eligible": rights.payoutEligible,
+            "permission_document_uri": rights.permissionDocumentURI ?? NSNull(),
+            "permission_document_sha256": rights.permissionDocumentURI.map { _ in "unverified_external_reference" } ?? NSNull(),
+            "consent_scope": rights.consentScope,
+            "consent_notes": rights.consentNotes,
+            "redaction_required": true,
+            "retention_policy": "standard_blueprint_site_capture",
+        ]
+        let rightsConsentURL = directory.appendingPathComponent("rights_consent.json")
+        let rightsConsentData = try JSONSerialization.data(withJSONObject: rightsConsent, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try rightsConsentData.write(to: rightsConsentURL, options: .atomic)
+
+        let semanticObservationsURL = directory.appendingPathComponent("semantic_anchor_observations.jsonl")
+        let semanticLines = request.metadata.semanticAnchors.map { event -> String in
+            var payload: [String: Any] = [
+                "anchor_instance_id": event.id,
+                "anchor_type": event.anchorType.rawValue,
+                "label": event.label ?? NSNull(),
+                "frame_id": event.frameId ?? NSNull(),
+                "t_capture_sec": event.tCaptureSec ?? NSNull(),
+                "coordinate_frame_session_id": event.coordinateFrameSessionId ?? topology.coordinateFrameSessionId ?? NSNull(),
+                "observation_method": "manual_tap",
+                "confidence": 1.0,
+                "notes": event.notes ?? NSNull(),
+            ]
+            if let tCaptureSec = event.tCaptureSec {
+                payload["t_monotonic_ns"] = Int64((tCaptureSec * 1_000_000_000.0).rounded())
+            }
+            let data = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])
+            return String(data: data ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+        }
+        try semanticLines.joined(separator: "\n").appending(semanticLines.isEmpty ? "" : "\n").write(
+            to: semanticObservationsURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try writeVideoTrackFile(in: directory)
+        try writeHashesAndProvenance(in: directory, request: request)
+    }
+
+    private func writeVideoTrackFile(in directory: URL) throws {
+        let videoURL = directory.appendingPathComponent("walkthrough.mov")
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        let manifestObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
+        let frameRows = readJSONLines(from: directory.appendingPathComponent("arkit/frames.jsonl"))
+        let width = Int((manifestObject?["width"] as? NSNumber)?.doubleValue ?? 0)
+        let height = Int((manifestObject?["height"] as? NSNumber)?.doubleValue ?? 0)
+        let fps = (manifestObject?["fps_source"] as? NSNumber)?.doubleValue ?? 0.0
+
+        let asset = AVURLAsset(url: videoURL)
+        let durationSeconds = asset.duration.seconds.isFinite ? max(0.0, asset.duration.seconds) : 0.0
+        let videoTrack = asset.tracks(withMediaType: .video).first
+        let trackSize = videoTrack?.naturalSize ?? .zero
+        let nominalFPS = videoTrack?.nominalFrameRate ?? Float(fps)
+        let estimatedFrameCount: Int = {
+            if nominalFPS > 0, durationSeconds > 0 {
+                return Int((durationSeconds * Double(nominalFPS)).rounded())
+            }
+            return frameRows.count
+        }()
+
+        let videoTrackPayload: [String: Any] = [
+            "schema_version": "v1",
+            "video_file": "walkthrough.mov",
+            "duration_sec": durationSeconds,
+            "frame_count": estimatedFrameCount,
+            "nominal_fps": Double(nominalFPS),
+            "contains_vfr": false,
+            "video_start_pts_sec": 0.0,
+            "width": Int(trackSize.width.rounded()).nonZero(or: width),
+            "height": Int(trackSize.height.rounded()).nonZero(or: height),
+            "orientation": "portrait",
+            "codec": "h264",
+            "color_space": manifestObject?["color_space"] as? String ?? "unknown",
+        ]
+        let videoTrackURL = directory.appendingPathComponent("video_track.json")
+        let data = try JSONSerialization.data(withJSONObject: videoTrackPayload, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try data.write(to: videoTrackURL, options: .atomic)
+    }
+
+    private func writeHashesAndProvenance(in directory: URL, request: CaptureUploadRequest) throws {
+        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        let provenanceURL = directory.appendingPathComponent("provenance.json")
+        let hashesURL = directory.appendingPathComponent("hashes.json")
+
+        let provisionalProvenance: [String: Any] = [
+            "schema_version": "v1",
+            "scene_id": sceneId,
+            "capture_id": captureId,
+            "capture_source": request.metadata.captureSource.rawValue,
+            "captured_by_user_id": request.metadata.creatorId,
+            "uploaded_by_user_id": request.metadata.creatorId,
+            "capture_app_build": Bundle.main.object(forInfoDictionaryKey: kCFBundleVersionKey as String) as? String ?? "unknown",
+            "capture_app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+            "device_installation_id": request.metadata.creatorId,
+            "bundle_created_at": ISO8601DateFormatter().string(from: request.metadata.capturedAt),
+            "upload_completed_at": ISO8601DateFormatter().string(from: Date()),
+            "bundle_sha256": "pending",
+        ]
+        let provisionalData = try JSONSerialization.data(withJSONObject: provisionalProvenance, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try provisionalData.write(to: provenanceURL, options: .atomic)
+
+        let artifactHashes = try buildArtifactHashes(in: directory, excluding: ["hashes.json"])
+        let bundleSha = bundleHash(from: artifactHashes)
+
+        var finalProvenance = provisionalProvenance
+        finalProvenance["bundle_sha256"] = bundleSha
+        let finalProvenanceData = try JSONSerialization.data(withJSONObject: finalProvenance, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try finalProvenanceData.write(to: provenanceURL, options: .atomic)
+
+        let finalArtifactHashes = try buildArtifactHashes(in: directory, excluding: ["hashes.json"])
+        let hashesPayload: [String: Any] = [
+            "schema_version": "v1",
+            "bundle_sha256": bundleHash(from: finalArtifactHashes),
+            "artifacts": finalArtifactHashes,
+        ]
+        let hashesData = try JSONSerialization.data(withJSONObject: hashesPayload, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try hashesData.write(to: hashesURL, options: .atomic)
+    }
+
+    private func buildArtifactHashes(in directory: URL, excluding excludedNames: Set<String>) throws -> [String: String] {
+        guard let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
+            return [:]
+        }
+
+        var hashes: [String: String] = [:]
+        for case let fileURL as URL in enumerator {
+            let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            guard !excludedNames.contains(fileURL.lastPathComponent) else { continue }
+            let relative = relativePathInBundle(for: fileURL, relativeTo: directory)
+            let data = try Data(contentsOf: fileURL)
+            hashes[relative] = sha256Hex(of: data)
+        }
+        return hashes
+    }
+
+    private func bundleHash(from artifactHashes: [String: String]) -> String {
+        let canonical = artifactHashes
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\($0.value)" }
+            .joined(separator: "\n")
+        return sha256Hex(of: Data(canonical.utf8))
+    }
+
+    private func sha256Hex(of data: Data) -> String {
+        #if canImport(CryptoKit)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+        #else
+        return data.base64EncodedString()
+        #endif
+    }
+
+    private func relativePathInBundle(for url: URL, relativeTo directory: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let basePath = directory.standardizedFileURL.path
+        guard path.hasPrefix(basePath) else { return url.lastPathComponent }
+        var relative = String(path.dropFirst(basePath.count))
+        while relative.hasPrefix("/") {
+            relative.removeFirst()
+        }
+        return relative.isEmpty ? url.lastPathComponent : relative
+    }
+
+    private func writeARKitDerivedSidecars(in directory: URL, coordinateFrameSessionId: String?) throws {
+        let arkitDirectory = directory.appendingPathComponent("arkit", isDirectory: true)
+        let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
+        guard fileManager.fileExists(atPath: framesURL.path) else { return }
+
+        let frameRows = readJSONLines(from: framesURL)
+        guard !frameRows.isEmpty else { return }
+
+        let frameQualityURL = arkitDirectory.appendingPathComponent("frame_quality.jsonl")
+        let perFrameCameraStateURL = arkitDirectory.appendingPathComponent("per_frame_camera_state.jsonl")
+        let syncMapURL = directory.appendingPathComponent("sync_map.jsonl")
+        let depthManifestURL = arkitDirectory.appendingPathComponent("depth_manifest.json")
+        let confidenceManifestURL = arkitDirectory.appendingPathComponent("confidence_manifest.json")
+        let sessionIntrinsicsURL = arkitDirectory.appendingPathComponent("session_intrinsics.json")
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        let rawManifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
+        let intrinsicsURL = arkitDirectory.appendingPathComponent("intrinsics.json")
+        let intrinsicsObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: intrinsicsURL))) as? [String: Any]
+
+        let frameQualityLines = frameRows.map { row -> String in
+            var qualityRow: [String: Any] = [
+                "anchor_observations": arrayValue(in: row, keys: ["anchorObservations", "anchor_observations"]),
+            ]
+            if let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]) {
+                qualityRow["frame_id"] = frameId
+            }
+            if let tCaptureSec = doubleValue(in: row, keys: ["tCaptureSec", "t_capture_sec"]) {
+                qualityRow["t_capture_sec"] = tCaptureSec
+            }
+            if let trackingState = stringValue(in: row, keys: ["trackingState", "tracking_state"]) {
+                qualityRow["tracking_state"] = trackingState
+            }
+            if let trackingReason = stringValue(in: row, keys: ["trackingReason", "tracking_reason"]) {
+                qualityRow["tracking_reason"] = trackingReason
+            }
+            if let worldMappingStatus = stringValue(in: row, keys: ["worldMappingStatus", "world_mapping_status"]) {
+                qualityRow["world_mapping_status"] = worldMappingStatus
+            }
+            if let relocalizationEvent = boolValue(in: row, keys: ["relocalizationEvent", "relocalization_event"]) {
+                qualityRow["relocalization_event"] = relocalizationEvent
+            }
+            if let sharpnessScore = doubleValue(in: row, keys: ["sharpnessScore", "sharpness_score"]) {
+                qualityRow["sharpness_score"] = sharpnessScore
+            }
+            if let depthSource = stringValue(in: row, keys: ["depthSource", "depth_source"]) {
+                qualityRow["depth_source"] = depthSource
+            }
+            if let depthValidFraction = doubleValue(in: row, keys: ["depthValidFraction", "depth_valid_fraction"]) {
+                qualityRow["depth_valid_fraction"] = depthValidFraction
+            }
+            if let missingDepthFraction = doubleValue(in: row, keys: ["missingDepthFraction", "missing_depth_fraction"]) {
+                qualityRow["missing_depth_fraction"] = missingDepthFraction
+            }
+            if let sceneDepthFile = stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"]) {
+                qualityRow["scene_depth_file"] = sceneDepthFile
+            }
+            if let smoothedSceneDepthFile = stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"]) {
+                qualityRow["smoothed_scene_depth_file"] = smoothedSceneDepthFile
+            }
+            if let confidenceFile = stringValue(in: row, keys: ["confidenceFile", "confidence_file"]) {
+                qualityRow["confidence_file"] = confidenceFile
+            }
+            if let exposureDuration = doubleValue(in: row, keys: ["exposureDurationS", "exposure_duration_s"]) {
+                qualityRow["exposure_duration_s"] = exposureDuration
+            }
+            if let iso = doubleValue(in: row, keys: ["iso"]) {
+                qualityRow["iso"] = iso
+            }
+            if let exposureTargetBias = doubleValue(in: row, keys: ["exposureTargetBias", "exposure_target_bias"]) {
+                qualityRow["exposure_target_bias"] = exposureTargetBias
+            }
+            if let whiteBalanceGains = dictionaryValue(in: row, keys: ["whiteBalanceGains", "white_balance_gains"]) {
+                qualityRow["white_balance_gains"] = whiteBalanceGains
+            }
+            if let coordinateFrameSessionId = stringValue(in: row, keys: ["coordinateFrameSessionId", "coordinate_frame_session_id"]) ?? coordinateFrameSessionId {
+                qualityRow["coordinate_frame_session_id"] = coordinateFrameSessionId
+            }
+            if let tMonotonicNs = objectValue(in: row, keys: ["tMonotonicNs", "t_monotonic_ns"]) as? NSNumber {
+                qualityRow["t_monotonic_ns"] = tMonotonicNs.int64Value
+            }
+            let isRelocalization = boolValue(in: row, keys: ["relocalizationEvent", "relocalization_event"]) ?? false
+            let hasDepthRepresentation =
+                stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"]) != nil ||
+                stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"]) != nil
+            let trackingState = stringValue(in: row, keys: ["trackingState", "tracking_state"]) ?? "unknown"
+            qualityRow["usable_for_pose"] = trackingState == "normal" && !isRelocalization
+            qualityRow["usable_for_depth"] = hasDepthRepresentation && !isRelocalization
+            let encoded = try? JSONSerialization.data(withJSONObject: qualityRow, options: [.withoutEscapingSlashes])
+            return String(data: encoded ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+        }
+        try frameQualityLines.joined(separator: "\n").appending("\n").write(to: frameQualityURL, atomically: true, encoding: .utf8)
+
+        let perFrameCameraStateLines = frameRows.map { row -> String in
+            var payload: [String: Any] = [:]
+            if let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]) {
+                payload["frame_id"] = frameId
+            }
+            if let tCaptureSec = doubleValue(in: row, keys: ["tCaptureSec", "t_capture_sec"]) {
+                payload["t_capture_sec"] = tCaptureSec
+            }
+            if let tMonotonicNs = objectValue(in: row, keys: ["tMonotonicNs", "t_monotonic_ns"]) as? NSNumber {
+                payload["t_monotonic_ns"] = tMonotonicNs.int64Value
+            }
+            payload["coordinate_frame_session_id"] = stringValue(in: row, keys: ["coordinateFrameSessionId", "coordinate_frame_session_id"]) ?? coordinateFrameSessionId ?? NSNull()
+            if let exposureDuration = doubleValue(in: row, keys: ["exposureDurationS", "exposure_duration_s"]) {
+                payload["exposure_duration_s"] = exposureDuration
+            }
+            if let iso = doubleValue(in: row, keys: ["iso"]) {
+                payload["iso"] = iso
+            }
+            if let exposureTargetBias = doubleValue(in: row, keys: ["exposureTargetBias", "exposure_target_bias"]) {
+                payload["exposure_target_bias"] = exposureTargetBias
+            }
+            if let whiteBalanceGains = dictionaryValue(in: row, keys: ["whiteBalanceGains", "white_balance_gains"]) {
+                payload["white_balance_gains"] = whiteBalanceGains
+            }
+            payload["focus_mode"] = NSNull()
+            payload["focus_locked"] = NSNull()
+            payload["zoom_factor"] = 1.0
+            payload["exposure_mode"] = NSNull()
+            payload["exposure_locked"] = NSNull()
+            payload["white_balance_mode"] = NSNull()
+            payload["video_stabilization_mode"] = NSNull()
+            payload["torch_active"] = false
+            payload["hdr_active"] = false
+            let encoded = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])
+            return String(data: encoded ?? Data("{}".utf8), encoding: .utf8) ?? "{}"
+        }
+        try perFrameCameraStateLines.joined(separator: "\n").appending("\n").write(to: perFrameCameraStateURL, atomically: true, encoding: .utf8)
+
+        let syncMapLines = frameRows.compactMap { row -> String? in
+            guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]),
+                  let tCaptureSec = doubleValue(in: row, keys: ["tCaptureSec", "t_capture_sec"]) else { return nil }
+            var payload: [String: Any] = [
+                "frame_id": frameId,
+                "t_video_sec": tCaptureSec,
+                "t_capture_sec": tCaptureSec,
+                "pose_frame_id": frameId,
+                "sync_status": "exact_frame_id_match",
+                "delta_ms": 0.0,
+            ]
+            if let tMonotonicNs = objectValue(in: row, keys: ["tMonotonicNs", "t_monotonic_ns"]) as? NSNumber {
+                payload["t_monotonic_ns"] = tMonotonicNs.int64Value
+            } else if let timestamp = doubleValue(in: row, keys: ["timestamp"]) {
+                payload["t_monotonic_ns"] = Int64((timestamp * 1_000_000_000.0).rounded())
+            }
+            let encoded = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])
+            return String(data: encoded ?? Data("{}".utf8), encoding: .utf8)
+        }
+        try syncMapLines.joined(separator: "\n").appending(syncMapLines.isEmpty ? "" : "\n").write(to: syncMapURL, atomically: true, encoding: .utf8)
+
+        let depthEntries = frameRows.compactMap { row -> [String: Any]? in
+            guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]) else { return nil }
+            let depthPath = stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"])
+                ?? stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"])
+            guard let depthPath else { return nil }
+            var entry: [String: Any] = [
+                "frame_id": frameId,
+                "depth_path": depthPath,
+                "representation": "per_frame_depth_map",
+                "depth_source": stringValue(in: row, keys: ["depthSource", "depth_source"]) ?? "unknown",
+            ]
+            if let depthValidFraction = doubleValue(in: row, keys: ["depthValidFraction", "depth_valid_fraction"]) {
+                entry["depth_valid_fraction"] = depthValidFraction
+            }
+            if let missingDepthFraction = doubleValue(in: row, keys: ["missingDepthFraction", "missing_depth_fraction"]) {
+                entry["missing_depth_fraction"] = missingDepthFraction
+            }
+            return entry
+        }
+        var depthManifest: [String: Any] = [
+            "schema_version": "v1",
+            "representation": "per_frame_depth_map",
+            "encoding": "png_u16_mm",
+            "units": "millimeters",
+            "invalid_value_semantics": "0_means_missing",
+            "missing_depth_reason": NSNull(),
+            "frames": depthEntries,
+        ]
+        if let coordinateFrameSessionId {
+            depthManifest["coordinate_frame_session_id"] = coordinateFrameSessionId
+        }
+        let depthManifestData = try JSONSerialization.data(withJSONObject: depthManifest, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try depthManifestData.write(to: depthManifestURL, options: .atomic)
+
+        let confidenceEntries = frameRows.compactMap { row -> [String: Any]? in
+            guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]),
+                  let confidencePath = stringValue(in: row, keys: ["confidenceFile", "confidence_file"]) else { return nil }
+            var entry: [String: Any] = [
+                "frame_id": frameId,
+                "confidence_path": confidencePath,
+                "representation": "per_frame_confidence_map",
+            ]
+            if let pairedDepthPath = stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"])
+                ?? stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"]) {
+                entry["paired_depth_path"] = pairedDepthPath
+            }
+            return entry
+        }
+        var confidenceManifest: [String: Any] = [
+            "schema_version": "v1",
+            "representation": "per_frame_confidence_map",
+            "encoding": "png_u8",
+            "confidence_scale": [
+                "0": "low_or_missing",
+                "1": "medium",
+                "2": "high",
+            ],
+            "frames": confidenceEntries,
+        ]
+        if let coordinateFrameSessionId {
+            confidenceManifest["coordinate_frame_session_id"] = coordinateFrameSessionId
+        }
+        let confidenceManifestData = try JSONSerialization.data(withJSONObject: confidenceManifest, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try confidenceManifestData.write(to: confidenceManifestURL, options: .atomic)
+
+        var sessionIntrinsics: [String: Any] = [
+            "schema_version": "v1",
+            "camera_model": "pinhole",
+            "principal_point_reference": "full_resolution_image",
+            "distortion_model": "apple_standard",
+            "distortion_coeffs": [],
+        ]
+        if let coordinateFrameSessionId {
+            sessionIntrinsics["coordinate_frame_session_id"] = coordinateFrameSessionId
+        }
+        if let intrinsicsObject {
+            sessionIntrinsics["intrinsics"] = intrinsicsObject
+        }
+        if let cameraIntrinsics = rawManifest?["camera_intrinsics"] as? [String: Any] {
+            sessionIntrinsics["camera_intrinsics"] = cameraIntrinsics
+        }
+        if let exposureSettings = rawManifest?["exposure_settings"] as? [String: Any] {
+            sessionIntrinsics["exposure_settings"] = exposureSettings
+        }
+        let sessionIntrinsicsData = try JSONSerialization.data(withJSONObject: sessionIntrinsics, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try sessionIntrinsicsData.write(to: sessionIntrinsicsURL, options: .atomic)
+    }
+
+    private func groupedRelocalizationEvents(in directory: URL) -> [RelocalizationEventsFile.RelocalizationEvent] {
+        let framesURL = directory.appendingPathComponent("arkit/frames.jsonl")
+        let frameRows = readJSONLines(from: framesURL)
+        guard !frameRows.isEmpty else { return [] }
+
+        var events: [RelocalizationEventsFile.RelocalizationEvent] = []
+        var startFrameId: String?
+        var startTCaptureSec: Double?
+        var endFrameId: String?
+        var endTCaptureSec: Double?
+        var frameCount = 0
+
+        func flushEvent() {
+            guard frameCount > 0 else { return }
+            events.append(
+                RelocalizationEventsFile.RelocalizationEvent(
+                    startFrameId: startFrameId,
+                    endFrameId: endFrameId,
+                    startTCaptureSec: startTCaptureSec,
+                    endTCaptureSec: endTCaptureSec,
+                    frameCount: frameCount
+                )
+            )
+            startFrameId = nil
+            startTCaptureSec = nil
+            endFrameId = nil
+            endTCaptureSec = nil
+            frameCount = 0
+        }
+
+        for row in frameRows {
+            let isRelocalization = boolValue(in: row, keys: ["relocalizationEvent", "relocalization_event"]) ?? false
+            let frameId = stringValue(in: row, keys: ["frameId", "frame_id"])
+            let tCaptureSec = doubleValue(in: row, keys: ["tCaptureSec", "t_capture_sec"])
+            if isRelocalization {
+                if frameCount == 0 {
+                    startFrameId = frameId
+                    startTCaptureSec = tCaptureSec
+                }
+                endFrameId = frameId
+                endTCaptureSec = tCaptureSec
+                frameCount += 1
+            } else {
+                flushEvent()
+            }
+        }
+        flushEvent()
+        return events
+    }
+
+    private func readJSONLines(from url: URL) -> [[String: Any]] {
+        guard let data = try? Data(contentsOf: url),
+              let content = String(data: data, encoding: .utf8) else {
+            return []
+        }
+        return content
+            .split(whereSeparator: \.isNewline)
+            .compactMap { line in
+                guard let lineData = String(line).data(using: .utf8),
+                      let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    return nil
+                }
+                return object
+            }
+    }
+
+    private func stringValue(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = object[key] as? String, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func doubleValue(in object: [String: Any], keys: [String]) -> Double? {
+        for key in keys {
+            if let value = object[key] as? Double {
+                return value
+            }
+            if let value = object[key] as? NSNumber {
+                return value.doubleValue
+            }
+        }
+        return nil
+    }
+
+    private func boolValue(in object: [String: Any], keys: [String]) -> Bool? {
+        for key in keys {
+            if let value = object[key] as? Bool {
+                return value
+            }
+            if let value = object[key] as? NSNumber {
+                return value.boolValue
+            }
+        }
+        return nil
+    }
+
+    private func dictionaryValue(in object: [String: Any], keys: [String]) -> [String: Any]? {
+        for key in keys {
+            if let value = object[key] as? [String: Any] {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func objectValue(in object: [String: Any], keys: [String]) -> Any? {
+        for key in keys {
+            if let value = object[key] {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func arrayValue(in object: [String: Any], keys: [String]) -> [String] {
+        for key in keys {
+            if let value = object[key] as? [String] {
+                return value
+            }
+        }
+        return []
     }
 }
 
@@ -1093,5 +1808,11 @@ private extension JSONEncoder {
         encoder.dateEncodingStrategy = .iso8601
         encoder.keyEncodingStrategy = .convertToSnakeCase
         return encoder
+    }
+}
+
+private extension Int {
+    func nonZero(or fallback: Int) -> Int {
+        self > 0 ? self : fallback
     }
 }

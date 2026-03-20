@@ -61,6 +61,10 @@ final class CaptureQualityMonitor: ObservableObject {
     @Published private(set) var depthFrameCount: Int = 0
     @Published private(set) var estimatedDataSizeMB: Double = 0
     @Published private(set) var elapsedSeconds: TimeInterval = 0
+    @Published private(set) var relocalizationCount: Int = 0
+    @Published private(set) var limitedTrackingSeconds: TimeInterval = 0
+    @Published private(set) var weakSignalEventCount: Int = 0
+    @Published private(set) var recoveryPrompt: String?
 
     private var startDate: Date?
     private var timer: Timer?
@@ -75,6 +79,9 @@ final class CaptureQualityMonitor: ObservableObject {
     }()
 
     private var previousSteadiness: SteadinessLevel?
+    private var lastARFrameTimestamp: TimeInterval?
+    private var wasPreviouslyLimited = false
+    private var wasPreviouslyRelocalizing = false
 
     init() {
         self.hasLiDAR = DeviceCapabilityService.shared.hasLiDAR
@@ -87,10 +94,17 @@ final class CaptureQualityMonitor: ObservableObject {
         meshAnchorCount = 0
         estimatedDataSizeMB = 0
         elapsedSeconds = 0
+        relocalizationCount = 0
+        limitedTrackingSeconds = 0
+        weakSignalEventCount = 0
+        recoveryPrompt = nil
         gyroSamples = []
         steadiness = .good
         trackingQuality = .notAvailable
         previousSteadiness = nil
+        lastARFrameTimestamp = nil
+        wasPreviouslyLimited = false
+        wasPreviouslyRelocalizing = false
 
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -127,6 +141,29 @@ final class CaptureQualityMonitor: ObservableObject {
             self.frameCount += 1
             if hasDepth { self.depthFrameCount += 1 }
             self.trackingQuality = tracking
+            self.recoveryPrompt = Self.recoveryPrompt(for: tracking)
+
+            if let lastTimestamp = self.lastARFrameTimestamp, frame.timestamp > lastTimestamp {
+                if !tracking.isGood {
+                    self.limitedTrackingSeconds += frame.timestamp - lastTimestamp
+                }
+            }
+            self.lastARFrameTimestamp = frame.timestamp
+
+            let isLimited = !tracking.isGood
+            if isLimited && !self.wasPreviouslyLimited {
+                self.weakSignalEventCount += 1
+            }
+            self.wasPreviouslyLimited = isLimited
+
+            let isRelocalizing = {
+                if case .limited(.relocalizing) = tracking { return true }
+                return false
+            }()
+            if isRelocalizing && !self.wasPreviouslyRelocalizing {
+                self.relocalizationCount += 1
+            }
+            self.wasPreviouslyRelocalizing = isRelocalizing
 
             // Rough data size estimate: ~50KB per RGB frame + ~20KB per depth frame
             self.estimatedDataSizeMB = (Double(self.frameCount) * 0.05 + Double(self.depthFrameCount) * 0.02)
@@ -208,5 +245,33 @@ final class CaptureQualityMonitor: ObservableObject {
         let estimatedArea = Double(meshAnchorCount) * 1.5
         let targetArea = 100.0
         return min(100.0, (estimatedArea / targetArea) * 100.0)
+    }
+
+    var hasWeakSignalConcern: Bool {
+        limitedTrackingSeconds >= 6 || relocalizationCount >= 2
+    }
+
+    private static func recoveryPrompt(for tracking: TrackingQuality) -> String? {
+        switch tracking {
+        case .normal:
+            return nil
+        case .notAvailable:
+            return "Tracking is weak. Stop walking and aim at fixed structure like door frames or floor-wall seams."
+        case .limited(let reason):
+            switch reason {
+            case .excessiveMotion:
+                return "Tracking is weak. Stop walking, steady the phone, and reacquire a fixed checkpoint."
+            case .insufficientFeatures:
+                return "Tracking is weak. Aim at static structure like rack uprights, column edges, or door frames."
+            case .relocalizing:
+                return "Resume only after tracking settles. Match a recent checkpoint before moving forward."
+            case .initializing:
+                return "Hold still at the current checkpoint until tracking stabilizes."
+            case .none:
+                return "Hold on a stable structural view before you continue."
+            @unknown default:
+                return "Hold on a stable structural view before you continue."
+            }
+        }
     }
 }

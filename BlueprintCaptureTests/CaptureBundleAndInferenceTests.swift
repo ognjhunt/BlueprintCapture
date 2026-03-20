@@ -234,6 +234,130 @@ struct CaptureBundleAndInferenceTests {
     }
 
     @Test
+    func finalizerWritesRecordingSessionAndARKitDerivedSidecars() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-sidecars-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        let arkit = raw.appendingPathComponent("arkit", isDirectory: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("depth", isDirectory: true), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("confidence", isDirectory: true), withIntermediateDirectories: true)
+
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
+        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("{\"fx\":1200,\"fy\":1195,\"cx\":640,\"cy\":360,\"width\":1280,\"height\":720}".utf8)
+            .write(to: arkit.appendingPathComponent("intrinsics.json"))
+        try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
+            .write(to: arkit.appendingPathComponent("poses.jsonl"))
+        try Data("""
+{"frameId":"000001","tCaptureSec":0.0,"sceneDepthFile":"arkit/depth/000001.png","confidenceFile":"arkit/confidence/000001.png","trackingState":"normal","worldMappingStatus":"mapped","relocalizationEvent":false,"sharpnessScore":123.4,"depthValidFraction":0.84,"missingDepthFraction":0.16,"anchorObservations":["anchor_entry","semantic_doorway"],"coordinateFrameSessionId":"arkit-session-1"}
+""".utf8).write(to: arkit.appendingPathComponent("frames.jsonl"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
+
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "scene-sidecars",
+            reservationId: nil,
+            jobId: "scene-sidecars",
+            captureJobId: "scene-sidecars",
+            buyerRequestId: nil,
+            siteSubmissionId: "scene-sidecars",
+            regionId: nil,
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .curatedNearby,
+            priorityWeight: 1.0,
+            quotedPayoutCents: nil,
+            rightsProfile: nil,
+            requestedOutputs: ["qualification", "preview_simulation"],
+            intakePacket: QualificationIntakePacket(workflowName: "Loop route", taskSteps: ["Entry"], zone: "Dock"),
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: SceneMemoryCaptureMetadata(semanticAnchorsObserved: ["doorway"]),
+            captureRights: CaptureRightsMetadata(derivedSceneGenerationAllowed: true),
+            siteIdentity: SiteIdentity(
+                siteId: "site-123",
+                siteIdSource: "buyer_request",
+                placeId: "place-123",
+                siteName: "Warehouse A",
+                addressFull: "100 Example St",
+                geo: SiteGeoPoint(latitude: 1.0, longitude: 2.0, accuracyM: 12.0),
+                buildingId: nil,
+                floorId: nil,
+                roomId: nil,
+                zoneId: "dock_a"
+            ),
+            captureTopology: CaptureTopologyMetadata(
+                captureSessionId: "visit-1",
+                routeId: "route-1",
+                passId: "pass-1",
+                passIndex: 2,
+                intendedPassRole: "loop_closure",
+                entryAnchorId: "anchor_entry",
+                returnAnchorId: nil,
+                entryAnchorTCaptureSec: 0.0,
+                entryAnchorHoldDurationSec: 2.1,
+                siteVisitId: "visit-1",
+                coordinateFrameSessionId: "arkit-session-1",
+                arkitSessionId: "arkit-session-1"
+            ),
+            captureMode: CaptureModeMetadata(
+                requestedMode: "site_world_candidate",
+                resolvedMode: "site_world_candidate",
+                downgradeReason: nil
+            ),
+            semanticAnchors: [
+                CaptureSemanticAnchorEvent(
+                    anchorType: .doorway,
+                    label: "Doorway",
+                    frameId: "000001",
+                    tCaptureSec: 0.0,
+                    coordinateFrameSessionId: "arkit-session-1"
+                )
+            ]
+        )
+        let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
+
+        let finalizer = CaptureBundleFinalizer()
+        _ = try finalizer.finalize(request: request, mode: .localExport())
+
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("capture_mode.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("recording_session.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("relocalization_events.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("overlap_graph.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("semantic_anchors.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("arkit/frame_quality.jsonl").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("arkit/depth_manifest.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("arkit/confidence_manifest.json").path))
+        #expect(fileManager.fileExists(atPath: raw.appendingPathComponent("arkit/session_intrinsics.json").path))
+
+        let topologyObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_topology.json")))
+        let topology = try #require(topologyObject as? [String: Any])
+        #expect(topology["site_visit_id"] as? String == "visit-1")
+        #expect(topology["coordinate_frame_session_id"] as? String == "arkit-session-1")
+
+        let recordingObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("recording_session.json")))
+        let recording = try #require(recordingObject as? [String: Any])
+        #expect(recording["coordinate_frame_session_id"] as? String == "arkit-session-1")
+
+        let depthManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/depth_manifest.json")))
+        let depthManifest = try #require(depthManifestObject as? [String: Any])
+        let depthFrames = try #require(depthManifest["frames"] as? [[String: Any]])
+        #expect(depthFrames.count == 1)
+
+        let confidenceManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/confidence_manifest.json")))
+        let confidenceManifest = try #require(confidenceManifestObject as? [String: Any])
+        let confidenceFrames = try #require(confidenceManifest["frames"] as? [[String: Any]])
+        #expect(confidenceFrames.count == 1)
+    }
+
+    @Test
     func intakeResolutionUsesAuthoritativeIntakeBeforeAI() async throws {
         let service = IntakeResolutionService(inferenceService: FailingInferenceService())
         let request = CaptureUploadRequest(packageURL: URL(fileURLWithPath: "/tmp/fake"), metadata: CaptureUploadMetadata(
@@ -405,6 +529,80 @@ struct CaptureBundleAndInferenceTests {
         #expect(upload.enqueued.isEmpty)
         let pendingRequest = await MainActor.run { viewModel.pendingCaptureRequest }
         #expect(pendingRequest?.metadata.targetId == "target-123")
+    }
+
+    @Test
+    func captureFlowAddsSiteWorldWorkflowMetadataToPendingRequest() async throws {
+        let viewModel = await MainActor.run {
+            CaptureFlowViewModel(
+                uploadService: MockCaptureUploadService(),
+                targetStateService: MockTargetStateService(),
+                intakeResolutionService: StubIntakeResolutionService(outcome: nil),
+                exportService: StubCaptureExportService()
+            )
+        }
+
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("site-world-artifacts-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+        let artifacts = VideoCaptureManager.RecordingArtifacts(
+            baseFilename: "test",
+            directoryURL: baseDir,
+            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
+            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
+            manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            arKit: nil,
+            packageURL: baseDir,
+            startedAt: Date()
+        )
+
+        await MainActor.run {
+            viewModel.siteWorldSiteScale = .multiZone
+            viewModel.setCriticalZone(.restrictedBoundary, enabled: true)
+            viewModel.handleRecordingFinished(artifacts: artifacts, targetId: "target-123", reservationId: nil)
+        }
+
+        let pendingRequest = await MainActor.run { viewModel.pendingCaptureRequest }
+        let review = await MainActor.run { viewModel.pendingSiteWorldPassReview }
+        let scaffolding = pendingRequest?.metadata.scaffoldingPacket?.scaffoldingUsed ?? []
+        let coveragePlan = pendingRequest?.metadata.scaffoldingPacket?.coveragePlan ?? []
+
+        #expect(scaffolding.contains("site_world_candidate"))
+        #expect(scaffolding.contains("hub_return_plan"))
+        #expect(scaffolding.contains("critical_zone_revisits"))
+        #expect(coveragePlan.contains(where: { $0.contains("hub") || $0.contains("Hub") }))
+        #expect(review?.nextActionLabel == "Retake primary route")
+        #expect(review?.missingItems.contains(where: { $0.contains("Entrance localization hold") }) == true)
+        #expect(pendingRequest?.metadata.sceneMemory?.continuityScore == review.map { Double($0.score) / 100.0 })
+    }
+
+    @Test
+    func resetSiteWorldWorkflowSessionRestoresDefaultPlan() async throws {
+        let viewModel = await MainActor.run {
+            CaptureFlowViewModel(
+                uploadService: MockCaptureUploadService(),
+                targetStateService: MockTargetStateService(),
+                intakeResolutionService: StubIntakeResolutionService(outcome: nil),
+                exportService: StubCaptureExportService()
+            )
+        }
+
+        await MainActor.run {
+            viewModel.siteWorldSiteScale = .multiZone
+            viewModel.configureSiteWorldWorkflow()
+            viewModel.setCriticalZone(.handoffPoint, enabled: true)
+            viewModel.resetSiteWorldWorkflowSession()
+        }
+
+        let currentRole = await MainActor.run { viewModel.currentPlannedPassRole }
+        let scale = await MainActor.run { viewModel.siteWorldSiteScale }
+        let configured = await MainActor.run { viewModel.siteWorldWorkflowConfigured }
+        let criticalZones = await MainActor.run { viewModel.selectedCriticalZoneAnchors }
+
+        #expect(currentRole == "primary")
+        #expect(scale == .medium)
+        #expect(configured == false)
+        #expect(criticalZones.isEmpty)
     }
 
     @Test

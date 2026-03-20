@@ -1,6 +1,8 @@
 package app.blueprint.capture.data.capture
 
 import java.io.File
+import java.security.MessageDigest
+import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.serialization.encodeToString
@@ -14,6 +16,10 @@ data class AndroidCaptureBundleResult(
     val hypothesisFile: File,
     val intakeFile: File?,
     val completionFile: File,
+    val provenanceFile: File,
+    val rightsConsentFile: File,
+    val videoTrackFile: File,
+    val hashesFile: File,
     // Phase 2 optional files
     val siteIdentityFile: File?,
     val captureTopologyFile: File?,
@@ -46,12 +52,21 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val evidenceTier = evidenceTierFor(request, captureModality)
         val captureSource = if (request.captureSource == AndroidCaptureSource.MetaGlasses) "glasses" else "android"
         val captureTierHint = if (request.captureSource == AndroidCaptureSource.MetaGlasses) "tier2_glasses" else "tier2_android"
+        val coordinateFrameSessionId = request.captureTopology?.captureSessionId ?: request.captureId
+        val captureTopology = request.captureTopology ?: CaptureTopologyMetadata(
+            captureSessionId = request.captureId,
+            routeId = "route_unknown",
+            passId = "pass_primary_1",
+            passIndex = 1,
+            intendedPassRole = "primary",
+        )
 
         // -----------------------------------------------------------------
         // manifest.json
         // -----------------------------------------------------------------
         val manifest = CaptureManifest(
             sceneId = request.sceneId,
+            captureId = request.captureId,
             videoUri = "raw/walkthrough.mp4",
             deviceModel = request.deviceModel,
             osVersion = request.osVersion,
@@ -62,11 +77,12 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             hasLiDAR = request.hasLiDAR,
             captureSource = captureSource,
             captureTierHint = captureTierHint,
+            coordinateFrameSessionId = coordinateFrameSessionId,
             captureModality = captureModality,
             evidenceTier = evidenceTier,
             requestedOutputs = request.requestedOutputs,
             siteIdentity = request.siteIdentity,
-            captureTopology = request.captureTopology,
+            captureTopology = captureTopology,
             captureMode = request.captureMode,
             taskTextHint = request.intakePacket?.workflowName
                 ?: request.workflowName
@@ -122,7 +138,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
                 payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
             ),
             siteIdentity = request.siteIdentity,
-            captureTopology = request.captureTopology,
+            captureTopology = captureTopology,
             captureMode = request.captureMode,
         )
 
@@ -130,6 +146,20 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val completion = UploadComplete(
             sceneId = request.sceneId,
             captureId = request.captureId,
+        )
+        val rightsConsent = RightsConsentFile(
+            sceneId = request.sceneId,
+            captureId = request.captureId,
+            captureContributorPayoutEligible = (request.quotedPayoutCents ?: 0) > 0,
+            consentNotes = listOfNotNull(request.rightsProfile?.let { "rights_profile:$it" }),
+        )
+        val videoTrack = VideoTrackFile(
+            videoFile = "walkthrough.mp4",
+            durationSec = (request.captureDurationMs ?: 0L) / 1000.0,
+            frameCount = (((request.captureDurationMs ?: 0L) / 1000.0) * request.fpsSource).toInt(),
+            nominalFps = request.fpsSource,
+            width = request.width,
+            height = request.height,
         )
 
         // -----------------------------------------------------------------
@@ -141,12 +171,14 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             .also { it.writeText(json.encodeToString(context)) }
         val hypothesisFile = rawDirectory.resolve("task_hypothesis.json")
             .also { it.writeText(json.encodeToString(hypothesis)) }
-        val intakeFile = request.intakePacket?.let { packet ->
-            rawDirectory.resolve("intake_packet.json")
-                .also { it.writeText(json.encodeToString(packet)) }
-        }
+        val intakeFile = rawDirectory.resolve("intake_packet.json")
+            .also { it.writeText(json.encodeToString(request.intakePacket ?: QualificationIntakePacket())) }
         val completionFile = rawDirectory.resolve("capture_upload_complete.json")
             .also { it.writeText(json.encodeToString(completion)) }
+        val rightsConsentFile = rawDirectory.resolve("rights_consent.json")
+            .also { it.writeText(json.encodeToString(rightsConsent)) }
+        val videoTrackFile = rawDirectory.resolve("video_track.json")
+            .also { it.writeText(json.encodeToString(videoTrack)) }
 
         // -----------------------------------------------------------------
         // Phase 2 optional files — written only when data is present
@@ -156,10 +188,8 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
                 .also { it.writeText(json.encodeToString(identity)) }
         }
 
-        val captureTopologyFile = request.captureTopology?.let { topology ->
-            rawDirectory.resolve("capture_topology.json")
-                .also { it.writeText(json.encodeToString(topology)) }
-        }
+        val captureTopologyFile = rawDirectory.resolve("capture_topology.json")
+            .also { it.writeText(json.encodeToString(captureTopology)) }
 
         val captureModeFile = request.captureMode?.let { mode ->
             rawDirectory.resolve("capture_mode.json")
@@ -178,6 +208,27 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             dest
         }
 
+        val provisionalProvenance = ProvenanceFile(
+            sceneId = request.sceneId,
+            captureId = request.captureId,
+            captureSource = captureSource,
+            capturedByUserId = request.creatorId,
+            uploadedByUserId = request.creatorId,
+            deviceInstallationId = request.creatorId,
+            bundleCreatedAt = Instant.ofEpochMilli(request.captureStartEpochMs).toString(),
+            uploadCompletedAt = Instant.now().toString(),
+            bundleSha256 = "pending",
+        )
+        val provenanceFile = rawDirectory.resolve("provenance.json")
+            .also { it.writeText(json.encodeToString(provisionalProvenance)) }
+
+        val hashesFile = rawDirectory.resolve("hashes.json")
+        val artifactHashes = buildArtifactHashes(rawDirectory, exclude = setOf("hashes.json"))
+        val computedBundleHash = bundleHash(artifactHashes)
+        val finalArtifactHashes = buildArtifactHashes(rawDirectory, exclude = setOf("hashes.json"))
+        provenanceFile.writeText(json.encodeToString(provisionalProvenance.copy(bundleSha256 = computedBundleHash)))
+        hashesFile.writeText(json.encodeToString(HashesFile(bundleSha256 = bundleHash(finalArtifactHashes), artifacts = finalArtifactHashes)))
+
         return AndroidCaptureBundleResult(
             captureRoot = captureRoot,
             rawDirectory = rawDirectory,
@@ -186,6 +237,10 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             hypothesisFile = hypothesisFile,
             intakeFile = intakeFile,
             completionFile = completionFile,
+            provenanceFile = provenanceFile,
+            rightsConsentFile = rightsConsentFile,
+            videoTrackFile = videoTrackFile,
+            hashesFile = hashesFile,
             siteIdentityFile = siteIdentityFile,
             captureTopologyFile = captureTopologyFile,
             captureModeFile = captureModeFile,
@@ -221,5 +276,27 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             return "video_with_validated_scaffolding"
         }
         return "pre_screen_video"
+    }
+
+    private fun buildArtifactHashes(root: File, exclude: Set<String>): Map<String, String> {
+        val files = root.walkTopDown()
+            .filter { it.isFile && it.name !in exclude }
+            .sortedBy { it.relativeTo(root).invariantSeparatorsPath }
+            .toList()
+        return files.associate { file ->
+            file.relativeTo(root).invariantSeparatorsPath to sha256(file.readBytes())
+        }
+    }
+
+    private fun bundleHash(artifactHashes: Map<String, String>): String {
+        val canonical = artifactHashes.entries
+            .sortedBy { it.key }
+            .joinToString("\n") { (path, hash) -> "$path:$hash" }
+        return sha256(canonical.toByteArray())
+    }
+
+    private fun sha256(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { "%02x".format(it) }
     }
 }

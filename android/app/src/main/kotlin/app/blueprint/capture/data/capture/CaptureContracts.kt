@@ -174,18 +174,26 @@ data class CaptureIntakeMetadata(
 
 @Serializable
 data class CaptureManifest(
+    @SerialName("schema_version") val schemaVersion: String = "v3",
     @SerialName("scene_id") val sceneId: String,
+    @SerialName("capture_id") val captureId: String,
     @SerialName("video_uri") val videoUri: String,
     @SerialName("device_model") val deviceModel: String,
+    @SerialName("device_model_marketing") val deviceModelMarketing: String = deviceModel,
+    @SerialName("hardware_model_identifier") val hardwareModelIdentifier: String = deviceModel,
     @SerialName("os_version") val osVersion: String,
+    @SerialName("app_version") val appVersion: String = "unknown",
+    @SerialName("app_build") val appBuild: String = "unknown",
     @SerialName("fps_source") val fpsSource: Double,
     val width: Int,
     val height: Int,
     @SerialName("capture_start_epoch_ms") val captureStartEpochMs: Long,
     @SerialName("has_lidar") val hasLiDAR: Boolean,
-    @SerialName("capture_schema_version") val captureSchemaVersion: String = "2.0.0",
+    @SerialName("depth_supported") val depthSupported: Boolean = hasLiDAR,
+    @SerialName("capture_schema_version") val captureSchemaVersion: String = "3.0.0",
     @SerialName("capture_source") val captureSource: String = "android",
     @SerialName("capture_tier_hint") val captureTierHint: String = "tier2_android",
+    @SerialName("coordinate_frame_session_id") val coordinateFrameSessionId: String,
     @SerialName("capture_modality") val captureModality: String = "android_video_only",
     @SerialName("evidence_tier") val evidenceTier: String = "pre_screen_video",
     @SerialName("requested_outputs") val requestedOutputs: List<String>,
@@ -281,7 +289,64 @@ data class TaskHypothesis(
 
 @Serializable
 data class UploadComplete(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
     @SerialName("scene_id") val sceneId: String,
     @SerialName("capture_id") val captureId: String,
     @SerialName("raw_prefix") val rawPrefix: String = "raw",
+)
+
+@Serializable
+data class RightsConsentFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("scene_id") val sceneId: String,
+    @SerialName("capture_id") val captureId: String,
+    @SerialName("consent_status") val consentStatus: String = "unknown",
+    @SerialName("capture_basis") val captureBasis: String = "unknown",
+    @SerialName("derived_scene_generation_allowed") val derivedSceneGenerationAllowed: Boolean = false,
+    @SerialName("data_licensing_allowed") val dataLicensingAllowed: Boolean = false,
+    @SerialName("capture_contributor_payout_eligible") val captureContributorPayoutEligible: Boolean = false,
+    @SerialName("permission_document_uri") val permissionDocumentUri: String? = null,
+    @SerialName("permission_document_sha256") val permissionDocumentSha256: String? = null,
+    @SerialName("consent_scope") val consentScope: List<String> = emptyList(),
+    @SerialName("consent_notes") val consentNotes: List<String> = emptyList(),
+    @SerialName("redaction_required") val redactionRequired: Boolean = true,
+)
+
+@Serializable
+data class ProvenanceFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("scene_id") val sceneId: String,
+    @SerialName("capture_id") val captureId: String,
+    @SerialName("capture_source") val captureSource: String,
+    @SerialName("captured_by_user_id") val capturedByUserId: String,
+    @SerialName("uploaded_by_user_id") val uploadedByUserId: String,
+    @SerialName("capture_app_build") val captureAppBuild: String = "unknown",
+    @SerialName("capture_app_version") val captureAppVersion: String = "unknown",
+    @SerialName("device_installation_id") val deviceInstallationId: String,
+    @SerialName("bundle_created_at") val bundleCreatedAt: String,
+    @SerialName("upload_completed_at") val uploadCompletedAt: String,
+    @SerialName("bundle_sha256") val bundleSha256: String,
+)
+
+@Serializable
+data class VideoTrackFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("video_file") val videoFile: String,
+    @SerialName("duration_sec") val durationSec: Double,
+    @SerialName("frame_count") val frameCount: Int,
+    @SerialName("nominal_fps") val nominalFps: Double,
+    @SerialName("contains_vfr") val containsVfr: Boolean = false,
+    @SerialName("video_start_pts_sec") val videoStartPtsSec: Double = 0.0,
+    val width: Int,
+    val height: Int,
+    val orientation: String = "portrait",
+    val codec: String = "mp4",
+    @SerialName("color_space") val colorSpace: String = "unknown",
+)
+
+@Serializable
+data class HashesFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("bundle_sha256") val bundleSha256: String,
+    val artifacts: Map<String, String>,
 )

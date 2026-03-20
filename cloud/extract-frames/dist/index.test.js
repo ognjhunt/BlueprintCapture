@@ -85,6 +85,34 @@ test("validateManifest accepts normalized scene memory and rights metadata", () 
     assert.ok(!validation.warnings.includes("malformed_scene_memory_capture"));
     assert.ok(!validation.warnings.includes("malformed_capture_rights"));
 });
+test("validateManifest enforces additional v3 manifest fields", () => {
+    const validation = validateManifest({
+        schema_version: "v3",
+        capture_schema_version: "3.0.0",
+        scene_id: "scene-123",
+        capture_id: "capture-456",
+        coordinate_frame_session_id: "cfs-1",
+        video_uri: "gs://bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov",
+        device_model: "iPhone16,2",
+        device_model_marketing: "iPhone 15 Pro",
+        os_version: "18.3.1",
+        app_version: "1.0.0",
+        app_build: "100",
+        ios_version: "18.3.1",
+        ios_build: "22D68",
+        hardware_model_identifier: "iPhone16,2",
+        fps_source: 30,
+        width: 1920,
+        height: 1440,
+        capture_start_epoch_ms: 1_700_000_000_000,
+        has_lidar: true,
+        depth_supported: true,
+        capture_source: "iphone",
+        capture_tier_hint: "tier1_iphone",
+    });
+    assert.equal(validation.valid, true);
+    assert.deepEqual(validation.missingRequired, []);
+});
 test("deriveRequestedRouting preserves outputs and expands preview simulation lane", () => {
     const routing = deriveRequestedRouting({
         requested_outputs: ["qualification", "preview_simulation"],
@@ -146,7 +174,12 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
         capture_source: "android",
     }, {
         siteIdentity: { site_id: "site-123", site_id_source: "site_submission" },
-        captureTopology: { capture_session_id: "sess-1", pass_id: "pass-1" },
+        captureTopology: {
+            capture_session_id: "visit-1",
+            site_visit_id: "visit-1",
+            coordinate_frame_session_id: "arkit-session-1",
+            pass_id: "pass-1",
+        },
         captureMode: { requested_mode: "site_world_candidate", resolved_mode: "site_world_candidate" },
         routeAnchors: {
             schema_version: "v1",
@@ -158,7 +191,9 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
         },
     });
     assert.equal(merged?.site_identity?.site_id, "site-123");
-    assert.equal(merged?.capture_topology?.capture_session_id, "sess-1");
+    assert.equal(merged?.capture_topology?.capture_session_id, "visit-1");
+    assert.equal(merged?.capture_topology?.site_visit_id, "visit-1");
+    assert.equal(merged?.capture_topology?.coordinate_frame_session_id, "arkit-session-1");
     assert.equal(merged?.capture_mode?.requested_mode, "site_world_candidate");
     assert.equal(merged?.route_anchors?.route_anchors?.[0]?.anchor_id, "anchor_entry");
     assert.equal(merged?.checkpoint_events?.checkpoint_events?.[0]?.anchor_id, "anchor_entry");

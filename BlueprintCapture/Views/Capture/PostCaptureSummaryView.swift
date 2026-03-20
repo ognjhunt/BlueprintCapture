@@ -6,6 +6,8 @@ struct PostCaptureSummaryView: View {
     let spaceTitle: String
     let spaceAddress: String?
     let actionState: CaptureFlowViewModel.FinishedCaptureActionState
+    let workflowReview: SiteWorldPassReview?
+    let onContinueWorkflow: (() -> Void)?
     let onUploadNow: () -> Void
     let onUploadLater: () -> Void
     let onExport: () -> Void
@@ -49,6 +51,12 @@ struct PostCaptureSummaryView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .padding(.horizontal, 20)
 
+                    if let workflowReview {
+                        workflowReviewCard(workflowReview)
+                            .padding(.horizontal, 20)
+                            .padding(.top, 12)
+                    }
+
                     // ── Notes ─────────────────────────────────────────────
                     TextField("Add a note (optional)", text: $userNotes, axis: .vertical)
                         .font(.subheadline)
@@ -85,6 +93,24 @@ struct PostCaptureSummaryView: View {
 
                     // ── CTAs ─────────────────────────────────────────────
                     VStack(spacing: 10) {
+                        if let continueLabel = workflowReview?.nextActionLabel,
+                           let onContinueWorkflow {
+                            Button(action: onContinueWorkflow) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "point.topleft.down.curvedto.point.bottomright.up.fill")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text(continueLabel)
+                                        .font(.system(size: 17, weight: .semibold))
+                                }
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 17)
+                                .background(Color(red: 0.22, green: 0.9, blue: 0.78))
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            }
+                            .disabled(isBusy)
+                        }
+
                         // Primary — Upload
                         Button(action: onUploadNow) {
                             HStack(spacing: 10) {
@@ -164,6 +190,81 @@ struct PostCaptureSummaryView: View {
         .padding(.vertical, 14)
     }
 
+    private func workflowReviewCard(_ review: SiteWorldPassReview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(review.title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(review.summary)
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.7))
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(review.tone.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(reviewToneColor(review.tone))
+                    Text("\(review.score)")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+            }
+
+            Text("Workflow progress \(review.completedRequiredPasses)/\(review.totalRequiredPasses)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color(white: 0.7))
+
+            if !review.completedItems.isEmpty {
+                workflowList(title: "Completed", items: review.completedItems, tint: Color(red: 0.2, green: 0.85, blue: 0.45))
+            }
+
+            if !review.missingItems.isEmpty {
+                workflowList(title: "Still needed", items: review.missingItems, tint: Color(red: 0.95, green: 0.54, blue: 0.34))
+            }
+
+            if let weakSignalSummary = review.weakSignalSummary {
+                Text(weakSignalSummary.replacingOccurrences(of: "weak_signal:", with: "Weak signal: "))
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.76))
+            }
+        }
+        .padding(14)
+        .background(Color(white: 0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func workflowList(title: String, items: [String], tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(tint)
+            ForEach(items, id: \.self) { item in
+                HStack(alignment: .top, spacing: 8) {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 5)
+                    Text(item)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.88))
+                }
+            }
+        }
+    }
+
+    private func reviewToneColor(_ tone: SiteWorldReviewTone) -> Color {
+        switch tone {
+        case .ready:
+            return Color(red: 0.2, green: 0.85, blue: 0.45)
+        case .caution:
+            return Color(red: 0.97, green: 0.75, blue: 0.28)
+        case .actionRequired:
+            return Color(red: 0.95, green: 0.54, blue: 0.34)
+        }
+    }
+
     // MARK: - Computed
 
     private var formattedDuration: String {
@@ -226,6 +327,8 @@ struct PostCaptureSummaryView: View {
         spaceTitle: "Current Location",
         spaceAddress: "1005 Crete St, Durham",
         actionState: .idle,
+        workflowReview: nil,
+        onContinueWorkflow: nil,
         onUploadNow: {},
         onUploadLater: {},
         onExport: {},

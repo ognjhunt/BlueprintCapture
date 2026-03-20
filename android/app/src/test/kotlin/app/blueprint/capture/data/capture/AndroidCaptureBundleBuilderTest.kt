@@ -40,9 +40,16 @@ class AndroidCaptureBundleBuilderTest {
         assertThat(result.contextFile.exists()).isTrue()
         assertThat(result.hypothesisFile.exists()).isTrue()
         assertThat(result.completionFile.exists()).isTrue()
+        assertThat(result.provenanceFile.exists()).isTrue()
+        assertThat(result.rightsConsentFile.exists()).isTrue()
+        assertThat(result.videoTrackFile.exists()).isTrue()
+        assertThat(result.hashesFile.exists()).isTrue()
         assertThat(File(result.rawDirectory, "walkthrough.mp4").exists()).isTrue()
 
         val manifest = json.decodeFromString<CaptureManifest>(result.manifestFile.readText())
+        assertThat(manifest.schemaVersion).isEqualTo("v3")
+        assertThat(manifest.captureId).isEqualTo("capture-123")
+        assertThat(manifest.coordinateFrameSessionId).isEqualTo("capture-123")
         assertThat(manifest.captureSource).isEqualTo("android")
         assertThat(manifest.captureTierHint).isEqualTo("tier2_android")
         assertThat(manifest.captureModality).isEqualTo("android_video_only")
@@ -56,5 +63,11 @@ class AndroidCaptureBundleBuilderTest {
         val hypothesis = json.decodeFromString<TaskHypothesis>(result.hypothesisFile.readText())
         assertThat(hypothesis.source).isEqualTo(CaptureIntakeSource.Authoritative)
         assertThat(hypothesis.taskSteps).containsExactly("Enter", "Sweep").inOrder()
+
+        val rightsConsent = json.decodeFromString<RightsConsentFile>(result.rightsConsentFile.readText())
+        assertThat(rightsConsent.redactionRequired).isTrue()
+
+        val hashes = json.decodeFromString<HashesFile>(result.hashesFile.readText())
+        assertThat(hashes.artifacts).containsKey("manifest.json")
     }
 }

@@ -19,18 +19,24 @@ struct PipelineContractTests {
             transform: transform,
             frame_id: "000001",
             t_device_sec: 0.0,
-            T_world_camera: transform
+            t_monotonic_ns: 123_456_000_000,
+            T_world_camera: transform,
+            tracking_state: "normal",
+            tracking_reason: nil,
+            world_mapping_status: "mapped",
+            coordinate_frame_session_id: "cfs-1"
         )
 
         let data = try JSONEncoder().encode(row)
         let jsonObject = try JSONSerialization.jsonObject(with: data)
         let json = try #require(jsonObject as? [String: Any])
 
-        #expect(json["pose_schema_version"] as? String == "2.0")
-        #expect(json["frameIndex"] as? Int == 0)
+        #expect(json["pose_schema_version"] as? String == "3.0")
+        #expect(json["frame_index"] as? Int == 0)
         #expect(json["timestamp"] as? Double == 123.456)
         #expect(json["frame_id"] as? String == "000001")
         #expect(json["t_device_sec"] as? Double == 0.0)
+        #expect((json["t_monotonic_ns"] as? NSNumber)?.int64Value == 123_456_000_000)
         #expect((json["transform"] as? [[Double]])?.count == 4)
         #expect((json["T_world_camera"] as? [[Double]])?.count == 4)
     }
@@ -48,7 +54,7 @@ struct PipelineContractTests {
 
     @Test
     func captureManifestSchemaConstantsAreStable() {
-        #expect(VideoCaptureManager.captureSchemaVersion == "2.0.0")
+        #expect(VideoCaptureManager.captureSchemaVersion == "3.0.0")
         #expect(VideoCaptureManager.captureSource == "iphone")
         #expect(VideoCaptureManager.captureTierHint == "tier1_iphone")
     }

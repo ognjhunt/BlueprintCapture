@@ -2,8 +2,10 @@ export type PoseRow = {
   pose_schema_version?: string;
   frame_id?: string;
   t_device_sec?: number;
+  t_monotonic_ns?: number;
   T_world_camera?: number[][];
   frameIndex?: number;
+  frame_index?: number;
   timestamp?: number;
   transform?: number[][];
   source_schema: "v2" | "legacy" | "mixed";
@@ -103,7 +105,7 @@ export function parsePoseRows(content: string): PoseRow[] {
 
   return rows.map((row) => {
     const frameIdRaw = typeof row.frame_id === "string" ? row.frame_id : undefined;
-    const frameIndexRaw = toFiniteNumber(row.frameIndex);
+    const frameIndexRaw = toFiniteNumber(row.frame_index ?? row.frameIndex);
     const frameId =
       frameIdRaw ??
       (frameIndexRaw !== undefined ? zeroPad(Math.max(0, Math.floor(frameIndexRaw)) + 1, 6) : undefined);

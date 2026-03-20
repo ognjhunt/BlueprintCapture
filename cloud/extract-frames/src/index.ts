@@ -95,6 +95,58 @@ async function loadArkitPoses(
   return index;
 }
 
+function parseJsonLines(content: string): Record<string, unknown>[] {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? [parsed] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+async function loadArkitFrameQuality(
+  bucket: StorageBucket,
+  rawPrefix: string,
+  tmpDir: string
+): Promise<Map<string, Record<string, unknown>>> {
+  const frameLogObjectName = `${rawPrefix}/arkit/frames.jsonl`;
+  const frameLogFile = bucket.file(frameLogObjectName);
+  let exists = false;
+  try {
+    [exists] = await frameLogFile.exists();
+  } catch (error) {
+    logger.warn("Failed to check existence of ARKit frame log", { frameLogObjectName, error });
+    return new Map();
+  }
+  if (!exists) {
+    return new Map();
+  }
+
+  const localFrameLogPath = join(tmpDir, `arkit-frames-${Date.now()}.jsonl`);
+  try {
+    await frameLogFile.download({ destination: localFrameLogPath });
+    const raw = readFileSync(localFrameLogPath, "utf8");
+    const rows = parseJsonLines(raw);
+    const byFrameId = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const frameId = asString(row.frame_id) ?? asString(row.frameId);
+      if (frameId) {
+        byFrameId.set(frameId, row);
+      }
+    }
+    return byFrameId;
+  } catch (error) {
+    logger.warn("Failed to load ARKit frame log", { frameLogObjectName, error });
+    return new Map();
+  }
+}
+
 type CapturePathInfo = {
   mode: "scenes" | "targets";
   sceneId: string;
@@ -503,6 +555,12 @@ function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null):
     },
     operator_notes: hasStringArray(raw?.operator_notes) ? raw?.operator_notes : [],
     inaccessible_areas: hasStringArray(raw?.inaccessible_areas) ? raw?.inaccessible_areas : [],
+    semantic_anchors_observed: hasStringArray(raw?.semantic_anchors_observed)
+      ? raw?.semantic_anchors_observed
+      : [],
+    relocalization_count: typeof raw?.relocalization_count === "number" ? raw?.relocalization_count : null,
+    overlap_checkpoint_count:
+      typeof raw?.overlap_checkpoint_count === "number" ? raw?.overlap_checkpoint_count : null,
     // world_model_candidate is NOT read from the raw manifest here. It is computed
     // deterministically from actual artifact presence and capture_mode after the bridge
     // has verified GCS artifacts. See canonicalWorldModelCandidate() below.
@@ -543,12 +601,20 @@ function normalizedCaptureTopology(manifest: Record<string, unknown> | null): Re
   if (!raw) return null;
   return {
     capture_session_id: asString(raw.capture_session_id) ?? null,
+    site_visit_id: asString(raw.site_visit_id) ?? asString(raw.capture_session_id) ?? null,
     route_id: asString(raw.route_id) ?? null,
     pass_id: asString(raw.pass_id) ?? null,
     pass_index: typeof raw.pass_index === "number" ? raw.pass_index : null,
     intended_pass_role: asString(raw.intended_pass_role) ?? "primary",
     entry_anchor_id: asString(raw.entry_anchor_id) ?? null,
     return_anchor_id: asString(raw.return_anchor_id) ?? null,
+    coordinate_frame_session_id:
+      asString(raw.coordinate_frame_session_id) ?? asString(raw.capture_session_id) ?? null,
+    arkit_session_id:
+      asString(raw.arkit_session_id) ??
+      asString(raw.coordinate_frame_session_id) ??
+      asString(raw.capture_session_id) ??
+      null,
     entry_anchor_t_capture_sec:
       typeof raw.entry_anchor_t_capture_sec === "number" ? raw.entry_anchor_t_capture_sec : null,
     entry_anchor_hold_duration_sec:
@@ -744,6 +810,30 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
       warnings.push(`missing_${field}`);
     }
   }
+  const schemaVersion = asString(manifest.schema_version);
+  if (schemaVersion === "v3" || (asString(manifest.capture_schema_version)?.startsWith("3.") ?? false)) {
+    const v3RequiredStrings = [
+      "capture_id",
+      "coordinate_frame_session_id",
+      "app_version",
+      "app_build",
+      "ios_version",
+      "ios_build",
+      "hardware_model_identifier",
+      "device_model_marketing",
+    ];
+    const v3RequiredBooleans = ["depth_supported"];
+    for (const field of v3RequiredStrings) {
+      if (!asString(manifest[field])) {
+        missingRequired.push(field);
+      }
+    }
+    for (const field of v3RequiredBooleans) {
+      if (typeof manifest[field] !== "boolean") {
+        missingRequired.push(field);
+      }
+    }
+  }
   warnings.push(...validateSceneMemoryCapture(manifest));
   warnings.push(...validateCaptureRights(manifest));
 
@@ -846,6 +936,7 @@ export const extractFrames = onObjectFinalized(
     const manifestValidation = validateManifest(manifest);
 
     const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
+    const arkitFrameQuality = await loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp);
     const intrinsics = await loadJsonObject(bucket, intrinsicsObjectName, tmp);
     const actualAvailability: ArtifactAvailability = {
       arkit_poses: poseIndex.byFrameId.size > 0 || poseIndex.byTime.length > 0,
@@ -968,6 +1059,73 @@ export const extractFrames = onObjectFinalized(
 
         if (Object.keys(arkitPose).length > 0) {
           entry.arkit_pose = arkitPose;
+        }
+
+        const poseFrameId = asString(pose.frame_id);
+        const frameQuality =
+          (poseFrameId ? arkitFrameQuality.get(poseFrameId) : undefined) ??
+          arkitFrameQuality.get(frameId);
+        if (frameQuality) {
+          const sceneDepthFile =
+            asString(frameQuality.sceneDepthFile) ?? asString(frameQuality.scene_depth_file);
+          const smoothedSceneDepthFile =
+            asString(frameQuality.smoothedSceneDepthFile) ??
+            asString(frameQuality.smoothed_scene_depth_file);
+          const confidenceFile =
+            asString(frameQuality.confidenceFile) ?? asString(frameQuality.confidence_file);
+          const arkitFrame: Record<string, unknown> = {
+            frame_id: poseFrameId ?? frameId,
+            tracking_state:
+              asString(frameQuality.trackingState) ?? asString(frameQuality.tracking_state) ?? null,
+            tracking_reason:
+              asString(frameQuality.trackingReason) ?? asString(frameQuality.tracking_reason) ?? null,
+            world_mapping_status:
+              asString(frameQuality.worldMappingStatus) ??
+              asString(frameQuality.world_mapping_status) ??
+              null,
+            relocalization_event:
+              frameQuality.relocalizationEvent === true || frameQuality.relocalization_event === true,
+            sharpness_score:
+              asFiniteNumber(frameQuality.sharpnessScore) ??
+              asFiniteNumber(frameQuality.sharpness_score) ??
+              null,
+            depth_source:
+              asString(frameQuality.depthSource) ?? asString(frameQuality.depth_source) ?? null,
+            depth_valid_fraction:
+              asFiniteNumber(frameQuality.depthValidFraction) ??
+              asFiniteNumber(frameQuality.depth_valid_fraction) ??
+              null,
+            missing_depth_fraction:
+              asFiniteNumber(frameQuality.missingDepthFraction) ??
+              asFiniteNumber(frameQuality.missing_depth_fraction) ??
+              null,
+            anchor_observations:
+              asStringArray(frameQuality.anchorObservations) ??
+              asStringArray(frameQuality.anchor_observations) ??
+              [],
+            exposure_duration_s:
+              asFiniteNumber(frameQuality.exposureDurationS) ??
+              asFiniteNumber(frameQuality.exposure_duration_s) ??
+              null,
+            iso: asFiniteNumber(frameQuality.iso) ?? null,
+            exposure_target_bias:
+              asFiniteNumber(frameQuality.exposureTargetBias) ??
+              asFiniteNumber(frameQuality.exposure_target_bias) ??
+              null,
+            white_balance_gains:
+              asRecord(frameQuality.whiteBalanceGains) ??
+              asRecord(frameQuality.white_balance_gains) ??
+              null,
+            depth_uri: smoothedSceneDepthFile
+              ? gsUri(bucketName, `${pathInfo.rawPrefix}/${smoothedSceneDepthFile}`)
+              : sceneDepthFile
+              ? gsUri(bucketName, `${pathInfo.rawPrefix}/${sceneDepthFile}`)
+              : null,
+            confidence_uri: confidenceFile
+              ? gsUri(bucketName, `${pathInfo.rawPrefix}/${confidenceFile}`)
+              : null,
+          };
+          entry.arkit_frame = arkitFrame;
         }
       }
 
@@ -1184,9 +1342,15 @@ export const extractFrames = onObjectFinalized(
       route_anchors: routeAnchors,
       checkpoint_events: checkpointEvents,
       capture_mode: captureMode,
+      site_visit_id:
+        asString(captureTopology?.site_visit_id) ??
+        asString(captureTopology?.capture_session_id) ??
+        null,
       geometry_source: null,
       geometry_ready: false,
       coordinate_frame_session_id:
+        asString(captureTopology?.coordinate_frame_session_id) ??
+        asString(captureTopology?.arkit_session_id) ??
         asString(captureTopology?.capture_session_id) ??
         asString(captureTopology?.captureSessionId) ??
         pathInfo.captureId,

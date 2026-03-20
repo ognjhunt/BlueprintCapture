@@ -174,6 +174,37 @@ struct CaptureTopologyMetadata: Equatable, Codable {
     let returnAnchorId: String?
     let entryAnchorTCaptureSec: Double?      // t_device_sec midpoint of detected entry hold
     let entryAnchorHoldDurationSec: Double?  // seconds held at entry anchor
+    let siteVisitId: String?
+    let coordinateFrameSessionId: String?
+    let arkitSessionId: String?
+
+    init(
+        captureSessionId: String,
+        routeId: String,
+        passId: String,
+        passIndex: Int,
+        intendedPassRole: String,
+        entryAnchorId: String?,
+        returnAnchorId: String?,
+        entryAnchorTCaptureSec: Double?,
+        entryAnchorHoldDurationSec: Double?,
+        siteVisitId: String? = nil,
+        coordinateFrameSessionId: String? = nil,
+        arkitSessionId: String? = nil
+    ) {
+        self.captureSessionId = captureSessionId
+        self.routeId = routeId
+        self.passId = passId
+        self.passIndex = passIndex
+        self.intendedPassRole = intendedPassRole
+        self.entryAnchorId = entryAnchorId
+        self.returnAnchorId = returnAnchorId
+        self.entryAnchorTCaptureSec = entryAnchorTCaptureSec
+        self.entryAnchorHoldDurationSec = entryAnchorHoldDurationSec
+        self.siteVisitId = siteVisitId
+        self.coordinateFrameSessionId = coordinateFrameSessionId
+        self.arkitSessionId = arkitSessionId
+    }
 }
 
 struct CaptureModeMetadata: Equatable, Codable {
@@ -182,25 +213,97 @@ struct CaptureModeMetadata: Equatable, Codable {
     let downgradeReason: String?
 }
 
+enum CaptureSemanticAnchorType: String, Codable, CaseIterable {
+    case entrance
+    case doorway
+    case corridorIntersection = "corridor_intersection"
+    case dockTurn = "dock_turn"
+    case handoffPoint = "handoff_point"
+    case controlPanel = "control_panel"
+    case floorTransition = "floor_transition"
+    case restrictedBoundary = "restricted_boundary"
+    case exitPoint = "exit_point"
+
+    var displayLabel: String {
+        switch self {
+        case .entrance:
+            return "Entrance"
+        case .doorway:
+            return "Doorway"
+        case .corridorIntersection:
+            return "Intersection"
+        case .dockTurn:
+            return "Dock Turn"
+        case .handoffPoint:
+            return "Handoff"
+        case .controlPanel:
+            return "Control Panel"
+        case .floorTransition:
+            return "Floor Transition"
+        case .restrictedBoundary:
+            return "Restricted Boundary"
+        case .exitPoint:
+            return "Exit"
+        }
+    }
+}
+
+struct CaptureSemanticAnchorEvent: Equatable, Codable, Identifiable {
+    let id: String
+    let anchorType: CaptureSemanticAnchorType
+    let label: String?
+    let frameId: String?
+    let tCaptureSec: Double?
+    let coordinateFrameSessionId: String?
+    let notes: String?
+
+    init(
+        id: String = UUID().uuidString,
+        anchorType: CaptureSemanticAnchorType,
+        label: String? = nil,
+        frameId: String? = nil,
+        tCaptureSec: Double? = nil,
+        coordinateFrameSessionId: String? = nil,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.anchorType = anchorType
+        self.label = label
+        self.frameId = frameId
+        self.tCaptureSec = tCaptureSec
+        self.coordinateFrameSessionId = coordinateFrameSessionId
+        self.notes = notes
+    }
+}
+
 struct SceneMemoryCaptureMetadata: Equatable, Codable {
     let continuityScore: Double?
     let lightingConsistency: String?
     let dynamicObjectDensity: String?
     let operatorNotes: [String]
     let inaccessibleAreas: [String]
+    let semanticAnchorsObserved: [String]
+    let relocalizationCount: Int?
+    let overlapCheckpointCount: Int?
 
     init(
         continuityScore: Double? = nil,
         lightingConsistency: String? = nil,
         dynamicObjectDensity: String? = nil,
         operatorNotes: [String] = [],
-        inaccessibleAreas: [String] = []
+        inaccessibleAreas: [String] = [],
+        semanticAnchorsObserved: [String] = [],
+        relocalizationCount: Int? = nil,
+        overlapCheckpointCount: Int? = nil
     ) {
         self.continuityScore = continuityScore
         self.lightingConsistency = lightingConsistency
         self.dynamicObjectDensity = dynamicObjectDensity
         self.operatorNotes = operatorNotes
         self.inaccessibleAreas = inaccessibleAreas
+        self.semanticAnchorsObserved = semanticAnchorsObserved
+        self.relocalizationCount = relocalizationCount
+        self.overlapCheckpointCount = overlapCheckpointCount
     }
 }
 
@@ -280,6 +383,71 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     let siteIdentity: SiteIdentity?
     let captureTopology: CaptureTopologyMetadata?
     let captureMode: CaptureModeMetadata?
+    let semanticAnchors: [CaptureSemanticAnchorEvent]
+
+    init(
+        id: UUID,
+        targetId: String?,
+        reservationId: String?,
+        jobId: String,
+        captureJobId: String?,
+        buyerRequestId: String?,
+        siteSubmissionId: String?,
+        regionId: String?,
+        creatorId: String,
+        capturedAt: Date,
+        uploadedAt: Date?,
+        captureSource: CaptureSource,
+        specialTaskType: SpecialTaskType?,
+        priorityWeight: Double?,
+        quotedPayoutCents: Int?,
+        rightsProfile: String?,
+        requestedOutputs: [String],
+        intakePacket: QualificationIntakePacket?,
+        intakeMetadata: CaptureIntakeMetadata?,
+        taskHypothesis: CaptureTaskHypothesis?,
+        scaffoldingPacket: CaptureScaffoldingPacket?,
+        captureModality: String?,
+        evidenceTier: String?,
+        captureContextHint: String?,
+        sceneMemory: SceneMemoryCaptureMetadata?,
+        captureRights: CaptureRightsMetadata?,
+        siteIdentity: SiteIdentity?,
+        captureTopology: CaptureTopologyMetadata?,
+        captureMode: CaptureModeMetadata?,
+        semanticAnchors: [CaptureSemanticAnchorEvent] = []
+    ) {
+        self.id = id
+        self.targetId = targetId
+        self.reservationId = reservationId
+        self.jobId = jobId
+        self.captureJobId = captureJobId
+        self.buyerRequestId = buyerRequestId
+        self.siteSubmissionId = siteSubmissionId
+        self.regionId = regionId
+        self.creatorId = creatorId
+        self.capturedAt = capturedAt
+        self.uploadedAt = uploadedAt
+        self.captureSource = captureSource
+        self.specialTaskType = specialTaskType
+        self.priorityWeight = priorityWeight
+        self.quotedPayoutCents = quotedPayoutCents
+        self.rightsProfile = rightsProfile
+        self.requestedOutputs = requestedOutputs
+        self.intakePacket = intakePacket
+        self.intakeMetadata = intakeMetadata
+        self.taskHypothesis = taskHypothesis
+        self.scaffoldingPacket = scaffoldingPacket
+        self.captureModality = captureModality
+        self.evidenceTier = evidenceTier
+        self.captureContextHint = captureContextHint
+        self.sceneMemory = sceneMemory
+        self.captureRights = captureRights
+        self.siteIdentity = siteIdentity
+        self.captureTopology = captureTopology
+        self.captureMode = captureMode
+        self.semanticAnchors = semanticAnchors
+    }
 }
 
 struct CaptureUploadRequest: Equatable {
