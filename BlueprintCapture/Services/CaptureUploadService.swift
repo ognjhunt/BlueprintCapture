@@ -477,7 +477,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case fileMissing
         case cancelled
         case uploadFailed
+        case authenticationRequired
         case missingStructuredIntake
+        case submissionRegistrationFailed
 
         var errorDescription: String? {
             switch self {
@@ -487,8 +489,12 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Upload cancelled."
             case .uploadFailed:
                 return "Upload failed. Please try again."
+            case .authenticationRequired:
+                return "Blueprint could not establish Firebase authentication for this capture. Enable Anonymous Auth or sign in before uploading."
             case .missingStructuredIntake:
                 return "Structured intake is required before upload."
+            case .submissionRegistrationFailed:
+                return "Upload reached storage but Blueprint could not register the capture submission. Check Firebase Auth and Firestore production config before retrying."
             }
         }
     }
@@ -509,28 +515,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private let subject = PassthroughSubject<Event, Never>()
     private let storageBucketURL = "gs://blueprint-8c1ca.appspot.com"
     private let finalizer: CaptureBundleFinalizerProtocol
-    private var pendingSubmissionWrites: [String: CaptureUploadRequest] = [:]
-    private var authStateObserver: NSObjectProtocol?
-
     init(finalizer: CaptureBundleFinalizerProtocol = CaptureBundleFinalizer()) {
         self.finalizer = finalizer
-        #if canImport(FirebaseFirestore) && canImport(FirebaseAuth)
-        self.authStateObserver = NotificationCenter.default.addObserver(
-            forName: .AuthStateDidChange,
-            object: nil,
-            queue: nil
-        ) { [weak self] _ in
-            self?.queue.async {
-                self?.flushPendingSubmissionWritesIfPossible()
-            }
-        }
-        #endif
-    }
-
-    deinit {
-        if let authStateObserver {
-            NotificationCenter.default.removeObserver(authStateObserver)
-        }
     }
 
     func enqueue(_ request: CaptureUploadRequest) {
@@ -607,6 +593,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         #if canImport(FirebaseStorage)
+        let hasAuthenticatedUser = await UserDeviceService.waitForAuthenticatedFirebaseUser(timeout: 10)
+        guard hasAuthenticatedUser else {
+            print("❌ [UploadService] Firebase auth unavailable; refusing to upload without a capture_submissions-capable session")
+            markUploadFailed(id: id, attempt: attempt, error: .authenticationRequired)
+            return
+        }
+
         let storage = Storage.storage(url: storageBucketURL)
         var isDir: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDir)
@@ -624,6 +617,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 request: record.request
             )
             if !ok { return }
+            await finalizeSuccessfulUpload(id: id, attempt: attempt)
             print("✅ [UploadService] Directory upload completed id=\(id)")
         } else {
             // Upload single file (zip)
@@ -687,7 +681,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 uploadSucceeded = true
             }
             if uploadSucceeded {
-                markUploadCompleted(id: id, attempt: attempt)
+                await finalizeSuccessfulUpload(id: id, attempt: attempt)
                 print("✅ [UploadService] Upload finished id=\(id)")
             } else if !Task.isCancelled {
                 markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
@@ -855,23 +849,20 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             }
         }
 
-        markUploadCompleted(id: id, attempt: attempt)
         return true
     }
 
-    /// Writes a `capture_submissions/{captureId}` document to Firestore when a capture
-    /// is successfully uploaded. This is the record the `onCaptureApproved` Cloud Function
-    /// watches — status starts as "submitted" and is updated to "approved"/"paid" by the
-    /// backend via the `updateCaptureStatus` Cloud Function.
-    private func writeSubmissionRecord(for request: CaptureUploadRequest) {
+    /// Writes `capture_submissions/{captureId}` before the upload is reported as complete.
+    /// This keeps the iPhone launch path fail-closed: raw storage upload alone is not success
+    /// unless downstream submission registration also succeeds.
+    private func ensureSubmissionRecordWritten(for request: CaptureUploadRequest) async -> Bool {
         #if canImport(FirebaseFirestore)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
-        guard Auth.auth().currentUser != nil else {
-            pendingSubmissionWrites[captureId] = request
-            print("ℹ️ [UploadService] Deferring capture_submissions/\(captureId) write until Firebase auth is available")
-            return
+        let hasAuthenticatedUser = await UserDeviceService.waitForAuthenticatedFirebaseUser(timeout: 10)
+        guard hasAuthenticatedUser else {
+            print("❌ [UploadService] capture_submissions/\(captureId) cannot be written because Firebase auth is unavailable")
+            return false
         }
-        pendingSubmissionWrites.removeValue(forKey: captureId)
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let db = Firestore.firestore()
         let docRef = db.collection("capture_submissions").document(captureId)
@@ -885,31 +876,35 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             "submitted_at": Timestamp(date: request.metadata.uploadedAt ?? Date()),
             "created_at": Timestamp(date: Date())
         ]
-        docRef.setData(payload, merge: true) { [weak self] error in
-            if let error = error {
-                self?.queue.async {
-                    self?.pendingSubmissionWrites[captureId] = request
+        return await withCheckedContinuation { continuation in
+            docRef.setData(payload, merge: true) { error in
+                if let error = error {
+                    print("⚠️ [UploadService] Failed to write capture_submissions/\(captureId): \(error.localizedDescription)")
+                    continuation.resume(returning: false)
+                } else {
+                    print("✅ [UploadService] capture_submissions/\(captureId) written")
+                    continuation.resume(returning: true)
                 }
-                print("⚠️ [UploadService] Failed to write capture_submissions record: \(error.localizedDescription)")
-            } else {
-                self?.queue.async {
-                    self?.pendingSubmissionWrites.removeValue(forKey: captureId)
-                }
-                print("✅ [UploadService] capture_submissions/\(captureId) written")
             }
         }
+        #else
+        return true
         #endif
     }
 
-    private func flushPendingSubmissionWritesIfPossible() {
-        #if canImport(FirebaseFirestore) && canImport(FirebaseAuth)
-        guard Auth.auth().currentUser != nil, !pendingSubmissionWrites.isEmpty else { return }
-        let pending = Array(pendingSubmissionWrites.values)
-        print("ℹ️ [UploadService] Retrying \(pending.count) deferred capture_submissions write(s) after auth change")
-        for request in pending {
-            writeSubmissionRecord(for: request)
+    private func finalizeSuccessfulUpload(id: UUID, attempt: UUID) async {
+        guard let request = queue.sync(execute: {
+            guard let record = uploads[id], record.attempt == attempt else { return nil }
+            return record.request
+        }) else { return }
+
+        let submissionWritten = await ensureSubmissionRecordWritten(for: request)
+        guard submissionWritten else {
+            markUploadFailed(id: id, attempt: attempt, error: .submissionRegistrationFailed)
+            return
         }
-        #endif
+
+        markUploadCompleted(id: id, attempt: attempt)
     }
 
     private func contentType(for url: URL) -> String {
@@ -1023,7 +1018,6 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.uploads[id] = latestRecord
             self.subject.send(.progress(id: id, progress: 1.0))
             self.subject.send(.completed(latestRecord.request))
-            self.writeSubmissionRecord(for: latestRecord.request)
         }
     }
 

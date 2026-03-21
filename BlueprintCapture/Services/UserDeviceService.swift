@@ -56,6 +56,48 @@ final class UserDeviceService {
         }
     }
 
+    static func waitForAuthenticatedFirebaseUser(timeout: TimeInterval = 10) async -> Bool {
+        guard timeout > 0 else {
+            return Auth.auth().currentUser != nil
+        }
+        if Auth.auth().currentUser != nil {
+            return true
+        }
+
+        return await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var didResume = false
+            var observer: NSObjectProtocol?
+
+            let finish: (Bool) -> Void = { success in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !didResume else { return }
+                didResume = true
+                if let observer {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                continuation.resume(returning: success)
+            }
+
+            observer = NotificationCenter.default.addObserver(
+                forName: .AuthStateDidChange,
+                object: nil,
+                queue: nil
+            ) { _ in
+                finish(Auth.auth().currentUser != nil)
+            }
+
+            ensureAnonymousFirebaseUserIfNeeded {
+                finish(Auth.auth().currentUser != nil)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                finish(Auth.auth().currentUser != nil)
+            }
+        }
+    }
+
     private static func describeAnonymousAuthFailure(_ error: Error) -> String {
         let nsError = error as NSError
         if let authCode = AuthErrorCode(rawValue: nsError.code) {
