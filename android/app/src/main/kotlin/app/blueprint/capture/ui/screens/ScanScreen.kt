@@ -1,13 +1,8 @@
 package app.blueprint.capture.ui.screens
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
-import android.os.Build
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
@@ -19,7 +14,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.core.content.ContextCompat
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -149,28 +143,6 @@ fun ScanScreen(
     var showGlassesSheet by rememberSaveable { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
-    val blePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        // Permissions resolved (granted or denied) — ViewModel handles BLE/mock fallback
-        glassesViewModel.startScanning()
-    }
-
-    fun requestBleAndScan() {
-        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        val allGranted = required.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (allGranted) {
-            glassesViewModel.startScanning()
-        } else {
-            blePermissionLauncher.launch(required)
-        }
-    }
     // Capture method picker — set when a nearby-space card is tapped
     var selectedDetailTarget by remember { mutableStateOf<ScanTarget?>(null) }
     var capturePickerTarget by remember { mutableStateOf<ScanTarget?>(null) }
@@ -229,6 +201,28 @@ fun ScanScreen(
         captureRulesAccepted = false
     }
 
+<<<<<<< HEAD
+=======
+    fun requestLaunch(target: ScanTarget, autoStartRecorder: Boolean = false) {
+        val launch = target.toLaunch(autoStartRecorder = autoStartRecorder)
+        if (target.id == ScanViewModel.ALPHA_CURRENT_LOCATION_ID) {
+            pendingRightsLaunch = launch
+        } else {
+            onStartCapture(launch)
+        }
+    }
+
+    fun requestGlassesLaunch(target: ScanTarget) {
+        val launch = target.toLaunch(autoStartRecorder = false)
+        if (target.id == ScanViewModel.ALPHA_CURRENT_LOCATION_ID) {
+            pendingRightsGlassesLaunch = launch
+        } else {
+            glassesCaptureLaunch = launch
+            showGlassesSheet = true
+        }
+    }
+
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
     BackHandler(enabled = parityScreen != null) {
         when (parityScreen) {
             SearchParityScreen.Submit -> parityScreen = SearchParityScreen.Search
@@ -380,6 +374,68 @@ fun ScanScreen(
         )
     }
 
+<<<<<<< HEAD
+=======
+    (pendingRightsLaunch ?: pendingRightsGlassesLaunch)?.let {
+        AlertDialog(
+            onDismissRequest = {
+                pendingRightsLaunch = null
+                pendingRightsGlassesLaunch = null
+            },
+            containerColor = androidx.compose.ui.graphics.Color(0xFF111111),
+            title = {
+                Text(
+                    text = "Review capture rights",
+                    color = androidx.compose.ui.graphics.Color.White,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            },
+            text = {
+                Text(
+                    text = "Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand qualification, privacy, and rights checks may still block downstream use.",
+                    color = androidx.compose.ui.graphics.Color(0xFF888888),
+                    fontSize = 14.sp,
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val confirmedLaunch = pendingRightsLaunch
+                        val confirmedGlassesLaunch = pendingRightsGlassesLaunch
+                        pendingRightsLaunch = null
+                        pendingRightsGlassesLaunch = null
+                        if (confirmedLaunch != null) {
+                            onStartCapture(confirmedLaunch)
+                        } else if (confirmedGlassesLaunch != null) {
+                            glassesCaptureLaunch = confirmedGlassesLaunch
+                            showGlassesSheet = true
+                        }
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = BlueprintTeal,
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Text("I Confirm")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        pendingRightsLaunch = null
+                        pendingRightsGlassesLaunch = null
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, BlueprintBorder),
+                ) {
+                    Text("Cancel", color = BlueprintTextPrimary)
+                }
+            },
+        )
+    }
+
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
     if (parityScreen != null) {
         Dialog(
             onDismissRequest = ::closeSearchFlow,
@@ -464,7 +520,11 @@ fun ScanScreen(
         ) {
             GlassesConnectionSheet(
                 viewModel = glassesViewModel,
+<<<<<<< HEAD
                 onScanRequest = ::requestBleAndScan,
+=======
+                captureLaunch = glassesCaptureLaunch,
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
             )
         }
     }

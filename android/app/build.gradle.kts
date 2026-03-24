@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val mwdatAppId = providers.gradleProperty("MWDAT_APPLICATION_ID").orNull ?: ""
+val mwdatClientToken = providers.gradleProperty("MWDAT_CLIENT_TOKEN").orNull ?: ""
+val useMwdatDevAppId = providers.gradleProperty("MWDAT_USE_DEV_APP_ID").orNull?.toBoolean() ?: true
+
 android {
     namespace = "app.blueprint.capture"
     compileSdk = 36
@@ -36,15 +40,16 @@ android {
         buildConfigField("String", "GOOGLE_PLACES_API_KEY", "\"$googlePlacesKey\"")
         buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
         manifestPlaceholders["blueprintAppScheme"] = "blueprint"
-        val mwdatAppId = providers.gradleProperty("MWDAT_APPLICATION_ID").orNull ?: ""
-        val mwdatClientToken = providers.gradleProperty("MWDAT_CLIENT_TOKEN").orNull ?: ""
         manifestPlaceholders["mwdatApplicationId"] = mwdatAppId
         manifestPlaceholders["mwdatClientToken"] = mwdatClientToken
+        buildConfigField("boolean", "MWDAT_USE_DEV_APP_ID", useMwdatDevAppId.toString())
     }
 
     buildTypes {
         debug {
             versionNameSuffix = "-debug"
+            manifestPlaceholders["mwdatApplicationId"] = if (useMwdatDevAppId) "0" else mwdatAppId
+            manifestPlaceholders["mwdatClientToken"] = if (useMwdatDevAppId) "" else mwdatClientToken
         }
         release {
             isMinifyEnabled = false
@@ -132,6 +137,7 @@ dependencies {
     implementation(libs.firebase.storage)
     implementation(libs.firebase.messaging)
     implementation(libs.play.services.auth)
+    implementation(libs.play.services.location)
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.maps.compose)

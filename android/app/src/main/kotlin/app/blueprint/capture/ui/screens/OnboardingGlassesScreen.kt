@@ -1,10 +1,5 @@
 package app.blueprint.capture.ui.screens
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,12 +24,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -50,31 +43,8 @@ fun OnboardingGlassesScreen(
     onContinue: () -> Unit,
     glassesViewModel: GlassesViewModel = hiltViewModel(),
 ) {
-    val context = LocalContext.current
     val connectionState by glassesViewModel.state.collectAsState()
     var showConnectSheet by rememberSaveable { mutableStateOf(false) }
-
-    val blePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions(),
-    ) {
-        glassesViewModel.startScanning()
-    }
-
-    fun requestBleAndScan() {
-        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        val allGranted = required.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (allGranted) {
-            glassesViewModel.startScanning()
-        } else {
-            blePermissionLauncher.launch(required)
-        }
-    }
 
     val connectedDeviceName = (connectionState as? GlassesConnectionState.Connected)?.deviceName
 
@@ -178,7 +148,6 @@ fun OnboardingGlassesScreen(
         ) {
             GlassesConnectionSheet(
                 viewModel = glassesViewModel,
-                onScanRequest = ::requestBleAndScan,
             )
         }
     }
@@ -187,7 +156,9 @@ fun OnboardingGlassesScreen(
 private fun connectionButtonTitle(state: GlassesConnectionState): String = when (state) {
     is GlassesConnectionState.Connected -> "Continue"
     is GlassesConnectionState.Connecting -> "Connecting..."
-    is GlassesConnectionState.Scanning -> "Scanning..."
+    is GlassesConnectionState.Registering -> "Connecting..."
+    is GlassesConnectionState.PermissionRequired -> "Grant Permission"
+    is GlassesConnectionState.Available -> if (state.devices.isEmpty()) "Waiting for Glasses" else "Choose Glasses"
     is GlassesConnectionState.Error -> "Try Again"
-    GlassesConnectionState.Idle -> "Connect Glasses"
+    GlassesConnectionState.SetupRequired -> "Connect Glasses"
 }

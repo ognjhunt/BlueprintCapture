@@ -39,8 +39,14 @@ struct GlassesCaptureView: View {
         case .disconnected:
             disconnectedView
 
-        case .scanning:
+        case .registering:
+            registeringView
+
+        case .waitingForDevice:
             scanningView
+
+        case .permissionRequired(let deviceName):
+            permissionRequiredView(deviceName: deviceName)
 
         case .connecting:
             connectingView
@@ -87,11 +93,11 @@ struct GlassesCaptureView: View {
 
             Spacer()
 
-            // Scan button
+            // Connect button
             Button {
                 captureManager.startScanning()
             } label: {
-                Text("Scan for Glasses")
+                Text("Connect with Meta AI")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
             .padding(.horizontal, 24)
@@ -114,7 +120,40 @@ struct GlassesCaptureView: View {
         }
     }
 
-    // MARK: - Scanning State
+    // MARK: - Registering State
+
+    private var registeringView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            VStack(spacing: 20) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                    .tint(BlueprintTheme.brandTeal)
+
+                Text("Finishing Meta setup…")
+                    .font(.headline)
+                    .blueprintPrimaryOnDark()
+
+                Text("Approve Blueprint in Meta AI. Once approved, your glasses will appear here.")
+                    .font(.subheadline)
+                    .blueprintSecondaryOnDark()
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+
+            Spacer()
+
+            Button("Cancel") {
+                captureManager.stopScanning()
+            }
+            .buttonStyle(BlueprintSecondaryButtonStyle())
+            .padding(.horizontal)
+            .padding(.bottom)
+        }
+    }
+
+    // MARK: - Waiting State
 
     private var scanningView: some View {
         VStack(spacing: 24) {
@@ -138,7 +177,7 @@ struct GlassesCaptureView: View {
                 }
                 .frame(height: 200)
 
-                Text("Scanning for devices...")
+                Text("Waiting for glasses...")
                     .font(.headline)
                     .blueprintPrimaryOnDark()
 
@@ -151,7 +190,7 @@ struct GlassesCaptureView: View {
             // Discovered devices list
             if !captureManager.discoveredDevices.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Found Devices")
+                        Text("Available Devices")
                         .font(.headline)
                         .blueprintPrimaryOnDark()
                         .padding(.horizontal)
@@ -176,6 +215,39 @@ struct GlassesCaptureView: View {
             .buttonStyle(BlueprintSecondaryButtonStyle())
             .padding(.horizontal)
             .padding(.bottom)
+        }
+    }
+
+    private func permissionRequiredView(deviceName: String) -> some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            VStack(spacing: 20) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 54))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+
+                Text("Camera permission required")
+                    .font(.headline)
+                    .blueprintPrimaryOnDark()
+
+                Text("Grant camera access in Meta AI for \(deviceName), then continue.")
+                    .font(.subheadline)
+                    .blueprintSecondaryOnDark()
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+
+            Spacer()
+
+            Button {
+                captureManager.startScanning()
+            } label: {
+                Text("Open Meta AI Again")
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .padding(.horizontal, 24)
+            .padding(.bottom, 24)
         }
     }
 

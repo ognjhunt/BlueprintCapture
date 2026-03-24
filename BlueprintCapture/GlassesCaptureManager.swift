@@ -25,7 +25,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     enum ConnectionState: Equatable {
         case disconnected
-        case scanning
+        case registering
+        case waitingForDevice
+        case permissionRequired(deviceName: String)
         case connecting
         case connected(deviceName: String)
         case error(String)
@@ -89,6 +91,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let id: String
         let name: String
         let isMock: Bool
+        #if canImport(MWDATCore)
+        let datIdentifier: DeviceIdentifier?
+        #endif
     }
 
     // MARK: - Published Properties
@@ -99,21 +104,26 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     @Published private(set) var currentFrame: UIImage?
     @Published private(set) var streamingInfo: StreamingInfo?
     @Published private(set) var isConnectedToMockDevice: Bool = false
-    @Published var useMockDevice: Bool = {
-        #if DEBUG
-        return true
-        #else
-        return false
-        #endif
-    }()
+    @Published var useMockDevice: Bool = false
     @Published var mockVideoURL: URL?
 
     // MARK: - Private Properties
 
-    private var deviceKit: MWDeviceKit?
     private var mockDeviceKit: MWMockDeviceKit?
     private var cameraSession: MWCameraSession?
-    private var currentDevice: MWDevice?
+    #if canImport(MWDATCore)
+    private let wearables: WearablesInterface = Wearables.shared
+    private var registrationTask: Task<Void, Never>?
+    private var devicesTask: Task<Void, Never>?
+    private var registrationState: RegistrationState = Wearables.shared.registrationState
+    private var streamSession: StreamSession?
+    private var selectedDevice: DiscoveredDevice?
+    private var stateListenerToken: AnyListenerToken?
+    private var videoFrameListenerToken: AnyListenerToken?
+    private var errorListenerToken: AnyListenerToken?
+    private var photoDataListenerToken: AnyListenerToken?
+    private var pendingPhotoContinuation: CheckedContinuation<UIImage, Error>?
+    #endif
 
     private var currentArtifacts: CaptureArtifacts?
     private var videoWriter: AVAssetWriter?
@@ -157,15 +167,6 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func setupSDK() {
-        // Initialize the MWDAT SDK
-        do {
-            deviceKit = try MWDeviceKit()
-            print("✅ [GlassesCapture] MWDeviceKit initialized")
-        } catch {
-            print("❌ [GlassesCapture] Failed to initialize MWDeviceKit: \(error)")
-            connectionState = .error("Failed to initialize Meta glasses SDK: \(error.localizedDescription)")
-        }
-
         // Initialize MockDeviceKit for testing
         do {
             mockDeviceKit = try MWMockDeviceKit()
@@ -173,23 +174,46 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         } catch {
             print("⚠️ [GlassesCapture] MockDeviceKit not available: \(error)")
         }
+
+        #if canImport(MWDATCore)
+        registrationState = wearables.registrationState
+        startWearablesObservers()
+        syncConnectionStateFromWearables()
+        #endif
     }
 
     // MARK: - Device Discovery
 
     func startScanning() {
-        guard connectionState != .scanning else { return }
-        connectionState = .scanning
-        discoveredDevices = []
-
-        print("🔍 [GlassesCapture] Starting device scan (useMockDevice: \(useMockDevice))")
+        print("🔍 [GlassesCapture] Starting Meta glasses setup (useMockDevice: \(useMockDevice))")
 
         if useMockDevice {
+            discoveredDevices = []
             // Use MockDeviceKit for testing
             startMockDeviceScan()
         } else {
-            // Use real DeviceKit for production
-            startRealDeviceScan()
+            #if canImport(MWDATCore)
+            if registrationState == .registered {
+                syncConnectionStateFromWearables(forceRefresh: true)
+            } else {
+                connectionState = .registering
+                Task {
+                    do {
+                        try await wearables.startRegistration()
+                    } catch let error as RegistrationError {
+                        await MainActor.run {
+                            self.connectionState = .error(error.description)
+                        }
+                    } catch {
+                        await MainActor.run {
+                            self.connectionState = .error(error.localizedDescription)
+                        }
+                    }
+                }
+            }
+            #else
+            connectionState = .error("Meta DAT SDK is unavailable in this build.")
+            #endif
         }
     }
 
@@ -205,14 +229,24 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 // Add simulated discovery delay for realistic UX
                 try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
 
+                #if canImport(MWDATCore)
+                let mockDevice = DiscoveredDevice(
+                    id: "mock-rayban-meta-001",
+                    name: "Ray-Ban Meta (Mock)",
+                    isMock: true,
+                    datIdentifier: nil
+                )
+                #else
                 let mockDevice = DiscoveredDevice(
                     id: "mock-rayban-meta-001",
                     name: "Ray-Ban Meta (Mock)",
                     isMock: true
                 )
+                #endif
 
                 await MainActor.run {
                     self.discoveredDevices = [mockDevice]
+                    self.connectionState = .waitingForDevice
                     print("✅ [GlassesCapture] Mock device discovered: \(mockDevice.name)")
                 }
             } catch {
@@ -223,39 +257,19 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    private func startRealDeviceScan() {
-        guard let kit = deviceKit else {
-            connectionState = .error("DeviceKit not initialized")
-            return
-        }
-
-        Task {
-            do {
-                // Start scanning for real Meta glasses
-                let devices = try await kit.discoverDevices()
-
-                await MainActor.run {
-                    self.discoveredDevices = devices.map { device in
-                        DiscoveredDevice(
-                            id: device.identifier,
-                            name: device.name,
-                            isMock: false
-                        )
-                    }
-                    print("✅ [GlassesCapture] Found \(self.discoveredDevices.count) devices")
-                }
-            } catch {
-                await MainActor.run {
-                    self.connectionState = .error("Device scan failed: \(error.localizedDescription)")
-                }
-            }
-        }
-    }
-
     func stopScanning() {
+        #if canImport(MWDATCore)
+        if useMockDevice {
+            connectionState = .disconnected
+            discoveredDevices = []
+        } else {
+            syncConnectionStateFromWearables(forceRefresh: true)
+        }
+        #else
         connectionState = .disconnected
         discoveredDevices = []
-        print("🛑 [GlassesCapture] Stopped scanning")
+        #endif
+        print("🛑 [GlassesCapture] Stopped Meta setup flow")
     }
 
     // MARK: - Device Connection
@@ -269,7 +283,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         if device.isMock {
             connectToMockDevice(device)
         } else {
+            #if canImport(MWDATCore)
             connectToRealDevice(device)
+            #else
+            connectionState = .error("Meta DAT SDK is unavailable in this build.")
+            #endif
         }
     }
 
@@ -302,27 +320,52 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
     }
 
+    #if canImport(MWDATCore)
     private func connectToRealDevice(_ device: DiscoveredDevice) {
-        guard let kit = deviceKit else {
-            connectionState = .error("DeviceKit not initialized")
-            return
-        }
-
         Task {
             do {
-                // Connect to the real device
-                let connectedDevice = try await kit.connect(deviceId: device.id)
-                self.currentDevice = connectedDevice
+                guard let datIdentifier = device.datIdentifier ?? discoveredDevices.first(where: { $0.id == device.id })?.datIdentifier else {
+                    await MainActor.run {
+                        self.connectionState = .error("This device is not available through Meta DAT yet. Complete setup in Meta AI first.")
+                    }
+                    return
+                }
 
-                // Create camera session
-                let session = try await connectedDevice.createCameraSession()
+                let status = try await wearables.checkPermissionStatus(.camera)
+                let grantedStatus: PermissionStatus
+                if status == .granted {
+                    grantedStatus = status
+                } else {
+                    let requested = try await wearables.requestPermission(.camera)
+                    grantedStatus = requested
+                }
 
+                guard grantedStatus == .granted else {
+                    await MainActor.run {
+                        self.connectionState = .permissionRequired(deviceName: device.name)
+                    }
+                    return
+                }
+
+                let selector = SpecificDeviceSelector(deviceIdentifier: datIdentifier)
+                let config = StreamSessionConfig(
+                    videoCodec: .raw,
+                    resolution: .low,
+                    frameRate: 24
+                )
+                let session = StreamSession(streamSessionConfig: config, deviceSelector: selector)
                 await MainActor.run {
-                    self.cameraSession = session
+                    self.selectedDevice = device
+                    self.installStreamListeners(session)
+                    self.streamSession = session
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = false
                     self.persistLastConnectedDevice(device)
-                    print("✅ [GlassesCapture] Connected to device: \(device.name)")
+                    print("✅ [GlassesCapture] Connected to real DAT device: \(device.name)")
+                }
+            } catch let error as RegistrationError {
+                await MainActor.run {
+                    self.connectionState = .error(error.description)
                 }
             } catch {
                 await MainActor.run {
@@ -331,6 +374,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             }
         }
     }
+    #endif
 
     func disconnect() {
         if captureState.isActive {
@@ -338,8 +382,20 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         cameraSession = nil
-        currentDevice = nil
+        #if canImport(MWDATCore)
+        Task {
+            await self.streamSession?.stop()
+        }
+        streamSession = nil
+        selectedDevice = nil
+        stateListenerToken = nil
+        videoFrameListenerToken = nil
+        errorListenerToken = nil
+        photoDataListenerToken = nil
+        #endif
         isConnectedToMockDevice = false
+        currentFrame = nil
+        streamingInfo = nil
         connectionState = .disconnected
         print("🔌 [GlassesCapture] Disconnected")
     }
@@ -352,13 +408,23 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             return nil
         }
         let isMock = UserDefaults.standard.bool(forKey: lastDeviceIsMockKey)
+        #if canImport(MWDATCore)
+        return DiscoveredDevice(id: id, name: name, isMock: isMock, datIdentifier: nil)
+        #else
         return DiscoveredDevice(id: id, name: name, isMock: isMock)
+        #endif
     }
 
     func reconnectLastDevice() {
         guard let device = lastConnectedDevice else { return }
         // Fast-path reconnect: connect directly if possible.
-        connect(to: device)
+        if let liveMatch = discoveredDevices.first(where: { $0.id == device.id }) {
+            connect(to: liveMatch)
+        } else if device.isMock {
+            connect(to: device)
+        } else {
+            startScanning()
+        }
     }
 
     private func persistLastConnectedDevice(_ device: DiscoveredDevice) {
@@ -366,6 +432,188 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         UserDefaults.standard.set(device.name, forKey: lastDeviceNameKey)
         UserDefaults.standard.set(device.isMock, forKey: lastDeviceIsMockKey)
     }
+
+    #if canImport(MWDATCore)
+    private func startWearablesObservers() {
+        registrationTask?.cancel()
+        devicesTask?.cancel()
+
+        registrationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await state in wearables.registrationStateStream() {
+                registrationState = state
+                syncConnectionStateFromWearables()
+            }
+        }
+
+        devicesTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await deviceIds in wearables.devicesStream() {
+                discoveredDevices = deviceIds.map { deviceId in
+                    let name = wearables.deviceForIdentifier(deviceId)?.nameOrId() ?? String(describing: deviceId)
+                    return DiscoveredDevice(
+                        id: String(describing: deviceId),
+                        name: name,
+                        isMock: false,
+                        datIdentifier: deviceId
+                    )
+                }
+                syncConnectionStateFromWearables()
+            }
+        }
+    }
+
+    private func syncConnectionStateFromWearables(forceRefresh: Bool = false) {
+        guard !useMockDevice else { return }
+
+        if !forceRefresh {
+            switch connectionState {
+            case .connected, .connecting, .permissionRequired:
+                return
+            default:
+                break
+            }
+        }
+
+        switch registrationState {
+        case .registering:
+            connectionState = .registering
+        case .registered:
+            connectionState = .waitingForDevice
+        default:
+            connectionState = .disconnected
+        }
+    }
+
+    private func installStreamListeners(_ session: StreamSession) {
+        stateListenerToken = session.statePublisher.listen { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleStreamStateChange(state)
+            }
+        }
+        videoFrameListenerToken = session.videoFramePublisher.listen { [weak self] frame in
+            Task { @MainActor [weak self] in
+                self?.handleDATVideoFrame(frame)
+            }
+        }
+        errorListenerToken = session.errorPublisher.listen { [weak self] error in
+            Task { @MainActor [weak self] in
+                let message = self?.formatStreamError(error) ?? error.localizedDescription
+                self?.connectionState = .error(message)
+                if self?.captureState.isActive == true {
+                    self?.captureState = .error(message)
+                }
+            }
+        }
+        photoDataListenerToken = session.photoDataPublisher.listen { [weak self] photoData in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let image = UIImage(data: photoData.data) {
+                    pendingPhotoContinuation?.resume(returning: image)
+                } else {
+                    pendingPhotoContinuation?.resume(throwing: NSError(
+                        domain: "GlassesCapture",
+                        code: -5,
+                        userInfo: [NSLocalizedDescriptionKey: "Failed to decode the captured photo."]
+                    ))
+                }
+                pendingPhotoContinuation = nil
+            }
+        }
+    }
+
+    private func handleStreamStateChange(_ state: StreamSessionState) {
+        switch state {
+        case .paused:
+            if captureState.isActive {
+                captureState = .paused
+            }
+        case .stopped:
+            if case .preparing = captureState {
+                captureState = .idle
+            }
+        default:
+            break
+        }
+    }
+
+    private func handleDATVideoFrame(_ frame: VideoFrame) {
+        guard case .streaming = captureState else { return }
+        guard let image = frame.makeUIImage() else { return }
+
+        frameCount += 1
+        currentFrame = image
+        writeVideoFrame(image: image, frameTime: CMTime(seconds: Double(frameCount) / 24.0, preferredTimescale: 600))
+
+        if let startTime = recordingStartTime {
+            let duration = Date().timeIntervalSince(startTime)
+            let imageSize = image.size
+            streamingInfo = StreamingInfo(
+                startedAt: startTime,
+                frameCount: frameCount,
+                resolution: CGSize(width: imageSize.width, height: imageSize.height),
+                fps: Double(frameCount) / max(duration, 0.001),
+                durationSeconds: duration
+            )
+            if let streamingInfo {
+                captureState = .streaming(streamingInfo)
+            }
+        }
+    }
+
+    private func formatStreamError(_ error: StreamSessionError) -> String {
+        switch error {
+        case .deviceNotFound:
+            return "Meta glasses not found. Open Meta AI and keep them nearby."
+        case .deviceNotConnected:
+            return "Meta glasses are no longer connected."
+        case .permissionDenied:
+            return "Camera permission was denied in Meta AI."
+        case .timeout:
+            return "The glasses connection timed out."
+        case .hingesClosed:
+            return "Open the glasses hinges and try again."
+        case .thermalCritical:
+            return "The glasses paused streaming because they are too warm."
+        case .videoStreamingError:
+            return "Video streaming failed. Try reconnecting the glasses."
+        case .internalError:
+            return "The Meta glasses SDK reported an internal error."
+        @unknown default:
+            return "An unknown Meta glasses error occurred."
+        }
+    }
+
+    func handleWearablesCallback(_ url: URL) -> Bool {
+        guard
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+            components.queryItems?.contains(where: { $0.name == "metaWearablesAction" }) == true
+        else {
+            return false
+        }
+
+        Task {
+            do {
+                _ = try await wearables.handleUrl(url)
+            } catch let error as RegistrationError {
+                await MainActor.run {
+                    self.connectionState = .error(error.description)
+                }
+            } catch {
+                await MainActor.run {
+                    self.connectionState = .error(error.localizedDescription)
+                }
+            }
+        }
+        return true
+    }
+    #endif
+
+    #if !canImport(MWDATCore)
+    func handleWearablesCallback(_ url: URL) -> Bool {
+        false
+    }
+    #endif
 
     // MARK: - Mock Video Source
 
@@ -408,6 +656,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
                 // Setup video writer
                 try setupVideoWriter(artifacts: artifacts)
+                setupMotionLogging(artifacts: artifacts)
 
                 // Start camera stream
                 try await startCameraStream()
@@ -526,6 +775,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         self.lastFrameTime = .zero
     }
 
+    private func writeVideoFrame(image: UIImage, frameTime: CMTime) {
+        guard let input = videoWriterInput,
+              let adaptor = pixelBufferAdaptor,
+              input.isReadyForMoreMediaData,
+              let pixelBuffer = image.toPixelBuffer(width: 1280, height: 720) else {
+            return
+        }
+        adaptor.append(pixelBuffer, withPresentationTime: frameTime)
+        lastFrameTime = frameTime
+    }
+
     private func setupMotionLogging(artifacts: CaptureArtifacts) {
         // ⚠️ IMPORTANT: This motion data comes from the PHONE's IMU (CMMotionManager), NOT from
         // the Meta glasses camera. The glasses camera is mounted on the user's head, while the
@@ -604,20 +864,25 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func startCameraStream() async throws {
+        #if canImport(MWDATCamera)
+        if let session = streamSession, !isConnectedToMockDevice {
+            await session.start()
+            return
+        }
+        #endif
+
         guard let session = cameraSession else {
             throw NSError(domain: "GlassesCapture", code: -3, userInfo: [
                 NSLocalizedDescriptionKey: "Camera session not available"
             ])
         }
 
-        // Configure stream for maximum quality (720p @ 30fps)
         let streamConfig = MWCameraStreamConfig(
             resolution: .hd720p,
             frameRate: 30,
             format: .bgra
         )
 
-        // Start streaming with frame handler
         try await session.startStreaming(config: streamConfig) { [weak self] frame in
             guard let self else { return }
             Task { @MainActor in
@@ -673,14 +938,30 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     func pauseCapture() {
         guard case .streaming = captureState else { return }
+        #if canImport(MWDATCamera)
+        if let session = streamSession, !isConnectedToMockDevice {
+            Task { await session.stop() }
+        } else {
+            cameraSession?.pauseStreaming()
+        }
+        #else
         cameraSession?.pauseStreaming()
+        #endif
         captureState = .paused
         print("⏸️ [GlassesCapture] Capture paused")
     }
 
     func resumeCapture() {
         guard captureState == .paused else { return }
+        #if canImport(MWDATCamera)
+        if let session = streamSession, !isConnectedToMockDevice {
+            Task { await session.start() }
+        } else {
+            cameraSession?.resumeStreaming()
+        }
+        #else
         cameraSession?.resumeStreaming()
+        #endif
         if let info = streamingInfo {
             captureState = .streaming(info)
         }
@@ -693,7 +974,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         print("⏹️ [GlassesCapture] Stopping capture...")
 
         // Stop camera stream
+        #if canImport(MWDATCamera)
+        if let session = streamSession, !isConnectedToMockDevice {
+            Task { await session.stop() }
+        } else {
+            cameraSession?.stopStreaming()
+        }
+        #else
         cameraSession?.stopStreaming()
+        #endif
 
         // Stop motion updates
         motionManager.stopDeviceMotionUpdates()
@@ -798,8 +1087,22 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     // MARK: - Photo Capture (for scale anchors)
 
     func capturePhoto() async throws -> UIImage {
-        guard case .connected = connectionState,
-              let session = cameraSession else {
+        guard case .connected = connectionState else {
+            throw NSError(domain: "GlassesCapture", code: -4, userInfo: [
+                NSLocalizedDescriptionKey: "Not connected to device"
+            ])
+        }
+
+        #if canImport(MWDATCamera)
+        if let session = streamSession, !isConnectedToMockDevice {
+            return try await withCheckedThrowingContinuation { continuation in
+                pendingPhotoContinuation = continuation
+                session.capturePhoto(format: .jpeg)
+            }
+        }
+        #endif
+
+        guard let session = cameraSession else {
             throw NSError(domain: "GlassesCapture", code: -4, userInfo: [
                 NSLocalizedDescriptionKey: "Not connected to device"
             ])
@@ -829,6 +1132,47 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 }
 
 // MARK: - Mock/Placeholder Types for SDK Integration
+
+private extension UIImage {
+    func toPixelBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+        guard let cgImage = cgImage else { return nil }
+
+        var pixelBuffer: CVPixelBuffer?
+        let attrs: [String: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey as String: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey as String: true,
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+        ]
+
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &pixelBuffer
+        )
+
+        guard status == kCVReturnSuccess, let buffer = pixelBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+
+        let context = CGContext(
+            data: CVPixelBufferGetBaseAddress(buffer),
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        )
+
+        context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return buffer
+    }
+}
 
 // These types provide a working implementation for testing
 // When the actual MWDAT SDK is available, these will be replaced by real SDK types

@@ -23,6 +23,10 @@ struct ScanHomeView: View {
     @State private var showingSearch = false
     @State private var nearbyPOIs: [DemoCapture] = []
 
+    private var isUITesting: Bool {
+        RuntimeConfig.current.isUITesting
+    }
+
     init(
         glassesManager: GlassesCaptureManager,
         uploadQueue: UploadQueueViewModel,
@@ -87,9 +91,26 @@ struct ScanHomeView: View {
             JobDetailSheet(
                 item: item,
                 userLocation: viewModel.currentLocation,
-                onStartCapture: { recordingJob = item.job },
-                onStartPhoneCapture: { reviewSubmissionSeed = submissionSeed(for: item) },
-                onSubmitForReview: { reviewSubmissionSeed = submissionSeed(for: item) },
+                onStartCapture: {
+                    selectedItem = nil
+                    DispatchQueue.main.async {
+                        recordingJob = item.job
+                    }
+                },
+                onStartPhoneCapture: {
+                    selectedItem = nil
+                    let seed = submissionSeed(for: item)
+                    DispatchQueue.main.async {
+                        reviewSubmissionSeed = seed
+                    }
+                },
+                onSubmitForReview: {
+                    selectedItem = nil
+                    let seed = submissionSeed(for: item)
+                    DispatchQueue.main.async {
+                        reviewSubmissionSeed = seed
+                    }
+                },
                 onDirections: { openDirections(to: item.job) }
             )
         }
@@ -264,12 +285,13 @@ struct ScanHomeView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 14) {
                         ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
-                            Button { selectedItem = item } label: {
+                            Button { handleItemSelection(item) } label: {
                                 FeaturedCaptureCard(item: item)
                                     .frame(width: 280)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("scan-home-featured-\(index)")
+                            .accessibilityIdentifier("scan-home-featured-\(item.id)")
                         }
                         ForEach(placeholders) { demo in
                             Button { selectedDemo = demo } label: {
@@ -401,11 +423,12 @@ struct ScanHomeView: View {
 
                 LazyVStack(spacing: 12) {
                     ForEach(Array(allItems.enumerated()), id: \.element.id) { index, item in
-                        Button { selectedItem = item } label: {
+                        Button { handleItemSelection(item) } label: {
                             CaptureListRow(item: item)
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("scan-home-list-item-\(index)")
+                        .accessibilityIdentifier("scan-home-list-item-\(item.id)")
                     }
                 }
             }
@@ -549,7 +572,9 @@ struct ScanHomeView: View {
         switch glassesManager.connectionState {
         case .connected: return "Capture glasses ready"
         case .connecting: return "Connecting glasses"
-        case .scanning: return "Scanning for glasses"
+        case .registering: return "Finishing Meta setup"
+        case .waitingForDevice: return "Waiting for glasses"
+        case .permissionRequired: return "Permission needed"
         case .error: return "Connection issue"
         case .disconnected: return "Connect capture glasses"
         }
@@ -559,7 +584,9 @@ struct ScanHomeView: View {
         switch glassesManager.connectionState {
         case .connected(let name): return name
         case .connecting: return "Keep the device nearby."
-        case .scanning: return "Looking for paired devices."
+        case .registering: return "Approve Blueprint in Meta AI."
+        case .waitingForDevice: return "Keep the glasses connected in Meta AI and nearby."
+        case .permissionRequired(let deviceName): return "Grant camera access for \(deviceName) in Meta AI."
         case .error(let message): return message
         case .disconnected: return "Required for approved capture opportunities."
         }
@@ -592,13 +619,21 @@ struct ScanHomeView: View {
 
     private func openJobDetail(jobId: String) async {
         if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
-            selectedItem = match
+            handleItemSelection(match)
             return
         }
         await viewModel.refresh()
         if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
-            selectedItem = match
+            handleItemSelection(match)
         }
+    }
+
+    private func handleItemSelection(_ item: ScanHomeViewModel.JobItem) {
+        if isUITesting, item.permissionTier == .approved {
+            recordingJob = item.job
+            return
+        }
+        selectedItem = item
     }
 
     private func refreshPayoutsReady() async {

@@ -45,7 +45,7 @@ struct GlassesConnectSheet: View {
                     .padding(.horizontal, 20)
 
                 // Discovered devices (scanning)
-                if glassesManager.connectionState == .scanning,
+                if glassesManager.connectionState == .waitingForDevice,
                    !glassesManager.discoveredDevices.isEmpty {
                     devicesList
                         .padding(.horizontal, 20)
@@ -87,8 +87,12 @@ struct GlassesConnectSheet: View {
             connectedCard(deviceName: name)
         case .connecting:
             connectingCard
-        case .scanning:
+        case .registering:
+            registeringCard
+        case .waitingForDevice:
             scanningCard
+        case .permissionRequired(let deviceName):
+            permissionRequiredCard(deviceName: deviceName)
         case .error(let message):
             errorCard(message: message)
         case .disconnected:
@@ -141,7 +145,7 @@ struct GlassesConnectSheet: View {
             Button {
                 glassesManager.startScanning()
             } label: {
-                Text("Scan for Glasses")
+                Text("Connect with Meta AI")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
@@ -152,19 +156,19 @@ struct GlassesConnectSheet: View {
         }
     }
 
-    // MARK: - Scanning
+    // MARK: - Registering
 
-    private var scanningCard: some View {
+    private var registeringCard: some View {
         HStack(spacing: 14) {
             ProgressView()
                 .tint(BlueprintTheme.brandTeal)
                 .frame(width: 36, height: 36)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Scanning…")
+                Text("Finishing Meta setup…")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                Text("Looking for nearby glasses")
+                Text("Approve Blueprint in Meta AI, then return here.")
                     .font(.caption)
                     .foregroundStyle(Color(white: 0.45))
             }
@@ -174,6 +178,85 @@ struct GlassesConnectSheet: View {
             Button("Cancel") { glassesManager.stopScanning() }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Color(white: 0.5))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Waiting
+
+    private var scanningCard: some View {
+        HStack(spacing: 14) {
+            ProgressView()
+                .tint(BlueprintTheme.brandTeal)
+                .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Waiting for glasses…")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text("Keep your glasses connected in Meta AI and nearby.")
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.45))
+            }
+
+            Spacer()
+
+            Button("Cancel") { glassesManager.stopScanning() }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color(white: 0.5))
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    private func permissionRequiredCard(deviceName: String) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .frame(width: 36, height: 36)
+                    .background(BlueprintTheme.brandTeal.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Camera permission required")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text("Grant camera access in Meta AI for \(deviceName).")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.45))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            Button {
+                if let device = glassesManager.discoveredDevices.first(where: { $0.name == deviceName }) ?? glassesManager.lastConnectedDevice {
+                    glassesManager.connect(to: device)
+                } else {
+                    glassesManager.startScanning()
+                }
+            } label: {
+                Text("Open Meta Permission Flow")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

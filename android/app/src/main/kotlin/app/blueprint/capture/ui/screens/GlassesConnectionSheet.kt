@@ -1,5 +1,13 @@
 package app.blueprint.capture.ui.screens
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -31,19 +39,24 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+<<<<<<< HEAD
 import app.blueprint.capture.data.glasses.GlassesCaptureState
+=======
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import app.blueprint.capture.data.glasses.GlassesCaptureState
+import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -57,14 +70,60 @@ import app.blueprint.capture.ui.theme.BlueprintTextPrimary
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import com.meta.wearable.dat.core.Wearables
+import com.meta.wearable.dat.core.types.PermissionStatus
 
 @Composable
 fun GlassesConnectionSheet(
     viewModel: GlassesViewModel = hiltViewModel(),
+<<<<<<< HEAD
     onScanRequest: () -> Unit = viewModel::startScanning,
+=======
+    captureLaunch: CaptureLaunch? = null,
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 ) {
+    val context = LocalContext.current
+    val activity = context.findActivity()
     val state by viewModel.state.collectAsState()
     val captureState by viewModel.captureState.collectAsState()
+<<<<<<< HEAD
+=======
+    val captureUiState by viewModel.captureUiState.collectAsState()
+
+    val blePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        viewModel.beginMetaSetup(activity)
+    }
+    val wearablesPermissionLauncher = rememberLauncherForActivityResult(
+        contract = Wearables.RequestPermissionContract(),
+    ) { result ->
+        viewModel.onWearablesPermissionResolved(result.getOrDefault(PermissionStatus.Denied))
+    }
+
+    fun requestMetaSetup() {
+        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val allGranted = required.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            viewModel.beginMetaSetup(activity)
+        } else {
+            blePermissionLauncher.launch(required)
+        }
+    }
+
+    LaunchedEffect(captureLaunch) {
+        viewModel.setCaptureContext(captureLaunch)
+    }
+    DisposableEffect(Unit) {
+        onDispose { viewModel.setCaptureContext(null) }
+    }
+>>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 
     Column(
         modifier = Modifier
@@ -102,12 +161,20 @@ fun GlassesConnectionSheet(
 
         // State-driven action area
         when (val s = state) {
-            is GlassesConnectionState.Idle -> {
-                ScanButton(onClick = onScanRequest)
+            is GlassesConnectionState.SetupRequired -> {
+                SetupRequiredCard(onClick = ::requestMetaSetup)
             }
 
-            is GlassesConnectionState.Scanning -> {
-                ScanningCard(onCancel = viewModel::stopScanning)
+            is GlassesConnectionState.Registering -> {
+                RegisteringCard(onCancel = viewModel::stopScanning)
+            }
+
+            is GlassesConnectionState.Available -> {
+                AvailabilityCard(
+                    message = s.message,
+                    hasDevices = s.devices.isNotEmpty(),
+                    onPrimaryClick = ::requestMetaSetup,
+                )
                 if (s.devices.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
                     s.devices.forEach { device ->
@@ -115,6 +182,15 @@ fun GlassesConnectionSheet(
                         Spacer(modifier = Modifier.height(8.dp))
                     }
                 }
+            }
+
+            is GlassesConnectionState.PermissionRequired -> {
+                PermissionRequiredCard(
+                    deviceName = s.device.name,
+                    message = s.message,
+                    onGrant = { wearablesPermissionLauncher.launch(com.meta.wearable.dat.core.types.Permission.CAMERA) },
+                    onCancel = viewModel::stopScanning,
+                )
             }
 
             is GlassesConnectionState.Connecting -> {
@@ -132,7 +208,7 @@ fun GlassesConnectionSheet(
             }
 
             is GlassesConnectionState.Error -> {
-                ErrorCard(message = s.message, onRetry = onScanRequest)
+                ErrorCard(message = s.message, onRetry = ::requestMetaSetup)
             }
         }
     }
@@ -174,7 +250,7 @@ private fun DrawScope.drawGlassesIcon(tint: Color) {
 // ── Action components ─────────────────────────────────────────────────────────
 
 @Composable
-private fun ScanButton(onClick: () -> Unit) {
+private fun SetupRequiredCard(onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -185,7 +261,7 @@ private fun ScanButton(onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "Scan for Glasses",
+            text = "Connect with Meta AI",
             color = BlueprintBlack,
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
@@ -194,18 +270,7 @@ private fun ScanButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun ScanningCard(onCancel: () -> Unit) {
-    val infiniteTransition = rememberInfiniteTransition(label = "spinner")
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "spinner-rotation",
-    )
-
+private fun RegisteringCard(onCancel: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,13 +288,13 @@ private fun ScanningCard(onCancel: () -> Unit) {
         )
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = "Scanning...",
+                text = "Finishing Meta setup...",
                 color = BlueprintTextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Looking for nearby glasses",
+                text = "Approve Blueprint in Meta AI, then come back here.",
                 color = BlueprintTextMuted,
                 fontSize = 13.sp,
             )
@@ -238,6 +303,81 @@ private fun ScanningCard(onCancel: () -> Unit) {
             text = "Cancel",
             color = BlueprintTextMuted,
             fontSize = 15.sp,
+            modifier = Modifier.clickable(onClick = onCancel),
+        )
+    }
+}
+
+@Composable
+private fun AvailabilityCard(
+    message: String,
+    hasDevices: Boolean,
+    onPrimaryClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BlueprintSurfaceCard, RoundedCornerShape(16.dp))
+            .border(1.dp, BlueprintBorder, RoundedCornerShape(16.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = if (hasDevices) "Meta glasses available" else "Waiting for your glasses",
+            color = BlueprintTextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = message,
+            color = BlueprintTextMuted,
+            fontSize = 13.sp,
+        )
+        if (!hasDevices) {
+            CaptureActionButton(
+                label = "Open Meta Setup Again",
+                color = BlueprintTeal,
+                onClick = onPrimaryClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionRequiredCard(
+    deviceName: String,
+    message: String,
+    onGrant: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(BlueprintSurfaceCard, RoundedCornerShape(16.dp))
+            .border(1.dp, BlueprintBorder, RoundedCornerShape(16.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "Camera permission needed",
+            color = BlueprintTextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = "$message\n\nDevice: $deviceName",
+            color = BlueprintTextMuted,
+            fontSize = 13.sp,
+        )
+        CaptureActionButton(
+            label = "Grant in Meta AI",
+            color = BlueprintTeal,
+            onClick = onGrant,
+        )
+        Text(
+            text = "Cancel",
+            color = BlueprintTextMuted,
+            fontSize = 14.sp,
             modifier = Modifier.clickable(onClick = onCancel),
         )
     }
@@ -275,7 +415,7 @@ private fun DeviceRow(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "Tap to connect",
+                text = if (device.isMock) "Debug mock device" else "Tap to connect",
                 color = BlueprintTextMuted,
                 fontSize = 13.sp,
             )
@@ -287,6 +427,12 @@ private fun DeviceRow(
             modifier = Modifier.size(22.dp),
         )
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable
@@ -500,6 +646,6 @@ private fun ErrorCard(message: String, onRetry: () -> Unit) {
             color = BlueprintTextMuted,
             fontSize = 14.sp,
         )
-        ScanButton(onClick = onRetry)
+        SetupRequiredCard(onClick = onRetry)
     }
 }

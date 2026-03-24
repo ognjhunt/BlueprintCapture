@@ -367,9 +367,10 @@ private struct AuthStepView: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                                     .stroke(Color(white: 0.18), lineWidth: 1)
-                            )
+                                )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("auth-google")
 
                         // Divider
                         HStack(spacing: 12) {
@@ -398,6 +399,7 @@ private struct AuthStepView: View {
                                         )
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityIdentifier(mode == .signIn ? "auth-sign-in" : "auth-create-account")
                             }
                         }
                         .padding(4)
@@ -415,7 +417,8 @@ private struct AuthStepView: View {
                         }
                         authTextField("Email Address", placeholder: "you@example.com", text: $vm.email,
                                       icon: "envelope.fill", keyboardType: .emailAddress,
-                                      focusBinding: $focusedField, focusValue: .email, submitLabel: .next) { focusedField = .password }
+                                      focusBinding: $focusedField, focusValue: .email, submitLabel: .next,
+                                      accessibilityIdentifier: "auth-email") { focusedField = .password }
 
                         AuthSecureFieldView(title: "Password", placeholder: "At least 8 characters",
                                             text: $vm.password, focusBinding: $focusedField, focusValue: .password,
@@ -490,6 +493,7 @@ private struct AuthStepView: View {
         focusBinding: FocusState<AuthFocusField?>.Binding,
         focusValue: AuthFocusField,
         submitLabel: SubmitLabel = .next,
+        accessibilityIdentifier: String? = nil,
         onSubmit: @escaping () -> Void = {}
     ) -> some View {
         let focused = focusBinding.wrappedValue == focusValue
@@ -513,6 +517,7 @@ private struct AuthStepView: View {
                     .focused(focusBinding, equals: focusValue)
                     .submitLabel(submitLabel)
                     .onSubmit(onSubmit)
+                    .accessibilityIdentifier(accessibilityIdentifier ?? "")
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
@@ -791,7 +796,9 @@ private struct OnboardingGlassesView: View {
         switch glassesManager.connectionState {
         case .connected: return "Manage Connection"
         case .connecting: return "Connecting…"
-        case .scanning: return "Scanning…"
+        case .registering: return "Connecting…"
+        case .waitingForDevice: return "Waiting for Glasses"
+        case .permissionRequired: return "Grant Permission"
         case .error: return "Try Again"
         case .disconnected: return "Connect Glasses"
         }
