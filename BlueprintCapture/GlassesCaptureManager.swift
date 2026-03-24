@@ -20,6 +20,7 @@ import MWDATMockDevice
 /// Supports both real device connections and MockDeviceKit for testing.
 @MainActor
 final class GlassesCaptureManager: NSObject, ObservableObject {
+    private static let logPrefix = "[BlueprintGlasses]"
 
     // MARK: - Types
 
@@ -170,13 +171,14 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         // Initialize MockDeviceKit for testing
         do {
             mockDeviceKit = try MWMockDeviceKit()
-            print("✅ [GlassesCapture] MWMockDeviceKit initialized for testing")
+            print("\(Self.logPrefix) mockDeviceKit initialized")
         } catch {
-            print("⚠️ [GlassesCapture] MockDeviceKit not available: \(error)")
+            print("\(Self.logPrefix) mockDeviceKit unavailable: \(error)")
         }
 
         #if canImport(MWDATCore)
         registrationState = wearables.registrationState
+        print("\(Self.logPrefix) initial registrationState=\(registrationState)")
         startWearablesObservers()
         syncConnectionStateFromWearables()
         #endif
@@ -185,7 +187,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     // MARK: - Device Discovery
 
     func startScanning() {
-        print("🔍 [GlassesCapture] Starting Meta glasses setup (useMockDevice: \(useMockDevice))")
+        print("\(Self.logPrefix) beginMetaSetup useMockDevice=\(useMockDevice)")
 
         if useMockDevice {
             discoveredDevices = []
@@ -199,13 +201,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 connectionState = .registering
                 Task {
                     do {
-                        try await wearables.startRegistration()
+                        try wearables.startRegistration()
+                        print("\(Self.logPrefix) wearables.startRegistration launched")
                     } catch let error as RegistrationError {
                         await MainActor.run {
+                            print("\(Self.logPrefix) wearables.startRegistration failed: \(error.description)")
                             self.connectionState = .error(error.description)
                         }
                     } catch {
                         await MainActor.run {
+                            print("\(Self.logPrefix) wearables.startRegistration failed: \(error.localizedDescription)")
                             self.connectionState = .error(error.localizedDescription)
                         }
                     }
@@ -247,10 +252,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 await MainActor.run {
                     self.discoveredDevices = [mockDevice]
                     self.connectionState = .waitingForDevice
-                    print("✅ [GlassesCapture] Mock device discovered: \(mockDevice.name)")
+                    print("\(Self.logPrefix) mock device discovered name=\(mockDevice.name)")
                 }
             } catch {
                 await MainActor.run {
+                    print("\(Self.logPrefix) mock scan failed: \(error.localizedDescription)")
                     self.connectionState = .error("Mock scan failed: \(error.localizedDescription)")
                 }
             }
@@ -269,7 +275,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         connectionState = .disconnected
         discoveredDevices = []
         #endif
-        print("🛑 [GlassesCapture] Stopped Meta setup flow")
+        print("\(Self.logPrefix) stoppedMetaSetup")
     }
 
     // MARK: - Device Connection
@@ -278,7 +284,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         guard connectionState != .connecting else { return }
         connectionState = .connecting
 
-        print("🔗 [GlassesCapture] Connecting to: \(device.name)")
+        print("\(Self.logPrefix) connect requested device=\(device.name) isMock=\(device.isMock)")
 
         if device.isMock {
             connectToMockDevice(device)
@@ -310,10 +316,11 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = true
                     self.persistLastConnectedDevice(device)
-                    print("✅ [GlassesCapture] Connected to mock device: \(device.name)")
+                    print("\(Self.logPrefix) connected mock device=\(device.name)")
                 }
             } catch {
                 await MainActor.run {
+                    print("\(Self.logPrefix) mock connection failed: \(error.localizedDescription)")
                     self.connectionState = .error("Mock connection failed: \(error.localizedDescription)")
                 }
             }
@@ -332,11 +339,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 }
 
                 let status = try await wearables.checkPermissionStatus(.camera)
+                print("\(Self.logPrefix) cameraPermissionStatus=\(status) device=\(device.name)")
                 let grantedStatus: PermissionStatus
                 if status == .granted {
                     grantedStatus = status
                 } else {
                     let requested = try await wearables.requestPermission(.camera)
+                    print("\(Self.logPrefix) cameraPermissionRequested result=\(requested) device=\(device.name)")
                     grantedStatus = requested
                 }
 
@@ -347,7 +356,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     return
                 }
 
-                let selector = SpecificDeviceSelector(deviceIdentifier: datIdentifier)
+                let selector = SpecificDeviceSelector(device: datIdentifier)
                 let config = StreamSessionConfig(
                     videoCodec: .raw,
                     resolution: .low,
@@ -361,14 +370,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = false
                     self.persistLastConnectedDevice(device)
-                    print("✅ [GlassesCapture] Connected to real DAT device: \(device.name)")
+                    print("\(Self.logPrefix) connected dat device=\(device.name)")
                 }
             } catch let error as RegistrationError {
                 await MainActor.run {
+                    print("\(Self.logPrefix) dat connect registration error: \(error.description)")
                     self.connectionState = .error(error.description)
                 }
             } catch {
                 await MainActor.run {
+                    print("\(Self.logPrefix) dat connect failed: \(error.localizedDescription)")
                     self.connectionState = .error("Connection failed: \(error.localizedDescription)")
                 }
             }
@@ -397,7 +408,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         currentFrame = nil
         streamingInfo = nil
         connectionState = .disconnected
-        print("🔌 [GlassesCapture] Disconnected")
+        print("\(Self.logPrefix) disconnected")
     }
 
     // MARK: - Reconnect
@@ -442,6 +453,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             guard let self else { return }
             for await state in wearables.registrationStateStream() {
                 registrationState = state
+                print("\(Self.logPrefix) registrationState=\(state)")
                 syncConnectionStateFromWearables()
             }
         }
@@ -449,8 +461,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         devicesTask = Task { @MainActor [weak self] in
             guard let self else { return }
             for await deviceIds in wearables.devicesStream() {
+                print("\(Self.logPrefix) devices.count=\(deviceIds.count)")
                 discoveredDevices = deviceIds.map { deviceId in
-                    let name = wearables.deviceForIdentifier(deviceId)?.nameOrId() ?? String(describing: deviceId)
+                    let name = self.wearables.deviceForIdentifier(deviceId)?.nameOrId() ?? String(describing: deviceId)
                     return DiscoveredDevice(
                         id: String(describing: deviceId),
                         name: name,
@@ -483,6 +496,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         default:
             connectionState = .disconnected
         }
+        print("\(Self.logPrefix) uiState=\(connectionState) discoveredDevices=\(discoveredDevices.count)")
     }
 
     private func installStreamListeners(_ session: StreamSession) {
@@ -499,6 +513,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         errorListenerToken = session.errorPublisher.listen { [weak self] error in
             Task { @MainActor [weak self] in
                 let message = self?.formatStreamError(error) ?? error.localizedDescription
+                print("\(Self.logPrefix) streamError=\(message)")
                 self?.connectionState = .error(message)
                 if self?.captureState.isActive == true {
                     self?.captureState = .error(message)
@@ -523,6 +538,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func handleStreamStateChange(_ state: StreamSessionState) {
+        print("\(Self.logPrefix) streamState=\(state)")
         switch state {
         case .paused:
             if captureState.isActive {
@@ -571,10 +587,6 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             return "Camera permission was denied in Meta AI."
         case .timeout:
             return "The glasses connection timed out."
-        case .hingesClosed:
-            return "Open the glasses hinges and try again."
-        case .thermalCritical:
-            return "The glasses paused streaming because they are too warm."
         case .videoStreamingError:
             return "Video streaming failed. Try reconnecting the glasses."
         case .internalError:
@@ -594,13 +606,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         Task {
             do {
+                print("\(Self.logPrefix) handleWearablesCallback url=\(url.absoluteString)")
                 _ = try await wearables.handleUrl(url)
             } catch let error as RegistrationError {
                 await MainActor.run {
+                    print("\(Self.logPrefix) handleWearablesCallback failed: \(error.description)")
                     self.connectionState = .error(error.description)
                 }
             } catch {
                 await MainActor.run {
+                    print("\(Self.logPrefix) handleWearablesCallback failed: \(error.localizedDescription)")
                     self.connectionState = .error(error.localizedDescription)
                 }
             }
