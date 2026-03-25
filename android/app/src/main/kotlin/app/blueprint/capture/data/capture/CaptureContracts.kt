@@ -30,6 +30,7 @@ enum class CaptureTaskHypothesisStatus {
 @Serializable
 enum class AndroidCaptureSource {
     @SerialName("android") AndroidPhone,
+    @SerialName("android_xr_glasses") AndroidXrGlasses,
     @SerialName("glasses") MetaGlasses,
 }
 
@@ -190,12 +191,14 @@ data class CaptureManifest(
     @SerialName("capture_start_epoch_ms") val captureStartEpochMs: Long,
     @SerialName("has_lidar") val hasLiDAR: Boolean,
     @SerialName("depth_supported") val depthSupported: Boolean = hasLiDAR,
-    @SerialName("capture_schema_version") val captureSchemaVersion: String = "3.0.0",
+    @SerialName("capture_schema_version") val captureSchemaVersion: String = "3.1.0",
     @SerialName("capture_source") val captureSource: String = "android",
     @SerialName("capture_tier_hint") val captureTierHint: String = "tier2_android",
     @SerialName("coordinate_frame_session_id") val coordinateFrameSessionId: String,
     @SerialName("capture_modality") val captureModality: String = "android_video_only",
+    @SerialName("capture_profile_id") val captureProfileId: String = "android_camera_only",
     @SerialName("evidence_tier") val evidenceTier: String = "pre_screen_video",
+    @SerialName("rights_profile") val rightsProfile: String = "unknown",
     @SerialName("requested_outputs") val requestedOutputs: List<String>,
     @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
     @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
@@ -207,7 +210,26 @@ data class CaptureManifest(
     @SerialName("scene_memory_capture") val sceneMemoryCapture: SceneMemoryCapture,
     @SerialName("capture_rights") val captureRights: CaptureRights,
     @SerialName("capture_evidence") val captureEvidence: CaptureEvidence,
+    @SerialName("capture_capabilities") val captureCapabilities: CaptureCapabilities = CaptureCapabilities(),
 )
+
+@Serializable
+enum class CaptureAuthority {
+    @SerialName("authoritative_raw")
+    AuthoritativeRaw,
+
+    @SerialName("raw_tracking_only")
+    RawTrackingOnly,
+
+    @SerialName("diagnostic_only")
+    DiagnosticOnly,
+
+    @SerialName("not_available")
+    NotAvailable,
+
+    @SerialName("derived_later_expected")
+    DerivedLaterExpected,
+}
 
 @Serializable
 data class SceneMemoryCapture(
@@ -220,6 +242,8 @@ data class SceneMemoryCapture(
     @SerialName("world_model_candidate") val worldModelCandidate: Boolean = false,
     @SerialName("motion_provenance") val motionProvenance: String? = "phone_imu_diagnostic_only",
     @SerialName("motion_timestamps_capture_relative") val motionTimestampsCaptureRelative: Boolean = true,
+    @SerialName("geometry_source") val geometrySource: String? = null,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
 )
 
 @Serializable
@@ -229,7 +253,22 @@ data class SensorAvailability(
     @SerialName("arkit_depth") val arkitDepth: Boolean = false,
     @SerialName("arkit_confidence") val arkitConfidence: Boolean = false,
     @SerialName("arkit_meshes") val arkitMeshes: Boolean = false,
+    @SerialName("camera_pose") val cameraPose: Boolean = false,
+    @SerialName("camera_intrinsics") val cameraIntrinsics: Boolean = false,
+    val depth: Boolean = false,
+    @SerialName("depth_confidence") val depthConfidence: Boolean = false,
+    val mesh: Boolean = false,
+    @SerialName("point_cloud") val pointCloud: Boolean = false,
+    val planes: Boolean = false,
+    @SerialName("feature_points") val featurePoints: Boolean = false,
+    @SerialName("tracking_state") val trackingState: Boolean = false,
+    @SerialName("relocalization_events") val relocalizationEvents: Boolean = false,
+    @SerialName("light_estimate") val lightEstimate: Boolean = false,
     val motion: Boolean = true,
+    @SerialName("motion_authoritative") val motionAuthoritative: Boolean = false,
+    @SerialName("companion_phone_pose") val companionPhonePose: Boolean = false,
+    @SerialName("companion_phone_intrinsics") val companionPhoneIntrinsics: Boolean = false,
+    @SerialName("companion_phone_calibration") val companionPhoneCalibration: Boolean = false,
 )
 
 @Serializable
@@ -251,9 +290,65 @@ data class CaptureEvidence(
     @SerialName("arkit_depth_frames") val arkitDepthFrames: Int = 0,
     @SerialName("arkit_confidence_frames") val arkitConfidenceFrames: Int = 0,
     @SerialName("arkit_mesh_files") val arkitMeshFiles: Int = 0,
+    @SerialName("pose_rows") val poseRows: Int = 0,
+    @SerialName("intrinsics_valid") val intrinsicsValid: Boolean = false,
+    @SerialName("depth_frames") val depthFrames: Int = 0,
+    @SerialName("confidence_frames") val confidenceFrames: Int = 0,
+    @SerialName("mesh_files") val meshFiles: Int = 0,
+    @SerialName("point_cloud_samples") val pointCloudSamples: Int = 0,
+    @SerialName("plane_rows") val planeRows: Int = 0,
+    @SerialName("feature_point_rows") val featurePointRows: Int = 0,
+    @SerialName("tracking_state_rows") val trackingStateRows: Int = 0,
+    @SerialName("relocalization_event_rows") val relocalizationEventRows: Int = 0,
+    @SerialName("light_estimate_rows") val lightEstimateRows: Int = 0,
     @SerialName("motion_samples") val motionSamples: Int = 0,
+    @SerialName("pose_authority") val poseAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("intrinsics_authority") val intrinsicsAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("depth_authority") val depthAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.DiagnosticOnly,
     @SerialName("motion_provenance") val motionProvenance: String? = "phone_imu_diagnostic_only",
     @SerialName("motion_timestamps_capture_relative") val motionTimestampsCaptureRelative: Boolean = true,
+    @SerialName("geometry_source") val geometrySource: String? = null,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
+)
+
+@Serializable
+data class CaptureCapabilities(
+    @SerialName("camera_pose") val cameraPose: Boolean = false,
+    @SerialName("camera_intrinsics") val cameraIntrinsics: Boolean = false,
+    val depth: Boolean = false,
+    @SerialName("depth_confidence") val depthConfidence: Boolean = false,
+    val mesh: Boolean = false,
+    @SerialName("point_cloud") val pointCloud: Boolean = false,
+    val planes: Boolean = false,
+    @SerialName("feature_points") val featurePoints: Boolean = false,
+    @SerialName("tracking_state") val trackingState: Boolean = false,
+    @SerialName("relocalization_events") val relocalizationEvents: Boolean = false,
+    @SerialName("light_estimate") val lightEstimate: Boolean = false,
+    val motion: Boolean = true,
+    @SerialName("motion_authoritative") val motionAuthoritative: Boolean = false,
+    @SerialName("companion_phone_pose") val companionPhonePose: Boolean = false,
+    @SerialName("companion_phone_intrinsics") val companionPhoneIntrinsics: Boolean = false,
+    @SerialName("companion_phone_calibration") val companionPhoneCalibration: Boolean = false,
+    @SerialName("pose_rows") val poseRows: Int = 0,
+    @SerialName("intrinsics_valid") val intrinsicsValid: Boolean = false,
+    @SerialName("depth_frames") val depthFrames: Int = 0,
+    @SerialName("confidence_frames") val confidenceFrames: Int = 0,
+    @SerialName("mesh_files") val meshFiles: Int = 0,
+    @SerialName("point_cloud_samples") val pointCloudSamples: Int = 0,
+    @SerialName("plane_rows") val planeRows: Int = 0,
+    @SerialName("feature_point_rows") val featurePointRows: Int = 0,
+    @SerialName("tracking_state_rows") val trackingStateRows: Int = 0,
+    @SerialName("relocalization_event_rows") val relocalizationEventRows: Int = 0,
+    @SerialName("light_estimate_rows") val lightEstimateRows: Int = 0,
+    @SerialName("motion_samples") val motionSamples: Int = 0,
+    @SerialName("pose_authority") val poseAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("intrinsics_authority") val intrinsicsAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("depth_authority") val depthAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
+    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.DiagnosticOnly,
+    @SerialName("motion_provenance") val motionProvenance: String? = "phone_imu_diagnostic_only",
+    @SerialName("geometry_source") val geometrySource: String? = null,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
 )
 
 @Serializable
@@ -266,6 +361,8 @@ data class CaptureContext(
     @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
     @SerialName("world_model_candidate") val worldModelCandidate: Boolean = false,
     @SerialName("capture_evidence") val captureEvidence: CaptureEvidence = CaptureEvidence(),
+    @SerialName("capture_profile_id") val captureProfileId: String = "android_camera_only",
+    @SerialName("capture_capabilities") val captureCapabilities: CaptureCapabilities = CaptureCapabilities(),
     @SerialName("capture_rights") val captureRights: CaptureRights = CaptureRights(),
     @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
     @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
@@ -349,4 +446,78 @@ data class HashesFile(
     @SerialName("schema_version") val schemaVersion: String = "v1",
     @SerialName("bundle_sha256") val bundleSha256: String,
     val artifacts: Map<String, String>,
+)
+
+@Serializable
+data class RecordingSessionFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("scene_id") val sceneId: String,
+    @SerialName("capture_id") val captureId: String,
+    @SerialName("site_visit_id") val siteVisitId: String,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("pass_id") val passId: String,
+    @SerialName("pass_index") val passIndex: Int,
+    @SerialName("pass_role") val passRole: String,
+    @SerialName("coordinate_frame_session_id") val coordinateFrameSessionId: String,
+    @SerialName("arkit_session_id") val arkitSessionId: String,
+    @SerialName("world_frame_definition") val worldFrameDefinition: String,
+    val units: String,
+    val handedness: String,
+    @SerialName("gravity_aligned") val gravityAligned: Boolean,
+    @SerialName("session_reset_count") val sessionResetCount: Int,
+    @SerialName("captured_at") val capturedAt: String,
+)
+
+@Serializable
+data class RelocalizationEventRecord(
+    @SerialName("start_frame_id") val startFrameId: String? = null,
+    @SerialName("end_frame_id") val endFrameId: String? = null,
+    @SerialName("start_t_capture_sec") val startTCaptureSec: Double? = null,
+    @SerialName("end_t_capture_sec") val endTCaptureSec: Double? = null,
+    @SerialName("frame_count") val frameCount: Int = 0,
+    val recovered: Boolean = false,
+    val source: String = "tracking_state_transition",
+)
+
+@Serializable
+data class RouteAnchorsFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("route_anchors") val routeAnchors: List<Map<String, String>> = emptyList(),
+)
+
+@Serializable
+data class CheckpointEventsFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("checkpoint_events") val checkpointEvents: List<Map<String, String>> = emptyList(),
+)
+
+@Serializable
+data class RelocalizationEventsFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("relocalization_events") val relocalizationEvents: List<RelocalizationEventRecord> = emptyList(),
+)
+
+@Serializable
+data class SyncMapRow(
+    @SerialName("frame_id") val frameId: String,
+    @SerialName("t_video_sec") val tVideoSec: Double,
+    @SerialName("t_capture_sec") val tCaptureSec: Double,
+    @SerialName("pose_frame_id") val poseFrameId: String? = null,
+    @SerialName("sync_status") val syncStatus: String,
+    @SerialName("delta_ms") val deltaMs: Double? = null,
+    @SerialName("t_monotonic_ns") val tMonotonicNs: Long? = null,
+    @SerialName("coordinate_frame_session_id") val coordinateFrameSessionId: String? = null,
+)
+
+@Serializable
+data class OverlapGraphFile(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("site_visit_id") val siteVisitId: String,
+    @SerialName("route_id") val routeId: String,
+    @SerialName("pass_id") val passId: String,
+    @SerialName("pass_role") val passRole: String,
+    @SerialName("coordinate_frame_session_id") val coordinateFrameSessionId: String,
+    @SerialName("observed_anchor_ids") val observedAnchorIds: List<String> = emptyList(),
+    @SerialName("semantic_anchor_ids") val semanticAnchorIds: List<String> = emptyList(),
+    @SerialName("relocalization_event_count") val relocalizationEventCount: Int = 0,
 )

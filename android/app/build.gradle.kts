@@ -29,16 +29,21 @@ android {
         }
 
         val backendBaseUrl = providers.gradleProperty("BLUEPRINT_BACKEND_BASE_URL").orNull ?: ""
+        val demandBackendBaseUrl = providers.gradleProperty("BLUEPRINT_DEMAND_BACKEND_BASE_URL").orNull ?: ""
         val allowMockJobsFallback = providers.gradleProperty("BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK").orNull ?: "false"
+        val enableOpenCaptureHere = providers.gradleProperty("BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE").orNull ?: "true"
         val stripePublishableKey = providers.gradleProperty("BLUEPRINT_STRIPE_PUBLISHABLE_KEY").orNull ?: ""
-        val googlePlacesKey = providers.gradleProperty("BLUEPRINT_GOOGLE_PLACES_API_KEY").orNull ?: ""
-        val geminiApiKey = providers.gradleProperty("BLUEPRINT_GEMINI_API_KEY").orNull ?: ""
+        val nearbyDiscoveryProvider = providers.gradleProperty("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER").orNull ?: "places_nearby"
+        val enableGeminiMapsGroundingFallback =
+            providers.gradleProperty("BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK").orNull ?: "false"
 
         buildConfigField("String", "BACKEND_BASE_URL", "\"$backendBaseUrl\"")
+        buildConfigField("String", "DEMAND_BACKEND_BASE_URL", "\"$demandBackendBaseUrl\"")
         buildConfigField("boolean", "ALLOW_MOCK_JOBS_FALLBACK", allowMockJobsFallback)
+        buildConfigField("boolean", "ENABLE_OPEN_CAPTURE_HERE", enableOpenCaptureHere)
         buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
-        buildConfigField("String", "GOOGLE_PLACES_API_KEY", "\"$googlePlacesKey\"")
-        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
+        buildConfigField("String", "NEARBY_DISCOVERY_PROVIDER", "\"$nearbyDiscoveryProvider\"")
+        buildConfigField("boolean", "ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK", enableGeminiMapsGroundingFallback)
         manifestPlaceholders["blueprintAppScheme"] = "blueprint"
         manifestPlaceholders["mwdatApplicationId"] = mwdatAppId
         manifestPlaceholders["mwdatClientToken"] = mwdatClientToken
@@ -130,6 +135,11 @@ dependencies {
     implementation(libs.androidx.camera.lifecycle)
     implementation(libs.androidx.camera.video)
     implementation(libs.androidx.camera.view)
+    implementation(libs.google.ar.core)
+    implementation(libs.androidx.xr.runtime)
+    implementation(libs.androidx.xr.projected)
+    implementation(libs.androidx.xr.glimmer)
+    implementation(libs.androidx.xr.arcore)
 
     implementation(libs.firebase.auth)
     implementation(libs.firebase.analytics)
@@ -141,7 +151,6 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.maps.compose)
-    implementation(libs.places)
     implementation(libs.coil.compose)
     implementation(libs.mwdat.core)
     implementation(libs.mwdat.camera)

@@ -82,7 +82,7 @@ fun OnboardingGlassesScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "Optional - pair Meta smart glasses for hands-free capture.",
+                text = "Optional - connect Meta smart glasses or launch Android XR projected glasses mode.",
                 color = BlueprintTextMuted,
                 fontSize = 17.sp,
                 lineHeight = 24.sp,

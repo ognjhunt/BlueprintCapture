@@ -66,6 +66,13 @@
             android:exported="false" />
 
         <activity
+            android:name=".GlassesProjectedActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:requiredDisplayCategory="xr_projected"
+            android:theme="@style/Theme.BlueprintCapture" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.BlueprintCapture">

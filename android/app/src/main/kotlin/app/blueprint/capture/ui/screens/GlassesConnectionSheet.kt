@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,14 +38,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-<<<<<<< HEAD
-import app.blueprint.capture.data.glasses.GlassesCaptureState
-=======
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,6 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.glasses.GlassesCaptureState
+import app.blueprint.capture.data.glasses.AndroidXrProjectedPlatform
+import app.blueprint.capture.data.glasses.GlassesPlatformId
+import app.blueprint.capture.data.glasses.MetaDatGlassesPlatform
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
@@ -76,19 +81,16 @@ import com.meta.wearable.dat.core.types.PermissionStatus
 @Composable
 fun GlassesConnectionSheet(
     viewModel: GlassesViewModel = hiltViewModel(),
-<<<<<<< HEAD
-    onScanRequest: () -> Unit = viewModel::startScanning,
-=======
+    xrViewModel: AndroidXrViewModel = hiltViewModel(),
     captureLaunch: CaptureLaunch? = null,
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
     val state by viewModel.state.collectAsState()
     val captureState by viewModel.captureState.collectAsState()
-<<<<<<< HEAD
-=======
     val captureUiState by viewModel.captureUiState.collectAsState()
+    val xrState by xrViewModel.uiState.collectAsState()
+    var selectedPlatform by rememberSaveable { mutableStateOf(GlassesPlatformId.AndroidXrProjected) }
 
     val blePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
@@ -119,11 +121,14 @@ fun GlassesConnectionSheet(
 
     LaunchedEffect(captureLaunch) {
         viewModel.setCaptureContext(captureLaunch)
+        xrViewModel.setCaptureContext(captureLaunch)
     }
     DisposableEffect(Unit) {
-        onDispose { viewModel.setCaptureContext(null) }
+        onDispose {
+            viewModel.setCaptureContext(null)
+            xrViewModel.setCaptureContext(null)
+        }
     }
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
 
     Column(
         modifier = Modifier
@@ -159,56 +164,205 @@ fun GlassesConnectionSheet(
 
         Spacer(modifier = Modifier.height(36.dp))
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GlassesPlatformCard(
+                title = AndroidXrProjectedPlatform.title,
+                subtitle = AndroidXrProjectedPlatform.subtitle,
+                isSelected = selectedPlatform == AndroidXrProjectedPlatform.id,
+                onClick = { selectedPlatform = AndroidXrProjectedPlatform.id },
+                modifier = Modifier.weight(1f),
+            )
+            GlassesPlatformCard(
+                title = MetaDatGlassesPlatform.title,
+                subtitle = MetaDatGlassesPlatform.subtitle,
+                isSelected = selectedPlatform == MetaDatGlassesPlatform.id,
+                onClick = { selectedPlatform = MetaDatGlassesPlatform.id },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
         // State-driven action area
-        when (val s = state) {
-            is GlassesConnectionState.SetupRequired -> {
-                SetupRequiredCard(onClick = ::requestMetaSetup)
-            }
+        if (selectedPlatform == GlassesPlatformId.AndroidXrProjected) {
+            AndroidXrPanel(
+                uiState = xrState,
+                captureLaunch = captureLaunch,
+                onLaunch = { xrViewModel.launchProjectedExperience(activity) },
+            )
+        } else {
+            when (val s = state) {
+                is GlassesConnectionState.SetupRequired -> {
+                    SetupRequiredCard(onClick = ::requestMetaSetup)
+                }
 
-            is GlassesConnectionState.Registering -> {
-                RegisteringCard(onCancel = viewModel::stopScanning)
-            }
+                is GlassesConnectionState.Registering -> {
+                    RegisteringCard(onCancel = viewModel::stopScanning)
+                }
 
-            is GlassesConnectionState.Available -> {
-                AvailabilityCard(
-                    message = s.message,
-                    hasDevices = s.devices.isNotEmpty(),
-                    onPrimaryClick = ::requestMetaSetup,
-                )
-                if (s.devices.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    s.devices.forEach { device ->
-                        DeviceRow(device = device, onClick = { viewModel.connect(device) })
-                        Spacer(modifier = Modifier.height(8.dp))
+                is GlassesConnectionState.Available -> {
+                    AvailabilityCard(
+                        message = s.message,
+                        hasDevices = s.devices.isNotEmpty(),
+                        onPrimaryClick = ::requestMetaSetup,
+                    )
+                    if (s.devices.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        s.devices.forEach { device ->
+                            DeviceRow(device = device, onClick = { viewModel.connect(device) })
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
                     }
                 }
-            }
 
-            is GlassesConnectionState.PermissionRequired -> {
-                PermissionRequiredCard(
-                    deviceName = s.device.name,
-                    message = s.message,
-                    onGrant = { wearablesPermissionLauncher.launch(com.meta.wearable.dat.core.types.Permission.CAMERA) },
-                    onCancel = viewModel::stopScanning,
+                is GlassesConnectionState.PermissionRequired -> {
+                    PermissionRequiredCard(
+                        deviceName = s.device.name,
+                        message = s.message,
+                        onGrant = { wearablesPermissionLauncher.launch(com.meta.wearable.dat.core.types.Permission.CAMERA) },
+                        onCancel = viewModel::stopScanning,
+                    )
+                }
+
+                is GlassesConnectionState.Connecting -> {
+                    ConnectingCard(deviceName = s.device.name)
+                }
+
+                is GlassesConnectionState.Connected -> {
+                    ConnectedCard(
+                        deviceName = s.deviceName,
+                        captureLaunch = captureUiState.captureLaunch,
+                        captureState = captureState,
+                        captureUiState = captureUiState,
+                        onStartCapture = viewModel::startCapture,
+                        onStopCapture = viewModel::stopCapture,
+                        onResumeCapture = viewModel::resumeCapture,
+                        onDisconnect = viewModel::disconnect,
+                    )
+                }
+
+                is GlassesConnectionState.Error -> {
+                    ErrorCard(message = s.message, onRetry = ::requestMetaSetup)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GlassesPlatformCard(
+    title: String,
+    subtitle: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isSelected) BlueprintTealSurface else BlueprintSurfaceInset)
+            .border(
+                width = 1.dp,
+                color = if (isSelected) BlueprintTeal else BlueprintBorder,
+                shape = RoundedCornerShape(16.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = title,
+                color = BlueprintTextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = subtitle,
+                color = BlueprintTextMuted,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AndroidXrPanel(
+    uiState: AndroidXrUiState,
+    captureLaunch: CaptureLaunch?,
+    onLaunch: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(BlueprintSurfaceInset)
+            .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
+            .padding(18.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                text = if (uiState.isProjectedDeviceConnected) {
+                    "Android XR glasses detected"
+                } else {
+                    "Waiting for Android XR glasses"
+                },
+                color = BlueprintTextPrimary,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = uiState.launchMessage,
+                color = BlueprintTextMuted,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+            )
+            Text(
+                text = buildString {
+                    append(if (uiState.capabilities.supportsProjectedCamera) "Projected camera" else "No projected camera")
+                    append(" • ")
+                    append(if (uiState.capabilities.supportsProjectedMic) "Projected mic" else "No projected mic")
+                    append(" • ")
+                    append(if (uiState.capabilities.supportsGeospatial) "Geospatial-ready" else "No geospatial")
+                },
+                color = BlueprintTextMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            uiState.launchError?.let {
+                Text(
+                    text = it,
+                    color = Color(0xFFFF8A80),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
                 )
             }
-
-            is GlassesConnectionState.Connecting -> {
-                ConnectingCard(deviceName = s.device.name)
-            }
-
-            is GlassesConnectionState.Connected -> {
-                ConnectedCard(
-                    deviceName = s.deviceName,
-                    captureState = captureState,
-                    onStartCapture = viewModel::startCapture,
-                    onStopCapture = viewModel::stopCapture,
-                    onDisconnect = viewModel::disconnect,
+            uiState.queuedUploadId?.let {
+                Text(
+                    text = "Queued projected capture: $it",
+                    color = BlueprintSuccess,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
                 )
             }
-
-            is GlassesConnectionState.Error -> {
-                ErrorCard(message = s.message, onRetry = ::requestMetaSetup)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(BlueprintAccent)
+                    .clickable(onClick = onLaunch)
+                    .padding(vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (captureLaunch != null) "Launch Android XR capture" else "Open Android XR readiness mode",
+                    color = BlueprintBlack,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                )
             }
         }
     }
@@ -469,9 +623,12 @@ private fun ConnectingCard(deviceName: String) {
 @Composable
 private fun ConnectedCard(
     deviceName: String,
+    captureLaunch: CaptureLaunch?,
     captureState: GlassesCaptureState,
+    captureUiState: GlassesCaptureUiState,
     onStartCapture: () -> Unit,
     onStopCapture: () -> Unit,
+    onResumeCapture: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
     Column(
@@ -508,14 +665,32 @@ private fun ConnectedCard(
             )
         }
 
+        val captureContextLabel = captureLaunch?.label
+        if (captureContextLabel != null) {
+            Text(
+                text = "Capture target: $captureContextLabel",
+                color = BlueprintTextMuted,
+                fontSize = 13.sp,
+            )
+        } else {
+            Text(
+                text = "Connection only. Start glasses capture from a live target so the upload keeps truthful site metadata.",
+                color = BlueprintTextMuted,
+                fontSize = 13.sp,
+            )
+        }
+
         // Capture controls — driven by captureState
         when (captureState) {
             is GlassesCaptureState.Idle -> {
-                CaptureActionButton(
-                    label = "Start Capture",
-                    color = BlueprintTeal,
-                    onClick = onStartCapture,
-                )
+                if (captureLaunch != null) {
+                    CaptureActionButton(
+                        label = "Start Capture",
+                        color = BlueprintTeal,
+                        enabled = !captureUiState.isFinalizing,
+                        onClick = onStartCapture,
+                    )
+                }
             }
 
             is GlassesCaptureState.Preparing -> {
@@ -553,8 +728,9 @@ private fun ConnectedCard(
                         )
                     }
                     CaptureActionButton(
-                        label = "Stop Capture",
+                        label = if (captureUiState.isFinalizing) "Finalizing…" else "Stop Capture",
                         color = BlueprintAccent,
+                        enabled = !captureUiState.isFinalizing,
                         onClick = onStopCapture,
                     )
                 }
@@ -564,7 +740,8 @@ private fun ConnectedCard(
                 CaptureActionButton(
                     label = "Resume Capture",
                     color = BlueprintTeal,
-                    onClick = onStartCapture,
+                    enabled = !captureUiState.isFinalizing,
+                    onClick = onResumeCapture,
                 )
             }
 
@@ -577,11 +754,35 @@ private fun ConnectedCard(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                     )
-                    CaptureActionButton(
-                        label = "Start New Capture",
-                        color = BlueprintTeal,
-                        onClick = onStartCapture,
-                    )
+                    when {
+                        captureUiState.isFinalizing -> Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                color = BlueprintTeal,
+                                strokeWidth = 2.dp,
+                                trackColor = BlueprintSurfaceInset,
+                            )
+                            Text(
+                                text = captureUiState.statusMessage ?: "Queueing upload…",
+                                color = BlueprintTextMuted,
+                                fontSize = 13.sp,
+                            )
+                        }
+                        captureUiState.queuedUploadId != null -> Text(
+                            text = captureUiState.statusMessage
+                                ?: "Capture bundled and queued for upload.",
+                            color = BlueprintSuccess,
+                            fontSize = 13.sp,
+                        )
+                        captureLaunch != null -> CaptureActionButton(
+                            label = "Start New Capture",
+                            color = BlueprintTeal,
+                            onClick = onStartCapture,
+                        )
+                    }
                 }
             }
 
@@ -591,12 +792,23 @@ private fun ConnectedCard(
                     color = BlueprintAccent,
                     fontSize = 13.sp,
                 )
-                CaptureActionButton(
-                    label = "Retry Capture",
-                    color = BlueprintTeal,
-                    onClick = onStartCapture,
-                )
+                if (captureLaunch != null) {
+                    CaptureActionButton(
+                        label = "Retry Capture",
+                        color = BlueprintTeal,
+                        enabled = !captureUiState.isFinalizing,
+                        onClick = onStartCapture,
+                    )
+                }
             }
+        }
+
+        captureUiState.errorMessage?.let { message ->
+            Text(
+                text = message,
+                color = BlueprintAccent,
+                fontSize = 13.sp,
+            )
         }
 
         Text(
@@ -611,18 +823,28 @@ private fun ConnectedCard(
 }
 
 @Composable
-private fun CaptureActionButton(label: String, color: androidx.compose.ui.graphics.Color, onClick: () -> Unit) {
+private fun CaptureActionButton(
+    label: String,
+    color: androidx.compose.ui.graphics.Color,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(color.copy(alpha = 0.15f))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .background(color.copy(alpha = if (enabled) 0.15f else 0.08f))
+            .border(1.dp, color.copy(alpha = if (enabled) 0.35f else 0.18f), RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = label, color = color, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = label,
+            color = if (enabled) color else color.copy(alpha = 0.55f),
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
