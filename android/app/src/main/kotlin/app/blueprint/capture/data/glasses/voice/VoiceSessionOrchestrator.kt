@@ -24,6 +24,10 @@ interface OnDeviceSpeechInput {
     fun release()
 }
 
+interface PartialResultsListener {
+    fun onPartialTranscript(partial: String)
+}
+
 interface VoiceOutput {
     fun speak(text: String, utteranceId: String = DEFAULT_UTTERANCE_ID)
     fun stop()
@@ -51,8 +55,11 @@ class VoiceSessionOrchestrator(
     private val voiceOutput: VoiceOutput,
     private val onStateChanged: (VoiceSessionState) -> Unit,
     private val onTranscript: (String) -> Unit,
+    private val onPartialTranscript: (String) -> Unit = {},
+    private val continuousListening: Boolean = true,
 ) {
     private var state: VoiceSessionState = VoiceSessionState.Idle
+    private var sessionActive = false
 
     fun currentState(): VoiceSessionState = state
 
@@ -60,6 +67,7 @@ class VoiceSessionOrchestrator(
         welcomeText: String,
         preferGeminiLive: Boolean = true,
     ) {
+        sessionActive = true
         transitionTo(VoiceSessionState.Starting(prefersGeminiLive = preferGeminiLive))
         scope.launch {
             if (preferGeminiLive) {
@@ -80,13 +88,21 @@ class VoiceSessionOrchestrator(
 
     fun notifyUtteranceCompleted(utteranceId: String) {
         if (utteranceId == VoiceOutput.WELCOME_UTTERANCE_ID || utteranceId == VoiceOutput.ERROR_UTTERANCE_ID) {
-            speechInput.startListening()
-            transitionTo(VoiceSessionState.Listening(source = "on_device_asr"))
+            beginListening()
+        }
+    }
+
+    fun notifyPartialResults(partial: String) {
+        if (partial.isNotBlank()) {
+            onPartialTranscript(partial)
         }
     }
 
     fun notifySpeechResults(matches: List<String>, confidences: FloatArray? = null) {
-        if (matches.isEmpty()) return
+        if (matches.isEmpty()) {
+            if (continuousListening && sessionActive) beginListening()
+            return
+        }
         val chosenIndex = confidences
             ?.indices
             ?.maxByOrNull { confidences[it] }
@@ -94,9 +110,18 @@ class VoiceSessionOrchestrator(
         val transcript = matches.getOrNull(chosenIndex) ?: matches.first()
         onTranscript(transcript)
         transitionTo(VoiceSessionState.Thinking(transcript = transcript))
+
+        if (continuousListening && sessionActive) {
+            beginListening()
+        }
     }
 
     fun notifyRecognitionError(message: String) {
+        val isSilenceTimeout = message.contains("error 6") || message.contains("error 7")
+        if (isSilenceTimeout && continuousListening && sessionActive) {
+            beginListening()
+            return
+        }
         voiceOutput.speak(
             text = message,
             utteranceId = VoiceOutput.ERROR_UTTERANCE_ID,
@@ -105,6 +130,7 @@ class VoiceSessionOrchestrator(
     }
 
     fun endSession() {
+        sessionActive = false
         scope.launch {
             geminiLiveConnector.stopSession()
         }
@@ -114,8 +140,14 @@ class VoiceSessionOrchestrator(
     }
 
     fun release() {
+        sessionActive = false
         speechInput.release()
         voiceOutput.release()
+    }
+
+    private fun beginListening() {
+        speechInput.startListening()
+        transitionTo(VoiceSessionState.Listening(source = "on_device_asr"))
     }
 
     private fun transitionTo(next: VoiceSessionState) {

@@ -34,6 +34,7 @@ This repo now has a compiler-verified Android XR projected-glasses path alongsid
 - Hardened runtime behavior:
   - the Android XR projected activity resets runtime capability state on teardown
   - voice fallback messaging now explicitly says when on-device speech is in use
+  - Android XR UI capability messaging stays video-first and no longer advertises pose/geospatial readiness before hardware validation
 
 - Preserved Meta DAT support without forcing private-package access for local XR verification:
   - the app module now enables the private Meta SDK only when `-PMWDAT_ENABLE_PRIVATE_SDK=true` is supplied
@@ -93,6 +94,23 @@ The current build is honest about this and falls back to on-device speech.
 - Real Meta DAT verification on this machine still requires private credentials.
   - To re-enable the real Meta path for Android builds, provide valid GitHub Packages credentials and run with `-PMWDAT_ENABLE_PRIVATE_SDK=true`.
   - Repository credentials still come from `android/local.properties` (`gpr.user`, `gpr.token`) or Gradle properties.
+
+## Physical Android XR validation checklist
+
+Use this on actual Android XR hardware before claiming runtime readiness:
+
+1. Connect the glasses and confirm the app reports `Android XR glasses detected`.
+2. Launch the projected activity and verify the prompt flow for `CAMERA` and `RECORD_AUDIO`.
+3. Confirm the projected screen reflects display on/off changes without stale capability state after closing the activity.
+4. Start a short capture and verify the UI reports projected camera readiness, active recording, and non-Gemini on-device voice fallback messaging.
+5. Stop the capture and confirm the app queues an upload instead of failing during bundle finalization.
+6. Inspect the generated bundle under app-private storage and verify:
+   - `manifest.json` keeps `capture_source = "glasses"` and `capture_tier_hint = "tier2_glasses"`
+   - `manifest.json` sets `capture_profile_id = "android_xr_glasses"` and `capture_modality = "android_xr_video_only"`
+   - `manifest.json` leaves `motion_provenance` and `geometry_source` unset when no validated XR sidecars exist
+   - `raw/recording_session.json` keeps `world_frame_definition = "unavailable_no_public_world_tracking"`
+
+If any step fails, capture the exact device model, Android XR build, failure step, and whether the issue reproduces after relaunching the projected activity.
 
 ## Practical test commands
 

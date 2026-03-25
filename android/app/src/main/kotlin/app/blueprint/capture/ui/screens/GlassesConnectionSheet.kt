@@ -325,7 +325,13 @@ private fun AndroidXrPanel(
                     append(" • ")
                     append(if (uiState.capabilities.supportsProjectedMic) "Projected mic" else "No projected mic")
                     append(" • ")
-                    append(if (uiState.capabilities.supportsGeospatial) "Geospatial-ready" else "No geospatial")
+                    append(
+                        if (uiState.capabilities.supportsDevicePose || uiState.capabilities.supportsGeospatial) {
+                            "World tracking available"
+                        } else {
+                            "World tracking unverified"
+                        },
+                    )
                 },
                 color = BlueprintTextMuted,
                 fontSize = 13.sp,

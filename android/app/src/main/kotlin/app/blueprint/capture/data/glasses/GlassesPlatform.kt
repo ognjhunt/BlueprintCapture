@@ -41,8 +41,8 @@ object AndroidXrProjectedPlatform : GlassesPlatform {
         hasDisplay = false,
         supportsProjectedCamera = true,
         supportsProjectedMic = true,
-        supportsDevicePose = true,
-        supportsGeospatial = true,
+        supportsDevicePose = false,
+        supportsGeospatial = false,
     )
 }
 

@@ -13,11 +13,11 @@ class GlassesPlatformRegistryTest {
     }
 
     @Test
-    fun `android xr platform advertises projected capabilities`() {
+    fun `android xr platform advertises projected camera and mic without world-tracking claims`() {
         val platform = GlassesPlatformRegistry.get(GlassesPlatformId.AndroidXrProjected)
         assertThat(platform.capabilities.supportsProjectedCamera).isTrue()
         assertThat(platform.capabilities.supportsProjectedMic).isTrue()
-        assertThat(platform.capabilities.supportsDevicePose).isTrue()
-        assertThat(platform.capabilities.supportsGeospatial).isTrue()
+        assertThat(platform.capabilities.supportsDevicePose).isFalse()
+        assertThat(platform.capabilities.supportsGeospatial).isFalse()
     }
 }

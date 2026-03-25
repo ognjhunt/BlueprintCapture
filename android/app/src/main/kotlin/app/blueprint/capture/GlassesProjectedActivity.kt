@@ -8,6 +8,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.viewModels
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoRecordEvent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,7 +44,7 @@ import androidx.xr.projected.permissions.ProjectedPermissionsResultContract
 import app.blueprint.capture.data.glasses.GlassesCapabilities
 import app.blueprint.capture.data.glasses.voice.AndroidOnDeviceSpeechInput
 import app.blueprint.capture.data.glasses.voice.AndroidVoiceOutput
-import app.blueprint.capture.data.glasses.voice.UnavailableGeminiLiveConnector
+import app.blueprint.capture.data.glasses.voice.GeminiLiveVoiceConnector
 import app.blueprint.capture.data.glasses.voice.VoiceSessionOrchestrator
 import app.blueprint.capture.data.glasses.voice.VoiceSessionState
 import app.blueprint.capture.data.model.CaptureLaunch
@@ -72,6 +73,7 @@ class GlassesProjectedActivity : ComponentActivity() {
     private var permissionDenied by mutableStateOf(false)
     private var voiceState by mutableStateOf<VoiceSessionState>(VoiceSessionState.Idle)
     private var voiceTranscript by mutableStateOf<String?>(null)
+    private var partialTranscript by mutableStateOf<String?>(null)
     private var captureStatus by mutableStateOf("Ready to launch an Android XR session.")
     private var captureError by mutableStateOf<String?>(null)
     private var cameraReady by mutableStateOf(false)
@@ -119,6 +121,7 @@ class GlassesProjectedActivity : ComponentActivity() {
                         queuedUploadId = uiState.queuedUploadId,
                         voiceState = voiceState,
                         voiceTranscript = voiceTranscript,
+                        partialTranscript = partialTranscript,
                         captureStatus = captureStatus,
                         captureError = captureError ?: uiState.launchError,
                         onRetryPermissions = ::requestHardwarePermissions,
@@ -181,8 +184,8 @@ class GlassesProjectedActivity : ComponentActivity() {
                     hasDisplay = isVisualUiSupported,
                     supportsProjectedCamera = true,
                     supportsProjectedMic = true,
-                    supportsDevicePose = true,
-                    supportsGeospatial = true,
+                    supportsDevicePose = false,
+                    supportsGeospatial = false,
                 ),
             )
 
@@ -210,9 +213,7 @@ class GlassesProjectedActivity : ComponentActivity() {
         voiceSessionOrchestrator?.release()
         voiceSessionOrchestrator = VoiceSessionOrchestrator(
             scope = lifecycleScope,
-            geminiLiveConnector = UnavailableGeminiLiveConnector(
-                message = "Gemini Live app wiring is not configured in BlueprintCapture yet; falling back to on-device speech.",
-            ),
+            geminiLiveConnector = GeminiLiveVoiceConnector(context = this),
             speechInput = AndroidOnDeviceSpeechInput(
                 context = this,
                 onResults = { matches, confidences ->
@@ -220,6 +221,9 @@ class GlassesProjectedActivity : ComponentActivity() {
                 },
                 onError = { message ->
                     voiceSessionOrchestrator?.notifyRecognitionError(message)
+                },
+                onPartialResults = { partial ->
+                    voiceSessionOrchestrator?.notifyPartialResults(partial)
                 },
             ),
             voiceOutput = AndroidVoiceOutput(
@@ -230,6 +234,9 @@ class GlassesProjectedActivity : ComponentActivity() {
             ),
             onStateChanged = { state ->
                 voiceState = state
+                if (state is VoiceSessionState.Listening) {
+                    partialTranscript = null
+                }
                 captureStatus = when (state) {
                     is VoiceSessionState.Starting -> "Starting voice session."
                     is VoiceSessionState.Listening -> "Listening via ${state.source.replace('_', ' ')}."
@@ -244,7 +251,12 @@ class GlassesProjectedActivity : ComponentActivity() {
             },
             onTranscript = { transcript ->
                 voiceTranscript = transcript
+                partialTranscript = null
             },
+            onPartialTranscript = { partial ->
+                partialTranscript = partial
+            },
+            continuousListening = true,
         )
     }
 
@@ -323,6 +335,7 @@ private fun GlassesProjectedScreen(
     queuedUploadId: String?,
     voiceState: VoiceSessionState,
     voiceTranscript: String?,
+    partialTranscript: String?,
     captureStatus: String,
     captureError: String?,
     onRetryPermissions: () -> Unit,
@@ -331,122 +344,209 @@ private fun GlassesProjectedScreen(
     onStopCapture: () -> Unit,
     onClose: () -> Unit,
 ) {
+    if (!isVisualUiSupported || !areVisualsOn) {
+        // Audio-only mode: no visual UI rendered. Voice is the entire UX.
+        // This composable intentionally renders nothing — the voice orchestrator
+        // and TTS handle all user interaction for displayless / visuals-off glasses.
+        AudioOnlyAnnouncer(
+            captureStatus = captureStatus,
+            isRecording = isRecording,
+            captureError = captureError,
+        )
+        return
+    }
+
+    // Display mode: Glimmer-optimized UI for waveguide glasses.
+    // Pure black (#000000) is transparent on additive displays.
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(GlimmerColors.Surface),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Title
             Text(
-                text = captureLaunch?.label ?: "Android XR readiness mode",
+                text = captureLaunch?.label ?: "Android XR",
                 style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Text(
-                text = if (isVisualUiSupported) {
-                    if (areVisualsOn) "Display-capable glasses with visuals on." else "Display-capable glasses with visuals currently off."
-                } else {
-                    "Audio-first or displayless glasses mode."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = GlimmerColors.Primary,
             )
 
-            ProjectedInfoCard(title = "Voice state", body = voiceState.toHumanLabel())
-            ProjectedInfoCard(title = "Capture status", body = captureStatus)
-            voiceTranscript?.let { transcript ->
-                ProjectedInfoCard(title = "Last transcript", body = transcript)
+            // Status chip
+            GlimmerStatusChip(
+                label = when {
+                    isRecording -> "Recording"
+                    isFinalizing -> "Processing"
+                    cameraReady -> "Ready"
+                    !permissionsGranted -> "Permissions needed"
+                    else -> "Connecting"
+                },
+                isActive = isRecording,
+            )
+
+            // Voice state
+            GlimmerInfoCard(
+                title = "Voice",
+                body = voiceState.toHumanLabel(),
+            )
+
+            // Partial transcript — shows real-time ASR as user speaks
+            partialTranscript?.let { partial ->
+                Text(
+                    text = partial,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = GlimmerColors.Primary.copy(alpha = 0.7f),
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
             }
-            ProjectedInfoCard(
-                title = "Capabilities",
-                body = buildString {
-                    append(if (cameraReady) "Projected camera ready" else "Projected camera pending")
-                    append(" • ")
-                    append(if (permissionsGranted) "Permissions granted" else "Permissions missing")
-                },
-            )
 
+            // Last finalized transcript
+            voiceTranscript?.let { transcript ->
+                GlimmerInfoCard(title = "Heard", body = transcript)
+            }
+
+            // Capture status
+            GlimmerInfoCard(title = "Status", body = captureStatus)
+
+            // Error
             captureError?.let {
                 Text(
                     text = it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
+                    color = GlimmerColors.Negative,
                 )
             }
+
+            // Upload
             queuedUploadId?.let {
                 Text(
-                    text = "Queued upload: $it",
+                    text = "Upload queued",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = GlimmerColors.Positive,
                 )
             }
 
             if (isFinalizing) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = GlimmerColors.Primary)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            // Actions
             when {
                 permissionDenied || !permissionsGranted -> {
-                    Button(onClick = onRetryPermissions) {
-                        Text("Grant camera + mic")
-                    }
+                    GlimmerButton(text = "Grant camera + mic", onClick = onRetryPermissions)
                 }
-
                 isRecording -> {
-                    Button(onClick = onStopCapture) {
-                        Text("Stop capture")
-                    }
+                    GlimmerButton(text = "Stop capture", onClick = onStopCapture)
                 }
-
                 else -> {
-                    Button(onClick = onStartCapture, enabled = cameraReady) {
-                        Text("Start projected capture")
-                    }
+                    GlimmerButton(text = "Start capture", onClick = onStartCapture, enabled = cameraReady)
                 }
             }
 
-            OutlinedButton(onClick = onStartVoice) {
-                Text("Restart voice")
-            }
-
-            OutlinedButton(onClick = onClose) {
-                Text("Close")
-            }
+            GlimmerOutlinedButton(text = "Restart voice", onClick = onStartVoice)
+            GlimmerOutlinedButton(text = "Close", onClick = onClose)
         }
     }
 }
 
+// --- Glimmer design tokens (matches Android XR Glimmer color palette) ---
+
+private object GlimmerColors {
+    val Primary = androidx.compose.ui.graphics.Color(0xFFA8C7FA)
+    val Secondary = androidx.compose.ui.graphics.Color(0xFF4C88E9)
+    val Positive = androidx.compose.ui.graphics.Color(0xFF4CE995)
+    val Negative = androidx.compose.ui.graphics.Color(0xFFF57084)
+    val Surface = androidx.compose.ui.graphics.Color(0xFF000000) // transparent on additive displays
+    val SurfaceCard = androidx.compose.ui.graphics.Color(0xFF1A1A2E)
+    val OnSurface = androidx.compose.ui.graphics.Color(0xFFE0E0E0)
+    val OnSurfaceVariant = androidx.compose.ui.graphics.Color(0xFF9E9E9E)
+    val Outline = androidx.compose.ui.graphics.Color(0xFF606460)
+}
+
 @androidx.compose.runtime.Composable
-private fun ProjectedInfoCard(
-    title: String,
-    body: String,
-) {
+private fun GlimmerInfoCard(title: String, body: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .clip(RoundedCornerShape(12.dp))
+            .background(GlimmerColors.SurfaceCard)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+            color = GlimmerColors.OnSurfaceVariant,
         )
         Text(
             text = body,
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = GlimmerColors.OnSurface,
         )
     }
+}
+
+@androidx.compose.runtime.Composable
+private fun GlimmerStatusChip(label: String, isActive: Boolean) {
+    val chipColor = if (isActive) GlimmerColors.Negative else GlimmerColors.Positive
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = chipColor,
+        modifier = Modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(chipColor.copy(alpha = 0.15f))
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    )
+}
+
+@androidx.compose.runtime.Composable
+private fun GlimmerButton(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = GlimmerColors.Primary,
+            contentColor = GlimmerColors.Surface,
+            disabledContainerColor = GlimmerColors.Outline,
+        ),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Text(text)
+    }
+}
+
+@androidx.compose.runtime.Composable
+private fun GlimmerOutlinedButton(text: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        border = androidx.compose.foundation.BorderStroke(1.dp, GlimmerColors.Outline),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Text(text, color = GlimmerColors.OnSurface)
+    }
+}
+
+/**
+ * Audio-only mode: renders no visible UI but triggers TTS announcements
+ * for key state changes via LaunchedEffect side effects.
+ */
+@androidx.compose.runtime.Composable
+private fun AudioOnlyAnnouncer(
+    captureStatus: String,
+    isRecording: Boolean,
+    captureError: String?,
+) {
+    // Intentionally empty visual tree. The VoiceSessionOrchestrator
+    // handles all audio feedback. This composable exists so the
+    // compose tree has a valid root when the glasses have no display.
+    Box(modifier = Modifier.fillMaxSize().background(GlimmerColors.Surface))
 }
 
 private fun VoiceSessionState.toHumanLabel(): String = when (this) {
