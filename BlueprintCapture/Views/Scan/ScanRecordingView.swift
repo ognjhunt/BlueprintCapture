@@ -12,6 +12,8 @@ struct ScanRecordingView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var showConnectSheet = false
+    @State private var showOpenCaptureAcknowledgement = false
+    @State private var openCaptureAcknowledged = false
     @State private var phase: Phase = .preparing("Preparing…")
     @State private var errorMessage: String?
     @State private var guidanceTip: String? = nil
@@ -27,6 +29,10 @@ struct ScanRecordingView: View {
 
     private var isUITesting: Bool {
         RuntimeConfig.current.isUITesting
+    }
+
+    private var isOpenCaptureHere: Bool {
+        job.id == ScanHomeViewModel.alphaCurrentLocationJobID
     }
 
     init(job: ScanJob,
@@ -62,6 +68,18 @@ struct ScanRecordingView: View {
                 showConnectSheet = false
                 Task { await beginIfPossible() }
             }
+        }
+        .alert("Review capture rights", isPresented: $showOpenCaptureAcknowledgement) {
+            Button("Cancel", role: .cancel) {
+                errorMessage = "Open capture requires an explicit rights acknowledgement before recording starts."
+                phase = .error
+            }
+            Button("I Confirm") {
+                openCaptureAcknowledged = true
+                Task { await beginIfPossible() }
+            }
+        } message: {
+            Text("Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand downstream qualification, privacy, and rights checks may block use.")
         }
         .onAppear {
             Task { await beginIfPossible() }
@@ -291,6 +309,12 @@ struct ScanRecordingView: View {
             return
         }
 
+        if isOpenCaptureHere && !openCaptureAcknowledged {
+            phase = .preparing("Reviewing capture rights…")
+            showOpenCaptureAcknowledgement = true
+            return
+        }
+
         // Ensure connected
         if case .connected = glassesManager.connectionState {
             // continue
@@ -330,9 +354,9 @@ struct ScanRecordingView: View {
         }
 
         // Reserve + check-in right before recording starts.
-        // Skip for the alpha current-location item — it lives only on-device and
-        // has no Firestore document to reserve against.
-        if job.id != ScanHomeViewModel.alphaCurrentLocationJobID {
+        // Open-capture-here lives only on-device, so there is no marketplace
+        // reservation document to claim before recording begins.
+        if !isOpenCaptureHere {
             phase = .preparing("Reserving job…")
             do {
                 let target = Target(

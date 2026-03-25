@@ -6,6 +6,7 @@ import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import androidx.annotation.VisibleForTesting
 import com.meta.wearable.dat.camera.StreamSession
 import com.meta.wearable.dat.camera.startStreamSession
 import com.meta.wearable.dat.camera.types.StreamConfiguration
@@ -17,6 +18,10 @@ import com.meta.wearable.dat.core.selectors.SpecificDeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +34,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 sealed class GlassesCaptureState {
     object Idle : GlassesCaptureState()
@@ -47,6 +58,8 @@ data class GlassesCaptureArtifacts(
     val videoFile: File,
     val framesDirectory: File,
     val metadataFile: File,
+    val glassesEvidenceDirectory: File,
+    val companionPhoneDirectory: File?,
     val durationMs: Long,
     val frameCount: Int,
 )
@@ -188,11 +201,27 @@ class GlassesCaptureManager @Inject constructor(
                 """{"source":"meta_glasses","frames":$framesReceivedCount,"duration_ms":$durationMs}""",
             )
         }
+        val streamMetrics = inferStreamMetrics(
+            frameFiles = frameFiles,
+            durationMs = durationMs,
+            frameCount = framesReceivedCount,
+            framePresentationTimesUs = frameTimestamps.toList(),
+        )
+        val evidenceDirectories = writeCanonicalEvidence(
+            outputDir = outputDir,
+            captureStartMs = captureStartMs,
+            framePresentationTimesUs = frameTimestamps.toList(),
+            streamWidth = streamMetrics.width,
+            streamHeight = streamMetrics.height,
+            streamFps = streamMetrics.fps,
+        )
 
         val artifacts = GlassesCaptureArtifacts(
             videoFile = videoFile,
             framesDirectory = framesDir,
             metadataFile = metadataFile,
+            glassesEvidenceDirectory = evidenceDirectories.glassesDirectory,
+            companionPhoneDirectory = evidenceDirectories.companionPhoneDirectory,
             durationMs = durationMs,
             frameCount = framesReceivedCount,
         )
@@ -210,6 +239,22 @@ class GlassesCaptureManager @Inject constructor(
         frameTimestamps.clear()
         _captureState.value = GlassesCaptureState.Idle
     }
+
+    private fun writeCanonicalEvidence(
+        outputDir: File,
+        captureStartMs: Long,
+        framePresentationTimesUs: List<Long>,
+        streamWidth: Int?,
+        streamHeight: Int?,
+        streamFps: Double?,
+    ): CanonicalEvidenceDirectories = Companion.writeCanonicalEvidence(
+        outputDir = outputDir,
+        captureStartMs = captureStartMs,
+        framePresentationTimesUs = framePresentationTimesUs,
+        streamWidth = streamWidth,
+        streamHeight = streamHeight,
+        streamFps = streamFps,
+    )
 
     // ── Frame encoding ────────────────────────────────────────────────────────
 
@@ -291,5 +336,164 @@ class GlassesCaptureManager @Inject constructor(
             }
             inputSurface.release()
         }
+    }
+
+    private fun inferStreamMetrics(
+        frameFiles: List<File>,
+        durationMs: Long,
+        frameCount: Int,
+        framePresentationTimesUs: List<Long>,
+    ): StreamMetrics {
+        val firstBitmap = frameFiles.firstOrNull()?.let { file ->
+            val bytes = runCatching { file.readBytes() }.getOrNull() ?: return@let null
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+        val width = firstBitmap?.width
+        val height = firstBitmap?.height
+        firstBitmap?.recycle()
+        val fps = when {
+            framePresentationTimesUs.size >= 2 -> {
+                val deltas = framePresentationTimesUs.zipWithNext { a, b -> b - a }.filter { it > 0 }
+                val averageDeltaUs = deltas.average()
+                if (averageDeltaUs.isFinite() && averageDeltaUs > 0.0) {
+                    1_000_000.0 / averageDeltaUs
+                } else {
+                    null
+                }
+            }
+            durationMs > 0L && frameCount > 0 -> frameCount * 1000.0 / durationMs.toDouble()
+            else -> null
+        }
+        return StreamMetrics(width = width, height = height, fps = fps)
+    }
+
+    internal data class CanonicalEvidenceDirectories(
+        val glassesDirectory: File,
+        val companionPhoneDirectory: File?,
+    )
+
+    private data class StreamMetrics(
+        val width: Int?,
+        val height: Int?,
+        val fps: Double?,
+    )
+
+    companion object {
+        @VisibleForTesting
+        internal fun writeCanonicalEvidence(
+            outputDir: File,
+            captureStartMs: Long,
+            framePresentationTimesUs: List<Long>,
+            streamWidth: Int?,
+            streamHeight: Int?,
+            streamFps: Double?,
+        ): CanonicalEvidenceDirectories {
+            val glassesDirectory = File(outputDir, "glasses").also { it.mkdirs() }
+            val streamMetadataFile = File(glassesDirectory, "stream_metadata.json")
+            val frameTimestampsFile = File(glassesDirectory, "frame_timestamps.jsonl")
+            val deviceStateFile = File(glassesDirectory, "device_state.jsonl")
+            val healthEventsFile = File(glassesDirectory, "health_events.jsonl")
+
+            val firstTimestampUs = framePresentationTimesUs.firstOrNull()
+            val frameTimestampLines = framePresentationTimesUs.mapIndexed { index, presentationTimeUs ->
+                lineJson.encodeToString(
+                    JsonObject.serializer(),
+                    buildJsonObject {
+                        put("schema_version", "v1")
+                        put("frame_id", String.format(Locale.US, "%06d", index + 1))
+                        put("frame_index", index)
+                        put("presentation_time_us", presentationTimeUs)
+                        put(
+                            "t_capture_sec",
+                            round6(
+                                if (firstTimestampUs != null) {
+                                    (presentationTimeUs - firstTimestampUs) / 1_000_000.0
+                                } else {
+                                    0.0
+                                },
+                            ),
+                        )
+                        put("t_monotonic_ns", presentationTimeUs * 1_000L)
+                        put(
+                            "captured_at",
+                            ISO_8601.format(
+                                Instant.ofEpochMilli(
+                                    captureStartMs + (((presentationTimeUs - (firstTimestampUs ?: presentationTimeUs)) / 1_000.0).toLong()),
+                                ),
+                            ),
+                        )
+                    },
+                )
+            }
+            frameTimestampsFile.writeText(
+                frameTimestampLines.joinToString(separator = "\n").let { if (it.isEmpty()) it else "$it\n" },
+            )
+
+            val unavailableEvent = lineJson.encodeToString(
+                JsonObject.serializer(),
+                buildJsonObject {
+                    put("schema_version", "v1")
+                    put("event", "unavailable_in_public_sdk")
+                    put("reason", "public_sdk_not_exposed")
+                },
+            )
+            deviceStateFile.writeText("$unavailableEvent\n")
+            healthEventsFile.writeText("$unavailableEvent\n")
+
+            val streamMetadata = buildJsonObject {
+                put("schema_version", "v1")
+                put("capture_source", "glasses")
+                put("device_model", "Meta smart glasses")
+                put("frame_count", framePresentationTimesUs.size)
+                put("first_party_geometry_available", false)
+                put("first_party_motion_available", false)
+                put("public_device_state_available", false)
+                put("public_health_events_available", false)
+                put("companion_phone_pose_available", false)
+                put("companion_phone_intrinsics_available", false)
+                put("companion_phone_calibration_available", false)
+                put(
+                    "notes",
+                    buildJsonArray {
+                        add(JsonPrimitive("Public Android glasses capture does not expose glasses-native pose, IMU, depth, or calibrated extrinsics."))
+                    },
+                )
+                if (streamWidth != null && streamHeight != null) {
+                    put(
+                        "stream_resolution",
+                        buildJsonObject {
+                            put("width", streamWidth)
+                            put("height", streamHeight)
+                        },
+                    )
+                }
+                if (streamFps != null) {
+                    put("stream_frame_rate", round3(streamFps))
+                }
+            }
+            streamMetadataFile.writeText(prettyJson.encodeToString(JsonObject.serializer(), streamMetadata))
+
+            return CanonicalEvidenceDirectories(
+                glassesDirectory = glassesDirectory,
+                companionPhoneDirectory = null,
+            )
+        }
+
+        private val ISO_8601: DateTimeFormatter =
+            DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneOffset.UTC)
+        private val prettyJson = Json {
+            prettyPrint = true
+            encodeDefaults = true
+            explicitNulls = false
+        }
+        private val lineJson = Json {
+            prettyPrint = false
+            encodeDefaults = true
+            explicitNulls = false
+        }
+
+        private fun round3(value: Double): Double = String.format(Locale.US, "%.3f", value).toDouble()
+
+        private fun round6(value: Double): Double = String.format(Locale.US, "%.6f", value).toDouble()
     }
 }

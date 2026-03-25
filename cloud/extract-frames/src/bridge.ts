@@ -44,6 +44,17 @@ export type ArtifactAvailability = {
   arkit_confidence: boolean;
   arkit_meshes: boolean;
   motion: boolean;
+  camera_pose?: boolean;
+  camera_intrinsics?: boolean;
+  depth?: boolean;
+  depth_confidence?: boolean;
+  point_cloud?: boolean;
+  planes?: boolean;
+  tracking_state?: boolean;
+  light_estimate?: boolean;
+  companion_phone_pose?: boolean;
+  companion_phone_intrinsics?: boolean;
+  companion_phone_calibration?: boolean;
 };
 
 export type ClaimedArtifactEvaluation = {
@@ -335,6 +346,45 @@ export function evaluateClaimedArtifacts(input: {
   if (input.claimed.motion && !input.actual.motion) {
     warnings.push("claimed_motion_missing_or_empty");
   }
+  if (input.claimed.camera_pose && !input.actual.camera_pose) {
+    blockers.push("claimed_camera_pose_missing_or_empty");
+  }
+  if (input.claimed.camera_intrinsics && !input.actual.camera_intrinsics) {
+    blockers.push("claimed_camera_intrinsics_invalid");
+  }
+  if (input.claimed.depth && !input.actual.depth) {
+    warnings.push("claimed_depth_missing_or_empty");
+  }
+  if (input.claimed.depth_confidence && !input.actual.depth_confidence) {
+    warnings.push("claimed_depth_confidence_missing_or_empty");
+  }
+  if (input.claimed.point_cloud && !input.actual.point_cloud) {
+    warnings.push("claimed_point_cloud_missing_or_empty");
+  }
+  if (input.claimed.planes && !input.actual.planes) {
+    warnings.push("claimed_planes_missing_or_empty");
+  }
+  if (input.claimed.tracking_state && !input.actual.tracking_state) {
+    warnings.push("claimed_tracking_state_missing_or_empty");
+  }
+  if (input.claimed.light_estimate && !input.actual.light_estimate) {
+    warnings.push("claimed_light_estimate_missing_or_empty");
+  }
+  if (input.claimed.companion_phone_pose && !input.actual.companion_phone_pose) {
+    warnings.push("claimed_companion_phone_pose_missing_or_empty");
+  }
+  if (
+    input.claimed.companion_phone_intrinsics &&
+    !input.actual.companion_phone_intrinsics
+  ) {
+    warnings.push("claimed_companion_phone_intrinsics_missing_or_invalid");
+  }
+  if (
+    input.claimed.companion_phone_calibration &&
+    !input.actual.companion_phone_calibration
+  ) {
+    warnings.push("claimed_companion_phone_calibration_missing");
+  }
 
   return { valid, blockers, warnings };
 }
@@ -366,6 +416,44 @@ export function buildCaptureBundleReferences(input: {
   }
   if (input.availability.motion) {
     captureBundle.motion_uri = `${base}/motion.jsonl`;
+  }
+  if (input.availability.camera_pose) {
+    captureBundle.arcore_poses_uri = `${base}/arcore/poses.jsonl`;
+    captureBundle.arcore_frames_uri = `${base}/arcore/frames.jsonl`;
+  }
+  if (input.availability.camera_intrinsics) {
+    captureBundle.arcore_intrinsics_uri = `${base}/arcore/session_intrinsics.json`;
+  }
+  if (input.availability.depth) {
+    captureBundle.arcore_depth_manifest_uri = `${base}/arcore/depth_manifest.json`;
+    captureBundle.arcore_depth_prefix_uri = `${base}/arcore/depth`;
+  }
+  if (input.availability.depth_confidence) {
+    captureBundle.arcore_confidence_manifest_uri = `${base}/arcore/confidence_manifest.json`;
+    captureBundle.arcore_confidence_prefix_uri = `${base}/arcore/confidence`;
+  }
+  if (input.availability.point_cloud) {
+    captureBundle.arcore_point_cloud_uri = `${base}/arcore/point_cloud.jsonl`;
+  }
+  if (input.availability.planes) {
+    captureBundle.arcore_planes_uri = `${base}/arcore/planes.jsonl`;
+  }
+  if (input.availability.tracking_state) {
+    captureBundle.arcore_tracking_state_uri = `${base}/arcore/tracking_state.jsonl`;
+  }
+  if (input.availability.light_estimate) {
+    captureBundle.arcore_light_estimates_uri = `${base}/arcore/light_estimates.jsonl`;
+  }
+  if (input.availability.companion_phone_pose) {
+    captureBundle.companion_phone_poses_uri = `${base}/companion_phone/poses.jsonl`;
+  }
+  if (input.availability.companion_phone_intrinsics) {
+    captureBundle.companion_phone_intrinsics_uri =
+      `${base}/companion_phone/session_intrinsics.json`;
+  }
+  if (input.availability.companion_phone_calibration) {
+    captureBundle.companion_phone_calibration_uri =
+      `${base}/companion_phone/calibration.json`;
   }
 
   return captureBundle;

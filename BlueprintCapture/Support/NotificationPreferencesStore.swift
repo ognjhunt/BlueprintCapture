@@ -122,7 +122,20 @@ final class NotificationPreferencesStore: ObservableObject {
             preferences = remote
             persist()
         } catch {
-            print("⚠️ [Notifications] Failed to refresh preferences: \(error.localizedDescription)")
+            let message: String
+            if let apiError = error as? APIService.APIError {
+                message = apiError.errorDescription ?? String(describing: apiError)
+            } else {
+                message = error.localizedDescription
+            }
+            SessionEventManager.shared.logError(
+                errorCode: "notification_sync_failed",
+                metadata: [
+                    "operation": "refresh preferences",
+                    "message": message
+                ]
+            )
+            print("⚠️ [Notifications] Failed to refresh preferences: \(message)")
         }
     }
 

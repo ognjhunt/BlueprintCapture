@@ -69,6 +69,26 @@ class SettingsViewModel: ObservableObject {
                 self.stripeAccountState = nil
                 return
             }
+            guard AppConfig.hasBackendBaseURL() else {
+                let currentUser = Auth.auth().currentUser
+                let fallbackProfile = UserProfile(
+                    fullName: currentUser?.displayName ?? "",
+                    email: currentUser?.email ?? "",
+                    phoneNumber: currentUser?.phoneNumber ?? "",
+                    company: ""
+                )
+                self.profile = fallbackProfile
+                self.editingProfile = fallbackProfile
+                self.totalEarnings = 0
+                self.pendingPayout = 0
+                self.scansCompleted = 0
+                self.billingInfo = nil
+                self.captureHistory = []
+                self.qcStatus = nil
+                self.payoutLedger = []
+                self.stripeAccountState = nil
+                return
+            }
             async let profileTask = apiService.fetchUserProfile()
             async let earningsTask = apiService.fetchEarnings()
             async let capturesTask = apiService.fetchCaptureHistory()

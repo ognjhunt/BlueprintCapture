@@ -72,7 +72,7 @@ fun BlueprintCaptureRoot(
                 RootStage.Onboarding -> OnboardingScreen(
                     hasBackend = config.hasBackend,
                     hasStripe = config.hasStripe,
-                    hasPlaces = config.hasPlaces,
+                    hasNearbyDiscovery = config.hasNearbyDiscovery,
                     onContinue = rootViewModel::completeOnboarding,
                 )
 

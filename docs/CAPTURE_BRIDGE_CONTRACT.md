@@ -2,7 +2,23 @@
 
 This document defines the bridge contract emitted by [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts).
 
-For the canonical upstream raw iPhone bundle contract, see [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md). This bridge document remains the compatibility and downstream materialization contract.
+For the canonical upstream raw capture contract, see [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md). This bridge document remains the compatibility and downstream materialization contract.
+
+## Additive V3.1 Note
+
+Raw bundles may now carry:
+
+- `capture_profile_id`
+- `capture_capabilities`
+- `arcore/*` raw sidecars for Android ARCore captures
+- `glasses/*` raw sidecars for glasses POV metadata
+- `companion_phone/*` sidecars for uncalibrated companion-phone pose scaffolds
+
+The bridge must preserve the raw-vs-derived distinction:
+
+- raw first-party evidence stays authoritative
+- `capture_capabilities` declares what the device truthfully captured
+- downstream geometry remains derived and must not be mislabeled as raw evidence
 
 ## Input Paths
 
@@ -46,9 +62,11 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   "height": 1440,
   "capture_start_epoch_ms": 1702137045123,
   "has_lidar": true,
-  "capture_schema_version": "2.0.0",
+  "capture_schema_version": "3.1.0",
   "capture_source": "iphone|android|glasses",
-  "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses"
+  "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses",
+  "capture_profile_id": "iphone_arkit_lidar|iphone_arkit_non_lidar|android_arcore_depth|android_arcore_pose_only|android_camera_only|glasses_pov|glasses_pov_companion_phone",
+  "capture_capabilities": {}
 }
 ```
 
@@ -74,7 +92,9 @@ The manifest must also carry normalized scene-memory and rights metadata:
     "inaccessible_areas": [],
     "world_model_candidate": false,
     "motion_provenance": null,
-    "motion_timestamps_capture_relative": false
+    "motion_timestamps_capture_relative": false,
+    "geometry_source": null,
+    "geometry_expected_downstream": true
   },
   "capture_rights": {
     "derived_scene_generation_allowed": false,
@@ -99,9 +119,25 @@ The manifest also includes a validated `capture_evidence` block:
     "arkit_depth_frames": 0,
     "arkit_confidence_frames": 0,
     "arkit_mesh_files": 0,
+    "pose_rows": 0,
+    "intrinsics_valid": false,
+    "depth_frames": 0,
+    "confidence_frames": 0,
+    "point_cloud_samples": 0,
+    "plane_rows": 0,
+    "feature_point_rows": 0,
+    "tracking_state_rows": 0,
+    "relocalization_event_rows": 0,
+    "light_estimate_rows": 0,
     "motion_samples": 0,
+    "pose_authority": "not_available",
+    "intrinsics_authority": "not_available",
+    "depth_authority": "not_available",
+    "motion_authority": "diagnostic_only",
     "motion_provenance": null,
-    "motion_timestamps_capture_relative": false
+    "motion_timestamps_capture_relative": false,
+    "geometry_source": null,
+    "geometry_expected_downstream": true
   }
 }
 ```

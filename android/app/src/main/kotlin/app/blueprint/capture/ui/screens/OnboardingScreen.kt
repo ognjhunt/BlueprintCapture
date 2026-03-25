@@ -41,7 +41,7 @@ import app.blueprint.capture.ui.theme.BlueprintTextPrimary
 fun OnboardingScreen(
     hasBackend: Boolean,
     hasStripe: Boolean,
-    hasPlaces: Boolean,
+    hasNearbyDiscovery: Boolean,
     onContinue: () -> Unit,
 ) {
     Box(

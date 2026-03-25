@@ -68,6 +68,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -91,6 +92,9 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.blueprint.capture.data.capture.ARCoreCaptureManager
+import app.blueprint.capture.data.capture.ARCoreSupportLevel
+import app.blueprint.capture.data.capture.ARCoreSupport
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
 import app.blueprint.capture.ui.theme.BlueprintAccent
@@ -109,6 +113,7 @@ import coil.compose.SubcomposeAsyncImageContent
 import java.io.File
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
@@ -124,6 +129,8 @@ fun CaptureSessionScreen(
     val reviewDraft = uiState.reviewDraft
     val isBusy = uiState.actionState != FinishedCaptureActionState.Idle
     val hasDetailsSurface = capture.hasDetailsSurface
+    val arcoreSupportLevel = remember(context) { ARCoreSupport.supportLevel(context) }
+    val arcoreRuntimeAvailable = arcoreSupportLevel == ARCoreSupportLevel.SupportedInstalled
 
     var showRecorder by remember(capture.targetId, capture.jobId, capture.label) {
         mutableStateOf(!hasDetailsSurface)
@@ -135,9 +142,12 @@ fun CaptureSessionScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var videoCapture by remember { mutableStateOf<VideoCapture<Recorder>?>(null) }
     var recording by remember { mutableStateOf<Recording?>(null) }
+    var usingArcoreRuntime by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var elapsedSeconds by remember { mutableLongStateOf(0L) }
     var captureStartEpochMs by remember { mutableLongStateOf(0L) }
+    val screenScope = rememberCoroutineScope()
+    val arcoreManager = remember(context) { ARCoreCaptureManager(context) }
     val previewView = remember(context) {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -208,8 +218,8 @@ fun CaptureSessionScreen(
         viewModel.consumeExportShare()
     }
 
-    DisposableEffect(showRecorder, permissionsGranted, lifecycleOwner, previewView) {
-        if (!showRecorder || !permissionsGranted) {
+    DisposableEffect(showRecorder, permissionsGranted, lifecycleOwner, previewView, usingArcoreRuntime) {
+        if (!showRecorder || !permissionsGranted || usingArcoreRuntime) {
             videoCapture = null
             onDispose { }
         } else {
@@ -254,6 +264,14 @@ fun CaptureSessionScreen(
         }
     }
 
+    DisposableEffect(arcoreManager) {
+        onDispose {
+            screenScope.launch {
+                arcoreManager.close()
+            }
+        }
+    }
+
     when {
         reviewDraft != null -> ReviewScreen(
             uiState = uiState,
@@ -281,6 +299,8 @@ fun CaptureSessionScreen(
             isRecording = isRecording,
             elapsedSeconds = elapsedSeconds,
             videoCapture = videoCapture,
+            arcoreSupportLevel = arcoreSupportLevel,
+            usingArcoreRuntime = usingArcoreRuntime,
             passBrief = viewModel.currentSiteWorldPassBrief,
             routePlan = viewModel.siteWorldRoutePlanSummary,
             requiredRules = viewModel.siteWorldRequiredRules,
@@ -304,13 +324,43 @@ fun CaptureSessionScreen(
             onMarkEntryLock = viewModel::markSiteWorldEntryLock,
             onMarkWeakSignal = viewModel::noteWeakSignalSegment,
             onStartRecording = {
-                val captureUseCase = videoCapture ?: return@RecorderScreen
                 viewModel.beginWorkflowRecordingPass()
-                val outputFile = createRecordingFile(context)
                 captureStartEpochMs = System.currentTimeMillis()
                 elapsedSeconds = 0L
                 cameraError = null
+                val outputDirectory = createRecordingOutputDirectory(context)
+                viewModel.startIMUSampling(captureStartEpochMs)
+                if (ARCoreSupport.isUsable(context)) {
+                    usingArcoreRuntime = true
+                    runCatching {
+                        ProcessCameraProvider.getInstance(context).get().unbindAll()
+                    }
+                    screenScope.launch {
+                        val started = arcoreManager.startCapture(
+                            outputDirectory = outputDirectory,
+                            captureStartEpochMs = captureStartEpochMs,
+                        )
+                        started.onSuccess {
+                            isRecording = true
+                        }.onFailure { error ->
+                            usingArcoreRuntime = false
+                            val (imuFile, motionSampleCount) = viewModel.stopIMUSamplingAndFlush(outputDirectory)
+                            imuFile?.delete()
+                            cameraError = error.message ?: "ARCore capture could not start on this device."
+                        }
+                    }
+                    return@RecorderScreen
+                }
 
+                val captureUseCase = videoCapture
+                if (captureUseCase == null) {
+                    val (imuFile, _) = viewModel.stopIMUSamplingAndFlush(outputDirectory)
+                    imuFile?.delete()
+                    outputDirectory.deleteRecursively()
+                    cameraError = "Android camera session is not ready."
+                    return@RecorderScreen
+                }
+                val outputFile = outputDirectory.resolve("walkthrough.mp4")
                 var pendingRecording = captureUseCase.output.prepareRecording(
                     context,
                     FileOutputOptions.Builder(outputFile).build(),
@@ -330,23 +380,52 @@ fun CaptureSessionScreen(
                         is VideoRecordEvent.Finalize -> {
                             isRecording = false
                             recording = null
+                            val (imuSamplesFile, motionSampleCount) = viewModel.stopIMUSamplingAndFlush(outputDirectory)
                             if (event.hasError()) {
-                                outputFile.delete()
+                                outputDirectory.deleteRecursively()
                                 cameraError = event.cause?.message
                                     ?: "Recording failed before the file finalized."
-                        } else {
-                            viewModel.prepareRecordedCapture(
-                                capture = capture,
-                                recordingFile = outputFile,
-                                captureStartEpochMs = captureStartEpochMs,
+                            } else {
+                                viewModel.prepareRecordedCapture(
+                                    capture = capture,
+                                    recordingFile = outputFile,
+                                    captureStartEpochMs = captureStartEpochMs,
                                     captureDurationMs = event.recordingStats.recordedDurationNanos / 1_000_000L,
+                                    imuSamplesFile = imuSamplesFile,
+                                    motionSampleCount = motionSampleCount,
                                 )
                             }
                         }
                     }
                 }
             },
-            onStopRecording = { recording?.stop() },
+            onStopRecording = {
+                if (usingArcoreRuntime) {
+                    screenScope.launch {
+                        val result = arcoreManager.stopCapture()
+                        usingArcoreRuntime = false
+                        isRecording = false
+                        result.onSuccess { artifacts ->
+                            val (imuSamplesFile, motionSampleCount) =
+                                viewModel.stopIMUSamplingAndFlush(artifacts.recordingFile.parentFile ?: context.cacheDir)
+                            viewModel.prepareRecordedCapture(
+                                capture = capture,
+                                recordingFile = artifacts.recordingFile,
+                                captureStartEpochMs = artifacts.captureStartEpochMs,
+                                captureDurationMs = artifacts.durationMs,
+                                imuSamplesFile = imuSamplesFile,
+                                motionSampleCount = motionSampleCount,
+                                arcoreEvidenceDirectory = artifacts.arcoreEvidenceDirectory,
+                                coordinateFrameSessionId = artifacts.coordinateFrameSessionId,
+                            )
+                        }.onFailure { error ->
+                            cameraError = error.message ?: "ARCore capture could not finish cleanly."
+                        }
+                    }
+                } else {
+                    recording?.stop()
+                }
+            },
         )
 
         else -> CaptureDetailsSurface(
@@ -811,6 +890,8 @@ private fun RecorderScreen(
     isRecording: Boolean,
     elapsedSeconds: Long,
     videoCapture: VideoCapture<Recorder>?,
+    arcoreSupportLevel: ARCoreSupportLevel,
+    usingArcoreRuntime: Boolean,
     passBrief: SiteWorldPassBrief,
     routePlan: List<String>,
     requiredRules: List<String>,
@@ -868,6 +949,18 @@ private fun RecorderScreen(
             SiteWorldAnchorType.RestrictedBoundary,
         )
     }
+    val arcoreStatusMessage = remember(arcoreSupportLevel, usingArcoreRuntime) {
+        when {
+            usingArcoreRuntime ->
+                "ARCore recording is active. The on-screen camera preview is paused until a Camera2 SharedCamera pipeline is wired. walkthrough.mp4 and arcore/* evidence are still being recorded."
+            arcoreSupportLevel == ARCoreSupportLevel.SupportedInstalled ->
+                "Preview is live only during preflight. When recording starts, CameraX hands off to ARCore and the preview pauses because SharedCamera live preview is not wired yet."
+            arcoreSupportLevel == ARCoreSupportLevel.SupportedNeedsInstall ->
+                "This device needs the current ARCore service installed before ARCore-first capture can run."
+            else -> null
+        }
+    }
+    val canStartRecording = permissionsGranted && !isBusy && (videoCapture != null || arcoreSupportLevel == ARCoreSupportLevel.SupportedInstalled)
 
     Box(
         modifier = Modifier
@@ -878,6 +971,43 @@ private fun RecorderScreen(
             factory = { previewView },
             modifier = Modifier.fillMaxSize(),
         )
+
+        if (usingArcoreRuntime) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(BlueprintBlack.copy(alpha = 0.56f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 24.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(BlueprintSurfaceRaised.copy(alpha = 0.94f))
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "ARCore capture running",
+                        style = TextStyle(
+                            color = BlueprintTextPrimary,
+                            fontSize = 18.sp,
+                            lineHeight = 22.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                    )
+                    Text(
+                        text = "Live camera preview is unavailable in this runtime until SharedCamera is integrated. Recording continues in the background.",
+                        style = TextStyle(
+                            color = BlueprintTextMuted,
+                            fontSize = 14.sp,
+                            lineHeight = 19.sp,
+                            fontWeight = FontWeight.Medium,
+                        ),
+                    )
+                }
+            }
+        }
 
         Box(
             modifier = Modifier
@@ -945,11 +1075,19 @@ private fun RecorderScreen(
                     Text(
                         when {
                             !permissionsGranted -> "Camera and microphone access are required before Android can record the walkthrough."
+                            usingArcoreRuntime -> "ARCore recording is running. Keep walking the planned pass even though the preview is paused."
                             isRecording -> livePrompt
                             else -> "Plan the route, then start the next pass when you are ready."
                         },
                         color = BlueprintTextMuted,
                     )
+                }
+
+                arcoreStatusMessage?.let { message ->
+                    SurfaceCard {
+                        Text("ARCore runtime")
+                        Text(message, color = BlueprintTextMuted)
+                    }
                 }
 
                 cameraError?.let { message ->
@@ -1017,6 +1155,12 @@ private fun RecorderScreen(
                     isRecording = isRecording,
                     elapsedSeconds = elapsedSeconds,
                     uiState = uiState,
+                    runtimeStatus = when {
+                        usingArcoreRuntime -> "ARCore capture active"
+                        arcoreSupportLevel == ARCoreSupportLevel.SupportedInstalled -> "ARCore preflight preview"
+                        arcoreSupportLevel == ARCoreSupportLevel.SupportedNeedsInstall -> "ARCore install required"
+                        else -> "CameraX video preview"
+                    },
                 )
 
                 when {
@@ -1036,7 +1180,7 @@ private fun RecorderScreen(
                     !isRecording -> {
                         Button(
                             onClick = onStartRecording,
-                            enabled = videoCapture != null && !isBusy,
+                            enabled = canStartRecording,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = BlueprintAccent,
@@ -1599,6 +1743,7 @@ private fun SessionStatusCard(
     isRecording: Boolean,
     elapsedSeconds: Long,
     uiState: CaptureSessionUiState,
+    runtimeStatus: String,
 ) {
     SurfaceCard {
         Row(
@@ -1616,9 +1761,11 @@ private fun SessionStatusCard(
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (permissionsGranted) "Permissions ready" else "Permissions missing")
-                Text(statusLabel(uiState), color = BlueprintTextMuted)
+                Text(runtimeStatus, color = BlueprintTextMuted)
             }
         }
+
+        Text(statusLabel(uiState), color = BlueprintTextMuted)
 
         if (uiState.actionState != FinishedCaptureActionState.Idle) {
             LinearProgressIndicator(
@@ -1718,8 +1865,14 @@ private fun hasCapturePermissions(context: Context): Boolean {
 }
 
 private fun createRecordingFile(context: Context): File {
-    return context.cacheDir.resolve("recordings").also { it.mkdirs() }
-        .resolve("walkthrough-${UUID.randomUUID()}.mp4")
+    return createRecordingOutputDirectory(context).resolve("walkthrough.mp4")
+}
+
+private fun createRecordingOutputDirectory(context: Context): File {
+    return context.cacheDir.resolve("recordings")
+        .also { it.mkdirs() }
+        .resolve(UUID.randomUUID().toString())
+        .also { it.mkdirs() }
 }
 
 private fun formatElapsed(seconds: Long): String {

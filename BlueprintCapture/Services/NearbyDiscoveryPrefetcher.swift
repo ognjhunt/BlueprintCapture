@@ -22,30 +22,22 @@ final class NearbySeedsStore {
 
 /// Fire-and-forget prefetch once we get user's location the first time
 struct NearbyDiscoveryPrefetcher {
-    private let discovery: GeminiDiscoveryServiceProtocol
-    private let details: PlacesDetailsServiceProtocol
+    private let discovery: NearbyCandidateDiscoveryServiceProtocol
 
-    init(discovery: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(),
-         details: PlacesDetailsServiceProtocol = PlacesDetailsService()) {
+    init(discovery: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService()) {
         self.discovery = discovery
-        self.details = details
     }
 
     func runOnceIfPossible(userLocation: CLLocationCoordinate2D, radiusMeters: Int = 1609, limit: Int = 25) {
         guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return }
-        Task.detached(priority: .utility) {
+        Task(priority: .utility) {
             do {
-                let candidates = try await discovery.discoverCandidates(
+                let detailsLite = try await discovery.discoverCandidatePlaces(
                     userLocation: userLocation,
                     radiusMeters: radiusMeters,
                     limit: limit,
-                    categories: ["grocery", "electronics"],
-                    sku: .B,
-                    geohashHint: nil
+                    includedTypes: ["supermarket", "electronics_store", "store"]
                 )
-                guard !candidates.isEmpty else { return }
-                let ids = candidates.map { $0.placeId }
-                let detailsLite = try await details.fetchDetails(placeIds: ids)
                 guard !detailsLite.isEmpty else { return }
                 let first = Array(detailsLite.prefix(10))
                 NearbySeedsStore.shared.write(first)
@@ -56,4 +48,3 @@ struct NearbyDiscoveryPrefetcher {
         }
     }
 }
-

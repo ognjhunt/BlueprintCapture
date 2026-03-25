@@ -1,0 +1,19 @@
+// Copy this file to an untracked local path, for example:
+// Config/BlueprintCapture.release.xcconfig
+//
+// Validate it with:
+//   BLUEPRINT_RELEASE_XCCONFIG=/absolute/path/to/BlueprintCapture.release.xcconfig \
+//   ./scripts/archive_external_alpha.sh --validate-config-only
+//
+// Archive with:
+//   BLUEPRINT_RELEASE_XCCONFIG=/absolute/path/to/BlueprintCapture.release.xcconfig \
+//   ./scripts/archive_external_alpha.sh
+
+BLUEPRINT_URL_SLASH = /
+BLUEPRINT_BACKEND_BASE_URL = https:$(BLUEPRINT_URL_SLASH)$(BLUEPRINT_URL_SLASH)your-creator-backend.example.com
+BLUEPRINT_DEMAND_BACKEND_BASE_URL = https:$(BLUEPRINT_URL_SLASH)$(BLUEPRINT_URL_SLASH)us-central1-your-project.cloudfunctions.net/api
+BLUEPRINT_NEARBY_DISCOVERY_PROVIDER = places_nearby
+BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK = NO
+BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO
+BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE = NO
+BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS = YES

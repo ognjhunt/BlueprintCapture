@@ -73,12 +73,18 @@ Secrets.plist
 .env
 .env.*
 !.env.example
+Config/*.xcconfig
 
 # Android
 android/.gradle/
+android/.kotlin/
 android/local.properties
 android/**/build/
 android/.idea/
+
+# Local build outputs
+build/
+builds/
 
 # Cloud Functions
 cloud/**/node_modules/

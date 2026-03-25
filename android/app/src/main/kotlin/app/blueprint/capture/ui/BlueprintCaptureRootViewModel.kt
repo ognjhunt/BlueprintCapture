@@ -9,6 +9,7 @@ import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.MainTab
 import app.blueprint.capture.data.model.RootStage
 import app.blueprint.capture.data.model.UploadQueueItem
+import app.blueprint.capture.data.permissions.StartupPermissionChecker
 import app.blueprint.capture.data.session.SessionPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -51,6 +52,7 @@ class BlueprintCaptureRootViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val authRepository: AuthRepository,
     private val captureUploadRepository: CaptureUploadRepository,
+    private val startupPermissionChecker: StartupPermissionChecker,
 ) : ViewModel() {
     private val selectedTab = MutableStateFlow(MainTab.Scan)
     private val activeCapture = MutableStateFlow<CaptureLaunch?>(null)
@@ -111,15 +113,16 @@ class BlueprintCaptureRootViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val uploadQueue = rest[3] as List<UploadQueueItem>
         BlueprintCaptureRootUiState(
-            stage = when {
-                !flags.onboardingComplete -> RootStage.Onboarding
-                user == null && !flags.authSkipped -> RootStage.Auth
-                !flags.inviteCodeComplete -> RootStage.InviteCode
-                !flags.permissionsComplete -> RootStage.Permissions
-                !flags.walkthroughComplete -> RootStage.Walkthrough
-                !flags.glassesSetupComplete -> RootStage.ConnectGlasses
-                else -> RootStage.App
-            },
+            stage = resolveRootStage(
+                onboardingComplete = flags.onboardingComplete,
+                hasRegisteredUser = user != null,
+                authSkipped = flags.authSkipped,
+                inviteCodeComplete = flags.inviteCodeComplete,
+                permissionsComplete = flags.permissionsComplete,
+                hasStartupPermissions = startupPermissionChecker.hasRequiredStartupPermission(),
+                walkthroughComplete = flags.walkthroughComplete,
+                glassesSetupComplete = flags.glassesSetupComplete,
+            ),
             selectedTab = tab,
             activeCapture = capture,
             uploads = uploadQueue,
@@ -181,4 +184,23 @@ class BlueprintCaptureRootViewModel @Inject constructor(
     fun cancelUpload(id: String) {
         captureUploadRepository.cancelUpload(id)
     }
+}
+
+internal fun resolveRootStage(
+    onboardingComplete: Boolean,
+    hasRegisteredUser: Boolean,
+    authSkipped: Boolean,
+    inviteCodeComplete: Boolean,
+    permissionsComplete: Boolean,
+    hasStartupPermissions: Boolean,
+    walkthroughComplete: Boolean,
+    glassesSetupComplete: Boolean,
+): RootStage = when {
+    !onboardingComplete -> RootStage.Onboarding
+    !hasRegisteredUser && !authSkipped -> RootStage.Auth
+    !inviteCodeComplete -> RootStage.InviteCode
+    !permissionsComplete || !hasStartupPermissions -> RootStage.Permissions
+    !walkthroughComplete -> RootStage.Walkthrough
+    !glassesSetupComplete -> RootStage.ConnectGlasses
+    else -> RootStage.App
 }

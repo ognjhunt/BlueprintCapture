@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AVFoundation
+import ARKit
 import UIKit
 import CoreMotion
 
@@ -73,6 +74,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let framesDirectoryURL: URL
         let motionLogURL: URL
         let manifestURL: URL
+        let glassesDirectoryURL: URL
+        let streamMetadataURL: URL
+        let frameTimestampsLogURL: URL
+        let deviceStateLogURL: URL
+        let healthEventsLogURL: URL
+        let companionPhoneDirectoryURL: URL
+        let companionPhonePosesLogURL: URL
+        let companionPhoneIntrinsicsURL: URL
+        let companionPhoneCalibrationURL: URL
         let packageURL: URL
         let startedAt: Date
         let endedAt: Date
@@ -144,11 +154,18 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         return queue
     }()
     private var motionLogFileHandle: FileHandle?
+    private var frameTimestampsLogFileHandle: FileHandle?
+    private var companionPhonePosesFileHandle: FileHandle?
     private let motionJSONEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return encoder
     }()
+    private let companionARSession = ARSession()
+    private var companionPhoneTrackingActive = false
+    private var companionIntrinsicsWritten = false
+    private var companionFirstFrameTimestamp: TimeInterval?
+    private var latestCompanionFrameId: String?
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -164,6 +181,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        companionARSession.delegate = self
         setupSDK()
     }
 
@@ -672,6 +690,8 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 // Setup video writer
                 try setupVideoWriter(artifacts: artifacts)
                 setupMotionLogging(artifacts: artifacts)
+                try setupMetadataLogging(artifacts: artifacts)
+                startCompanionPhoneTrackingIfAvailable(artifacts: artifacts)
 
                 // Start camera stream
                 try await startCameraStream()
@@ -717,6 +737,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let videoURL = recordingDir.appendingPathComponent("walkthrough.mov")
         let motionURL = recordingDir.appendingPathComponent("motion.jsonl")
         let manifestURL = recordingDir.appendingPathComponent("manifest.json")
+        let glassesDirectoryURL = recordingDir.appendingPathComponent("glasses", isDirectory: true)
+        let streamMetadataURL = glassesDirectoryURL.appendingPathComponent("stream_metadata.json")
+        let frameTimestampsLogURL = glassesDirectoryURL.appendingPathComponent("frame_timestamps.jsonl")
+        let deviceStateLogURL = glassesDirectoryURL.appendingPathComponent("device_state.jsonl")
+        let healthEventsLogURL = glassesDirectoryURL.appendingPathComponent("health_events.jsonl")
+        let companionPhoneDirectoryURL = recordingDir.appendingPathComponent("companion_phone", isDirectory: true)
+        let companionPhonePosesLogURL = companionPhoneDirectoryURL.appendingPathComponent("poses.jsonl")
+        let companionPhoneIntrinsicsURL = companionPhoneDirectoryURL.appendingPathComponent("session_intrinsics.json")
+        let companionPhoneCalibrationURL = companionPhoneDirectoryURL.appendingPathComponent("calibration.json")
 
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: parentDir, withIntermediateDirectories: true)
@@ -725,6 +754,12 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
         try fileManager.createDirectory(at: recordingDir, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: framesDir, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: glassesDirectoryURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: companionPhoneDirectoryURL, withIntermediateDirectories: true)
+        fileManager.createFile(atPath: frameTimestampsLogURL.path, contents: nil)
+        fileManager.createFile(atPath: deviceStateLogURL.path, contents: nil)
+        fileManager.createFile(atPath: healthEventsLogURL.path, contents: nil)
+        fileManager.createFile(atPath: companionPhonePosesLogURL.path, contents: nil)
 
         return CaptureArtifacts(
             baseFilename: baseName,
@@ -733,6 +768,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             framesDirectoryURL: framesDir,
             motionLogURL: motionURL,
             manifestURL: manifestURL,
+            glassesDirectoryURL: glassesDirectoryURL,
+            streamMetadataURL: streamMetadataURL,
+            frameTimestampsLogURL: frameTimestampsLogURL,
+            deviceStateLogURL: deviceStateLogURL,
+            healthEventsLogURL: healthEventsLogURL,
+            companionPhoneDirectoryURL: companionPhoneDirectoryURL,
+            companionPhonePosesLogURL: companionPhonePosesLogURL,
+            companionPhoneIntrinsicsURL: companionPhoneIntrinsicsURL,
+            companionPhoneCalibrationURL: companionPhoneCalibrationURL,
             packageURL: packageURL,
             startedAt: Date(),
             endedAt: Date(), // Will be updated on stop
@@ -831,6 +875,78 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         } catch {
             print("⚠️ [GlassesCapture] Failed to setup motion logging: \(error)")
         }
+    }
+
+    private func setupMetadataLogging(artifacts: CaptureArtifacts) throws {
+        if FileManager.default.fileExists(atPath: artifacts.frameTimestampsLogURL.path) {
+            try FileManager.default.removeItem(at: artifacts.frameTimestampsLogURL)
+        }
+        if FileManager.default.fileExists(atPath: artifacts.companionPhonePosesLogURL.path) {
+            try FileManager.default.removeItem(at: artifacts.companionPhonePosesLogURL)
+        }
+        FileManager.default.createFile(atPath: artifacts.frameTimestampsLogURL.path, contents: nil)
+        FileManager.default.createFile(atPath: artifacts.companionPhonePosesLogURL.path, contents: nil)
+        frameTimestampsLogFileHandle = try FileHandle(forWritingTo: artifacts.frameTimestampsLogURL)
+        companionPhonePosesFileHandle = try FileHandle(forWritingTo: artifacts.companionPhonePosesLogURL)
+
+        let streamMetadata: [String: Any] = [
+            "schema_version": "v1",
+            "device_model": "Meta Ray-Ban Smart Glasses",
+            "capture_source": "glasses",
+            "stream_resolution": [
+                "width": 1280,
+                "height": 720,
+            ],
+            "stream_frame_rate": 30,
+            "first_party_geometry_available": false,
+            "first_party_motion_available": false,
+            "public_device_state_available": false,
+            "public_health_events_available": false,
+        ]
+        let streamData = try JSONSerialization.data(withJSONObject: streamMetadata, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try streamData.write(to: artifacts.streamMetadataURL, options: .atomic)
+
+        let unavailableEvent = "{\"event\":\"unavailable_in_public_sdk\"}\n"
+        try unavailableEvent.write(to: artifacts.deviceStateLogURL, atomically: true, encoding: .utf8)
+        try unavailableEvent.write(to: artifacts.healthEventsLogURL, atomically: true, encoding: .utf8)
+
+        let calibration: [String: Any] = [
+            "schema_version": "v1",
+            "calibrated_to_glasses_optical_center": false,
+            "calibration_source": "not_available_in_public_sdk",
+            "notes": ["Companion phone tracking is not extrinsically calibrated to the glasses camera."],
+        ]
+        let calibrationData = try JSONSerialization.data(withJSONObject: calibration, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try calibrationData.write(to: artifacts.companionPhoneCalibrationURL, options: .atomic)
+    }
+
+    private func startCompanionPhoneTrackingIfAvailable(artifacts: CaptureArtifacts) {
+        guard ARWorldTrackingConfiguration.isSupported else { return }
+        companionIntrinsicsWritten = false
+        companionFirstFrameTimestamp = nil
+        latestCompanionFrameId = nil
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.environmentTexturing = .none
+        companionARSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+        companionPhoneTrackingActive = true
+        let streamMetadataUpdate: [String: Any] = [
+            "schema_version": "v1",
+            "camera_model": "pinhole",
+            "source": "companion_phone_arkit",
+            "calibrated_to_glasses_optical_center": false,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: streamMetadataUpdate, options: [.prettyPrinted, .withoutEscapingSlashes]) {
+            try? data.write(to: artifacts.companionPhoneIntrinsicsURL.deletingLastPathComponent().appendingPathComponent("metadata.json"), options: .atomic)
+        }
+    }
+
+    private func stopCompanionPhoneTracking() {
+        guard companionPhoneTrackingActive else { return }
+        companionARSession.pause()
+        companionPhoneTrackingActive = false
+        companionIntrinsicsWritten = false
+        companionFirstFrameTimestamp = nil
+        latestCompanionFrameId = nil
     }
 
     private func writeMotionSample(_ motion: CMDeviceMotion) {
@@ -949,6 +1065,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let frameTime = CMTime(seconds: Double(frameCount) / 30.0, preferredTimescale: 600)
         adaptor.append(pixelBuffer, withPresentationTime: frameTime)
         lastFrameTime = frameTime
+        if let handle = frameTimestampsLogFileHandle {
+            let row: [String: Any] = [
+                "frame_index": frameCount,
+                "presentation_time_us": Int64((frameTime.seconds * 1_000_000.0).rounded()),
+                "t_capture_sec": frameTime.seconds,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: row, options: [.withoutEscapingSlashes]) {
+                handle.write(data)
+                handle.write(Data("\n".utf8))
+            }
+        }
     }
 
     func pauseCapture() {
@@ -1001,11 +1128,20 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         // Stop motion updates
         motionManager.stopDeviceMotionUpdates()
+        stopCompanionPhoneTracking()
 
         // Close motion log
         if let handle = motionLogFileHandle {
             try? handle.close()
             motionLogFileHandle = nil
+        }
+        if let handle = frameTimestampsLogFileHandle {
+            try? handle.close()
+            frameTimestampsLogFileHandle = nil
+        }
+        if let handle = companionPhonePosesFileHandle {
+            try? handle.close()
+            companionPhonePosesFileHandle = nil
         }
 
         // Finish video writing
@@ -1032,6 +1168,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 framesDirectoryURL: artifacts.framesDirectoryURL,
                 motionLogURL: artifacts.motionLogURL,
                 manifestURL: artifacts.manifestURL,
+                glassesDirectoryURL: artifacts.glassesDirectoryURL,
+                streamMetadataURL: artifacts.streamMetadataURL,
+                frameTimestampsLogURL: artifacts.frameTimestampsLogURL,
+                deviceStateLogURL: artifacts.deviceStateLogURL,
+                healthEventsLogURL: artifacts.healthEventsLogURL,
+                companionPhoneDirectoryURL: artifacts.companionPhoneDirectoryURL,
+                companionPhonePosesLogURL: artifacts.companionPhonePosesLogURL,
+                companionPhoneIntrinsicsURL: artifacts.companionPhoneIntrinsicsURL,
+                companionPhoneCalibrationURL: artifacts.companionPhoneCalibrationURL,
                 packageURL: artifacts.packageURL,
                 startedAt: artifacts.startedAt,
                 endedAt: endedAt,
@@ -1061,20 +1206,31 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     private func writeManifest(artifacts: CaptureArtifacts) async {
         // Raw capture manifest.
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
         let manifest: [String: Any] = [
             // These are patched by CaptureUploadService during directory upload with actual values.
             "scene_id": "",  // Patched with targetId/reservationId during upload
+            "capture_id": "",
             "video_uri": "", // Patched with full GCS gs://... path during upload
             "device_model": "Meta Ray-Ban Smart Glasses",
+            "device_model_marketing": "Meta Ray-Ban Smart Glasses",
+            "hardware_model_identifier": UIDevice.current.model,
             "os_version": UIDevice.current.systemVersion,
+            "ios_version": UIDevice.current.systemVersion,
+            "ios_build": ProcessInfo.processInfo.operatingSystemVersionString,
+            "app_version": appVersion,
+            "app_build": appBuild,
             "fps_source": 30.0,  // Pipeline expects float
             "width": 1280,
             "height": 720,
             "capture_start_epoch_ms": Int64(artifacts.startedAt.timeIntervalSince1970 * 1000),
             "has_lidar": false,  // Glasses don't have LiDAR
-            "capture_schema_version": "2.0.0",
+            "depth_supported": false,
+            "capture_schema_version": "3.1.0",
             "capture_source": "glasses",
             "capture_tier_hint": "tier2_glasses",
+            "coordinate_frame_session_id": artifacts.baseFilename,
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
@@ -1143,6 +1299,57 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         currentFrame = nil
         streamingInfo = nil
         captureState = .idle
+    }
+}
+
+extension GlassesCaptureManager: ARSessionDelegate {
+    nonisolated func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.companionPhoneTrackingActive,
+                  let artifacts = self.currentArtifacts,
+                  let handle = self.companionPhonePosesFileHandle else { return }
+            if self.companionFirstFrameTimestamp == nil {
+                self.companionFirstFrameTimestamp = frame.timestamp
+            }
+            let firstTimestamp = self.companionFirstFrameTimestamp ?? frame.timestamp
+            let tCaptureSec = max(0.0, frame.timestamp - firstTimestamp)
+            let frameId = String(format: "%06d", Int((tCaptureSec * 30.0).rounded()) + 1)
+            self.latestCompanionFrameId = frameId
+            let m = frame.camera.transform
+            let transform: [[Double]] = [
+                [Double(m.columns.0.x), Double(m.columns.1.x), Double(m.columns.2.x), Double(m.columns.3.x)],
+                [Double(m.columns.0.y), Double(m.columns.1.y), Double(m.columns.2.y), Double(m.columns.3.y)],
+                [Double(m.columns.0.z), Double(m.columns.1.z), Double(m.columns.2.z), Double(m.columns.3.z)],
+                [Double(m.columns.0.w), Double(m.columns.1.w), Double(m.columns.2.w), Double(m.columns.3.w)],
+            ]
+            let payload: [String: Any] = [
+                "frame_id": frameId,
+                "t_capture_sec": tCaptureSec,
+                "t_monotonic_ns": Int64((frame.timestamp * 1_000_000_000.0).rounded()),
+                "T_world_camera": transform,
+                "tracking_state": "\(frame.camera.trackingState)",
+                "coordinate_frame_session_id": artifacts.baseFilename,
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes]) {
+                handle.write(data)
+                handle.write(Data("\n".utf8))
+            }
+
+            guard !self.companionIntrinsicsWritten else { return }
+            let intrinsics: [String: Any] = [
+                "fx": Double(frame.camera.intrinsics.columns.0.x),
+                "fy": Double(frame.camera.intrinsics.columns.1.y),
+                "cx": Double(frame.camera.intrinsics.columns.2.x),
+                "cy": Double(frame.camera.intrinsics.columns.2.y),
+                "width": Int(frame.camera.imageResolution.width),
+                "height": Int(frame.camera.imageResolution.height),
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: intrinsics, options: [.prettyPrinted, .withoutEscapingSlashes]) {
+                try? data.write(to: artifacts.companionPhoneIntrinsicsURL, options: .atomic)
+                self.companionIntrinsicsWritten = true
+            }
+        }
     }
 }
 

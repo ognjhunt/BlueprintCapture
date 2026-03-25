@@ -7,7 +7,9 @@ import {
   buildDemandSignalsForSiteOperatorSubmission,
   normalizeSiteType,
   rankNearbyOpportunities,
+  rankNearbyOpportunitiesForFeed,
   type DemandOpportunityFeedRequest,
+  type StrategicWeightConfig,
 } from "./demand-opportunities.js";
 
 test("normalizeSiteType collapses aliases", () => {
@@ -80,6 +82,38 @@ test("rankNearbyOpportunities boosts categories with stronger demand", () => {
   assert.ok((ranked[0]?.opportunity_score ?? 0) > (ranked[1]?.opportunity_score ?? 0));
 });
 
+test("expired demand signals do not influence nearby ranking", () => {
+  const staleSignals = buildDemandSignalsForRobotTeamRequest("submission-stale", {
+    company_name: "Atlas Robotics",
+    site_types: ["warehouse"],
+    workflows: ["dock handoff"],
+  }).map((signal) => ({
+    ...signal,
+    freshness_expires_at: "2026-01-01T00:00:00.000Z",
+  }));
+
+  const request: DemandOpportunityFeedRequest = {
+    lat: 37.77,
+    lng: -122.39,
+    radius_m: 5000,
+    limit: 5,
+    candidate_places: [
+      {
+        place_id: "warehouse-1",
+        display_name: "Dock Warehouse",
+        lat: 37.771,
+        lng: -122.391,
+        place_types: ["warehouse"],
+      },
+    ],
+  };
+
+  const ranked = rankNearbyOpportunities(request, staleSignals, undefined, new Date("2026-03-20T12:00:00.000Z"));
+
+  assert.equal(ranked.length, 1);
+  assert.match(ranked[0]?.ranking_explanation ?? "", /No explicit active signal found/);
+});
+
 test("annotateCaptureJobs applies demand metadata to job payloads", () => {
   const signals = buildDemandSignalsForRobotTeamRequest("submission-4", {
     company_name: "Atlas Robotics",
@@ -115,4 +149,155 @@ test("annotateCaptureJobs applies demand metadata to job payloads", () => {
   assert.equal(jobs[0]?.siteType, "warehouse");
   assert.ok((jobs[0]?.demandScore ?? 0) > 0.8);
   assert.ok((jobs[0]?.opportunityScore ?? 0) > 0.7);
+});
+
+test("strategic weights amplify opportunity scores for prioritized site types", () => {
+  const signals = buildDemandSignalsForRobotTeamRequest("submission-weights", {
+    company_name: "Atlas Robotics",
+    site_types: ["warehouse"],
+    workflows: ["dock handoff"],
+  });
+  const weights: StrategicWeightConfig = {
+    generated_at: "2026-03-20T00:00:00.000Z",
+    site_type_weights: {
+      warehouse: 1.25,
+      retail: 0.85,
+    },
+  };
+
+  const ranked = rankNearbyOpportunities({
+    lat: 37.77,
+    lng: -122.39,
+    radius_m: 5000,
+    limit: 2,
+    candidate_places: [
+      {
+        place_id: "warehouse-1",
+        display_name: "Dock Warehouse",
+        lat: 37.771,
+        lng: -122.391,
+        place_types: ["warehouse"],
+      },
+    ],
+  }, signals, weights);
+
+  assert.equal(ranked.length, 1);
+  assert.match(ranked[0]?.ranking_explanation ?? "", /weekly strategic weight 1.25x/);
+  assert.ok((ranked[0]?.opportunity_score ?? 0) > 0.9);
+});
+
+test("rankNearbyOpportunitiesForFeed falls back to heuristic ranking when no model config is present", async () => {
+  const signals = buildDemandSignalsForRobotTeamRequest("submission-fallback", {
+    company_name: "Atlas Robotics",
+    site_types: ["warehouse"],
+    workflows: ["dock handoff"],
+  });
+  const request: DemandOpportunityFeedRequest = {
+    lat: 37.77,
+    lng: -122.39,
+    radius_m: 5000,
+    limit: 2,
+    candidate_places: [
+      {
+        place_id: "warehouse-1",
+        display_name: "Dock Warehouse",
+        lat: 37.771,
+        lng: -122.391,
+        place_types: ["warehouse"],
+      },
+      {
+        place_id: "store-1",
+        display_name: "Corner Shop",
+        lat: 37.7712,
+        lng: -122.3912,
+        place_types: ["convenience_store"],
+      },
+    ],
+  };
+
+  const ranked = await rankNearbyOpportunitiesForFeed(request, signals, undefined, new Date(), {
+    enabled: false,
+  });
+
+  assert.equal(ranked[0]?.place_id, "warehouse-1");
+});
+
+test("rankNearbyOpportunitiesForFeed uses Gemini ranking when configured", async () => {
+  const signals = buildDemandSignalsForRobotTeamRequest("submission-llm", {
+    company_name: "Atlas Robotics",
+    site_types: ["warehouse"],
+    workflows: ["dock handoff"],
+  });
+  const request: DemandOpportunityFeedRequest = {
+    lat: 37.77,
+    lng: -122.39,
+    radius_m: 5000,
+    limit: 2,
+    candidate_places: [
+      {
+        place_id: "warehouse-1",
+        display_name: "Dock Warehouse",
+        lat: 37.771,
+        lng: -122.391,
+        place_types: ["warehouse_store"],
+      },
+      {
+        place_id: "store-1",
+        display_name: "Corner Shop",
+        lat: 37.7712,
+        lng: -122.3912,
+        place_types: ["convenience_store"],
+      },
+    ],
+  };
+
+  const fetchImpl: typeof fetch = async () =>
+    new Response(JSON.stringify({
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                text: JSON.stringify([
+                  {
+                    place_id: "store-1",
+                    site_type: "retail",
+                    site_type_confidence: 0.91,
+                    demand_score: 0.61,
+                    opportunity_score: 0.92,
+                    demand_summary: "Department-store style candidate with stronger near-term retail demand.",
+                    ranking_explanation: "Preferred due to stronger retail signal mix.",
+                    suggested_workflows: ["inventory_scan"],
+                  },
+                  {
+                    place_id: "warehouse-1",
+                    site_type: "warehouse",
+                    site_type_confidence: 0.88,
+                    demand_score: 0.84,
+                    opportunity_score: 0.75,
+                    demand_summary: "Warehouse candidate with strong logistics alignment.",
+                    ranking_explanation: "Strong warehouse fit, but ranked second in this synthetic model response.",
+                    suggested_workflows: ["dock_handoff"],
+                  },
+                ]),
+              },
+            ],
+          },
+        },
+      ],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }) as Response;
+
+  const ranked = await rankNearbyOpportunitiesForFeed(request, signals, undefined, new Date(), {
+    enabled: true,
+    apiKey: "test-key",
+    model: "gemini-3.1-flash-lite-preview",
+    fetchImpl,
+  });
+
+  assert.equal(ranked[0]?.place_id, "store-1");
+  assert.equal(ranked[0]?.site_type, "retail");
+  assert.deepEqual(ranked[0]?.suggested_workflows, ["inventory_scan"]);
 });

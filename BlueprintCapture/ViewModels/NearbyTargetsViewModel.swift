@@ -66,6 +66,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let targetStateService: TargetStateServiceProtocol
     // private let discoveryService: GeminiDiscoveryServiceProtocol // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
     private let placesDetailsService: PlacesDetailsServiceProtocol
+    private let nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol
     private let placesAutocomplete: PlacesAutocompleteServiceProtocol
     private let notifications: NotificationServiceProtocol
     private let recordingPolicyService: RecordingPolicyService
@@ -92,6 +93,7 @@ final class NearbyTargetsViewModel: ObservableObject {
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          // discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(), // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
+         nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
          placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
          notifications: NotificationServiceProtocol = NotificationService(),
          recordingPolicyService: RecordingPolicyService = .shared,
@@ -104,6 +106,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.targetStateService = targetStateService
         // self.discoveryService = discoveryService
         self.placesDetailsService = placesDetailsService
+        self.nearbyDiscoveryService = nearbyDiscoveryService
         self.placesAutocomplete = placesAutocomplete
         self.notifications = notifications
         self.recordingPolicyService = recordingPolicyService
@@ -762,32 +765,36 @@ extension NearbyTargetsViewModel {
         //     print("⏭️  [Pipeline] Gemini API key not configured, skipping")
         // }
 
-        // Fallback 2: Google Places Nearby Search (types-based)
-        print("📡 [Pipeline] Using Places Nearby Search…")
-        let nearby = GooglePlacesNearby()
+        // Fallback 2: Configured nearby discovery provider (Places Nearby by default,
+        // Gemini Maps grounding when explicitly enabled)
+        print("📡 [Pipeline] Using configured nearby discovery provider…")
         do {
             // Places v1 includedTypes aligned to our prior demand targets
             let includedTypes: [String] = [
-                // Valid Table A types for Nearby Search per Google docs
-                // https://developers.google.com/maps/documentation/places/web-service/place-types
+                // Valid Places API (New) Nearby Search types.
                 "supermarket",
                 "electronics_store",
                 "shopping_mall",
                 "department_store",
+                "warehouse_store",
+                "hardware_store",
+                "home_improvement_store",
+                "home_goods_store",
+                "furniture_store",
+                "store",
                 "convenience_store",
                 "pharmacy",
                 "clothing_store"
             ]
-            let nearbyPlaces = try await nearby.nearby(
-                lat: loc.coordinate.latitude,
-                lng: loc.coordinate.longitude,
+            let nearbyPlaces = try await nearbyDiscoveryService.discoverCandidatePlaces(
+                userLocation: loc.coordinate,
                 radiusMeters: radiusMeters,
                 limit: max(limit, 5),
-                types: includedTypes
+                includedTypes: includedTypes
             )
             if !nearbyPlaces.isEmpty {
-                print("✅ [Places Nearby] Found \(nearbyPlaces.count) places")
-                if AppConfig.hasBackendBaseURL() {
+                print("✅ [Nearby Discovery] Found \(nearbyPlaces.count) places")
+                if AppConfig.hasDemandBackendBaseURL() {
                     let response = try? await demandIntelligenceService.fetchDemandOpportunityFeed(
                         DemandOpportunityFeedRequest(
                             lat: loc.coordinate.latitude,
@@ -813,10 +820,10 @@ extension NearbyTargetsViewModel {
                 }
                 return mapDetailsToTargets(details: nearbyPlaces, fallbackSKU: .B, candidateScores: [:])
             } else {
-                print("⚠️  [Places Nearby] No places returned")
+                print("⚠️  [Nearby Discovery] No places returned")
             }
         } catch {
-            print("❌ [Places Nearby] Error: \(error.localizedDescription)")
+            print("❌ [Nearby Discovery] Error: \(error.localizedDescription)")
         }
 
         print("⏭️  [Pipeline] All Google APIs exhausted, returning empty (will fallback to Legacy TargetsAPI)")

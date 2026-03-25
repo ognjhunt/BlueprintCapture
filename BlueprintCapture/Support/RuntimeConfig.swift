@@ -8,6 +8,11 @@ enum AlphaFeature: String, CaseIterable {
     case recordingPolicyAI
 }
 
+enum NearbyDiscoveryProvider: String, Equatable {
+    case placesNearby = "places_nearby"
+    case geminiMapsGrounding = "gemini_maps_grounding"
+}
+
 enum FeatureAvailability: Equatable {
     case enabled
     case disabledForAlpha(String)
@@ -37,16 +42,57 @@ struct RuntimeConfig: Equatable {
     }
 
     let backendBaseURL: URL?
+    let demandBackendBaseURL: URL?
     let isUITesting: Bool
     let uiTestScenario: UITestScenario
     let allowOffsiteCheckIn: Bool
     let maxReservationDriveMinutes: Int
     let fallbackMaxReservationAirMiles: Double
+    let enableNearbyDiscovery: Bool
+    let nearbyDiscoveryProvider: NearbyDiscoveryProvider
+    let enableGeminiMapsGroundingFallback: Bool
     let enableDirectProviderFeatures: Bool
     let allowMockJobsFallback: Bool
+    let enableInternalTestSpace: Bool
+    let enableOpenCaptureHere: Bool
+    let enableRemoteNotifications: Bool
 
     static var current: RuntimeConfig {
         load()
+    }
+
+    init(
+        backendBaseURL: URL? = nil,
+        demandBackendBaseURL: URL? = nil,
+        isUITesting: Bool = false,
+        uiTestScenario: UITestScenario = .disabled,
+        allowOffsiteCheckIn: Bool = false,
+        maxReservationDriveMinutes: Int = 60,
+        fallbackMaxReservationAirMiles: Double = 35.0,
+        enableNearbyDiscovery: Bool = true,
+        nearbyDiscoveryProvider: NearbyDiscoveryProvider = .placesNearby,
+        enableGeminiMapsGroundingFallback: Bool = false,
+        enableDirectProviderFeatures: Bool = false,
+        allowMockJobsFallback: Bool = false,
+        enableInternalTestSpace: Bool = false,
+        enableOpenCaptureHere: Bool = true,
+        enableRemoteNotifications: Bool = false
+    ) {
+        self.backendBaseURL = backendBaseURL
+        self.demandBackendBaseURL = demandBackendBaseURL
+        self.isUITesting = isUITesting
+        self.uiTestScenario = uiTestScenario
+        self.allowOffsiteCheckIn = allowOffsiteCheckIn
+        self.maxReservationDriveMinutes = maxReservationDriveMinutes
+        self.fallbackMaxReservationAirMiles = fallbackMaxReservationAirMiles
+        self.enableNearbyDiscovery = enableNearbyDiscovery
+        self.nearbyDiscoveryProvider = nearbyDiscoveryProvider
+        self.enableGeminiMapsGroundingFallback = enableGeminiMapsGroundingFallback
+        self.enableDirectProviderFeatures = enableDirectProviderFeatures
+        self.allowMockJobsFallback = allowMockJobsFallback
+        self.enableInternalTestSpace = enableInternalTestSpace
+        self.enableOpenCaptureHere = enableOpenCaptureHere
+        self.enableRemoteNotifications = enableRemoteNotifications
     }
 
     static func load(
@@ -64,16 +110,51 @@ struct RuntimeConfig: Equatable {
             environment["BLUEPRINT_BACKEND_BASE_URL"] ??
             (infoDictionary["BLUEPRINT_BACKEND_BASE_URL"] as? String)
         )
+        let demandBackendBaseURL = urlValue(
+            environment["BLUEPRINT_DEMAND_BACKEND_BASE_URL"] ??
+            (infoDictionary["BLUEPRINT_DEMAND_BACKEND_BASE_URL"] as? String)
+        ) ?? backendBaseURL
 
         return RuntimeConfig(
             backendBaseURL: backendBaseURL,
+            demandBackendBaseURL: demandBackendBaseURL,
             isUITesting: isUITesting,
             uiTestScenario: scenario,
             allowOffsiteCheckIn: isUITesting || boolValue(environment["BLUEPRINT_ALLOW_OFFSITE_CHECKIN"], defaultValue: false),
             maxReservationDriveMinutes: intValue(environment["BLUEPRINT_MAX_RESERVATION_DRIVE_MINUTES"], defaultValue: 60),
             fallbackMaxReservationAirMiles: doubleValue(environment["BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES"], defaultValue: 35.0),
+            enableNearbyDiscovery: boolValue(environment["BLUEPRINT_ENABLE_NEARBY_DISCOVERY"], defaultValue: true),
+            nearbyDiscoveryProvider: nearbyDiscoveryProviderValue(
+                environment["BLUEPRINT_NEARBY_DISCOVERY_PROVIDER"] ??
+                (infoDictionary["BLUEPRINT_NEARBY_DISCOVERY_PROVIDER"] as? String),
+                defaultValue: .placesNearby
+            ),
+            enableGeminiMapsGroundingFallback: boolValue(
+                environment["BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK"] ??
+                infoDictionary["BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK"],
+                defaultValue: false
+            ),
             enableDirectProviderFeatures: boolValue(environment["BLUEPRINT_ENABLE_DIRECT_PROVIDER_FEATURES"], defaultValue: false),
-            allowMockJobsFallback: boolValue(environment["BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK"], defaultValue: false)
+            allowMockJobsFallback: boolValue(
+                environment["BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK"] ??
+                infoDictionary["BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK"],
+                defaultValue: false
+            ),
+            enableInternalTestSpace: boolValue(
+                environment["BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE"] ??
+                infoDictionary["BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE"],
+                defaultValue: isUITesting
+            ),
+            enableOpenCaptureHere: boolValue(
+                environment["BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE"] ??
+                infoDictionary["BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE"],
+                defaultValue: true
+            ),
+            enableRemoteNotifications: boolValue(
+                environment["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"] ??
+                infoDictionary["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"],
+                defaultValue: false
+            )
         )
     }
 
@@ -86,7 +167,7 @@ struct RuntimeConfig: Equatable {
             return .enabled
 
         case .nearbyDiscovery:
-            guard enableDirectProviderFeatures else {
+            guard enableNearbyDiscovery else {
                 return .disabledForAlpha("Live nearby discovery is disabled for this alpha build.")
             }
             return .enabled
@@ -127,6 +208,19 @@ struct RuntimeConfig: Equatable {
         }
     }
 
+    private static func boolValue(_ raw: Any?, defaultValue: Bool) -> Bool {
+        switch raw {
+        case let value as Bool:
+            return value
+        case let value as NSNumber:
+            return value.boolValue
+        case let value as String:
+            return boolValue(value, defaultValue: defaultValue)
+        default:
+            return defaultValue
+        }
+    }
+
     private static func intValue(_ raw: String?, defaultValue: Int) -> Int {
         guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
               let value = Int(raw) else {
@@ -150,13 +244,31 @@ struct RuntimeConfig: Equatable {
         }
         return URL(string: trimmed)
     }
+
+    private static func nearbyDiscoveryProviderValue(_ raw: String?, defaultValue: NearbyDiscoveryProvider) -> NearbyDiscoveryProvider {
+        guard let normalized = normalized(raw),
+              let provider = NearbyDiscoveryProvider(rawValue: normalized) else {
+            return defaultValue
+        }
+        return provider
+    }
 }
 
 enum DeveloperProviderOverrides {
-    static func value(for keys: [String], environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+    static func value(
+        for keys: [String],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> String? {
         for key in keys {
             guard let raw = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
                   raw.isEmpty == false else {
+                if let bundled = infoDictionary[key] as? String {
+                    let trimmed = bundled.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty == false {
+                        return trimmed
+                    }
+                }
                 continue
             }
             return raw

@@ -299,6 +299,26 @@ struct ScanHomeAndUploadTests {
         #expect(mapSelection.url == nil)
     }
 
+    @Test @MainActor func scanHome_buildsReviewOnlyInferredNearbyCandidates() async throws {
+        let candidate = PlaceDetailsLite(
+            placeId: "place-1",
+            displayName: "Westside Warehouse",
+            formattedAddress: "100 Logistics Way, Durham, NC",
+            lat: 35.99,
+            lng: -78.90,
+            types: ["warehouse_store", "store"]
+        )
+
+        let job = ScanHomeViewModel.makeInferredNearbyJob(from: candidate)
+
+        #expect(job.id == "poi-place-1")
+        #expect(job.category == "Warehouse Candidate")
+        #expect(job.rightsProfile == "review_required")
+        #expect(job.requestedOutputs == ["qualification", "review_intake"])
+        #expect(job.demandSourceKinds == ["inferred_signal"])
+        #expect(job.workflowName == "Inferred nearby candidate review")
+    }
+
     @Test @MainActor func scanHome_placesReviewSubmissionAfterLiveSections() async throws {
         let sections = ScanHomeViewModel.homeSectionKinds(
             hasReadyNearby: true,
@@ -328,6 +348,15 @@ struct ScanHomeAndUploadTests {
             framesDirectoryURL: baseDir.appendingPathComponent("frames", isDirectory: true),
             motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
             manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            glassesDirectoryURL: baseDir.appendingPathComponent("glasses", isDirectory: true),
+            streamMetadataURL: baseDir.appendingPathComponent("glasses/stream_metadata.json"),
+            frameTimestampsLogURL: baseDir.appendingPathComponent("glasses/frame_timestamps.jsonl"),
+            deviceStateLogURL: baseDir.appendingPathComponent("glasses/device_state.jsonl"),
+            healthEventsLogURL: baseDir.appendingPathComponent("glasses/health_events.jsonl"),
+            companionPhoneDirectoryURL: baseDir.appendingPathComponent("companion_phone", isDirectory: true),
+            companionPhonePosesLogURL: baseDir.appendingPathComponent("companion_phone/poses.jsonl"),
+            companionPhoneIntrinsicsURL: baseDir.appendingPathComponent("companion_phone/session_intrinsics.json"),
+            companionPhoneCalibrationURL: baseDir.appendingPathComponent("companion_phone/calibration.json"),
             packageURL: baseDir,
             startedAt: Date(),
             endedAt: Date(),

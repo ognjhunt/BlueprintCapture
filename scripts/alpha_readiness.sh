@@ -3,10 +3,40 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA_PATH="${ROOT}/build/DerivedData"
+RELEASE_DERIVED_DATA_PATH="${BLUEPRINT_RELEASE_DERIVED_DATA_PATH:-$ROOT/build/DerivedDataRelease}"
 SIMULATOR_NAME="${BLUEPRINT_SIMULATOR_NAME:-iPhone 17 Pro}"
 SIMULATOR_OS="${BLUEPRINT_SIMULATOR_OS:-26.0}"
+RELEASE_XCCONFIG="${BLUEPRINT_RELEASE_XCCONFIG:-$ROOT/Config/BlueprintCapture.release.xcconfig}"
 
 cd "$ROOT"
+
+ensure_extract_frames_dependencies() {
+  local extract_frames_dir="${ROOT}/cloud/extract-frames"
+  if [[ -x "${extract_frames_dir}/node_modules/.bin/tsc" ]]; then
+    return 0
+  fi
+
+  echo "==> Installing cloud bridge dependencies"
+  (cd "$extract_frames_dir" && npm ci >/dev/null)
+}
+
+resolve_swift_packages() {
+  local derived_data_path="$1"
+  local resolve_args=(
+    -resolvePackageDependencies
+    -project BlueprintCapture.xcodeproj
+    -scheme BlueprintCapture
+    -derivedDataPath "$derived_data_path"
+  )
+
+  if xcodebuild "${resolve_args[@]}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "==> Repairing stale Swift package state"
+  rm -rf "$derived_data_path/SourcePackages"
+  xcodebuild "${resolve_args[@]}" >/dev/null
+}
 
 find_simulator_udid() {
   xcrun simctl list devices available | awk -v name="$SIMULATOR_NAME" -v os="$SIMULATOR_OS" '
@@ -59,6 +89,9 @@ echo "==> Booting simulator ${SIMULATOR_NAME} (${SIMULATOR_UDID})"
 xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
 wait_for_simulator_boot
 
+ensure_extract_frames_dependencies
+resolve_swift_packages "$DERIVED_DATA_PATH"
+
 echo "==> Running cloud bridge tests"
 (cd "$ROOT/cloud/extract-frames" && npm test)
 
@@ -74,13 +107,25 @@ xcodebuild test \
   >/dev/null
 
 echo "==> Building app bundle for secret packaging check"
-xcodebuild build \
-  -project BlueprintCapture.xcodeproj \
-  -scheme BlueprintCapture \
-  -destination "generic/platform=iOS Simulator" \
-  -derivedDataPath "$DERIVED_DATA_PATH" >/dev/null
+BUILD_ARGS=(
+  build
+  -project BlueprintCapture.xcodeproj
+  -scheme BlueprintCapture
+  -configuration Release
+  -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}"
+  -derivedDataPath "$RELEASE_DERIVED_DATA_PATH"
+)
 
-APP_PATH="$(find "$DERIVED_DATA_PATH/Build/Products" -path '*BlueprintCapture.app' | head -n 1)"
+if [[ -f "$RELEASE_XCCONFIG" ]]; then
+  echo "==> Using release xcconfig ${RELEASE_XCCONFIG}"
+  BUILD_ARGS+=(-xcconfig "$RELEASE_XCCONFIG")
+fi
+
+resolve_swift_packages "$RELEASE_DERIVED_DATA_PATH"
+xcodebuild "${BUILD_ARGS[@]}" >/dev/null
+
+APP_PRODUCTS_DIR="$RELEASE_DERIVED_DATA_PATH/Build/Products/Release-iphonesimulator"
+APP_PATH="$(find "$APP_PRODUCTS_DIR" -path '*BlueprintCapture.app' | head -n 1)"
 if [[ -z "$APP_PATH" ]]; then
   echo "Failed to locate built BlueprintCapture.app" >&2
   exit 1
@@ -95,6 +140,63 @@ fi
 
 if [[ -f "$ROOT/BlueprintCapture/GoogleService-Info.plist" ]] && [[ ! -f "$APP_PATH/GoogleService-Info.plist" ]]; then
   echo "GoogleService-Info.plist is missing from the app bundle." >&2
+  exit 1
+fi
+
+INFO_PLIST="$APP_PATH/Info.plist"
+plist_value() {
+  /usr/libexec/PlistBuddy -c "Print :$1" "$INFO_PLIST" 2>/dev/null || true
+}
+
+normalize_bool() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]'
+}
+
+for forbidden_key in PLACES_API_KEY GOOGLE_PLACES_API_KEY GEMINI_API_KEY GOOGLE_AI_API_KEY GEMINI_MAPS_API_KEY; do
+  if [[ -n "$(plist_value "$forbidden_key")" ]]; then
+    echo "Provider key $forbidden_key is bundled in the app. Nearby discovery must go through the backend proxy." >&2
+    exit 1
+  fi
+done
+
+ALLOW_MOCK="$(normalize_bool "$(plist_value BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK)")"
+if [[ "$ALLOW_MOCK" == "1" || "$ALLOW_MOCK" == "true" || "$ALLOW_MOCK" == "yes" ]]; then
+  echo "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK must be disabled for release/TestFlight builds." >&2
+  exit 1
+fi
+
+INTERNAL_TEST_SPACE="$(normalize_bool "$(plist_value BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE)")"
+if [[ "$INTERNAL_TEST_SPACE" == "1" || "$INTERNAL_TEST_SPACE" == "true" || "$INTERNAL_TEST_SPACE" == "yes" ]]; then
+  echo "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE must be disabled for release/TestFlight builds." >&2
+  exit 1
+fi
+
+REMOTE_NOTIFICATIONS="$(normalize_bool "$(plist_value BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS)")"
+if [[ "$REMOTE_NOTIFICATIONS" != "1" && "$REMOTE_NOTIFICATIONS" != "true" && "$REMOTE_NOTIFICATIONS" != "yes" ]]; then
+  echo "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS must be enabled for release/TestFlight builds." >&2
+  exit 1
+fi
+
+BACKEND_BASE_URL="$(plist_value BLUEPRINT_BACKEND_BASE_URL)"
+if [[ -z "$BACKEND_BASE_URL" ]]; then
+  echo "BLUEPRINT_BACKEND_BASE_URL must be set in the release build before external distribution." >&2
+  exit 1
+fi
+
+DEMAND_BACKEND_BASE_URL="$(plist_value BLUEPRINT_DEMAND_BACKEND_BASE_URL)"
+if [[ -z "$DEMAND_BACKEND_BASE_URL" ]]; then
+  echo "BLUEPRINT_DEMAND_BACKEND_BASE_URL must be set in the release build." >&2
+  exit 1
+fi
+
+NEARBY_PROVIDER="$(plist_value BLUEPRINT_NEARBY_DISCOVERY_PROVIDER)"
+if [[ "$NEARBY_PROVIDER" != "places_nearby" ]]; then
+  echo "Release default nearby provider must be places_nearby (found '$NEARBY_PROVIDER')." >&2
+  exit 1
+fi
+
+if ! grep -q "aps-environment" "$ROOT/BlueprintCapture/BlueprintCapture.entitlements"; then
+  echo "BlueprintCapture.entitlements is missing aps-environment." >&2
   exit 1
 fi
 

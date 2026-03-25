@@ -199,7 +199,7 @@ fun SettingsScreen(
                 iconBg = BlueprintTealSurface,
                 iconTint = BlueprintTeal,
                 title = "Manage Payouts",
-                subtitle = "Venmo, PayPal, Crypto, Stripe",
+                subtitle = "View Android alpha payout status and backend sync notes",
                 onClick = { showPayouts = true },
             )
             SettingsRowDivider()
@@ -207,9 +207,9 @@ fun SettingsScreen(
                 icon = Icons.Rounded.AccountBalance,
                 iconBg = IconBgNavyBlue,
                 iconTint = IconTintNavyBlue,
-                title = "Connect Bank Account",
-                subtitle = "Stripe payouts for approved scans",
-                onClick = {},
+                title = "Payout Onboarding",
+                subtitle = "Not yet enabled on Android alpha",
+                onClick = { showPayouts = true },
             )
             SettingsRowDivider()
             SettingsNavRow(

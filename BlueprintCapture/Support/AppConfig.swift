@@ -18,8 +18,28 @@ enum AppConfig {
         backendBaseURL() != nil
     }
 
+    static func demandBackendBaseURL() -> URL? {
+        RuntimeConfig.current.demandBackendBaseURL
+    }
+
+    static func hasDemandBackendBaseURL() -> Bool {
+        demandBackendBaseURL() != nil
+    }
+
     static func allowMockJobsFallback() -> Bool {
         RuntimeConfig.current.allowMockJobsFallback
+    }
+
+    static func enableInternalTestSpace() -> Bool {
+        RuntimeConfig.current.enableInternalTestSpace
+    }
+
+    static func enableOpenCaptureHere() -> Bool {
+        RuntimeConfig.current.enableOpenCaptureHere
+    }
+
+    static func enableRemoteNotifications() -> Bool {
+        RuntimeConfig.current.enableRemoteNotifications
     }
 
     // MARK: - Reservation Guards
@@ -40,6 +60,7 @@ enum AppConfig {
 extension Notification.Name {
     static let blueprintNotificationAction = Notification.Name("Blueprint.NotificationAction")
     static let AuthStateDidChange = Notification.Name("Blueprint.AuthStateDidChange")
+    static let FirebaseGuestBootstrapStateDidChange = Notification.Name("Blueprint.FirebaseGuestBootstrapStateDidChange")
     static let blueprintOpenTab = Notification.Name("Blueprint.OpenTab")
     static let blueprintOpenScanJobDetail = Notification.Name("Blueprint.OpenScanJobDetail")
     static let blueprintOpenCaptureDetail = Notification.Name("Blueprint.OpenCaptureDetail")

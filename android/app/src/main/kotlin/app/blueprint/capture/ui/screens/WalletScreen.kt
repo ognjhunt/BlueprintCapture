@@ -462,7 +462,7 @@ private fun WalletPendingRow(
                 .clip(RoundedCornerShape(22.dp))
                 .background(Color(0xFF232325))
                 .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(22.dp))
-                .clickable(onClick = onCashout)
+                .clickable(enabled = cashoutEnabled, onClick = onCashout)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,

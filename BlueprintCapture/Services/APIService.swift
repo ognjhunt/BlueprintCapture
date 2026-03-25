@@ -173,21 +173,21 @@ final class APIService {
     }
 
     func submitRobotTeamDemand(_ payload: RobotTeamDemandIntakePayload) async throws -> DemandSignalSubmissionReceipt {
-        var request = try makeRequest(path: "v1/demand/robot-team-requests", method: "POST")
+        var request = try makeDemandRequest(path: "v1/demand/robot-team-requests", method: "POST")
         request.httpBody = try encoder.encode(payload)
         let data = try await perform(request: request, expecting: 201)
         return try decoder.decode(DemandSignalSubmissionReceipt.self, from: data)
     }
 
     func submitSiteOperatorDemand(_ payload: SiteOperatorDemandIntakePayload) async throws -> DemandSignalSubmissionReceipt {
-        var request = try makeRequest(path: "v1/demand/site-operator-submissions", method: "POST")
+        var request = try makeDemandRequest(path: "v1/demand/site-operator-submissions", method: "POST")
         request.httpBody = try encoder.encode(payload)
         let data = try await perform(request: request, expecting: 201)
         return try decoder.decode(DemandSignalSubmissionReceipt.self, from: data)
     }
 
     func fetchDemandOpportunityFeed(_ requestPayload: DemandOpportunityFeedRequest) async throws -> DemandOpportunityFeedResponse {
-        var request = try makeRequest(path: "v1/opportunities/feed", method: "POST")
+        var request = try makeDemandRequest(path: "v1/opportunities/feed", method: "POST")
         request.httpBody = try encoder.encode(requestPayload)
         let data = try await perform(request: request, expecting: 200)
         return try decoder.decode(DemandOpportunityFeedResponse.self, from: data)
@@ -201,8 +201,24 @@ final class APIService {
         return url
     }
 
+    private func demandBaseURL() throws -> URL {
+        guard let url = AppConfig.demandBackendBaseURL() else {
+            throw APIError.missingBaseURL
+        }
+        return url
+    }
+
     private func makeRequest(path: String, method: String = "GET") throws -> URLRequest {
         let url = try baseURL().appendingPathComponent(path)
+        return buildRequest(url: url, method: method)
+    }
+
+    private func makeDemandRequest(path: String, method: String = "GET") throws -> URLRequest {
+        let url = try demandBaseURL().appendingPathComponent(path)
+        return buildRequest(url: url, method: method)
+    }
+
+    private func buildRequest(url: URL, method: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")

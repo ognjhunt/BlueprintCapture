@@ -29,6 +29,13 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "BLUEPRINT_DEMAND_BACKEND_BASE_URL"
+            value = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
       <Testables>
          <TestableReference
             skipped = "NO"
@@ -74,6 +81,13 @@
             ReferencedContainer = "container:BlueprintCapture.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "BLUEPRINT_DEMAND_BACKEND_BASE_URL"
+            value = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -91,6 +105,13 @@
             ReferencedContainer = "container:BlueprintCapture.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "BLUEPRINT_DEMAND_BACKEND_BASE_URL"
+            value = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

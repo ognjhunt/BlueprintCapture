@@ -71,6 +71,17 @@ final class WalletViewModel: ObservableObject {
             stripeAccountState = nil
             return
         }
+        guard AppConfig.hasBackendBaseURL() else {
+            totalEarnings = 0
+            pendingPayout = 0
+            scansCompleted = 0
+            qcStatus = nil
+            captureHistory = []
+            payoutLedger = []
+            billingInfo = nil
+            stripeAccountState = nil
+            return
+        }
 
         do {
             async let earningsTask = apiService.fetchEarnings()

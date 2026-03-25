@@ -1,8 +1,20 @@
 # Capture Raw Contract V3
 
-This document defines the canonical raw capture bundle contract for iPhone site walkthrough capture in `BlueprintCapture`.
+This document defines the canonical raw capture bundle contract for site walkthrough capture in `BlueprintCapture`.
 
-It is intentionally stricter than the bridge compatibility layer in [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts). Compatibility parsing for older bundles is a bridge concern. V3 is the format new iPhone raw bundles should write.
+It is intentionally stricter than the bridge compatibility layer in [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts). Compatibility parsing for older bundles is a bridge concern. V3 is the format new raw bundles should write.
+
+## Additive V3.1 Update
+
+`capture_schema_version = 3.1.0` keeps `schema_version = "v3"` while extending the contract across iPhone, Android, and glasses modalities.
+
+New bundles remain backward-compatible but must additionally emit:
+
+- top-level `capture_profile_id`
+- top-level `capture_capabilities`
+- modality-specific sidecars under `arkit/`, `arcore/`, `glasses/`, and `companion_phone/` only when those signals are truthfully available
+
+Raw first-party evidence remains authoritative. Derived geometry remains separate and non-authoritative.
 
 ## Goals
 
@@ -40,18 +52,40 @@ raw/
   sync_map.jsonl                             required
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
+  glasses/
+    stream_metadata.json                     required for glasses
+    frame_timestamps.jsonl                   required for glasses
+    device_state.jsonl                       required for glasses
+    health_events.jsonl                      required for glasses
+  companion_phone/
+    poses.jsonl                              required when companion_phone_pose=true
+    session_intrinsics.json                  required when companion_phone_intrinsics=true
+    calibration.json                         required when companion_phone_calibration=true
   arkit/
     poses.jsonl                              required for iphone
     frames.jsonl                             required for iphone
     frame_quality.jsonl                      required for iphone
     session_intrinsics.json                  required for iphone
     per_frame_camera_state.jsonl             required for iphone
+    feature_points.jsonl                     required when feature_points=true
+    plane_observations.jsonl                 required when planes=true
+    light_estimates.jsonl                    required when light_estimate=true
     depth_manifest.json                      required when depth_supported=true
     confidence_manifest.json                 required when depth_supported=true
     depth/*.png                              required when depth_supported=true
     confidence/*.png                         required when depth_supported=true
     mesh_manifest.json                       optional but high-value
     meshes/*.obj                             optional but high-value
+  arcore/
+    poses.jsonl                              required when camera_pose=true and geometry_source=arcore
+    frames.jsonl                             required when camera_pose=true and geometry_source=arcore
+    session_intrinsics.json                  required when camera_intrinsics=true and geometry_source=arcore
+    tracking_state.jsonl                     required when tracking_state=true and geometry_source=arcore
+    point_cloud.jsonl                        required when point_cloud=true
+    planes.jsonl                             required when planes=true and geometry_source=arcore
+    light_estimates.jsonl                    required when light_estimate=true and geometry_source=arcore
+    depth_manifest.json                      required when depth=true and geometry_source=arcore
+    confidence_manifest.json                 required when depth_confidence=true and geometry_source=arcore
 ```
 
 ## Global Rules
@@ -126,6 +160,8 @@ Required fields:
 - `capture_id`
 - `capture_source`
 - `capture_tier_hint`
+- `capture_profile_id`
+- `capture_capabilities`
 - `coordinate_frame_session_id`
 - `video_uri`
 - `capture_start_epoch_ms`
@@ -142,6 +178,25 @@ Required fields:
 - `height`
 - `rights_profile`
 - `requested_outputs`
+
+`capture_profile_id` values currently written:
+
+- `iphone_arkit_lidar`
+- `iphone_arkit_non_lidar`
+- `android_arcore_depth`
+- `android_arcore_pose_only`
+- `android_camera_only`
+- `glasses_pov`
+- `glasses_pov_companion_phone`
+
+`capture_capabilities` carries:
+
+- neutral availability flags such as `camera_pose`, `camera_intrinsics`, `depth`, `depth_confidence`, `point_cloud`, `planes`, `feature_points`, `tracking_state`, `relocalization_events`, `light_estimate`, `motion`, `motion_authoritative`, `companion_phone_pose`, `companion_phone_intrinsics`, `companion_phone_calibration`
+- normalized evidence counters such as `pose_rows`, `intrinsics_valid`, `depth_frames`, `confidence_frames`, `mesh_files`, `point_cloud_samples`, `plane_rows`, `feature_point_rows`, `tracking_state_rows`, `relocalization_event_rows`, `light_estimate_rows`, `motion_samples`
+- authority labels such as `pose_authority`, `intrinsics_authority`, `depth_authority`, `motion_authority`
+- `motion_provenance`
+- `geometry_source`
+- `geometry_expected_downstream`
 
 Example:
 

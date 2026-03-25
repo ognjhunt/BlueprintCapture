@@ -17,7 +17,8 @@ Or:
 ```bash
 xcodebuild -project BlueprintCapture.xcodeproj \
   -scheme BlueprintCapture \
-  -destination "platform=iOS Simulator,name=iPhone 15"
+  -destination "platform=iOS Simulator,name=iPhone 15" \
+  -derivedDataPath build/DerivedData
 ```
 
 ## Primary Flow
@@ -36,8 +37,23 @@ xcodebuild -project BlueprintCapture.xcodeproj \
 - ARKit files are present for iPhone captures when the device supports them
 - scene-memory and rights metadata are present even when values are unknown
 
+## Alpha Notes
+
+- Honest empty states are valid. Do not inject demo marketplace targets in production-like builds.
+- Android glasses capture should only be started from a real target or open-capture flow so the bundle keeps truthful site metadata.
+- Direct-provider AI features and Android payout onboarding are out of scope unless you explicitly wire and validate real provider contracts.
+
 ## Key Paths
 
 - [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift)
 - [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift)
 - [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts)
+
+## Release Config
+
+```bash
+BLUEPRINT_RELEASE_XCCONFIG=/absolute/path/to/BlueprintCapture.release.xcconfig \
+./scripts/archive_external_alpha.sh --validate-config-only
+```
+
+For xcconfig URLs, follow the slash-helper pattern in [ConfigTemplates/BlueprintCapture.release.xcconfig.example](/Users/nijelhunt_1/workspace/BlueprintCapture/ConfigTemplates/BlueprintCapture.release.xcconfig.example) so `https://...` is not parsed as `https:`.

@@ -11,6 +11,7 @@ plugins {
 val mwdatAppId = providers.gradleProperty("MWDAT_APPLICATION_ID").orNull ?: ""
 val mwdatClientToken = providers.gradleProperty("MWDAT_CLIENT_TOKEN").orNull ?: ""
 val useMwdatDevAppId = providers.gradleProperty("MWDAT_USE_DEV_APP_ID").orNull?.toBoolean() ?: true
+val useMwdatPrivateSdk = providers.gradleProperty("MWDAT_ENABLE_PRIVATE_SDK").orNull?.toBoolean() == true
 
 android {
     namespace = "app.blueprint.capture"
@@ -44,6 +45,7 @@ android {
         buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
         buildConfigField("String", "NEARBY_DISCOVERY_PROVIDER", "\"$nearbyDiscoveryProvider\"")
         buildConfigField("boolean", "ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK", enableGeminiMapsGroundingFallback)
+        buildConfigField("boolean", "MWDAT_PRIVATE_SDK_ENABLED", useMwdatPrivateSdk.toString())
         manifestPlaceholders["blueprintAppScheme"] = "blueprint"
         manifestPlaceholders["mwdatApplicationId"] = mwdatAppId
         manifestPlaceholders["mwdatClientToken"] = mwdatClientToken
@@ -88,6 +90,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+        }
+    }
+
+    sourceSets.named("main") {
+        if (!useMwdatPrivateSdk) {
+            java.srcDir("src/metaStub/kotlin")
         }
     }
 }
@@ -152,8 +160,10 @@ dependencies {
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.maps.compose)
     implementation(libs.coil.compose)
-    implementation(libs.mwdat.core)
-    implementation(libs.mwdat.camera)
+    if (useMwdatPrivateSdk) {
+        implementation(libs.mwdat.core)
+        implementation(libs.mwdat.camera)
+    }
 
     testImplementation(libs.junit4)
     testImplementation(libs.truth)

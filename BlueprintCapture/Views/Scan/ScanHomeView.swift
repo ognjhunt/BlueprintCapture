@@ -2,7 +2,6 @@ import SwiftUI
 import FirebaseAuth
 import UIKit
 import CoreLocation
-import MapKit
 
 struct ScanHomeView: View {
     @ObservedObject var glassesManager: GlassesCaptureManager
@@ -21,7 +20,10 @@ struct ScanHomeView: View {
     @State private var showingStripeOnboarding = false
     @State private var selectedDemo: DemoCapture?
     @State private var showingSearch = false
-    @State private var nearbyPOIs: [DemoCapture] = []
+
+    private var isUITesting: Bool {
+        RuntimeConfig.current.isUITesting
+    }
 
     private var isUITesting: Bool {
         RuntimeConfig.current.isUITesting
@@ -152,10 +154,6 @@ struct ScanHomeView: View {
             viewModel.onAppear()
             await refreshPayoutsReady()
         }
-        .onChange(of: viewModel.currentLocation) { _, loc in
-            guard let loc, nearbyPOIs.isEmpty else { return }
-            Task { await loadNearbyPOIs(near: loc) }
-        }
         .onDisappear { viewModel.onDisappear() }
     }
 
@@ -232,16 +230,15 @@ struct ScanHomeView: View {
     // MARK: - Featured Section
 
     private var featuredItems: [ScanHomeViewModel.JobItem] {
-        // The alpha current-location item is always pinned first so we can test
-        // the full pipeline on any live device capture.
-        let alphaItem = viewModel.nearbyItems.first(where: { $0.id == ScanHomeViewModel.alphaCurrentLocationJobID })
-        let specials = viewModel.specialItems
-        let readyNearby = viewModel.nearbyItems.filter {
-            $0.isReadyNow && $0.permissionTier == .approved
-            && $0.id != ScanHomeViewModel.alphaCurrentLocationJobID
-        }
-        let combined = [alphaItem].compactMap { $0 } + specials + readyNearby
-        return Array(combined.prefix(10))
+        let openCaptureItem = viewModel.nearbyItems.first(where: { $0.id == ScanHomeViewModel.alphaCurrentLocationJobID })
+        let rankedItems = viewModel.items.filter { $0.id != ScanHomeViewModel.alphaCurrentLocationJobID }
+        return Array(([openCaptureItem].compactMap { $0 } + rankedItems).prefix(10))
+    }
+
+    private var fallbackDemoItems: [DemoCapture] {
+        guard RuntimeConfig.current.enableInternalTestSpace else { return [] }
+        let realNearbyCount = featuredItems.filter { $0.id != ScanHomeViewModel.alphaCurrentLocationJobID }.count
+        return realNearbyCount == 0 ? DemoCapture.samples : []
     }
 
     @ViewBuilder
@@ -251,8 +248,9 @@ struct ScanHomeView: View {
                 Text("Nearby Spaces")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
-                if !featuredItems.isEmpty {
-                    Text("\(featuredItems.count)")
+                let visibleCount = featuredItems.count + fallbackDemoItems.count
+                if visibleCount > 0 {
+                    Text("\(visibleCount)")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(Color(white: 0.5))
                         .padding(.horizontal, 8)
@@ -279,9 +277,6 @@ struct ScanHomeView: View {
                     .foregroundStyle(Color(white: 0.4))
                     .padding(.horizontal, 20)
             case .loaded:
-                // Always show real job cards first (includes the pinned alpha item),
-                // then append the dynamic nearby POI / demo cards so they are never hidden.
-                let placeholders = nearbyPOIs.isEmpty ? DemoCapture.samples : nearbyPOIs
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 14) {
                         ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
@@ -293,7 +288,7 @@ struct ScanHomeView: View {
                             .accessibilityIdentifier("scan-home-featured-\(index)")
                             .accessibilityIdentifier("scan-home-featured-\(item.id)")
                         }
-                        ForEach(placeholders) { demo in
+                        ForEach(fallbackDemoItems) { demo in
                             Button { selectedDemo = demo } label: {
                                 DemoFeaturedCard(demo: demo)
                                     .frame(width: 280)
@@ -652,79 +647,6 @@ struct ScanHomeView: View {
 
     // MARK: - Nearby POI Loading
 
-    private func loadNearbyPOIs(near userLocation: CLLocation) async {
-        let region = MKCoordinateRegion(
-            center: userLocation.coordinate,
-            latitudinalMeters: 4000,
-            longitudinalMeters: 4000
-        )
-        let categories: [MKPointOfInterestCategory] = [
-            .store, .hotel, .parking,
-            .fitnessCenter, .museum, .stadium, .publicTransport,
-            .library, .theater, .movieTheater, .university
-        ]
-        let request = MKLocalSearch.Request()
-        request.region = region
-        request.resultTypes = .pointOfInterest
-        request.pointOfInterestFilter = MKPointOfInterestFilter(including: categories)
-
-        guard let response = try? await MKLocalSearch(request: request).start() else { return }
-
-        let results: [DemoCapture] = response.mapItems.prefix(8).compactMap { item in
-            guard let name = item.name else { return nil }
-            let coord = item.placemark.coordinate
-            let itemLoc = CLLocation(latitude: coord.latitude, longitude: coord.longitude)
-            let distMiles = userLocation.distance(from: itemLoc) / 1609.34
-
-            let street = item.placemark.thoroughfare.map { "\($0) · " } ?? ""
-            let city = item.placemark.locality ?? item.placemark.administrativeArea ?? ""
-            let addressLine = "\(street)\(city)".trimmingCharacters(in: .whitespaces)
-
-            let (category, payout, minutes, colors) = poiMetadata(for: item.pointOfInterestCategory)
-
-            return DemoCapture(
-                id: "poi_\(coord.latitude)_\(coord.longitude)",
-                title: name,
-                address: addressLine.isEmpty ? (item.placemark.title ?? name) : addressLine,
-                category: category,
-                payout: payout,
-                distance: String(format: "%.1f mi", distMiles),
-                estMinutes: minutes,
-                coordinate: coord,
-                gradientColors: colors,
-                permission: "Review",
-                permissionColor: BlueprintTheme.brandTeal
-            )
-        }
-        nearbyPOIs = results
-    }
-
-    private func poiMetadata(for category: MKPointOfInterestCategory?) -> (String, String, Int, [Color]) {
-        switch category {
-        case .store:
-            return ("RETAIL", "$40", 25, [Color(red: 0.1, green: 0.18, blue: 0.28), Color(white: 0.08)])
-        case .hotel:
-            return ("HOSPITALITY", "$80", 40, [Color(red: 0.08, green: 0.16, blue: 0.2), Color(white: 0.08)])
-        case .parking:
-            return ("PARKING", "$30", 20, [Color(red: 0.18, green: 0.16, blue: 0.1), Color(white: 0.08)])
-        case .fitnessCenter:
-            return ("FITNESS", "$45", 30, [Color(red: 0.12, green: 0.2, blue: 0.14), Color(white: 0.08)])
-        case .museum:
-            return ("CULTURAL", "$65", 40, [Color(red: 0.18, green: 0.12, blue: 0.2), Color(white: 0.08)])
-        case .stadium:
-            return ("VENUE", "$120", 60, [Color(red: 0.2, green: 0.14, blue: 0.08), Color(white: 0.08)])
-        case .publicTransport:
-            return ("TRANSIT", "$50", 30, [Color(red: 0.08, green: 0.18, blue: 0.16), Color(white: 0.08)])
-        case .library:
-            return ("LIBRARY", "$35", 25, [Color(red: 0.12, green: 0.14, blue: 0.2), Color(white: 0.08)])
-        case .theater, .movieTheater:
-            return ("THEATER", "$90", 50, [Color(red: 0.2, green: 0.08, blue: 0.14), Color(white: 0.08)])
-        case .university:
-            return ("CAMPUS", "$55", 35, [Color(red: 0.1, green: 0.16, blue: 0.12), Color(white: 0.08)])
-        default:
-            return ("COMMERCIAL", "$45", 30, [Color(white: 0.18), Color(white: 0.1)])
-        }
-    }
 }
 
 // MARK: - Demo Placeholder Data

@@ -23,8 +23,8 @@ import app.blueprint.capture.data.glasses.AndroidXrProjectedPlatform
 import app.blueprint.capture.data.glasses.GlassesCapabilities
 import app.blueprint.capture.data.glasses.androidxr.AndroidXrProjectedLaunch
 import app.blueprint.capture.data.model.CaptureLaunch
-import androidx.xr.projected.ExperimentalProjectedApi
 import androidx.xr.projected.ProjectedContext
+import androidx.xr.projected.experimental.ExperimentalProjectedApi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -64,7 +64,7 @@ class AndroidXrViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            ProjectedContext.isProjectedDeviceConnected(context).collect { connected ->
+            ProjectedContext.isProjectedDeviceConnected(context, coroutineContext).collect { connected ->
                 _uiState.value = _uiState.value.copy(
                     isProjectedDeviceConnected = connected,
                     launchMessage = if (connected) {
@@ -93,6 +93,10 @@ class AndroidXrViewModel @Inject constructor(
 
     fun updateRuntimeCapabilities(capabilities: GlassesCapabilities) {
         capabilityRepository.update(capabilities)
+    }
+
+    fun resetRuntimeCapabilities() {
+        capabilityRepository.reset()
     }
 
     fun launchProjectedExperience(activity: Activity?) {

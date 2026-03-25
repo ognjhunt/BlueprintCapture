@@ -141,6 +141,9 @@ fun ScanScreen(
     }
 
     var showGlassesSheet by rememberSaveable { mutableStateOf(false) }
+    var pendingRightsLaunch by remember { mutableStateOf<CaptureLaunch?>(null) }
+    var pendingRightsGlassesLaunch by remember { mutableStateOf<CaptureLaunch?>(null) }
+    var glassesCaptureLaunch by remember { mutableStateOf<CaptureLaunch?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     // Capture method picker — set when a nearby-space card is tapped
@@ -201,8 +204,6 @@ fun ScanScreen(
         captureRulesAccepted = false
     }
 
-<<<<<<< HEAD
-=======
     fun requestLaunch(target: ScanTarget, autoStartRecorder: Boolean = false) {
         val launch = target.toLaunch(autoStartRecorder = autoStartRecorder)
         if (target.id == ScanViewModel.ALPHA_CURRENT_LOCATION_ID) {
@@ -222,7 +223,6 @@ fun ScanScreen(
         }
     }
 
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
     BackHandler(enabled = parityScreen != null) {
         when (parityScreen) {
             SearchParityScreen.Submit -> parityScreen = SearchParityScreen.Search
@@ -280,7 +280,7 @@ fun ScanScreen(
 
         item {
             NearbySpacesSection(
-                targets = state.targets + state.nearbyPlaceTargets,
+                targets = state.targets,
                 onTargetClick = { target -> selectedDetailTarget = target },
             )
         }
@@ -300,7 +300,7 @@ fun ScanScreen(
             },
             onStartReview = {
                 selectedDetailTarget = null
-                onStartCapture(target.toLaunch())
+                requestLaunch(target)
             },
             onOpenDirections = {
                 selectedDetailTarget = null
@@ -334,7 +334,7 @@ fun ScanScreen(
                     Button(
                         onClick = {
                             capturePickerTarget = null
-                            onStartCapture(target.toLaunch(autoStartRecorder = true))
+                            requestLaunch(target, autoStartRecorder = true)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(
@@ -347,8 +347,7 @@ fun ScanScreen(
                     OutlinedButton(
                         onClick = {
                             capturePickerTarget = null
-                            requestBleAndScan()
-                            showGlassesSheet = true
+                            requestGlassesLaunch(target)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
@@ -374,8 +373,6 @@ fun ScanScreen(
         )
     }
 
-<<<<<<< HEAD
-=======
     (pendingRightsLaunch ?: pendingRightsGlassesLaunch)?.let {
         AlertDialog(
             onDismissRequest = {
@@ -435,7 +432,6 @@ fun ScanScreen(
         )
     }
 
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
     if (parityScreen != null) {
         Dialog(
             onDismissRequest = ::closeSearchFlow,
@@ -503,7 +499,10 @@ fun ScanScreen(
 
     if (showGlassesSheet) {
         ModalBottomSheet(
-            onDismissRequest = { showGlassesSheet = false },
+            onDismissRequest = {
+                showGlassesSheet = false
+                glassesCaptureLaunch = null
+            },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = BlueprintSurfaceRaised,
             contentColor = BlueprintTextPrimary,
@@ -520,11 +519,7 @@ fun ScanScreen(
         ) {
             GlassesConnectionSheet(
                 viewModel = glassesViewModel,
-<<<<<<< HEAD
-                onScanRequest = ::requestBleAndScan,
-=======
                 captureLaunch = glassesCaptureLaunch,
->>>>>>> c020448d (Implement real Meta glasses DAT flows on iOS and Android)
             )
         }
     }
@@ -838,6 +833,7 @@ private fun JobDetailDialog(
                         Text(
                             text = when {
                                 target.permissionTone == CapturePermissionTone.Blocked -> "Not Allowed"
+                                target.id == ScanViewModel.ALPHA_CURRENT_LOCATION_ID -> "Review Rights To Start"
                                 !isOnSite -> "Get Directions"
                                 target.permissionTone == CapturePermissionTone.Approved -> "Start Capture"
                                 target.permissionTone == CapturePermissionTone.Permission -> "Check Access First"
@@ -1365,12 +1361,13 @@ private fun NearbySpaceCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val statusText = when {
+                        target.id == ScanViewModel.ALPHA_CURRENT_LOCATION_ID -> "Open capture · Review rights"
+                        target.readyNow -> "Ready now · Start capture"
+                        else -> "Nearby · Tap to submit"
+                    }
                     Text(
-                        text = if (target.readyNow) {
-                            "Ready now · Start capture"
-                        } else {
-                            "Nearby · Tap to submit"
-                        },
+                        text = statusText,
                         style = TextStyle(
                             color = BlueprintTextSecondary,
                             fontSize = 16.sp,

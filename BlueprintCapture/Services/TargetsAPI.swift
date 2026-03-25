@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 
 protocol TargetsAPIProtocol {
     func fetchTargets(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> [Target]
@@ -37,70 +38,39 @@ protocol PlacesNearbyProtocol {
 }
 
 final class GooglePlacesNearby: PlacesNearbyProtocol {
-    private let session: URLSession
-    private let apiKeyProvider: () -> String?
+    private let backend: NearbyProxyBackendService
 
     init(
-        session: URLSession = .shared,
-        apiKeyProvider: @escaping () -> String? = {
-            guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return nil }
-            return DeveloperProviderOverrides.value(for: ["PLACES_API_KEY", "GOOGLE_PLACES_API_KEY"])
-        }
+        backend: NearbyProxyBackendService = .shared
     ) {
-        self.session = session
-        self.apiKeyProvider = apiKeyProvider
+        self.backend = backend
     }
 
-    enum ServiceError: Error { case featureDisabled, missingAPIKey, badResponse }
+    enum ServiceError: LocalizedError {
+        case featureDisabled
+
+        var errorDescription: String? {
+            switch self {
+            case .featureDisabled:
+                return "Live nearby discovery is disabled for this build."
+            }
+        }
+    }
 
         func nearby(lat: Double, lng: Double, radiusMeters: Int, limit: Int, types: [String]) async throws -> [PlaceDetailsLite] {
         guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else {
             throw ServiceError.featureDisabled
         }
-        guard let apiKey = apiKeyProvider() else { throw ServiceError.missingAPIKey }
-            let url = URL(string: "https://places.googleapis.com/v1/places:searchNearby")!
-            var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-            // New Places API (v1) requires a field mask header for POST methods
-            request.addValue("places.id,places.displayName,places.formattedAddress,places.location,places.types", forHTTPHeaderField: "X-Goog-FieldMask")
-            // Provide the API key in header (supported and recommended)
-            request.addValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
-        // Use includedTypes filter; prefer grocery/electronics if provided
-        struct Circle: Encodable { let center: Center; let radius: Int }
-        struct Center: Encodable { let latitude: Double; let longitude: Double }
-        struct LocationRestriction: Encodable { let circle: Circle }
-        struct Body: Encodable { let includedTypes: [String]?; let maxResultCount: Int; let locationRestriction: LocationRestriction; let rankPreference: String }
-        let body = Body(
-            includedTypes: types.isEmpty ? nil : types,
-            maxResultCount: limit,
-            locationRestriction: LocationRestriction(circle: Circle(center: Center(latitude: lat, longitude: lng), radius: radiusMeters)),
-            rankPreference: "DISTANCE"
+        let response = try await backend.discover(
+            userLocation: CLLocationCoordinate2D(latitude: lat, longitude: lng),
+            radiusMeters: radiusMeters,
+            limit: limit,
+            includedTypes: types,
+            providerHint: .placesNearby,
+            allowFallback: false
         )
-        request.httpBody = try JSONEncoder().encode(body)
-
-            let (data, response) = try await session.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let body = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-                print("❌ [Places Nearby] HTTP \(http.statusCode) — \(body.prefix(400))")
-                throw ServiceError.badResponse
-            }
-        // Minimal parse of Places search results
-        struct DisplayName: Decodable { let text: String? }
-        struct LocationLatLng: Decodable { let latitude: Double?; let longitude: Double? }
-        struct Place: Decodable { let id: String?; let displayName: DisplayName?; let formattedAddress: String?; let location: LocationLatLng?; let types: [String]?; let placeId: String? }
-        struct Response: Decodable { let places: [Place]? }
-        let decoded = try JSONDecoder().decode(Response.self, from: data)
-        let places = decoded.places ?? []
-        print("✅ [Places Nearby] Decoded \(places.count) places")
-        return places.compactMap { p in
-            // id or placeId may be present depending on endpoint
-            guard let id = p.id ?? p.placeId,
-                  let name = p.displayName?.text,
-                  let lat = p.location?.latitude,
-                  let lng = p.location?.longitude else { return nil }
-            return PlaceDetailsLite(placeId: id, displayName: name, formattedAddress: p.formattedAddress, lat: lat, lng: lng, types: p.types)
-        }
+        print("✅ [Places Nearby] Decoded \(response.places.count) places via nearby proxy")
+        return response.places.map(\.placeDetailsLite)
     }
 }
 
@@ -171,4 +141,3 @@ final class MockTargetsAPI: TargetsAPIProtocol {
         return results
     }
 }
-

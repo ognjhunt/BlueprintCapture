@@ -23,13 +23,9 @@ final class CorePathUITests: XCTestCase {
         XCTAssertTrue(getStarted.waitForExistence(timeout: 10))
         getStarted.tap()
 
-        let skipInvite = app.buttons["Skip for now"]
-        XCTAssertTrue(skipInvite.waitForExistence(timeout: 10))
-        skipInvite.tap()
-
-        XCTAssertTrue(app.buttons["Continue with Google"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Create Account"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.textFields["you@example.com"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["auth-sign-in"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["auth-create-account"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["auth-email"].waitForExistence(timeout: 10))
     }
 
     @MainActor
@@ -37,13 +33,9 @@ final class CorePathUITests: XCTestCase {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let firstFeatured = app.buttons["scan-home-featured-0"]
-        XCTAssertTrue(firstFeatured.waitForExistence(timeout: 10))
-        firstFeatured.tap()
-
-        let primaryAction = app.buttons["job-detail-primary-action"]
-        XCTAssertTrue(primaryAction.waitForExistence(timeout: 10))
-        primaryAction.tap()
+        let approvedFeatured = app.buttons["scan-home-featured-ui_test_job_approved"]
+        XCTAssertTrue(approvedFeatured.waitForExistence(timeout: 10))
+        approvedFeatured.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
         XCTAssertTrue(stopButton.waitForExistence(timeout: 10))
@@ -54,25 +46,21 @@ final class CorePathUITests: XCTestCase {
     }
 
     @MainActor
-    func testCorePathScenarioUploadFromSummaryReturnsToVisibleUploadProgress() throws {
+    func testCorePathScenarioUploadFromRecordingReturnsToVisibleUploadProgress() throws {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let firstFeatured = app.buttons["scan-home-featured-0"]
-        XCTAssertTrue(firstFeatured.waitForExistence(timeout: 10))
-        firstFeatured.tap()
-
-        let primaryAction = app.buttons["job-detail-primary-action"]
-        XCTAssertTrue(primaryAction.waitForExistence(timeout: 10))
-        primaryAction.tap()
+        let approvedFeatured = app.buttons["scan-home-featured-ui_test_job_approved"]
+        XCTAssertTrue(approvedFeatured.waitForExistence(timeout: 10))
+        approvedFeatured.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
         XCTAssertTrue(stopButton.waitForExistence(timeout: 10))
         stopButton.tap()
 
-        let uploadButton = app.buttons["post-capture-upload"]
-        XCTAssertTrue(uploadButton.waitForExistence(timeout: 10))
-        uploadButton.tap()
+        let backToFeed = app.buttons["scan-recording-back"]
+        XCTAssertTrue(backToFeed.waitForExistence(timeout: 10))
+        backToFeed.tap()
 
         let uploadOverlay = app.buttons["upload-overlay-compact"]
         XCTAssertTrue(uploadOverlay.waitForExistence(timeout: 10))

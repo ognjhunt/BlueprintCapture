@@ -1,5 +1,13 @@
-BLUEPRINT_BACKEND_BASE_URL=https://your-backend.example.com
+# If you point clients directly at the Firebase router function, use:
+# https://us-central1-your-project.cloudfunctions.net/api
+BLUEPRINT_BACKEND_BASE_URL=
+BLUEPRINT_DEMAND_BACKEND_BASE_URL=https://your-backend.example.com
 BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=false
+BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE=true
 BLUEPRINT_STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
-BLUEPRINT_GOOGLE_PLACES_API_KEY=replace_me
-BLUEPRINT_GEMINI_API_KEY=replace_me
+# Nearby/provider requests are proxied through BLUEPRINT_DEMAND_BACKEND_BASE_URL.
+# Do not ship Places or Gemini client keys in the Android app.
+# Optional: keep default as places_nearby. Other supported value: gemini_maps_grounding
+# BLUEPRINT_NEARBY_DISCOVERY_PROVIDER=places_nearby
+# Optional: if enabled, the alternate provider is tried when the primary returns nothing or errors.
+# BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK=false

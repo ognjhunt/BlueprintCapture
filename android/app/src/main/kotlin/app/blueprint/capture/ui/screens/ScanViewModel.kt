@@ -5,6 +5,7 @@ import android.content.Context
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationManager
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.blueprint.capture.data.auth.AuthRepository
@@ -13,13 +14,13 @@ import app.blueprint.capture.data.capture.SubmissionSummary
 import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.CapturePermissionTone
 import app.blueprint.capture.data.model.DemandOpportunityFeedRequest
-import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.OpportunityCandidatePlace
 import app.blueprint.capture.data.model.RankedNearbyOpportunity
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.data.model.TargetAvailabilityStatus
 import app.blueprint.capture.data.notification.GeofenceJobTarget
 import app.blueprint.capture.data.notification.GeofenceManager
+import app.blueprint.capture.data.permissions.StartupPermissionChecker
 import app.blueprint.capture.data.places.NearbyPlace
 import app.blueprint.capture.data.places.PlacesRepository
 import app.blueprint.capture.data.profile.ContributorProfileRepository
@@ -45,12 +46,11 @@ import kotlin.math.abs
 data class ScanUiState(
     val userName: String = "",
     val targets: List<ScanTarget> = emptyList(),
-    val nearbyPlaceTargets: List<ScanTarget> = emptyList(),
     val isRefreshing: Boolean = false,
     val showGlassesBanner: Boolean = true,
     val showPayoutBanner: Boolean = true,
-    val payoutBannerTitle: String = "Payout setup unavailable",
-    val payoutBannerBody: String = "Payout setup is not enabled for this alpha build.",
+    val payoutBannerTitle: String = "Payout onboarding stays off-device",
+    val payoutBannerBody: String = "Android alpha keeps payout onboarding out of app until the live provider contract is wired.",
     val submissionSummary: SubmissionSummary = SubmissionSummary(),
 )
 
@@ -66,6 +66,7 @@ class ScanViewModel @Inject constructor(
     private val geofenceManager: GeofenceManager,
     private val placesRepository: PlacesRepository,
     private val demandIntelligenceBackendApi: DemandIntelligenceBackendApi,
+    private val startupPermissionChecker: StartupPermissionChecker,
     localConfigProvider: LocalConfigProvider,
 ) : ViewModel() {
 
@@ -92,33 +93,37 @@ class ScanViewModel @Inject constructor(
         _alphaAddress,
         _nearbyTargets,
     ) { profile, rawTargets, summary, alphaAddr, nearbyTargets ->
-        // Always pin the alpha current-location card first. Nearby POIs are a separate
-        // supplemental rail source, matching iOS where dynamic local places are appended
-        // after the live jobs instead of replacing the approved alpha card.
-        val alphaItem = _userLocation.value?.let { loc ->
-            buildAlphaCurrentLocationTarget(loc, alphaAddr)
+        val openCaptureItem = if (config.enableOpenCaptureHere) {
+            _userLocation.value?.let { loc ->
+                buildOpenCaptureHereTarget(loc, alphaAddr)
+            }
+        } else {
+            null
         }
-        val primaryTargets = listOfNotNull(alphaItem) + rawTargets
+        val primaryTargets = mergeTargetsWithOpenCapture(
+            rawTargets = rawTargets,
+            openCaptureTarget = openCaptureItem,
+        )
         val discoveredNearbyTargets = nearbyTargets
             .filterNot { supplemental ->
                 primaryTargets.any { existing -> existing.isSamePhysicalPlaceAs(supplemental) }
             }
             .take(5)
-        val fallbackNearbyTargets = if (discoveredNearbyTargets.isEmpty()) {
-            DemoData.scanTargets.take(5)
-        } else {
-            emptyList()
-        }
         ScanUiState(
             userName = profile?.name.orEmpty(),
-            targets = primaryTargets,
-            nearbyPlaceTargets = discoveredNearbyTargets.ifEmpty { fallbackNearbyTargets },
-            payoutBannerTitle = if (config.hasStripe) "Connect payout method"
-            else "Payout setup unavailable",
-            payoutBannerBody = if (config.hasStripe)
-                "Connect a payout method to receive capture earnings."
-            else
-                "Payout setup is not enabled for this alpha build.",
+            targets = (primaryTargets + discoveredNearbyTargets)
+                .distinctBy(ScanTarget::id)
+                .take(10),
+            payoutBannerTitle = if (config.hasBackend) {
+                "Payout onboarding stays off-device"
+            } else {
+                "Payout setup unavailable"
+            },
+            payoutBannerBody = if (config.hasBackend) {
+                "Wallet history can sync here, but payout-provider onboarding is intentionally not live on Android alpha."
+            } else {
+                "Payout setup is not enabled for this alpha build."
+            },
             submissionSummary = summary,
         )
     }
@@ -206,10 +211,16 @@ class ScanViewModel @Inject constructor(
     @SuppressLint("MissingPermission")
     fun refreshLocation(forceNearbyPlaces: Boolean = false) {
         viewModelScope.launch {
+            if (!startupPermissionChecker.hasRequiredStartupPermission()) {
+                return@launch
+            }
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
                 ?: return@launch
-            val loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                ?: lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            val loc = loadLastKnownLocationSafely(
+                hasStartupPermission = startupPermissionChecker.hasRequiredStartupPermission(),
+                networkProvider = { lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) },
+                gpsProvider = { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) },
+            )
             if (loc != null) {
                 _userLocation.value = loc
                 // Reverse-geocode in background so the alpha card shows a real address.
@@ -221,7 +232,7 @@ class ScanViewModel @Inject constructor(
     }
 
     private fun refreshNearbyPlaces(location: Location, force: Boolean = false) {
-        if (!config.hasPlaces && !config.hasBackend) {
+        if (!config.hasNearbyDiscovery && !config.hasDemandBackend) {
             _nearbyTargets.value = emptyList()
             return
         }
@@ -230,14 +241,14 @@ class ScanViewModel @Inject constructor(
         }
         lastNearbyDiscoveryLocation = location
         viewModelScope.launch {
-            val places = if (config.hasPlaces) placesRepository.searchNearby(location) else emptyList()
+            val places = if (config.hasNearbyDiscovery) placesRepository.searchNearby(location) else emptyList()
             val ranked = fetchRankedNearbyTargets(location, places)
             _nearbyTargets.value = if (ranked.isNotEmpty()) ranked else places.map { it.toNearbyScanTarget(location) }
         }
     }
 
     private suspend fun fetchRankedNearbyTargets(location: Location, places: List<NearbyPlace>): List<ScanTarget> {
-        if (!config.hasBackend || places.isEmpty()) return emptyList()
+        if (!config.hasDemandBackend || places.isEmpty()) return emptyList()
 
         val creatorId = authRepository.currentUserId() ?: return emptyList()
         return runCatching {
@@ -292,38 +303,39 @@ class ScanViewModel @Inject constructor(
     }
 
     /**
-     * Builds the hardcoded alpha test [ScanTarget] pinned to the user's current GPS position.
-     * Always [CapturePermissionTone.Approved] so it bypasses all permission gates and lets
-     * the full non-GPU pipeline run against a live device capture for internal testing.
+     * Builds the explicit open-capture target pinned to the user's current GPS position.
+     * This stays visually distinct from approved marketplace jobs and starts as a reviewed path.
      */
-    private fun buildAlphaCurrentLocationTarget(location: Location, address: String): ScanTarget =
+    private fun buildOpenCaptureHereTarget(location: Location, address: String): ScanTarget =
         ScanTarget(
             id = ALPHA_CURRENT_LOCATION_ID,
-            title = "Current Location",
+            title = "Open Capture Here",
             subtitle = address,
             addressText = address,
             payoutText = "$45",
             distanceText = "Here now",
             readyNow = true,
-            categoryLabel = "ALPHA",
+            categoryLabel = "OPEN CAPTURE",
             estimatedMinutes = 20,
-            permissionTone = CapturePermissionTone.Approved,
+            permissionTone = CapturePermissionTone.Review,
             lat = location.latitude,
             lng = location.longitude,
             checkinRadiusM = 999_999,
             priorityWeight = 100.0,
             quotedPayoutCents = 4500,
             requestedOutputs = listOf("qualification", "preview_simulation", "deeper_evaluation"),
-            workflowName = "Alpha Internal Test Capture",
+            rightsProfile = "open_capture_review",
+            workflowName = "Open Capture Here",
             workflowSteps = listOf(
-                "Capture the full space you are currently in.",
-                "Walk through every accessible room or area.",
+                "Confirm you have permission to capture this space before recording starts.",
+                "Capture the full accessible area around you.",
                 "Pause 2-3 seconds at each major transition point.",
                 "Capture from multiple heights where possible.",
             ),
             detailChecklist = listOf(
-                "Capture the full space you are currently in.",
-                "Walk through every accessible room or area.",
+                "Confirm you have permission to capture and commercialize this space.",
+                "Avoid restricted, private, or clearly unapproved areas.",
+                "Qualification, privacy, and rights checks can still block downstream use.",
                 "Pause 2-3 seconds at each major transition point.",
                 "Capture from multiple heights where possible.",
             ),
@@ -336,6 +348,22 @@ class ScanViewModel @Inject constructor(
 
     companion object {
         const val ALPHA_CURRENT_LOCATION_ID = "alpha-current-location"
+    }
+}
+
+internal fun loadLastKnownLocationSafely(
+    hasStartupPermission: Boolean,
+    networkProvider: () -> Location?,
+    gpsProvider: () -> Location?,
+): Location? {
+    if (!hasStartupPermission) {
+        return null
+    }
+    return runCatching {
+        networkProvider() ?: gpsProvider()
+    }.getOrElse { error ->
+        Log.w("ScanViewModel", "Unable to read last known location", error)
+        null
     }
 }
 
@@ -358,12 +386,14 @@ private fun NearbyPlace.toNearbyScanTarget(userLocation: Location): ScanTarget {
         estimatedMinutes = metadata.estimatedMinutes,
         permissionTone = CapturePermissionTone.Review,
         detailChecklist = listOf(
+            "This is an inferred nearby candidate, not an approved capture job yet.",
             "Capture only common areas and accessible circulation paths.",
             "Avoid faces, screens, paperwork, and restricted zones.",
             "If staff objects or signage restricts access, stop and submit for review instead.",
         ),
-        workflowName = "Nearby space review",
+        workflowName = "Inferred nearby candidate review",
         workflowSteps = listOf(
+            "Treat this as an inferred nearby candidate until Blueprint review completes.",
             "Start at the public entry or main approach.",
             "Walk the accessible common areas in one continuous pass.",
             "Pause at major transitions and call out blocked or restricted areas.",
@@ -389,6 +419,7 @@ private fun RankedNearbyOpportunity.toNearbyScanTarget(userLocation: Location): 
         }
     } else {
         listOf(
+            "This is an inferred nearby candidate, not an approved capture job yet.",
             "Capture only common areas and accessible circulation paths.",
             "Avoid faces, screens, paperwork, and restricted zones.",
             "If staff objects or signage restricts access, stop and submit for review instead.",
@@ -407,9 +438,10 @@ private fun RankedNearbyOpportunity.toNearbyScanTarget(userLocation: Location): 
         estimatedMinutes = metadata.estimatedMinutes,
         permissionTone = CapturePermissionTone.Review,
         detailChecklist = workflowChecklist,
-        workflowName = suggestedWorkflows.firstOrNull()?.replace('_', ' ') ?: "Nearby space review",
+        workflowName = suggestedWorkflows.firstOrNull()?.replace('_', ' ') ?: "Inferred nearby candidate review",
         workflowSteps = suggestedWorkflows.ifEmpty {
             listOf(
+                "Treat this as an inferred nearby candidate until Blueprint review completes.",
                 "Start at the public entry or main approach.",
                 "Walk the accessible common areas in one continuous pass.",
                 "Pause at major transitions and call out blocked or restricted areas.",
@@ -458,32 +490,34 @@ private fun nearbyMetadata(
     }
     val base = when {
         normalized.any { it in setOf("warehouse", "distribution_center", "logistics") } ->
-            NearbyPresentation("WAREHOUSE", "$70", 7_000, 35)
+            NearbyPresentation("WAREHOUSE CANDIDATE", "$70", 7_000, 35)
         normalized.any { it in setOf("manufacturing", "factory", "industrial") } ->
-            NearbyPresentation("MANUFACTURING", "$75", 7_500, 40)
+            NearbyPresentation("FACTORY CANDIDATE", "$75", 7_500, 40)
+        normalized.any { it in setOf("warehouse_store", "hardware_store", "home_improvement_store") } ->
+            NearbyPresentation("INDUSTRIAL CANDIDATE", "$58", 5_800, 32)
         normalized.any { it in setOf("store", "shopping_mall", "department_store", "supermarket", "retail", "grocery") } ->
-            NearbyPresentation("RETAIL", "$40", 4_000, 25)
+            NearbyPresentation("RETAIL CANDIDATE", "$40", 4_000, 25)
         normalized.contains("convenience_store") ->
-            NearbyPresentation("CONVENIENCE", "$28", 2_800, 18)
+            NearbyPresentation("CONVENIENCE CANDIDATE", "$28", 2_800, 18)
         normalized.any { it in setOf("hotel", "lodging", "hospitality") } ->
-            NearbyPresentation("HOSPITALITY", "$80", 8_000, 40)
+            NearbyPresentation("HOSPITALITY CANDIDATE", "$80", 8_000, 40)
         normalized.contains("parking") ->
-            NearbyPresentation("PARKING", "$30", 3_000, 20)
+            NearbyPresentation("PARKING CANDIDATE", "$30", 3_000, 20)
         normalized.contains("gym") ->
-            NearbyPresentation("FITNESS", "$45", 4_500, 30)
+            NearbyPresentation("FITNESS CANDIDATE", "$45", 4_500, 30)
         normalized.contains("museum") ->
-            NearbyPresentation("CULTURAL", "$65", 6_500, 40)
+            NearbyPresentation("CULTURAL CANDIDATE", "$65", 6_500, 40)
         normalized.contains("stadium") ->
-            NearbyPresentation("VENUE", "$120", 12_000, 60)
+            NearbyPresentation("VENUE CANDIDATE", "$120", 12_000, 60)
         normalized.any { it in setOf("transit_station", "train_station", "subway_station", "bus_station") } ->
-            NearbyPresentation("TRANSIT", "$50", 5_000, 30)
+            NearbyPresentation("TRANSIT CANDIDATE", "$50", 5_000, 30)
         normalized.contains("library") ->
-            NearbyPresentation("LIBRARY", "$35", 3_500, 25)
+            NearbyPresentation("LIBRARY CANDIDATE", "$35", 3_500, 25)
         normalized.any { it in setOf("movie_theater", "performing_arts_theater") } ->
-            NearbyPresentation("THEATER", "$90", 9_000, 50)
+            NearbyPresentation("THEATER CANDIDATE", "$90", 9_000, 50)
         normalized.any { it in setOf("university", "school") } ->
-            NearbyPresentation("CAMPUS", "$55", 5_500, 35)
-        else -> NearbyPresentation("COMMERCIAL", "$45", 4_500, 30)
+            NearbyPresentation("CAMPUS CANDIDATE", "$55", 5_500, 35)
+        else -> NearbyPresentation("INFERRED CANDIDATE", "$45", 4_500, 30)
     }
     val adjustedCents = (base.payoutCents * scoreMultiplier).toInt()
     return base.copy(
@@ -507,6 +541,14 @@ private fun ScanTarget.isSamePhysicalPlaceAs(other: ScanTarget): Boolean {
     }
     return title.equals(other.title, ignoreCase = true) &&
         addressText.equals(other.addressText, ignoreCase = true)
+}
+
+internal fun mergeTargetsWithOpenCapture(
+    rawTargets: List<ScanTarget>,
+    openCaptureTarget: ScanTarget?,
+): List<ScanTarget> {
+    val primaryTargets = listOfNotNull(openCaptureTarget) + rawTargets
+    return primaryTargets.distinctBy(ScanTarget::id)
 }
 
 private fun Location.isWithinMeters(other: Location, thresholdMeters: Float): Boolean =

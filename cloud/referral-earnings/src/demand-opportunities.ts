@@ -57,6 +57,13 @@ export interface DemandSignalDocument {
   summary?: string;
 }
 
+export interface StrategicWeightConfig {
+  generated_at?: string;
+  source_run_id?: string;
+  site_type_weights: Record<string, number>;
+  workflow_weights?: Record<string, number>;
+}
+
 export interface OpportunityCandidatePlace {
   place_id: string;
   display_name: string;
@@ -154,6 +161,25 @@ export interface CaptureJobApiRecord {
   suggestedWorkflows: string[];
 }
 
+type NearbyRankingModelCandidate = {
+  place_id: string;
+  site_type?: string;
+  site_type_confidence?: number;
+  demand_score: number;
+  opportunity_score: number;
+  demand_summary: string;
+  ranking_explanation: string;
+  suggested_workflows: string[];
+};
+
+export interface NearbyOpportunityRankerOptions {
+  apiKey?: string | null;
+  model?: string | null;
+  enabled?: boolean;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
 const siteTypeAliases: Record<string, string> = {
   warehouse: "warehouse",
   distribution_center: "warehouse",
@@ -248,6 +274,17 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null) return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return defaultValue;
+  return ["1", "true", "yes", "on"].includes(normalized);
+}
+
 function isFresh(signal: DemandSignalDocument, now: Date): boolean {
   if (!signal.freshness_expires_at) return true;
   const expires = Date.parse(signal.freshness_expires_at);
@@ -336,6 +373,7 @@ export function buildDemandSignalsForSiteOperatorSubmission(
 
 type AggregatedSignalSummary = {
   demandScore: number;
+  strategicWeight: number;
   sourceKinds: DemandSourceKind[];
   workflows: string[];
   signalIds: string[];
@@ -346,6 +384,7 @@ type AggregatedSignalSummary = {
 function aggregateSignalsForSiteType(
   signals: DemandSignalDocument[],
   siteType: string | null,
+  strategicWeights?: StrategicWeightConfig,
   now: Date = new Date(),
 ): AggregatedSignalSummary {
   const normalizedSiteType = normalizeSiteType(siteType);
@@ -368,16 +407,22 @@ function aggregateSignalsForSiteType(
   );
   const summaries = matching.map((signal) => signal.summary).filter(Boolean) as string[];
   const topSignals = matching.slice(0, 5).map((signal) => signal.id);
+  const strategicWeight = clamp(
+    strategicWeights?.site_type_weights?.[normalizedSiteType ?? ""] ?? 1,
+    0.6,
+    1.5,
+  );
   const summary = summaries[0]
     ?? (normalizedSiteType
       ? `Demand weighted toward ${normalizedSiteType.replace(/_/g, " ")} sites.`
       : "Demand inferred from market priors.");
   const rankingExplanation = matching.length > 0
-    ? `Matched ${matching.length} active demand signal${matching.length == 1 ? "" : "s"} for ${normalizedSiteType ?? "this site type"}.`
+    ? `Matched ${matching.length} active demand signal${matching.length == 1 ? "" : "s"} for ${normalizedSiteType ?? "this site type"}${strategicWeight !== 1 ? ` with weekly strategic weight ${strategicWeight.toFixed(2)}x.` : "."}`
     : `No explicit active signal found; using baseline demand for ${normalizedSiteType ?? "general commercial"} sites.`;
 
   return {
     demandScore,
+    strategicWeight,
     sourceKinds,
     workflows: workflows.length > 0 ? workflows : (defaultWorkflowsBySiteType[normalizedSiteType ?? ""] ?? []),
     signalIds: topSignals,
@@ -403,6 +448,7 @@ function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number)
 export function rankNearbyOpportunities(
   request: DemandOpportunityFeedRequest,
   signals: DemandSignalDocument[],
+  strategicWeights?: StrategicWeightConfig,
   now: Date = new Date(),
 ): RankedNearbyOpportunity[] {
   const limit = Math.max(1, Math.min(request.limit ?? 25, 100));
@@ -411,15 +457,16 @@ export function rankNearbyOpportunities(
   return (request.candidate_places ?? [])
     .map((candidate) => {
       const siteTypeGuess = inferSiteTypeFromPlaceTypes(candidate.place_types ?? []);
-      const aggregate = aggregateSignalsForSiteType(signals, siteTypeGuess.siteType, now);
+      const aggregate = aggregateSignalsForSiteType(signals, siteTypeGuess.siteType, strategicWeights, now);
       const distanceMeters = haversineMeters(request.lat, request.lng, candidate.lat, candidate.lng);
       const distanceWeight = clamp01(1 - Math.min(1, distanceMeters / radiusMeters));
       const sourceDiversityWeight = clamp01(aggregate.sourceKinds.length / 3);
-      const opportunityScore = clamp01(
+      const baseOpportunityScore = clamp01(
         aggregate.demandScore * 0.7 +
         distanceWeight * 0.2 +
         sourceDiversityWeight * 0.1,
       );
+      const opportunityScore = clamp01(baseOpportunityScore * aggregate.strategicWeight);
 
       return {
         place_id: candidate.place_id,
@@ -441,6 +488,223 @@ export function rankNearbyOpportunities(
     })
     .sort((lhs, rhs) => rhs.opportunity_score - lhs.opportunity_score)
     .slice(0, limit);
+}
+
+function nearbyRankerApiKey(): string {
+  const candidates = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_AI_API_KEY,
+  ];
+  for (const candidate of candidates) {
+    const normalized = candidate?.trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function nearbyRankerModel(): string {
+  return process.env.BLUEPRINT_NEARBY_RANKER_MODEL?.trim() || "gemini-3.1-flash-lite-preview";
+}
+
+function nearbyRankerEnabled(): boolean {
+  return parseBoolean(process.env.BLUEPRINT_ENABLE_NEARBY_LLM_RANKER, true);
+}
+
+function nearbyRankerTimeoutMs(): number {
+  const raw = Number(process.env.BLUEPRINT_NEARBY_LLM_TIMEOUT_MS || 5000);
+  if (!Number.isFinite(raw) || raw <= 0) return 5000;
+  return Math.trunc(raw);
+}
+
+function extractCandidateText(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const candidates = (payload as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates;
+  const first = candidates?.[0];
+  const parts = first?.content?.parts ?? [];
+  return parts
+    .map((part) => (typeof part?.text === "string" ? part.text : ""))
+    .join("")
+    .trim();
+}
+
+function sanitizeRankedCandidate(
+  raw: NearbyRankingModelCandidate,
+  baseline: RankedNearbyOpportunity,
+): RankedNearbyOpportunity {
+  const normalizedSiteType = normalizeSiteType(raw.site_type) ?? baseline.site_type;
+  const siteTypeConfidence = clamp(
+    typeof raw.site_type_confidence === "number" ? raw.site_type_confidence : (baseline.site_type_confidence ?? 0.35),
+    0,
+    1,
+  );
+  return {
+    ...baseline,
+    site_type: normalizedSiteType ?? undefined,
+    site_type_confidence: siteTypeConfidence,
+    demand_score: clamp01(raw.demand_score),
+    opportunity_score: clamp01(raw.opportunity_score),
+    demand_summary: String(raw.demand_summary || baseline.demand_summary || "").trim() || baseline.demand_summary,
+    ranking_explanation: String(raw.ranking_explanation || baseline.ranking_explanation || "").trim() || baseline.ranking_explanation,
+    suggested_workflows: Array.isArray(raw.suggested_workflows)
+      ? dedupe(raw.suggested_workflows.filter((value): value is string => typeof value === "string" && value.trim().length > 0))
+      : baseline.suggested_workflows,
+  };
+}
+
+function buildNearbyRankingPrompt(
+  request: DemandOpportunityFeedRequest,
+  heuristic: RankedNearbyOpportunity[],
+): string {
+  return [
+    "You are ranking real nearby place candidates for Blueprint capture qualification.",
+    "Use only the candidate list provided below. Do not invent places, addresses, coordinates, or workflows.",
+    "Prioritize likely warehouses, factories, industrial retail, department stores, supermarkets, and other commercially relevant environments.",
+    "Lower candidates that look consumer-only, low-signal, or weakly aligned.",
+    "Return concise structured rankings for every candidate.",
+    "",
+    "Scoring rules:",
+    "- demand_score: 0.0 to 1.0 estimate of how strategically interesting this site type is.",
+    "- opportunity_score: 0.0 to 1.0 overall priority, factoring site type relevance, distance, and baseline signal hints.",
+    "- site_type: short normalized label like warehouse, manufacturing, grocery, retail, hospitality, office, pharmacy, convenience_store.",
+    "- suggested_workflows: short snake_case workflows, max 3.",
+    "",
+    `Origin lat/lng: ${request.lat}, ${request.lng}`,
+    `Radius meters: ${request.radius_m ?? 1609}`,
+    `Limit: ${request.limit ?? heuristic.length}`,
+    "",
+    "Candidate list:",
+    JSON.stringify(heuristic.map((candidate) => ({
+      place_id: candidate.place_id,
+      display_name: candidate.display_name,
+      formatted_address: candidate.formatted_address,
+      lat: candidate.lat,
+      lng: candidate.lng,
+      place_types: candidate.place_types,
+      baseline_site_type: candidate.site_type,
+      baseline_site_type_confidence: candidate.site_type_confidence,
+      baseline_demand_score: candidate.demand_score,
+      baseline_opportunity_score: candidate.opportunity_score,
+      baseline_demand_summary: candidate.demand_summary,
+      baseline_ranking_explanation: candidate.ranking_explanation,
+      baseline_suggested_workflows: candidate.suggested_workflows,
+      baseline_demand_source_kinds: candidate.demand_source_kinds,
+    }))),
+  ].join("\n");
+}
+
+export async function rankNearbyOpportunitiesForFeed(
+  request: DemandOpportunityFeedRequest,
+  signals: DemandSignalDocument[],
+  strategicWeights?: StrategicWeightConfig,
+  now: Date = new Date(),
+  options: NearbyOpportunityRankerOptions = {},
+): Promise<RankedNearbyOpportunity[]> {
+  const heuristic = rankNearbyOpportunities(request, signals, strategicWeights, now);
+  if (!heuristic.length) return heuristic;
+
+  const enabled = options.enabled ?? nearbyRankerEnabled();
+  const apiKey = options.apiKey?.trim() || nearbyRankerApiKey();
+  const model = options.model?.trim() || nearbyRankerModel();
+  const timeoutMs = options.timeoutMs ?? nearbyRankerTimeoutMs();
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+
+  if (!enabled || !apiKey || !model || typeof fetchImpl !== "function") {
+    return heuristic;
+  }
+
+  const schema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        place_id: { type: "string" },
+        site_type: { type: "string" },
+        site_type_confidence: { type: "number" },
+        demand_score: { type: "number" },
+        opportunity_score: { type: "number" },
+        demand_summary: { type: "string" },
+        ranking_explanation: { type: "string" },
+        suggested_workflows: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: [
+        "place_id",
+        "demand_score",
+        "opportunity_score",
+        "demand_summary",
+        "ranking_explanation",
+        "suggested_workflows",
+      ],
+    },
+  };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: buildNearbyRankingPrompt(request, heuristic) }],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseJsonSchema: schema,
+            temperature: 0.2,
+            topP: 0.9,
+          },
+        }),
+        signal: controller.signal,
+      },
+    );
+    if (!response.ok) {
+      return heuristic;
+    }
+
+    const payload = await response.json();
+    const text = extractCandidateText(payload);
+    if (!text) {
+      return heuristic;
+    }
+
+    const parsed = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+      return heuristic;
+    }
+
+    const heuristicById = new Map(heuristic.map((candidate) => [candidate.place_id, candidate]));
+    const merged = parsed
+      .filter((item): item is NearbyRankingModelCandidate => Boolean(item && typeof item === "object" && typeof item.place_id === "string"))
+      .map((item) => {
+        const baseline = heuristicById.get(item.place_id);
+        return baseline ? sanitizeRankedCandidate(item, baseline) : null;
+      })
+      .filter((item): item is RankedNearbyOpportunity => item !== null);
+
+    if (!merged.length) {
+      return heuristic;
+    }
+
+    const missing = heuristic.filter((candidate) => !merged.some((item) => item.place_id === candidate.place_id));
+    return [...merged, ...missing]
+      .sort((lhs, rhs) => rhs.opportunity_score - lhs.opportunity_score)
+      .slice(0, Math.max(1, Math.min(request.limit ?? 25, 100)));
+  } catch {
+    return heuristic;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function asStringArray(value: unknown): string[] {
@@ -483,6 +747,7 @@ export function annotateCaptureJobs(
   origin: { lat: number; lng: number },
   radiusMeters: number,
   limit: number,
+  strategicWeights?: StrategicWeightConfig,
   now: Date = new Date(),
 ): CaptureJobApiRecord[] {
   return rawJobs
@@ -493,17 +758,18 @@ export function annotateCaptureJobs(
         normalizeSiteType(asNullableString(data["site_type"]))
         ?? normalizeSiteType(asNullableString(data["facility_template"]))
         ?? normalizeSiteType(asNullableString(data["category"]));
-      const aggregate = aggregateSignalsForSiteType(signals, siteType, now);
+      const aggregate = aggregateSignalsForSiteType(signals, siteType, strategicWeights, now);
       const distanceMeters = haversineMeters(origin.lat, origin.lng, jobLat, jobLng);
       const distanceWeight = clamp01(1 - Math.min(1, distanceMeters / radiusMeters));
       const priorityWeight = clamp01(asNumber(data["priority_weight"], 1) / 2);
       const payoutWeight = clamp01(asNumber(data["quoted_payout_cents"] ?? data["payout_cents"], 0) / 10000);
-      const opportunityScore = clamp01(
+      const baseOpportunityScore = clamp01(
         aggregate.demandScore * 0.55 +
         distanceWeight * 0.2 +
         priorityWeight * 0.15 +
         payoutWeight * 0.1,
       );
+      const opportunityScore = clamp01(baseOpportunityScore * aggregate.strategicWeight);
 
       return {
         id,

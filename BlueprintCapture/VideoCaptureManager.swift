@@ -31,6 +31,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             let meshDirectoryURL: URL?
             let posesLogURL: URL
             let intrinsicsURL: URL
+            let featurePointsLogURL: URL
+            let planeObservationsLogURL: URL
+            let lightEstimatesLogURL: URL
         }
 
         let baseFilename: String
@@ -119,6 +122,37 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let coordinateFrameSessionId: String?
     }
 
+    private struct ARFeaturePointLogEntry: Codable {
+        let frameId: String
+        let tCaptureSec: Double
+        let tMonotonicNs: Int64
+        let rawPointCount: Int
+        let sampledWorldPoints: [[Float]]
+        let coordinateFrameSessionId: String?
+    }
+
+    private struct ARPlaneObservationLogEntry: Codable {
+        let frameId: String
+        let tCaptureSec: Double
+        let tMonotonicNs: Int64
+        let anchorId: String
+        let alignment: String
+        let classification: String?
+        let center: [Float]
+        let extent: [Float]
+        let transform: [Float]
+        let coordinateFrameSessionId: String?
+    }
+
+    private struct ARLightEstimateLogEntry: Codable {
+        let frameId: String
+        let tCaptureSec: Double
+        let tMonotonicNs: Int64
+        let ambientIntensity: Double?
+        let ambientColorTemperature: Double?
+        let coordinateFrameSessionId: String?
+    }
+
     struct PipelinePoseRow: Codable {
         let pose_schema_version: String
         let frameIndex: Int
@@ -150,7 +184,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     static let poseSchemaVersion = "3.0"
-    static let captureSchemaVersion = "3.0.0"
+    static let captureSchemaVersion = "3.1.0"
     static let captureSource = "iphone"
     static let captureTierHint = "tier1_iphone"
     static let movingDepthSnapshotIntervalSeconds: TimeInterval = 0.2
@@ -164,6 +198,23 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     static func monotonicNanoseconds(from timestamp: TimeInterval) -> Int64 {
         Int64((timestamp * 1_000_000_000.0).rounded())
+    }
+
+    static func sampledFeaturePoints(from frame: ARFrame, limit: Int = 128) -> [simd_float3] {
+        guard let rawFeaturePoints = frame.rawFeaturePoints, rawFeaturePoints.points.count > 0 else {
+            return []
+        }
+        let points = rawFeaturePoints.points
+        guard points.count > limit else { return Array(points) }
+        let stride = max(1, points.count / limit)
+        var sampled: [simd_float3] = []
+        sampled.reserveCapacity(limit)
+        var index = 0
+        while index < points.count, sampled.count < limit {
+            sampled.append(points[index])
+            index += stride
+        }
+        return sampled
     }
 
     /// Estimates image sharpness via Laplacian variance on a downsampled luma plane.
@@ -266,6 +317,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var motionLogFileHandle: FileHandle?
     private var arFrameLogFileHandle: FileHandle?
     private var arPoseLogFileHandle: FileHandle?
+    private var arFeaturePointsLogFileHandle: FileHandle?
+    private var arPlaneObservationsLogFileHandle: FileHandle?
+    private var arLightEstimatesLogFileHandle: FileHandle?
     private var arIntrinsicsWritten: Bool = false
     private var currentCameraIntrinsics: CaptureManifest.CameraIntrinsics?
     private var currentExposureSettings: CaptureManifest.ExposureSettings?
@@ -909,6 +963,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let frameLog = root.appendingPathComponent("frames.jsonl")
         let posesLog = root.appendingPathComponent("poses.jsonl")
         let intrinsics = root.appendingPathComponent("intrinsics.json")
+        let featurePointsLog = root.appendingPathComponent("feature_points.jsonl")
+        let planeObservationsLog = root.appendingPathComponent("plane_observations.jsonl")
+        let lightEstimatesLog = root.appendingPathComponent("light_estimates.jsonl")
 
         do {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
@@ -918,6 +975,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             fileManager.createFile(atPath: frameLog.path, contents: nil)
             fileManager.createFile(atPath: posesLog.path, contents: nil)
             fileManager.createFile(atPath: intrinsics.path, contents: nil)
+            fileManager.createFile(atPath: featurePointsLog.path, contents: nil)
+            fileManager.createFile(atPath: planeObservationsLog.path, contents: nil)
+            fileManager.createFile(atPath: lightEstimatesLog.path, contents: nil)
             return RecordingArtifacts.ARKitArtifacts(
                 rootDirectoryURL: root,
                 frameLogURL: frameLog,
@@ -925,7 +985,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 confidenceDirectoryURL: confidence,
                 meshDirectoryURL: mesh,
                 posesLogURL: posesLog,
-                intrinsicsURL: intrinsics
+                intrinsicsURL: intrinsics,
+                featurePointsLogURL: featurePointsLog,
+                planeObservationsLogURL: planeObservationsLog,
+                lightEstimatesLogURL: lightEstimatesLog
             )
         } catch {
             print("Failed to set up ARKit capture directories: \(error)")
@@ -950,11 +1013,26 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 FileManager.default.createFile(atPath: arKit.posesLogURL.path, contents: nil)
             }
             arPoseLogFileHandle = try FileHandle(forWritingTo: arKit.posesLogURL)
+            if !FileManager.default.fileExists(atPath: arKit.featurePointsLogURL.path) {
+                FileManager.default.createFile(atPath: arKit.featurePointsLogURL.path, contents: nil)
+            }
+            arFeaturePointsLogFileHandle = try FileHandle(forWritingTo: arKit.featurePointsLogURL)
+            if !FileManager.default.fileExists(atPath: arKit.planeObservationsLogURL.path) {
+                FileManager.default.createFile(atPath: arKit.planeObservationsLogURL.path, contents: nil)
+            }
+            arPlaneObservationsLogFileHandle = try FileHandle(forWritingTo: arKit.planeObservationsLogURL)
+            if !FileManager.default.fileExists(atPath: arKit.lightEstimatesLogURL.path) {
+                FileManager.default.createFile(atPath: arKit.lightEstimatesLogURL.path, contents: nil)
+            }
+            arLightEstimatesLogFileHandle = try FileHandle(forWritingTo: arKit.lightEstimatesLogURL)
             arIntrinsicsWritten = false
         } catch {
             print("Failed to open ARKit frame log: \(error)")
             arFrameLogFileHandle = nil
             arPoseLogFileHandle = nil
+            arFeaturePointsLogFileHandle = nil
+            arPlaneObservationsLogFileHandle = nil
+            arLightEstimatesLogFileHandle = nil
             arIntrinsicsWritten = false
             currentARKitArtifacts = nil
         }
@@ -1046,6 +1124,22 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 }
             }
             arPoseLogFileHandle = nil
+            for (handle, label) in [
+                (arFeaturePointsLogFileHandle, "ARKit feature points log"),
+                (arPlaneObservationsLogFileHandle, "ARKit plane observations log"),
+                (arLightEstimatesLogFileHandle, "ARKit light estimates log"),
+            ] {
+                if let handle {
+                    do {
+                        try handle.close()
+                    } catch {
+                        print("Failed to close \(label): \(error)")
+                    }
+                }
+            }
+            arFeaturePointsLogFileHandle = nil
+            arPlaneObservationsLogFileHandle = nil
+            arLightEstimatesLogFileHandle = nil
             arIntrinsicsWritten = false
             arFirstFrameTimestamp = nil
         }
@@ -1326,6 +1420,73 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             print("Failed to encode ARKit frame log entry: \(error)")
         }
 
+        if let featurePointsHandle = arFeaturePointsLogFileHandle {
+            let featurePointsEntry = ARFeaturePointLogEntry(
+                frameId: frameId,
+                tCaptureSec: tDeviceSec,
+                tMonotonicNs: tMonotonicNs,
+                rawPointCount: frame.rawFeaturePointCount,
+                sampledWorldPoints: frame.sampledFeaturePoints.map { [$0.x, $0.y, $0.z] },
+                coordinateFrameSessionId: currentRecordingSessionId
+            )
+            do {
+                let data = try arFrameEncoder.encode(featurePointsEntry)
+                featurePointsHandle.write(data)
+                if let newline = "\n".data(using: .utf8) {
+                    featurePointsHandle.write(newline)
+                }
+            } catch {
+                print("Failed to encode ARKit feature points entry: \(error)")
+            }
+        }
+
+        if let planeObservationsHandle = arPlaneObservationsLogFileHandle {
+            for planeAnchor in frame.planeAnchors.prefix(32) {
+                let planeEntry = ARPlaneObservationLogEntry(
+                    frameId: frameId,
+                    tCaptureSec: tDeviceSec,
+                    tMonotonicNs: tMonotonicNs,
+                    anchorId: planeAnchor.identifier.uuidString,
+                    alignment: Self.stringValue(for: planeAnchor.alignment),
+                    classification: Self.stringValue(for: planeAnchor.classification),
+                    center: [planeAnchor.center.x, planeAnchor.center.y, planeAnchor.center.z],
+                    extent: [planeAnchor.extent.x, planeAnchor.extent.y, planeAnchor.extent.z],
+                    transform: matrixToArray(planeAnchor.transform),
+                    coordinateFrameSessionId: currentRecordingSessionId
+                )
+                do {
+                    let data = try arFrameEncoder.encode(planeEntry)
+                    planeObservationsHandle.write(data)
+                    if let newline = "\n".data(using: .utf8) {
+                        planeObservationsHandle.write(newline)
+                    }
+                } catch {
+                    print("Failed to encode ARKit plane observation entry: \(error)")
+                }
+            }
+        }
+
+        if let lightEstimatesHandle = arLightEstimatesLogFileHandle,
+           frame.ambientIntensity != nil || frame.ambientColorTemperature != nil {
+            let lightEstimateEntry = ARLightEstimateLogEntry(
+                frameId: frameId,
+                tCaptureSec: tDeviceSec,
+                tMonotonicNs: tMonotonicNs,
+                ambientIntensity: frame.ambientIntensity,
+                ambientColorTemperature: frame.ambientColorTemperature,
+                coordinateFrameSessionId: currentRecordingSessionId
+            )
+            do {
+                let data = try arFrameEncoder.encode(lightEstimateEntry)
+                lightEstimatesHandle.write(data)
+                if let newline = "\n".data(using: .utf8) {
+                    lightEstimatesHandle.write(newline)
+                }
+            } catch {
+                print("Failed to encode ARKit light estimate entry: \(error)")
+            }
+        }
+
         // Also append to poses.jsonl with both legacy and bridge-compatible schema.
         // Legacy fields retained: frameIndex, timestamp, transform
         // Bridge fields added: pose_schema_version, frame_id, t_device_sec, T_world_camera
@@ -1517,12 +1678,19 @@ private struct ARFrameData {
     let sharpnessScore: Double?
     let depthSnapshot: DepthFrameSnapshot?
     let confidenceSnapshot: ConfidenceFrameSnapshot?
+    let rawFeaturePointCount: Int
+    let sampledFeaturePoints: [simd_float3]
+    let planeAnchors: [ARPlaneAnchor]
+    let ambientIntensity: Double?
+    let ambientColorTemperature: Double?
 
     init(
         _ frame: ARFrame,
         sharpnessScore: Double?,
         depthSnapshot: DepthFrameSnapshot?,
-        confidenceSnapshot: ConfidenceFrameSnapshot?
+        confidenceSnapshot: ConfidenceFrameSnapshot?,
+        sampledFeaturePoints: [simd_float3],
+        planeAnchors: [ARPlaneAnchor]
     ) {
         transform = frame.camera.transform
         intrinsics = frame.camera.intrinsics
@@ -1533,6 +1701,16 @@ private struct ARFrameData {
         self.sharpnessScore = sharpnessScore
         self.depthSnapshot = depthSnapshot
         self.confidenceSnapshot = confidenceSnapshot
+        rawFeaturePointCount = frame.rawFeaturePoints?.points.count ?? 0
+        self.sampledFeaturePoints = sampledFeaturePoints
+        self.planeAnchors = planeAnchors
+        if let lightEstimate = frame.lightEstimate {
+            ambientIntensity = Double(lightEstimate.ambientIntensity)
+            ambientColorTemperature = Double(lightEstimate.ambientColorTemperature)
+        } else {
+            ambientIntensity = nil
+            ambientColorTemperature = nil
+        }
     }
 }
 
@@ -1566,11 +1744,15 @@ extension VideoCaptureManager: ARSessionDelegate {
             )
             : nil
         let sharpnessScore = Self.laplacianVariance(pixelBuffer: frame.capturedImage)
+        let sampledFeaturePoints = Self.sampledFeaturePoints(from: frame)
+        let planeAnchors = session.currentFrame?.anchors.compactMap { $0 as? ARPlaneAnchor } ?? []
         let snapshot = ARFrameData(
             frame,
             sharpnessScore: sharpnessScore,
             depthSnapshot: depthSnapshot,
-            confidenceSnapshot: confidenceSnapshot
+            confidenceSnapshot: confidenceSnapshot,
+            sampledFeaturePoints: sampledFeaturePoints,
+            planeAnchors: planeAnchors
         )
         arDataQueue.async { [weak self] in
             self?.writeARFrame(snapshot)
@@ -2545,6 +2727,40 @@ private extension VideoCaptureManager {
         let result = sysctlbyname("kern.osversion", &buffer, &size, nil, 0)
         guard result == 0 else { return "unknown" }
         return String(cString: buffer)
+    }
+
+    static func stringValue(for alignment: ARPlaneAnchor.Alignment) -> String {
+        switch alignment {
+        case .horizontal:
+            return "horizontal"
+        case .vertical:
+            return "vertical"
+        @unknown default:
+            return "unknown"
+        }
+    }
+
+    static func stringValue(for classification: ARPlaneAnchor.Classification) -> String? {
+        switch classification {
+        case .none:
+            return nil
+        case .wall:
+            return "wall"
+        case .floor:
+            return "floor"
+        case .ceiling:
+            return "ceiling"
+        case .table:
+            return "table"
+        case .seat:
+            return "seat"
+        case .window:
+            return "window"
+        case .door:
+            return "door"
+        @unknown default:
+            return "unknown"
+        }
     }
 }
 

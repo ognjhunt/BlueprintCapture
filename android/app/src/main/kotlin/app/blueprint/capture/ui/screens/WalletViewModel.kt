@@ -24,8 +24,8 @@ data class WalletUiState(
     val profile: ContributorProfile? = null,
     val hasBackend: Boolean = false,
     val hasStripe: Boolean = false,
-    val payoutBannerTitle: String = "Payout setup unavailable",
-    val payoutBannerBody: String = "Payout setup is not enabled for this alpha build.",
+    val payoutBannerTitle: String = "Payout onboarding stays off-device",
+    val payoutBannerBody: String = "Android alpha shows wallet sync only. Real payout onboarding is not yet available in-app.",
     val showPayoutBanner: Boolean = true,
     val payoutBannerActionLabel: String? = null,
     val isRefreshing: Boolean = false,
@@ -42,7 +42,7 @@ data class WalletUiState(
     val approvedCaptures: Int = profile?.stats?.approvedCaptures ?: 0
     val approvalRateLabel: String = "${profile?.stats?.approvalRatePercent ?: 0}%"
     val pendingReviewCount: Int = max(totalCaptures - approvedCaptures, 0)
-    val cashoutEnabled: Boolean = hasBackend && hasStripe
+    val cashoutEnabled: Boolean = false
 }
 
 @HiltViewModel
@@ -70,18 +70,18 @@ class WalletViewModel @Inject constructor(
             profile = profile,
             hasBackend = config.hasBackend,
             hasStripe = config.hasStripe,
-            payoutBannerTitle = when {
-                !config.hasBackend -> "Payout setup unavailable"
-                !config.hasStripe -> "Connect payout method"
-                else -> "Wallet is live"
+            payoutBannerTitle = if (config.hasBackend) {
+                "Payout onboarding stays off-device"
+            } else {
+                "Payout setup unavailable"
             },
-            payoutBannerBody = when {
-                !config.hasBackend -> "Payout setup is not enabled for this alpha build."
-                !config.hasStripe -> "Connect a payout method to receive earnings."
-                else -> "Your Wallet is connected and synced to the signed-in contributor profile."
+            payoutBannerBody = if (config.hasBackend) {
+                "Android alpha syncs wallet balances and payout history only. Provider onboarding is intentionally not live in-app yet."
+            } else {
+                "Payout setup is not enabled for this alpha build."
             },
-            showPayoutBanner = !config.hasBackend || !config.hasStripe,
-            payoutBannerActionLabel = if (config.hasBackend && !config.hasStripe) "Connect" else null,
+            showPayoutBanner = true,
+            payoutBannerActionLabel = null,
             isRefreshing = refreshing,
             payoutEntries = history.filter { it.stage == CaptureSubmissionStage.Paid },
             historyEntries = history,

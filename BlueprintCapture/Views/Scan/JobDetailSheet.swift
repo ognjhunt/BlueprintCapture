@@ -153,14 +153,16 @@ struct JobDetailSheet: View {
             Task { await generateFocusTip() }
         }
         .confirmationDialog("How do you want to capture?", isPresented: $showCapturePicker, titleVisibility: .visible) {
-            Button("📱  Use iPhone Camera") {
+            Button("Use iPhone Camera") {
                 dismiss()
                 onStartPhoneCapture()
             }
-            Button("🥽  Use Glasses") {
+            .accessibilityIdentifier("job-detail-capture-iphone")
+            Button("Use Glasses") {
                 dismiss()
                 onStartCapture()
             }
+            .accessibilityIdentifier("job-detail-capture-glasses")
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("iPhone uses ARKit + LiDAR. Glasses record hands-free.")
@@ -398,8 +400,13 @@ struct JobDetailSheet: View {
         }
         switch item.permissionTier {
         case .approved:
-            // Ask the user whether to use iPhone camera or glasses before routing.
-            showCapturePicker = true
+            if RuntimeConfig.current.isUITesting {
+                dismiss()
+                onStartCapture()
+            } else {
+                // Ask the user whether to use iPhone camera or glasses before routing.
+                showCapturePicker = true
+            }
         case .reviewRequired:
             onSubmitForReview()
             dismiss()

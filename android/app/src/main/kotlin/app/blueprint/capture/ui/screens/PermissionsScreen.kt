@@ -25,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.DirectionsRun
 import androidx.compose.material.icons.rounded.GpsFixed
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Security
@@ -33,8 +32,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,9 +47,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import app.blueprint.capture.data.permissions.StartupPermissionChecker
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
 import app.blueprint.capture.ui.theme.BlueprintBlack
+import app.blueprint.capture.ui.theme.BlueprintError
 import app.blueprint.capture.ui.theme.BlueprintSurfaceCard
 import app.blueprint.capture.ui.theme.BlueprintSurfaceInset
 import app.blueprint.capture.ui.theme.BlueprintSuccess
@@ -69,6 +72,10 @@ fun PermissionsScreen(
     onEnable: () -> Unit,
 ) {
     val context = LocalContext.current
+    val startupPermissionChecker = remember(context.applicationContext) {
+        StartupPermissionChecker(context.applicationContext)
+    }
+    var permissionError by remember { mutableStateOf<String?>(null) }
 
     val permissionItems = remember {
         buildList {
@@ -101,19 +108,6 @@ fun PermissionsScreen(
                     permission = Manifest.permission.CAMERA,
                 ),
             )
-            add(
-                PermissionItem(
-                    label = "Motion",
-                    icon = Icons.Rounded.DirectionsRun,
-                    iconBg = Color(0xFF173022),
-                    iconTint = BlueprintSuccess,
-                    permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        Manifest.permission.ACTIVITY_RECOGNITION
-                    } else {
-                        Manifest.permission.CAMERA // fallback — always granted
-                    },
-                ),
-            )
         }
     }
 
@@ -132,7 +126,12 @@ fun PermissionsScreen(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) { results ->
         results.forEach { (perm, granted) -> grantedMap[perm] = granted }
-        onEnable()
+        if (startupPermissionChecker.hasRequiredStartupPermission()) {
+            permissionError = null
+            onEnable()
+        } else {
+            permissionError = "Location access is required to enter the app."
+        }
     }
 
     Box(
@@ -207,6 +206,17 @@ fun PermissionsScreen(
                 }
             }
 
+            permissionError?.let { error ->
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = error,
+                    color = BlueprintError,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    textAlign = TextAlign.Center,
+                )
+            }
+
             Spacer(modifier = Modifier.height(140.dp))
         }
 
@@ -219,7 +229,10 @@ fun PermissionsScreen(
                 .padding(horizontal = 24.dp, vertical = 32.dp)
                 .clip(RoundedCornerShape(18.dp))
                 .background(BlueprintAccent)
-                .clickable { launcher.launch(permissionsToRequest) }
+                .clickable {
+                    permissionError = null
+                    launcher.launch(permissionsToRequest)
+                }
                 .padding(vertical = 18.dp),
             contentAlignment = Alignment.Center,
         ) {

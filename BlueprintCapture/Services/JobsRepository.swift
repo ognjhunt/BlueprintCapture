@@ -51,6 +51,13 @@ final class JobsRepository: JobsRepositoryProtocol {
         } catch {
             let ns = error as NSError
             if ns.domain == "FIRFirestoreErrorDomain" && ns.code == 7 {
+                SessionEventManager.shared.logError(
+                    errorCode: "jobs_permission_denied",
+                    metadata: [
+                        "collection": collectionPath,
+                        "mock_fallback_enabled": AppConfig.allowMockJobsFallback()
+                    ]
+                )
                 if AppConfig.allowMockJobsFallback() {
                     print("⚠️ [JobsRepository] capture_jobs read was denied; using mock jobs because BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK is enabled")
                     return Self.mockJobs()

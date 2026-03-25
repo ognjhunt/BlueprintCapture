@@ -116,7 +116,8 @@ class DemandIntelligenceBackendApi @Inject constructor(
         method: String,
         body: okhttp3.RequestBody? = null,
     ): Pair<String, Int> = withContext(Dispatchers.IO) {
-        val baseUrl = localConfigProvider.current().backendBaseUrl.trim()
+        val config = localConfigProvider.current()
+        val baseUrl = config.demandBackendBaseUrl.ifBlank { config.backendBaseUrl }.trim()
         if (baseUrl.isBlank()) {
             throw ApiError.MissingBaseUrl
         }

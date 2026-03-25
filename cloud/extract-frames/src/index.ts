@@ -308,6 +308,16 @@ async function fileHasContent(bucket: StorageBucket, objectName: string): Promis
   }
 }
 
+async function fileExists(bucket: StorageBucket, objectName: string): Promise<boolean> {
+  try {
+    const [exists] = await bucket.file(objectName).exists();
+    return exists;
+  } catch (error) {
+    logger.warn("Failed to inspect file existence", { objectName, error });
+    return false;
+  }
+}
+
 function isValidIntrinsicsPayload(value: Record<string, unknown> | null): boolean {
   const fx = asFiniteNumber(value?.fx);
   const fy = asFiniteNumber(value?.fy);
@@ -945,6 +955,28 @@ export const extractFrames = onObjectFinalized(
       arkit_confidence: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/confidence/`),
       arkit_meshes: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
       motion: await fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
+      camera_pose: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/poses.jsonl`),
+      camera_intrinsics: isValidIntrinsicsPayload(
+        await loadJsonObject(bucket, `${pathInfo.rawPrefix}/arcore/session_intrinsics.json`, tmp)
+      ),
+      depth:
+        (await fileExists(bucket, `${pathInfo.rawPrefix}/arcore/depth_manifest.json`)) ||
+        (await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/depth/`)),
+      depth_confidence:
+        (await fileExists(bucket, `${pathInfo.rawPrefix}/arcore/confidence_manifest.json`)) ||
+        (await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/confidence/`)),
+      point_cloud: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/point_cloud.jsonl`),
+      planes: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/planes.jsonl`),
+      tracking_state: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/tracking_state.jsonl`),
+      light_estimate: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/light_estimates.jsonl`),
+      companion_phone_pose: await fileHasContent(bucket, `${pathInfo.rawPrefix}/companion_phone/poses.jsonl`),
+      companion_phone_intrinsics: isValidIntrinsicsPayload(
+        await loadJsonObject(bucket, `${pathInfo.rawPrefix}/companion_phone/session_intrinsics.json`, tmp)
+      ),
+      companion_phone_calibration: await fileExists(
+        bucket,
+        `${pathInfo.rawPrefix}/companion_phone/calibration.json`
+      ),
     };
     const file = bucket.file(walkthroughObjectName);
 
@@ -1233,13 +1265,29 @@ export const extractFrames = onObjectFinalized(
       typeof sceneMemoryCapture.sensor_availability === "object" && sceneMemoryCapture.sensor_availability
         ? (sceneMemoryCapture.sensor_availability as Record<string, unknown>)
         : {};
+    const claimedCapabilities =
+      typeof manifest?.capture_capabilities === "object" && manifest?.capture_capabilities
+        ? (manifest?.capture_capabilities as Record<string, unknown>)
+        : {};
     const claimedAvailability: ArtifactAvailability = {
       arkit_poses: claimedSensorRecord.arkit_poses === true,
       arkit_intrinsics: claimedSensorRecord.arkit_intrinsics === true,
       arkit_depth: claimedSensorRecord.arkit_depth === true,
       arkit_confidence: claimedSensorRecord.arkit_confidence === true,
       arkit_meshes: claimedSensorRecord.arkit_meshes === true,
-      motion: claimedSensorRecord.motion === true,
+      motion:
+        claimedCapabilities.motion === true || claimedSensorRecord.motion === true,
+      camera_pose: claimedCapabilities.camera_pose === true,
+      camera_intrinsics: claimedCapabilities.camera_intrinsics === true,
+      depth: claimedCapabilities.depth === true,
+      depth_confidence: claimedCapabilities.depth_confidence === true,
+      point_cloud: claimedCapabilities.point_cloud === true,
+      planes: claimedCapabilities.planes === true,
+      tracking_state: claimedCapabilities.tracking_state === true,
+      light_estimate: claimedCapabilities.light_estimate === true,
+      companion_phone_pose: claimedCapabilities.companion_phone_pose === true,
+      companion_phone_intrinsics: claimedCapabilities.companion_phone_intrinsics === true,
+      companion_phone_calibration: claimedCapabilities.companion_phone_calibration === true,
     };
     const claimedArtifactEvaluation = evaluateClaimedArtifacts({
       claimed: claimedAvailability,
@@ -1313,6 +1361,8 @@ export const extractFrames = onObjectFinalized(
       scene_id: pathInfo.sceneId,
       capture_id: pathInfo.captureId,
       capture_source: captureSource,
+      capture_profile_id: asString(manifest?.capture_profile_id) ?? null,
+      capture_capabilities: manifest?.capture_capabilities ?? {},
       capture_tier: qualityGate.captureTier,
       processing_profile: qualityGate.processingProfile,
       raw_prefix_uri: rawPrefixUri,

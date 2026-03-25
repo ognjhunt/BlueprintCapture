@@ -35,6 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.xr.projected.ProjectedDeviceController
+import androidx.xr.projected.ProjectedDisplayController
+import androidx.xr.projected.experimental.ExperimentalProjectedApi
+import androidx.xr.projected.permissions.ProjectedPermissionsRequestParams
+import androidx.xr.projected.permissions.ProjectedPermissionsResultContract
 import app.blueprint.capture.data.glasses.GlassesCapabilities
 import app.blueprint.capture.data.glasses.voice.AndroidOnDeviceSpeechInput
 import app.blueprint.capture.data.glasses.voice.AndroidVoiceOutput
@@ -49,13 +54,6 @@ import app.blueprint.capture.ui.theme.BlueprintTheme
 import dagger.hilt.android.AndroidEntryPoint
 import java.io.File
 import kotlinx.coroutines.launch
-import androidx.xr.projected.CAPABILITY_VISUAL_UI
-import androidx.xr.projected.ExperimentalProjectedApi
-import androidx.xr.projected.ProjectedDeviceController
-import androidx.xr.projected.ProjectedDisplayController
-import androidx.xr.projected.ProjectedPermissionsRequestParams
-import androidx.xr.projected.ProjectedPermissionsResultContract
-import androidx.xr.projected.VISUALS_ON
 
 @AndroidEntryPoint
 @OptIn(ExperimentalProjectedApi::class)
@@ -155,6 +153,7 @@ class GlassesProjectedActivity : ComponentActivity() {
         voiceSessionOrchestrator?.release()
         captureManager?.close()
         displayController?.close()
+        viewModel.resetRuntimeCapabilities()
         super.onDestroy()
     }
 
@@ -174,7 +173,9 @@ class GlassesProjectedActivity : ComponentActivity() {
     private fun initializeProjectedExperience() {
         lifecycleScope.launch {
             val projectedDeviceController = ProjectedDeviceController.create(this@GlassesProjectedActivity)
-            isVisualUiSupported = projectedDeviceController.capabilities.contains(CAPABILITY_VISUAL_UI)
+            isVisualUiSupported = projectedDeviceController.capabilities.contains(
+                ProjectedDeviceController.Capability.CAPABILITY_VISUAL_UI,
+            )
             viewModel.updateRuntimeCapabilities(
                 GlassesCapabilities(
                     hasDisplay = isVisualUiSupported,
@@ -188,7 +189,7 @@ class GlassesProjectedActivity : ComponentActivity() {
             val controller = ProjectedDisplayController.create(this@GlassesProjectedActivity)
             displayController = controller
             controller.addPresentationModeChangedListener { flags ->
-                areVisualsOn = flags.hasPresentationMode(VISUALS_ON)
+                areVisualsOn = flags.hasPresentationMode(ProjectedDisplayController.PresentationMode.VISUALS_ON)
             }
 
             captureManager = AndroidXrProjectedCaptureManager(this@GlassesProjectedActivity)
@@ -233,7 +234,9 @@ class GlassesProjectedActivity : ComponentActivity() {
                     is VoiceSessionState.Starting -> "Starting voice session."
                     is VoiceSessionState.Listening -> "Listening via ${state.source.replace('_', ' ')}."
                     is VoiceSessionState.Thinking -> "Heard: ${state.transcript}"
-                    is VoiceSessionState.Speaking -> "Speaking guidance."
+                    is VoiceSessionState.Speaking ->
+                        if (state.fallback) "Speaking guidance with on-device voice fallback."
+                        else "Speaking guidance."
                     is VoiceSessionState.Errored -> state.message
                     VoiceSessionState.Ended -> "Voice session ended."
                     VoiceSessionState.Idle -> captureStatus
@@ -261,7 +264,6 @@ class GlassesProjectedActivity : ComponentActivity() {
         ) { event ->
             when (event) {
                 is VideoRecordEvent.Start -> {
-                    activeRecording = event.recording
                     isRecording = true
                     captureStatus = "Recording from the projected glasses camera."
                 }
@@ -284,6 +286,8 @@ class GlassesProjectedActivity : ComponentActivity() {
                     }
                 }
             }
+        }?.onSuccess { recording ->
+            activeRecording = recording
         }?.onFailure { error ->
             captureError = error.message ?: "Projected recording could not start."
         }

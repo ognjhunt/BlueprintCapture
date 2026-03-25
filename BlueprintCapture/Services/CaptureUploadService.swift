@@ -341,6 +341,52 @@ struct CaptureRightsMetadata: Equatable, Codable {
     }
 }
 
+enum CaptureAuthorityLevel: String, Codable {
+    case authoritativeRaw = "authoritative_raw"
+    case rawTrackingOnly = "raw_tracking_only"
+    case diagnosticOnly = "diagnostic_only"
+    case notAvailable = "not_available"
+    case derivedLaterExpected = "derived_later_expected"
+}
+
+struct CaptureCapabilitiesMetadata: Equatable, Codable {
+    let cameraPose: Bool
+    let cameraIntrinsics: Bool
+    let depth: Bool
+    let depthConfidence: Bool
+    let mesh: Bool
+    let pointCloud: Bool
+    let planes: Bool
+    let featurePoints: Bool
+    let trackingState: Bool
+    let relocalizationEvents: Bool
+    let lightEstimate: Bool
+    let motion: Bool
+    let motionAuthoritative: Bool
+    let companionPhonePose: Bool
+    let companionPhoneIntrinsics: Bool
+    let companionPhoneCalibration: Bool
+    let poseRows: Int
+    let intrinsicsValid: Bool
+    let depthFrames: Int
+    let confidenceFrames: Int
+    let meshFiles: Int
+    let pointCloudSamples: Int
+    let planeRows: Int
+    let featurePointRows: Int
+    let trackingStateRows: Int
+    let relocalizationEventRows: Int
+    let lightEstimateRows: Int
+    let motionSamples: Int
+    let poseAuthority: CaptureAuthorityLevel
+    let intrinsicsAuthority: CaptureAuthorityLevel
+    let depthAuthority: CaptureAuthorityLevel
+    let motionAuthority: CaptureAuthorityLevel
+    let motionProvenance: String?
+    let geometrySource: String?
+    let geometryExpectedDownstream: Bool
+}
+
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo
@@ -593,8 +639,16 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         #if canImport(FirebaseStorage)
-        let hasAuthenticatedUser = await UserDeviceService.waitForAuthenticatedFirebaseUser(timeout: 10)
-        guard hasAuthenticatedUser else {
+        do {
+            _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "guest_auth_bootstrap_failed",
+                metadata: [
+                    "context": "upload_enqueue",
+                    "message": error.localizedDescription
+                ]
+            )
             print("❌ [UploadService] Firebase auth unavailable; refusing to upload without a capture_submissions-capable session")
             markUploadFailed(id: id, attempt: attempt, error: .authenticationRequired)
             return
@@ -858,8 +912,17 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private func ensureSubmissionRecordWritten(for request: CaptureUploadRequest) async -> Bool {
         #if canImport(FirebaseFirestore)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
-        let hasAuthenticatedUser = await UserDeviceService.waitForAuthenticatedFirebaseUser(timeout: 10)
-        guard hasAuthenticatedUser else {
+        do {
+            _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "submission_write_failed",
+                metadata: [
+                    "capture_id": captureId,
+                    "reason": "guest_session_unavailable",
+                    "message": error.localizedDescription
+                ]
+            )
             print("❌ [UploadService] capture_submissions/\(captureId) cannot be written because Firebase auth is unavailable")
             return false
         }
@@ -879,6 +942,14 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return await withCheckedContinuation { continuation in
             docRef.setData(payload, merge: true) { error in
                 if let error = error {
+                    SessionEventManager.shared.logError(
+                        errorCode: "submission_write_failed",
+                        metadata: [
+                            "capture_id": captureId,
+                            "reason": "firestore_write_failed",
+                            "message": error.localizedDescription
+                        ]
+                    )
                     print("⚠️ [UploadService] Failed to write capture_submissions/\(captureId): \(error.localizedDescription)")
                     continuation.resume(returning: false)
                 } else {
@@ -893,10 +964,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func finalizeSuccessfulUpload(id: UUID, attempt: UUID) async {
-        guard let request = queue.sync(execute: {
-            guard let record = uploads[id], record.attempt == attempt else { return nil }
-            return record.request
-        }) else { return }
+        let record = queue.sync(execute: { uploads[id] })
+        guard let record, record.attempt == attempt else { return }
+        let request = record.request
 
         let submissionWritten = await ensureSubmissionRecordWritten(for: request)
         guard submissionWritten else {

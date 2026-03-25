@@ -3,6 +3,14 @@
     "default": "blueprint-8c1ca",
     "captire": "blueprint-8c1ca"
   },
-  "targets": {},
+  "targets": {
+    "blueprint-8c1ca": {
+      "hosting": {
+        "production": [
+          "blueprint-prod-f0f19"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

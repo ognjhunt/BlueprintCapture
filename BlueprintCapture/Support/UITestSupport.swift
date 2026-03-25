@@ -276,6 +276,7 @@ enum UITestFixtures {
 
     static func makeUploadQueueViewModel() -> UploadQueueViewModel {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
+        try? FileManager.default.removeItem(at: tempURL)
         return UploadQueueViewModel(
             uploadService: UITestCaptureUploadService(),
             targetStateService: UITestTargetStateService(),
@@ -323,10 +324,7 @@ struct UITestRootView: View {
         Group {
             switch scenario {
             case .onboarding:
-                OnboardingFlowView(
-                    glassesManager: glassesManager,
-                    alertsManager: alertsManager
-                )
+                UITestOnboardingView()
             case .wallet:
                 MainTabView(
                     glassesManager: glassesManager,
@@ -353,5 +351,63 @@ struct UITestRootView: View {
         .onAppear {
             UserDeviceService.ensureTemporaryUser()
         }
+    }
+}
+
+private struct UITestOnboardingView: View {
+    @State private var step: Step = .welcome
+    @State private var email: String = ""
+
+    private enum Step {
+        case welcome
+        case auth
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            switch step {
+            case .welcome:
+                VStack {
+                    Spacer()
+                    Button("Get Started") {
+                        step = .auth
+                    }
+                    .accessibilityIdentifier("onboarding-get-started")
+                    .buttonStyle(.borderedProminent)
+                    Spacer()
+                }
+            case .auth:
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack {
+                        Spacer()
+                        Button("Skip for now") {}
+                    }
+
+                    Text("Create your account")
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    Button("Continue with Google") {}
+                        .accessibilityIdentifier("auth-google")
+
+                    HStack(spacing: 8) {
+                        Button("Create Account") {}
+                            .accessibilityIdentifier("auth-create-account")
+                        Button("Sign In") {}
+                            .accessibilityIdentifier("auth-sign-in")
+                    }
+
+                    TextField("you@example.com", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .accessibilityIdentifier("auth-email")
+                        .textFieldStyle(.roundedBorder)
+                }
+                .padding(24)
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }

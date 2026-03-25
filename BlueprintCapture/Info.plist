@@ -47,6 +47,20 @@
     <string>Bluetooth is required to connect to your Meta smart glasses for video capture.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Local network access is used to discover and connect to your Meta smart glasses.</string>
+    <key>BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK</key>
+    <string>$(BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK)</string>
+    <key>BLUEPRINT_BACKEND_BASE_URL</key>
+    <string>$(BLUEPRINT_BACKEND_BASE_URL)</string>
+    <key>BLUEPRINT_DEMAND_BACKEND_BASE_URL</key>
+    <string>$(BLUEPRINT_DEMAND_BACKEND_BASE_URL)</string>
+    <key>BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK</key>
+    <string>$(BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK)</string>
+    <key>BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE</key>
+    <string>$(BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE)</string>
+    <key>BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS</key>
+    <string>$(BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS)</string>
+    <key>BLUEPRINT_NEARBY_DISCOVERY_PROVIDER</key>
+    <string>$(BLUEPRINT_NEARBY_DISCOVERY_PROVIDER)</string>
     <key>MWDAT</key>
     <dict>
         <key>AppLinkURLScheme</key>
@@ -65,7 +79,7 @@
         <key>MockDevice</key>
         <dict>
             <key>Enabled</key>
-            <true/>
+            <false/>
         </dict>
     </dict>
 	<key>CFBundleURLTypes</key>

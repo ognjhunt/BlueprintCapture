@@ -76,6 +76,7 @@ struct CaptureBundleAndInferenceTests {
         #expect(manifest["site_submission_id"] as? String == "scene-123")
         #expect(manifest["video_uri"] as? String == "raw/walkthrough.mov")
         #expect(manifest["capture_modality"] as? String == "iphone_video_only")
+        #expect(manifest["capture_profile_id"] as? String == "iphone_arkit_non_lidar")
         #expect(manifest["evidence_tier"] as? String == "pre_screen_video")
         #expect(manifest["task_text_hint"] as? String == "Inbound walk")
         #expect((manifest["task_steps"] as? [String]) == ["Enter aisle", "Walk route"])
@@ -99,6 +100,11 @@ struct CaptureBundleAndInferenceTests {
         let captureEvidence = try #require(manifest["capture_evidence"] as? [String: Any])
         #expect(captureEvidence["arkit_intrinsics_valid"] as? Bool == false)
         #expect(captureEvidence["arkit_pose_rows"] as? Int == 0)
+        #expect(captureEvidence["depth_authority"] as? String == "not_available")
+        let captureCapabilities = try #require(manifest["capture_capabilities"] as? [String: Any])
+        #expect(captureCapabilities["camera_pose"] as? Bool == false)
+        #expect(captureCapabilities["depth"] as? Bool == false)
+        #expect(captureCapabilities["geometry_expected_downstream"] as? Bool == false)
         let captureRights = try #require(manifest["capture_rights"] as? [String: Any])
         #expect(captureRights["data_licensing_allowed"] as? Bool == true)
         #expect(captureRights["derived_scene_generation_allowed"] as? Bool == false)
@@ -128,6 +134,9 @@ struct CaptureBundleAndInferenceTests {
         let contextEvidence = try #require(context["capture_evidence"] as? [String: Any])
         #expect(contextEvidence["arkit_intrinsics_valid"] as? Bool == false)
         #expect(contextEvidence["motion_samples"] as? Int == 0)
+        #expect(context["capture_profile_id"] as? String == "iphone_arkit_non_lidar")
+        let contextCapabilities = try #require(context["capture_capabilities"] as? [String: Any])
+        #expect(contextCapabilities["camera_intrinsics"] as? Bool == false)
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])
@@ -209,6 +218,7 @@ struct CaptureBundleAndInferenceTests {
         let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
         let manifest = try #require(manifestObject as? [String: Any])
         #expect(manifest["capture_modality"] as? String == "iphone_arkit_lidar")
+        #expect(manifest["capture_profile_id"] as? String == "iphone_arkit_lidar")
         #expect(manifest["evidence_tier"] as? String == "qualified_metric_capture")
         #expect((manifest["scaffolding_used"] as? [String]) == ["arkit_depth", "arkit_meshes", "arkit_pose_log"])
 
@@ -217,6 +227,8 @@ struct CaptureBundleAndInferenceTests {
         #expect(sensorAvailability["arkit_poses"] as? Bool == true)
         #expect(sensorAvailability["arkit_intrinsics"] as? Bool == true)
         #expect(sensorAvailability["arkit_depth"] as? Bool == true)
+        #expect(sceneMemory["geometry_source"] as? String == "arkit")
+        #expect(sceneMemory["geometry_expected_downstream"] as? Bool == false)
         #expect(sceneMemory["motion_provenance"] as? String == "phone_imu_diagnostic_only")
         #expect(sceneMemory["motion_timestamps_capture_relative"] as? Bool == true)
 
@@ -226,6 +238,10 @@ struct CaptureBundleAndInferenceTests {
         #expect(contextEvidence["motion_provenance"] as? String == "phone_imu_diagnostic_only")
         #expect(contextEvidence["motion_timestamps_capture_relative"] as? Bool == true)
         #expect(contextEvidence["arkit_pose_rows"] as? Int == 1)
+        #expect(contextEvidence["pose_authority"] as? String == "authoritative_raw")
+        let contextCapabilities = try #require(context["capture_capabilities"] as? [String: Any])
+        #expect(contextCapabilities["camera_pose"] as? Bool == true)
+        #expect(contextCapabilities["depth_authority"] as? String == "authoritative_raw")
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])
@@ -345,6 +361,11 @@ struct CaptureBundleAndInferenceTests {
         let recordingObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("recording_session.json")))
         let recording = try #require(recordingObject as? [String: Any])
         #expect(recording["coordinate_frame_session_id"] as? String == "arkit-session-1")
+        #expect(recording["world_frame_definition"] as? String == "arkit_world_origin_at_session_start")
+        #expect(recording["units"] as? String == "meters")
+        #expect(recording["handedness"] as? String == "right_handed")
+        #expect(recording["gravity_aligned"] as? Bool == true)
+        #expect((recording["session_reset_count"] as? NSNumber)?.intValue == 0)
 
         let depthManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/depth_manifest.json")))
         let depthManifest = try #require(depthManifestObject as? [String: Any])
@@ -698,13 +719,18 @@ struct CaptureBundleAndInferenceTests {
             runtimeConfigProvider: {
                 RuntimeConfig(
                     backendBaseURL: nil,
+                    demandBackendBaseURL: nil,
                     isUITesting: false,
                     uiTestScenario: .disabled,
                     allowOffsiteCheckIn: false,
                     maxReservationDriveMinutes: 60,
                     fallbackMaxReservationAirMiles: 35.0,
+                    enableNearbyDiscovery: true,
+                    nearbyDiscoveryProvider: .placesNearby,
+                    enableGeminiMapsGroundingFallback: false,
                     enableDirectProviderFeatures: true,
-                    allowMockJobsFallback: false
+                    allowMockJobsFallback: false,
+                    enableRemoteNotifications: false
                 )
             },
             apiKeyProvider: { "test-key" }

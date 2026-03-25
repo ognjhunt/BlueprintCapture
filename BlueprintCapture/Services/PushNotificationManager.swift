@@ -32,6 +32,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     private let center = UNUserNotificationCenter.current()
     private var didConfigure = false
     private var hasLoggedMissingBackendBaseURL = false
+    private var hasLoggedRemoteNotificationsDisabled = false
 
     override private init() {
         super.init()
@@ -52,6 +53,16 @@ final class PushNotificationManager: NSObject, ObservableObject {
         guard !didConfigure else { return }
         didConfigure = true
 
+        guard remoteNotificationsEnabled else {
+            logRemoteNotificationsDisabledIfNeeded()
+            Task {
+                await refreshNotificationSettings()
+                await syncCurrentDevice()
+                await NotificationPreferencesStore.shared.refreshFromBackendIfPossible()
+            }
+            return
+        }
+
         Messaging.messaging().delegate = self
         fcmToken = UserDefaults.standard.string(forKey: "fcmToken") ?? ""
 
@@ -70,8 +81,10 @@ final class PushNotificationManager: NSObject, ObservableObject {
             let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
             UserDefaults.standard.set(true, forKey: "notifications.authorization.asked")
             await refreshNotificationSettings()
-            if granted {
+            if granted && remoteNotificationsEnabled {
                 UIApplication.shared.registerForRemoteNotifications()
+            } else if granted {
+                logRemoteNotificationsDisabledIfNeeded()
             }
             await syncCurrentDevice()
         } catch {
@@ -85,6 +98,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func didRegisterForRemoteNotifications(deviceToken: Data) {
+        guard remoteNotificationsEnabled else { return }
         Messaging.messaging().apnsToken = deviceToken
         UserDefaults.standard.set(deviceToken.hexString, forKey: "apnsToken")
         print("✅ [Notifications] APNs registration succeeded")
@@ -94,6 +108,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
     }
 
     func didFailToRegisterForRemoteNotifications(_ error: Error) {
+        guard remoteNotificationsEnabled else { return }
         print("⚠️ [Notifications] APNs registration failed: \(error.localizedDescription)")
     }
 
@@ -102,7 +117,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
         do {
             try await APIService.shared.updateNotificationPreferences(NotificationPreferencesStore.shared.preferences)
         } catch {
-            print("⚠️ [Notifications] Failed to sync preferences: \(error.localizedDescription)")
+            logNotificationFailure(operation: "sync preferences", error: error)
         }
     }
 
@@ -123,7 +138,7 @@ final class PushNotificationManager: NSObject, ObservableObject {
                 )
             )
         } catch {
-            print("⚠️ [Notifications] Failed to sync device registration: \(error.localizedDescription)")
+            logNotificationFailure(operation: "sync device registration", error: error)
         }
     }
 
@@ -146,6 +161,33 @@ final class PushNotificationManager: NSObject, ObservableObject {
                 continuation.resume(returning: settings)
             }
         }
+    }
+
+    private var remoteNotificationsEnabled: Bool {
+        AppConfig.enableRemoteNotifications()
+    }
+
+    private func logRemoteNotificationsDisabledIfNeeded() {
+        guard !hasLoggedRemoteNotificationsDisabled else { return }
+        hasLoggedRemoteNotificationsDisabled = true
+        print("ℹ️ [Notifications] Remote push registration is disabled for this build")
+    }
+
+    private func logNotificationFailure(operation: String, error: Error) {
+        let message: String
+        if let apiError = error as? APIService.APIError {
+            message = apiError.errorDescription ?? String(describing: apiError)
+        } else {
+            message = error.localizedDescription
+        }
+        SessionEventManager.shared.logError(
+            errorCode: "notification_sync_failed",
+            metadata: [
+                "operation": operation,
+                "message": message
+            ]
+        )
+        print("⚠️ [Notifications] Failed to \(operation): \(message)")
     }
 
     private static var appVersion: String {

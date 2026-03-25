@@ -93,7 +93,6 @@ fun PayoutsScreen(onBack: () -> Unit) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Title block
         Column(modifier = Modifier.padding(horizontal = 20.dp)) {
             Text(
                 text = "Payouts",
@@ -104,7 +103,7 @@ fun PayoutsScreen(onBack: () -> Unit) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Set up identity verification and payouts",
+                text = "Android alpha keeps payout onboarding honest and off-device until the live payout path is wired.",
                 color = BlueprintTextMuted,
                 fontSize = 17.sp,
                 lineHeight = 22.sp,
@@ -112,105 +111,56 @@ fun PayoutsScreen(onBack: () -> Unit) {
         }
 
         Spacer(modifier = Modifier.height(20.dp))
-
-        // Alpha build banner
         PayoutsAlphaBanner(modifier = Modifier.padding(horizontal = 20.dp))
-
         Spacer(modifier = Modifier.height(32.dp))
-
-        // IDENTITY section
-        PayoutsSectionLabel("Identity")
-        Spacer(modifier = Modifier.height(10.dp))
-        Column(
+        HonestPayoutCard(
             modifier = Modifier.padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            IdentityStepCard(
-                icon = Icons.Rounded.VerifiedUser,
-                iconTint = BlueprintTextMuted,
-                title = "ID Verification",
-                bullets = listOf(
-                    "Government-issued photo ID",
-                    "Passport, driver's license, or national ID",
-                ),
-                actionLabel = "Start Verification",
-                onAction = {},
-            )
-            IdentityStepCard(
-                icon = Icons.Rounded.Face,
-                iconTint = BlueprintTextMuted,
-                title = "Liveness & Face Match",
-                bullets = listOf(
-                    "Quick selfie for face match",
-                    "Completed automatically with Step 1",
-                ),
-                actionLabel = null,
-                onAction = {},
-            )
-            IdentityStepCard(
-                icon = Icons.Rounded.Description,
-                iconTint = BlueprintTextMuted,
-                title = "Tax Information",
-                bullets = listOf(
-                    "Required for payments over \$600/year",
-                    "US citizens: W-9 · International: W-8BEN",
-                ),
-                actionLabel = "Submit Tax Info",
-                onAction = {},
-            )
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // PAYOUT SCHEDULE section
-        PayoutsSectionLabel("Payout Schedule")
-        Spacer(modifier = Modifier.height(10.dp))
-        PayoutsCard(modifier = Modifier.padding(horizontal = 20.dp)) {
-            PayoutsInfoRow(
-                icon = Icons.Rounded.DateRange,
-                iconBg = PayoutNavyBg,
-                iconTint = PayoutNavyTint,
-                title = "Weekly Default",
-                subtitle = "Mon–Sun earnings paid Wed–Thu",
-            )
-            PayoutsRowDivider()
-            PayoutsInfoRow(
-                icon = Icons.Rounded.CreditCard,
-                iconBg = BlueprintTealSurface,
-                iconTint = BlueprintTeal,
-                title = "Blueprint Card",
-                subtitle = "Auto-deposit after each capture (no fee)",
-            )
-            PayoutsRowDivider()
-            PayoutsInfoRow(
-                icon = Icons.Rounded.Bolt,
-                iconBg = PayoutAmberBg,
-                iconTint = BlueprintWarning,
-                title = "Instant Pay",
-                subtitle = "Same-day to debit card (fee applies)",
-            )
-        }
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // INSTANT PAY section
-        PayoutsSectionLabel("Instant Pay")
-        Spacer(modifier = Modifier.height(10.dp))
-        InstantPayCard(modifier = Modifier.padding(horizontal = 20.dp))
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "We never sell or share your personal information.",
-            color = Color(0xFF4C5056),
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+            title = "What is live in alpha",
+            body = "Wallet balances, payout history, and capture review state can sync from the backend when your account is configured.",
         )
-
+        Spacer(modifier = Modifier.height(14.dp))
+        HonestPayoutCard(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            title = "What is intentionally not live on Android",
+            body = "Identity verification, bank linking, instant pay, Venmo, PayPal, crypto, and Stripe onboarding are not completed in this Android alpha build.",
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        HonestPayoutCard(
+            modifier = Modifier.padding(horizontal = 20.dp),
+            title = "Why this screen is limited",
+            body = "BlueprintCapture is capture-first. Until payout onboarding is backed by truthful contracts and a real provider flow, Android keeps this surface informational instead of pretending setup is live.",
+        )
         Spacer(modifier = Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun HonestPayoutCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    body: String,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(BlueprintSurfaceCard, RoundedCornerShape(18.dp))
+            .border(1.dp, BlueprintBorder, RoundedCornerShape(18.dp))
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = title,
+            color = BlueprintTextPrimary,
+            fontSize = 18.sp,
+            lineHeight = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            text = body,
+            color = BlueprintTextMuted,
+            fontSize = 15.sp,
+            lineHeight = 21.sp,
+        )
     }
 }
 

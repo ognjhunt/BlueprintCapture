@@ -55,6 +55,14 @@ capture automatically.
 - Generated scenes are downstream derived products, not truth.
 - ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.
 - Raw bundle metadata reports only evidence that was actually captured and validated.
+- No production-like build should fabricate live capture supply or fake payout/provider readiness.
+
+## Alpha Scope
+
+- In scope: truthful capture selection, raw bundle packaging, upload queueing, wallet history sync, and explicit open-capture flow.
+- In scope on Android: phone capture and target-scoped Meta glasses capture that finalizes into the canonical bundle/upload pipeline.
+- Intentionally out of scope by default: direct-provider AI features, Street View previews, and Android payout onboarding UI that is not backed by a live provider contract.
+- Current cross-modality runtime limits are documented in [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
 
 ## Main Areas
 
@@ -71,7 +79,7 @@ open BlueprintCapture.xcodeproj
 ```
 
 ```bash
-xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture
+xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture -derivedDataPath build/DerivedData
 ```
 
 ## Tests
@@ -79,7 +87,14 @@ xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture
 Swift:
 
 ```bash
-xcodebuild test -project BlueprintCapture.xcodeproj -scheme BlueprintCapture -destination 'platform=iOS Simulator,name=iPhone 15' -only-testing:BlueprintCaptureTests/CaptureBundleAndInferenceTests -only-testing:BlueprintCaptureTests/PipelineContractTests -only-testing:BlueprintCaptureTests/ScanHomeAndUploadTests
+BLUEPRINT_IOS_SIMULATOR_NAME="iPhone 17 Pro" \
+xcodebuild test -project BlueprintCapture.xcodeproj -scheme BlueprintCapture \
+  -destination "platform=iOS Simulator,name=${BLUEPRINT_IOS_SIMULATOR_NAME}" \
+  -derivedDataPath build/DerivedData \
+  -only-testing:BlueprintCaptureTests/CaptureBundleAndInferenceTests \
+  -only-testing:BlueprintCaptureTests/PipelineContractTests \
+  -only-testing:BlueprintCaptureTests/RuntimeConfigTests \
+  -only-testing:BlueprintCaptureTests/ScanHomeOpenCaptureTests
 ```
 
 Cloud bridge:
@@ -88,3 +103,18 @@ Cloud bridge:
 cd cloud/extract-frames
 npm test
 ```
+
+Cross-repo external alpha gate:
+
+```bash
+python /Users/nijelhunt_1/workspace/BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py
+```
+
+Release config validation:
+
+```bash
+BLUEPRINT_RELEASE_XCCONFIG=/absolute/path/to/BlueprintCapture.release.xcconfig \
+./scripts/archive_external_alpha.sh --validate-config-only
+```
+
+Use the slash-helper form from [ConfigTemplates/BlueprintCapture.release.xcconfig.example](/Users/nijelhunt_1/workspace/BlueprintCapture/ConfigTemplates/BlueprintCapture.release.xcconfig.example) for any `https://...` xcconfig values so Xcode does not truncate them to `https:`.

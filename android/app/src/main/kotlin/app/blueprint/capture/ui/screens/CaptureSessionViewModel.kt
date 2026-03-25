@@ -106,6 +106,7 @@ data class SiteWorldRecordingState(
 data class CaptureReviewDraft(
     val capture: CaptureLaunch,
     val recordingFilePath: String,
+    val recordingWorkspacePath: String? = null,
     val captureStartEpochMs: Long,
     val captureDurationMs: Long,
     val width: Int,
@@ -126,6 +127,8 @@ data class CaptureReviewDraft(
     val motionSampleCount: Int = 0,
     // Path to pre-written imu_samples.jsonl file from CaptureIMUSampler
     val imuSamplesFilePath: String? = null,
+    val arcoreEvidenceDirectoryPath: String? = null,
+    val coordinateFrameSessionId: String? = null,
     val siteWorldSiteScale: SiteWorldSiteScale = SiteWorldSiteScale.Medium,
     val siteWorldCriticalZones: Set<SiteWorldAnchorType> = emptySet(),
     val siteWorldPassAttemptIndex: Int = 1,
@@ -136,8 +139,10 @@ data class CaptureReviewDraft(
     val siteWorldReview: SiteWorldPassReview? = null,
 ) {
     val recordingFile: File get() = File(recordingFilePath)
+    val recordingWorkspace: File? get() = recordingWorkspacePath?.let(::File)
     val preparedBundleFile: File? get() = preparedBundlePath?.let(::File)
     val imuSamplesFile: File? get() = imuSamplesFilePath?.let(::File)
+    val arcoreEvidenceDirectory: File? get() = arcoreEvidenceDirectoryPath?.let(::File)
 
     val taskSteps: List<String>
         get() = taskStepsText.lines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -227,7 +232,7 @@ data class CaptureReviewDraft(
                 siteName = capture.label.takeIf(String::isNotBlank),
             ),
             captureTopology = CaptureTopologyMetadata(
-                captureSessionId = captureId,
+                captureSessionId = coordinateFrameSessionId ?: captureId,
                 routeId = routeId,
                 passId = captureId,
                 passIndex = siteWorldPassAttemptIndex,
@@ -473,6 +478,8 @@ class CaptureSessionViewModel @Inject constructor(
         captureDurationMs: Long,
         imuSamplesFile: File? = null,
         motionSampleCount: Int = 0,
+        arcoreEvidenceDirectory: File? = null,
+        coordinateFrameSessionId: String? = null,
     ) {
         viewModelScope.launch {
             val snapshot = _uiState.value
@@ -492,6 +499,7 @@ class CaptureSessionViewModel @Inject constructor(
                     CaptureReviewDraft(
                         capture = capture,
                         recordingFilePath = recordingFile.absolutePath,
+                        recordingWorkspacePath = recordingFile.parentFile?.absolutePath,
                         captureStartEpochMs = captureStartEpochMs,
                         captureDurationMs = captureDurationMs,
                         width = metadata.width,
@@ -505,6 +513,8 @@ class CaptureSessionViewModel @Inject constructor(
                         owner = capture.owner.orEmpty(),
                         motionSampleCount = motionSampleCount,
                         imuSamplesFilePath = imuSamplesFile?.absolutePath,
+                        arcoreEvidenceDirectoryPath = arcoreEvidenceDirectory?.absolutePath,
+                        coordinateFrameSessionId = coordinateFrameSessionId,
                         siteWorldSiteScale = snapshot.siteWorldSiteScale,
                         siteWorldCriticalZones = snapshot.siteWorldCriticalZones,
                         siteWorldPassAttemptIndex = passAttemptIndex,
@@ -573,9 +583,11 @@ class CaptureSessionViewModel @Inject constructor(
     }
 
     fun discardPendingCapture() {
+        _uiState.value.reviewDraft?.recordingWorkspace?.takeIf(File::exists)?.deleteRecursively()
         _uiState.value.reviewDraft?.recordingFile?.takeIf(File::exists)?.delete()
         _uiState.value.reviewDraft?.preparedBundleFile?.deleteRecursively()
         _uiState.value.reviewDraft?.imuSamplesFile?.delete()
+        _uiState.value.reviewDraft?.arcoreEvidenceDirectory?.deleteRecursively()
         imuSampler?.release()
         imuSampler = null
         _uiState.value = CaptureSessionUiState()
@@ -803,6 +815,7 @@ class CaptureSessionViewModel @Inject constructor(
             request = request,
             walkthroughSource = draft.recordingFile,
             imuSamplesSource = draft.imuSamplesFile,
+            arcoreEvidenceDirectory = draft.arcoreEvidenceDirectory,
         )
         draft.recordingFile.takeIf(File::exists)?.delete()
 

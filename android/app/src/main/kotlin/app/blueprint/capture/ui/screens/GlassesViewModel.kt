@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.blueprint.capture.BuildConfig
 import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.capture.AndroidCaptureBundleBuilder
 import app.blueprint.capture.data.capture.AndroidCaptureBundleRequest
@@ -84,6 +85,8 @@ class GlassesViewModel @Inject constructor(
 ) : ViewModel() {
     private companion object {
         const val TAG = "BlueprintGlasses"
+        const val MWDAT_DISABLED_MESSAGE =
+            "Meta DAT private SDK is disabled in this build. Add GitHub Packages credentials and set MWDAT_ENABLE_PRIVATE_SDK=true to verify Meta glasses."
     }
 
     private val config = localConfigProvider.current()
@@ -108,6 +111,9 @@ class GlassesViewModel @Inject constructor(
     init {
         if (isEmulator && config.allowMockJobsFallback) {
             datDevices = listOf(GlassesDevice(id = "MOCK_001", name = "Ray-Ban Meta (Mock)", isMock = true))
+            publishDerivedState(force = true)
+        } else if (!BuildConfig.MWDAT_PRIVATE_SDK_ENABLED) {
+            stickyError = MWDAT_DISABLED_MESSAGE
             publishDerivedState(force = true)
         } else {
             observeWearables()
@@ -152,6 +158,11 @@ class GlassesViewModel @Inject constructor(
         stickyError = null
         pendingPermissionDevice = null
         Log.d(TAG, "beginMetaSetup isEmulator=$isEmulator activityPresent=${activity != null}")
+        if (!BuildConfig.MWDAT_PRIVATE_SDK_ENABLED) {
+            stickyError = MWDAT_DISABLED_MESSAGE
+            publishDerivedState(force = true)
+            return
+        }
         if (isEmulator) {
             publishDerivedState(force = true)
             return
@@ -203,10 +214,14 @@ class GlassesViewModel @Inject constructor(
             }
 
             val permissionResult = Wearables.checkPermissionStatus(Permission.CAMERA)
+            var permissionError: String? = null
             permissionResult.onFailure { error, _ ->
-                Log.w(TAG, "checkPermissionStatus failed: ${error.description}")
+                permissionError = error.description
+            }
+            if (permissionError != null && permissionResult.getOrNull() == null) {
+                Log.w(TAG, "checkPermissionStatus failed: $permissionError")
                 _state.value = GlassesConnectionState.Error(
-                    "Camera permission check failed: ${error.description}",
+                    "Camera permission check failed: $permissionError",
                 )
                 return@launch
             }
@@ -407,6 +422,8 @@ class GlassesViewModel @Inject constructor(
             outputRoot = outputRoot,
             request = request,
             walkthroughSource = artifacts.videoFile,
+            glassesEvidenceDirectory = artifacts.glassesEvidenceDirectory,
+            companionPhoneDirectory = artifacts.companionPhoneDirectory,
         )
         return uploadRepository.enqueueBundleUpload(
             label = captureLaunch.label,

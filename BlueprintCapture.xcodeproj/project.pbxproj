@@ -143,6 +143,7 @@
 				8901D8682EA7DB6000DF72ED /* Sources */,
 				8901D8692EA7DB6000DF72ED /* Frameworks */,
 				8901D86A2EA7DB6000DF72ED /* Resources */,
+				89F0D1012F4A000100AA0001 /* Validate No Provider Secrets */,
 			);
 			buildRules = (
 			);
@@ -290,6 +291,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		89F0D1012F4A000100AA0001 /* Validate No Provider Secrets */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/BlueprintCapture/Support/Secrets.local.plist",
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Validate No Provider Secrets";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/inject_local_provider_secrets.stamp",
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\nSECRETS_PLIST=\"${SRCROOT}/BlueprintCapture/Support/Secrets.local.plist\"\nAPP_PLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nSTAMP_FILE=\"${SCRIPT_OUTPUT_FILE_0}\"\n\nremove_key() {\n  /usr/libexec/PlistBuddy -c \"Delete :$1\" \"$APP_PLIST\" 2>/dev/null || true\n}\n\nfor key in PLACES_API_KEY GOOGLE_PLACES_API_KEY GEMINI_API_KEY GOOGLE_AI_API_KEY GEMINI_MAPS_API_KEY; do\n  remove_key \"$key\"\ndone\n\nif [ -f \"$SECRETS_PLIST\" ]; then\n  echo \"warning: Provider client secrets are ignored for mobile builds; use backend nearby proxy routes instead.\" >&2\nfi\n\ntouch \"$STAMP_FILE\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		8901D8682EA7DB6000DF72ED /* Sources */ = {
@@ -453,17 +479,22 @@
 		8901D8972EA7DB6300DF72ED /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				BLUEPRINT_BACKEND_BASE_URL = "";
-				CODE_SIGN_ENTITLEMENTS = BlueprintCapture/BlueprintCapture.entitlements;
+				BLUEPRINT_DEMAND_BACKEND_BASE_URL = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TUCA8KAYA;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BlueprintCapture/Info.plist;
+				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_BACKEND_BASE_URL = "$(BLUEPRINT_BACKEND_BASE_URL)";
+				INFOPLIST_KEY_BLUEPRINT_DEMAND_BACKEND_BASE_URL = "$(BLUEPRINT_DEMAND_BACKEND_BASE_URL)";
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK = NO;
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE = YES;
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS = NO;
+				INFOPLIST_KEY_BLUEPRINT_NEARBY_DISCOVERY_PROVIDER = places_nearby;
 				INFOPLIST_KEY_CFBundleDisplayName = Blueprint;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -486,17 +517,22 @@
 		8901D8982EA7DB6300DF72ED /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				BLUEPRINT_BACKEND_BASE_URL = "";
-				CODE_SIGN_ENTITLEMENTS = BlueprintCapture/BlueprintCapture.entitlements;
+				BLUEPRINT_DEMAND_BACKEND_BASE_URL = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TUCA8KAYA;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BlueprintCapture/Info.plist;
+				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_BACKEND_BASE_URL = "$(BLUEPRINT_BACKEND_BASE_URL)";
+				INFOPLIST_KEY_BLUEPRINT_DEMAND_BACKEND_BASE_URL = "$(BLUEPRINT_DEMAND_BACKEND_BASE_URL)";
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK = NO;
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE = NO;
+				INFOPLIST_KEY_BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS = YES;
+				INFOPLIST_KEY_BLUEPRINT_NEARBY_DISCOVERY_PROVIDER = places_nearby;
 				INFOPLIST_KEY_CFBundleDisplayName = Blueprint;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -230,6 +230,28 @@ struct CaptureEvidenceSummary: Equatable, Codable {
     let arkitDepthFrames: Int
     let arkitConfidenceFrames: Int
     let arkitMeshFiles: Int
+    let arkitFeaturePointRows: Int
+    let arkitPlaneRows: Int
+    let arkitTrackingStateRows: Int
+    let arkitRelocalizationEventRows: Int
+    let arkitLightEstimateRows: Int
+    let arcoreFrameRows: Int
+    let arcorePoseRows: Int
+    let arcoreIntrinsicsValid: Bool
+    let arcoreDepthFrames: Int
+    let arcoreConfidenceFrames: Int
+    let arcorePointCloudSamples: Int
+    let arcorePlaneRows: Int
+    let arcoreTrackingStateRows: Int
+    let arcoreLightEstimateRows: Int
+    let glassesFrameTimestampRows: Int
+    let glassesDeviceStateRows: Int
+    let glassesHealthEventRows: Int
+    let companionPhonePoseRows: Int
+    let companionPhoneIntrinsicsValid: Bool
+    let companionPhoneCalibrationPresent: Bool
+    let poseMatchRate: Double?
+    let p95PoseDeltaSec: Double?
     let motionSamples: Int
     let motionProvenance: String?
     let motionTimestampsCaptureRelative: Bool
@@ -245,8 +267,97 @@ struct CaptureEvidenceSummary: Equatable, Codable {
         ]
     }
 
+    var captureCapabilities: CaptureCapabilitiesMetadata {
+        let phoneMotionAuthoritative = motionProvenance == "iphone_device_imu"
+        let glassesDiagnosticMotion = motionProvenance == "phone_imu_diagnostic_only"
+        let hasARKitPose = arkitPoseRows > 0
+        let hasARCorePose = arcorePoseRows > 0
+        let hasARKitIntrinsics = arkitIntrinsicsValid
+        let hasARCoreIntrinsics = arcoreIntrinsicsValid
+        let hasPose = hasARKitPose || hasARCorePose
+        let hasIntrinsics = hasARKitIntrinsics || hasARCoreIntrinsics
+        let hasDepth = arkitDepthFrames > 0 || arcoreDepthFrames > 0
+        let hasDepthConfidence = arkitConfidenceFrames > 0 || arcoreConfidenceFrames > 0
+        let hasPointCloud = arcorePointCloudSamples > 0 || arkitFeaturePointRows > 0
+        let hasPlanes = arkitPlaneRows > 0 || arcorePlaneRows > 0
+        let hasLightEstimate = arkitLightEstimateRows > 0 || arcoreLightEstimateRows > 0
+        let hasTrackingState = arkitTrackingStateRows > 0 || arcoreTrackingStateRows > 0
+        let hasRelocalization = arkitRelocalizationEventRows > 0
+        let poseAuthority: CaptureAuthorityLevel = hasARKitPose
+            ? .authoritativeRaw
+            : hasARCorePose
+            ? .rawTrackingOnly
+            : .notAvailable
+        let intrinsicsAuthority: CaptureAuthorityLevel = hasARKitIntrinsics
+            ? .authoritativeRaw
+            : hasARCoreIntrinsics
+            ? .rawTrackingOnly
+            : .notAvailable
+        let depthAuthority: CaptureAuthorityLevel = arkitDepthFrames > 0
+            ? .authoritativeRaw
+            : arcoreDepthFrames > 0
+            ? .rawTrackingOnly
+            : .notAvailable
+        let motionAuthority: CaptureAuthorityLevel = phoneMotionAuthoritative
+            ? .authoritativeRaw
+            : glassesDiagnosticMotion
+            ? .diagnosticOnly
+            : motionSamples > 0
+            ? .rawTrackingOnly
+            : .notAvailable
+        return CaptureCapabilitiesMetadata(
+            cameraPose: hasPose,
+            cameraIntrinsics: hasIntrinsics,
+            depth: hasDepth,
+            depthConfidence: hasDepthConfidence,
+            mesh: arkitMeshFiles > 0,
+            pointCloud: hasPointCloud,
+            planes: hasPlanes,
+            featurePoints: arkitFeaturePointRows > 0,
+            trackingState: hasTrackingState,
+            relocalizationEvents: hasRelocalization,
+            lightEstimate: hasLightEstimate,
+            motion: motionSamples > 0,
+            motionAuthoritative: motionAuthority == .authoritativeRaw,
+            companionPhonePose: companionPhonePoseRows > 0,
+            companionPhoneIntrinsics: companionPhoneIntrinsicsValid,
+            companionPhoneCalibration: companionPhoneCalibrationPresent,
+            poseRows: max(arkitPoseRows, arcorePoseRows),
+            intrinsicsValid: hasIntrinsics,
+            depthFrames: max(arkitDepthFrames, arcoreDepthFrames),
+            confidenceFrames: max(arkitConfidenceFrames, arcoreConfidenceFrames),
+            meshFiles: arkitMeshFiles,
+            pointCloudSamples: max(arcorePointCloudSamples, arkitFeaturePointRows),
+            planeRows: max(arkitPlaneRows, arcorePlaneRows),
+            featurePointRows: arkitFeaturePointRows,
+            trackingStateRows: max(arkitTrackingStateRows, arcoreTrackingStateRows),
+            relocalizationEventRows: arkitRelocalizationEventRows,
+            lightEstimateRows: max(arkitLightEstimateRows, arcoreLightEstimateRows),
+            motionSamples: motionSamples,
+            poseAuthority: poseAuthority,
+            intrinsicsAuthority: intrinsicsAuthority,
+            depthAuthority: depthAuthority,
+            motionAuthority: motionAuthority,
+            motionProvenance: motionProvenance,
+            geometrySource: hasARKitPose ? "arkit" : hasARCorePose ? "arcore" : nil,
+            geometryExpectedDownstream: !hasDepth && (hasPose || companionPhonePoseRows > 0 || glassesFrameTimestampRows > 0)
+        )
+    }
+
     var hasUsableARKitBundle: Bool {
         arkitPoseRows > 0 && arkitIntrinsicsValid
+    }
+
+    var hasUsableARCoreBundle: Bool {
+        arcorePoseRows > 0 && arcoreIntrinsicsValid
+    }
+
+    var poseAlignmentOK: Bool {
+        guard let poseMatchRate,
+              let p95PoseDeltaSec else {
+            return false
+        }
+        return poseMatchRate >= 0.65 && p95PoseDeltaSec <= 0.2
     }
 
     var hasLiDAREvidence: Bool {
@@ -263,6 +374,15 @@ struct CaptureEvidenceSummary: Equatable, Codable {
         }
         if arkitMeshFiles > 0 {
             scaffolding.append("arkit_meshes")
+        }
+        if arcorePoseRows > 0 {
+            scaffolding.append("arcore_pose_log")
+        }
+        if arcoreDepthFrames > 0 {
+            scaffolding.append("arcore_depth")
+        }
+        if companionPhonePoseRows > 0 {
+            scaffolding.append("companion_phone_pose")
         }
         return scaffolding
     }
@@ -299,15 +419,25 @@ enum CaptureBundleContext {
         if request.metadata.captureSource == .iphoneVideo {
             return evidence.hasUsableARKitBundle ? "iphone_arkit_lidar" : "iphone_video_only"
         }
-        if !(request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).isEmpty {
+        if evidence.companionPhonePoseRows > 0 || !(request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).isEmpty {
             return "glasses_plus_scaffolding"
         }
         return "glasses_video_only"
     }
 
+    static func captureProfileId(for request: CaptureUploadRequest, evidence: CaptureEvidenceSummary) -> String {
+        if request.metadata.captureSource == .iphoneVideo {
+            return evidence.hasLiDAREvidence ? "iphone_arkit_lidar" : "iphone_arkit_non_lidar"
+        }
+        if evidence.companionPhonePoseRows > 0 || evidence.companionPhoneIntrinsicsValid {
+            return "glasses_pov_companion_phone"
+        }
+        return "glasses_pov"
+    }
+
     static func evidenceTier(for request: CaptureUploadRequest, evidence: CaptureEvidenceSummary) -> String {
         let intakeComplete = request.metadata.intakePacket?.isComplete == true
-        if request.metadata.captureSource == .iphoneVideo && intakeComplete && evidence.hasUsableARKitBundle {
+        if request.metadata.captureSource == .iphoneVideo && intakeComplete && evidence.hasUsableARKitBundle && evidence.hasLiDAREvidence {
             return "qualified_metric_capture"
         }
         if request.metadata.captureSource == .metaGlasses,
@@ -330,6 +460,7 @@ enum CaptureBundleContext {
             && evidence.arkitPoseRows > 0
             && evidence.arkitIntrinsicsValid
             && evidence.arkitDepthFrames > 0
+            && evidence.poseAlignmentOK
             && (request.metadata.intakePacket?.isComplete == true)
             && (request.metadata.captureRights?.derivedSceneGenerationAllowed == true)
     }
@@ -341,11 +472,28 @@ enum CaptureBundleContext {
         evidence: CaptureEvidenceSummary
     ) -> [String] {
         let captureMode = request.metadata.captureMode
+        let capabilities = evidence.captureCapabilities
         var gates: [String] = []
         gates.append("capture_mode_site_world_candidate:\(captureMode?.resolvedMode == "site_world_candidate")")
         gates.append("arkit_poses_valid:\(evidence.arkitPoseRows > 0)")
         gates.append("arkit_intrinsics_valid:\(evidence.arkitIntrinsicsValid)")
         gates.append("depth_coverage_ok:\(evidence.arkitDepthFrames > 0)")
+        gates.append("pose_alignment_ok:\(evidence.poseAlignmentOK)")
+        gates.append("pose_authority:\(capabilities.poseAuthority.rawValue)")
+        gates.append("intrinsics_authority:\(capabilities.intrinsicsAuthority.rawValue)")
+        gates.append("depth_authority:\(capabilities.depthAuthority.rawValue)")
+        gates.append("geometry_source:\(capabilities.geometrySource ?? "none")")
+        gates.append("geometry_expected_downstream:\(capabilities.geometryExpectedDownstream)")
+        if let poseMatchRate = evidence.poseMatchRate {
+            gates.append("pose_match_rate:\(String(format: "%.4f", poseMatchRate))")
+        } else {
+            gates.append("pose_match_rate:missing")
+        }
+        if let p95PoseDeltaSec = evidence.p95PoseDeltaSec {
+            gates.append("p95_pose_delta_sec:\(String(format: "%.4f", p95PoseDeltaSec))")
+        } else {
+            gates.append("p95_pose_delta_sec:missing")
+        }
         gates.append("intake_complete:\(request.metadata.intakePacket?.isComplete == true)")
         gates.append("derived_scene_generation_allowed:\(request.metadata.captureRights?.derivedSceneGenerationAllowed == true)")
         return gates
@@ -390,6 +538,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let rightsProfile: String?
         let requestedOutputs: [String]
         let captureModality: String
+        let captureProfileId: String
         let evidenceTier: String
         let scaffoldingUsed: [String]
         let coveragePlan: [String]
@@ -422,6 +571,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let sceneMemory: SceneMemoryCaptureMetadata
         let captureRights: CaptureRightsMetadata
         let captureEvidence: CaptureEvidenceSummary
+        let captureCapabilities: CaptureCapabilitiesMetadata
         let worldModelCandidate: Bool
         let worldModelCandidateReasoning: [String]
         let siteIdentity: SiteIdentity?
@@ -480,6 +630,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
     private struct RecordingSessionFile: Codable {
         let schemaVersion: String
+        let sceneId: String
+        let captureId: String
         let siteVisitId: String?
         let routeId: String?
         let passId: String?
@@ -487,7 +639,20 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let passRole: String?
         let coordinateFrameSessionId: String?
         let arkitSessionId: String?
+        let worldFrameDefinition: String
+        let units: String
+        let handedness: String
+        let gravityAligned: Bool
+        let sessionResetCount: Int
         let capturedAt: String
+    }
+
+    private struct RecordingWorldFrame {
+        let worldFrameDefinition: String
+        let units: String
+        let handedness: String
+        let gravityAligned: Bool
+        let sessionResetCount: Int
     }
 
     private struct OverlapGraphFile: Codable {
@@ -582,6 +747,126 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
     }
 
+    private func readJSONObjectLines(from url: URL) -> [[String: Any]] {
+        guard let data = try? Data(contentsOf: url),
+              let content = String(data: data, encoding: .utf8) else {
+            return []
+        }
+        return content.split(whereSeparator: \.isNewline).compactMap { line in
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty,
+                  let lineData = trimmed.data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                return nil
+            }
+            return object
+        }
+    }
+
+    private func frameIdentifier(from object: [String: Any]) -> String? {
+        if let frameId = object["frame_id"] as? String, !frameId.isEmpty {
+            return frameId
+        }
+        if let frameIndex = object["frame_index"] as? Int {
+            return String(format: "%06d", max(0, frameIndex) + 1)
+        }
+        if let frameIndex = object["frameIndex"] as? Int {
+            return String(format: "%06d", max(0, frameIndex) + 1)
+        }
+        return nil
+    }
+
+    private func timeValue(from object: [String: Any]) -> Double? {
+        for key in ["t_device_sec", "tCaptureSec", "timestamp"] {
+            if let value = object[key] as? Double {
+                return value
+            }
+            if let value = object[key] as? NSNumber {
+                return value.doubleValue
+            }
+        }
+        return nil
+    }
+
+    private func percentile(_ values: [Double], percentile: Double) -> Double? {
+        guard !values.isEmpty else { return nil }
+        if percentile <= 0 { return values.min() }
+        if percentile >= 100 { return values.max() }
+        let ordered = values.sorted()
+        let rank = (percentile / 100.0) * Double(ordered.count - 1)
+        let low = Int(floor(rank))
+        let high = min(ordered.count - 1, low + 1)
+        guard low != high else { return ordered[low] }
+        let weight = rank - Double(low)
+        return ordered[low] * (1.0 - weight) + ordered[high] * weight
+    }
+
+    private func nearestPoseTime(to frameTime: Double, poseTimes: [Double]) -> Double? {
+        guard !poseTimes.isEmpty else { return nil }
+        if poseTimes.count == 1 { return poseTimes[0] }
+        var low = 0
+        var high = poseTimes.count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            if poseTimes[mid] < frameTime {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        var best = poseTimes[low]
+        if low > 0 {
+            let previous = poseTimes[low - 1]
+            if abs(previous - frameTime) <= abs(best - frameTime) {
+                best = previous
+            }
+        }
+        return best
+    }
+
+    private func inspectPoseAlignment(
+        framesURL: URL,
+        posesURL: URL
+    ) -> (poseMatchRate: Double?, p95PoseDeltaSec: Double?) {
+        let frameRows = readJSONObjectLines(from: framesURL)
+        let poseRows = readJSONObjectLines(from: posesURL)
+        guard !frameRows.isEmpty, !poseRows.isEmpty else {
+            return (nil, nil)
+        }
+
+        var posesByFrameId: [String: Double] = [:]
+        var poseTimes: [Double] = []
+        for row in poseRows {
+            guard let poseTime = timeValue(from: row) else { continue }
+            poseTimes.append(poseTime)
+            if let frameId = frameIdentifier(from: row) {
+                posesByFrameId[frameId] = poseTime
+            }
+        }
+        poseTimes.sort()
+
+        var matched = 0
+        var deltas: [Double] = []
+        for row in frameRows {
+            let frameTime = timeValue(from: row)
+            let frameId = frameIdentifier(from: row)
+            var matchedPoseTime: Double?
+            if let frameId, let poseTime = posesByFrameId[frameId] {
+                matchedPoseTime = poseTime
+            } else if let frameTime {
+                matchedPoseTime = nearestPoseTime(to: frameTime, poseTimes: poseTimes)
+            }
+            guard let matchedPoseTime else { continue }
+            matched += 1
+            if let frameTime {
+                deltas.append(abs(frameTime - matchedPoseTime))
+            }
+        }
+
+        let poseMatchRate = frameRows.isEmpty ? nil : Double(matched) / Double(frameRows.count)
+        return (poseMatchRate, percentile(deltas, percentile: 95.0))
+    }
+
     private func isValidIntrinsicsFile(at url: URL) -> Bool {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -657,19 +942,63 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
     private func inspectEvidence(in directory: URL, request: CaptureUploadRequest) -> CaptureEvidenceSummary {
         let arkitDirectory = directory.appendingPathComponent("arkit", isDirectory: true)
+        let arcoreDirectory = directory.appendingPathComponent("arcore", isDirectory: true)
+        let glassesDirectory = directory.appendingPathComponent("glasses", isDirectory: true)
+        let companionPhoneDirectory = directory.appendingPathComponent("companion_phone", isDirectory: true)
         let posesURL = arkitDirectory.appendingPathComponent("poses.jsonl")
         let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
         let intrinsicsURL = arkitDirectory.appendingPathComponent("intrinsics.json")
         let motionURL = directory.appendingPathComponent("motion.jsonl")
+        let arcorePosesURL = arcoreDirectory.appendingPathComponent("poses.jsonl")
+        let arcoreFramesURL = arcoreDirectory.appendingPathComponent("frames.jsonl")
+        let arcoreIntrinsicsURL = arcoreDirectory.appendingPathComponent("session_intrinsics.json")
+        let featurePointsURL = arkitDirectory.appendingPathComponent("feature_points.jsonl")
+        let planeObservationsURL = arkitDirectory.appendingPathComponent("plane_observations.jsonl")
+        let lightEstimatesURL = arkitDirectory.appendingPathComponent("light_estimates.jsonl")
+        let arcorePointCloudURL = arcoreDirectory.appendingPathComponent("point_cloud.jsonl")
+        let arcorePlanesURL = arcoreDirectory.appendingPathComponent("planes.jsonl")
+        let arcoreTrackingStatesURL = arcoreDirectory.appendingPathComponent("tracking_state.jsonl")
+        let arcoreLightEstimatesURL = arcoreDirectory.appendingPathComponent("light_estimates.jsonl")
+        let glassesFrameTimestampsURL = glassesDirectory.appendingPathComponent("frame_timestamps.jsonl")
+        let glassesDeviceStateURL = glassesDirectory.appendingPathComponent("device_state.jsonl")
+        let glassesHealthEventsURL = glassesDirectory.appendingPathComponent("health_events.jsonl")
+        let companionPhonePosesURL = companionPhoneDirectory.appendingPathComponent("poses.jsonl")
+        let companionPhoneIntrinsicsURL = companionPhoneDirectory.appendingPathComponent("session_intrinsics.json")
+        let companionPhoneCalibrationURL = companionPhoneDirectory.appendingPathComponent("calibration.json")
 
         let motion = inspectMotionMetadata(at: motionURL, captureSource: request.metadata.captureSource)
+        let poseAlignment = inspectPoseAlignment(framesURL: framesURL, posesURL: posesURL)
+        let arkitFrameRows = readJSONObjectLines(from: framesURL)
+        let arcoreFrameRows = readJSONObjectLines(from: arcoreFramesURL)
         return CaptureEvidenceSummary(
-            arkitFrameRows: countJSONLines(in: framesURL),
+            arkitFrameRows: arkitFrameRows.count,
             arkitPoseRows: countJSONLines(in: posesURL),
             arkitIntrinsicsValid: isValidIntrinsicsFile(at: intrinsicsURL),
             arkitDepthFrames: countFiles(in: arkitDirectory.appendingPathComponent("depth", isDirectory: true), extensions: ["png"]),
             arkitConfidenceFrames: countFiles(in: arkitDirectory.appendingPathComponent("confidence", isDirectory: true), extensions: ["png"]),
             arkitMeshFiles: countFiles(in: arkitDirectory.appendingPathComponent("meshes", isDirectory: true), extensions: ["obj"]),
+            arkitFeaturePointRows: countJSONLines(in: featurePointsURL),
+            arkitPlaneRows: countJSONLines(in: planeObservationsURL),
+            arkitTrackingStateRows: arkitFrameRows.filter { ($0["trackingState"] as? String) != nil || ($0["tracking_state"] as? String) != nil }.count,
+            arkitRelocalizationEventRows: arkitFrameRows.filter { ($0["relocalizationEvent"] as? Bool) == true || ($0["relocalization_event"] as? Bool) == true }.count,
+            arkitLightEstimateRows: countJSONLines(in: lightEstimatesURL),
+            arcoreFrameRows: arcoreFrameRows.count,
+            arcorePoseRows: countJSONLines(in: arcorePosesURL),
+            arcoreIntrinsicsValid: isValidIntrinsicsFile(at: arcoreIntrinsicsURL),
+            arcoreDepthFrames: countFiles(in: arcoreDirectory.appendingPathComponent("depth", isDirectory: true), extensions: ["png"]),
+            arcoreConfidenceFrames: countFiles(in: arcoreDirectory.appendingPathComponent("confidence", isDirectory: true), extensions: ["png"]),
+            arcorePointCloudSamples: countJSONLines(in: arcorePointCloudURL),
+            arcorePlaneRows: countJSONLines(in: arcorePlanesURL),
+            arcoreTrackingStateRows: countJSONLines(in: arcoreTrackingStatesURL),
+            arcoreLightEstimateRows: countJSONLines(in: arcoreLightEstimatesURL),
+            glassesFrameTimestampRows: countJSONLines(in: glassesFrameTimestampsURL),
+            glassesDeviceStateRows: countJSONLines(in: glassesDeviceStateURL),
+            glassesHealthEventRows: countJSONLines(in: glassesHealthEventsURL),
+            companionPhonePoseRows: countJSONLines(in: companionPhonePosesURL),
+            companionPhoneIntrinsicsValid: isValidIntrinsicsFile(at: companionPhoneIntrinsicsURL),
+            companionPhoneCalibrationPresent: fileManager.fileExists(atPath: companionPhoneCalibrationURL.path),
+            poseMatchRate: poseAlignment.poseMatchRate,
+            p95PoseDeltaSec: poseAlignment.p95PoseDeltaSec,
             motionSamples: motion.samples,
             motionProvenance: motion.provenance,
             motionTimestampsCaptureRelative: motion.captureRelative
@@ -681,7 +1010,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         evidence: CaptureEvidenceSummary,
         normalized: SceneMemoryCaptureMetadata
     ) -> [String: Any] {
-        [
+        let capabilities = evidence.captureCapabilities
+        return [
             "continuity_score": normalized.continuityScore as Any,
             "lighting_consistency": normalized.lightingConsistency ?? "unknown",
             "dynamic_object_density": normalized.dynamicObjectDensity ?? "unknown",
@@ -693,8 +1023,12 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "overlap_checkpoint_count": normalized.overlapCheckpointCount as Any,
             "world_model_candidate": CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
             "world_model_candidate_reasoning": CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
+            "pose_match_rate": evidence.poseMatchRate as Any,
+            "p95_pose_delta_sec": evidence.p95PoseDeltaSec as Any,
             "motion_provenance": evidence.motionProvenance as Any,
             "motion_timestamps_capture_relative": evidence.motionTimestampsCaptureRelative,
+            "geometry_source": capabilities.geometrySource as Any,
+            "geometry_expected_downstream": capabilities.geometryExpectedDownstream,
         ]
     }
 
@@ -710,6 +1044,34 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         ]
     }
 
+    private func recordingWorldFrame(for evidence: CaptureEvidenceSummary) -> RecordingWorldFrame {
+        if evidence.arkitPoseRows > 0 || evidence.companionPhonePoseRows > 0 {
+            return RecordingWorldFrame(
+                worldFrameDefinition: "arkit_world_origin_at_session_start",
+                units: "meters",
+                handedness: "right_handed",
+                gravityAligned: true,
+                sessionResetCount: 0
+            )
+        }
+        if evidence.arcorePoseRows > 0 {
+            return RecordingWorldFrame(
+                worldFrameDefinition: "arcore_world_origin_at_session_start",
+                units: "meters",
+                handedness: "right_handed",
+                gravityAligned: true,
+                sessionResetCount: 0
+            )
+        }
+        return RecordingWorldFrame(
+            worldFrameDefinition: "unavailable_no_public_world_tracking",
+            units: "meters",
+            handedness: "unknown",
+            gravityAligned: false,
+            sessionResetCount: 0
+        )
+    }
+
     private func patchManifest(in directory: URL, request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws {
         let manifestURL = directory.appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
@@ -723,6 +1085,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
         let evidence = inspectEvidence(in: directory, request: request)
+        let capabilities = evidence.captureCapabilities
         let topology = effectiveCaptureTopology(for: request, directory: directory)
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
@@ -737,6 +1100,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         json["rights_profile"] = request.metadata.rightsProfile as Any
         json["requested_outputs"] = request.metadata.requestedOutputs
         json["capture_modality"] = CaptureBundleContext.captureModality(for: request, evidence: evidence)
+        json["capture_profile_id"] = CaptureBundleContext.captureProfileId(for: request, evidence: evidence)
         json["evidence_tier"] = CaptureBundleContext.evidenceTier(for: request, evidence: evidence)
         json["scaffolding_used"] = derivedScaffolding
         json["coverage_plan"] = request.metadata.scaffoldingPacket?.coveragePlan ?? []
@@ -756,6 +1120,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             normalized: normalizedSceneMemory
         )
         json["capture_evidence"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(evidence))
+        json["capture_capabilities"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(capabilities))
 
         // Site identity, topology, and capture mode blocks.
         if let siteIdentity = request.metadata.siteIdentity {
@@ -824,6 +1189,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let intakeMetadata = request.metadata.intakeMetadata
         let normalizedSceneMemory = normalizedSceneMemory(for: request, directory: directory)
         let normalizedRights = normalizedCaptureRights(for: request)
+        let capabilities = evidence.captureCapabilities
         let taskHypothesis = request.metadata.taskHypothesis ?? synthesizedTaskHypothesis(for: request)
         let resolvedCaptureMode: CaptureModeMetadata? = request.metadata.captureMode.map { captureMode in
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
@@ -853,6 +1219,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             rightsProfile: request.metadata.rightsProfile,
             requestedOutputs: request.metadata.requestedOutputs,
             captureModality: CaptureBundleContext.captureModality(for: request, evidence: evidence),
+            captureProfileId: CaptureBundleContext.captureProfileId(for: request, evidence: evidence),
             evidenceTier: CaptureBundleContext.evidenceTier(for: request, evidence: evidence),
             scaffoldingUsed: derivedScaffolding,
             coveragePlan: request.metadata.scaffoldingPacket?.coveragePlan ?? [],
@@ -885,6 +1252,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             sceneMemory: normalizedSceneMemory,
             captureRights: normalizedRights,
             captureEvidence: evidence,
+            captureCapabilities: capabilities,
             worldModelCandidate: CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence),
             worldModelCandidateReasoning: CaptureBundleContext.worldModelCandidateReasoning(for: request, evidence: evidence),
             siteIdentity: request.metadata.siteIdentity,
@@ -971,8 +1339,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let semanticAnchorsURL = directory.appendingPathComponent("semantic_anchors.json")
         try encoder.encode(semanticAnchors).write(to: semanticAnchorsURL, options: .atomic)
 
+        let recordingWorldFrame = recordingWorldFrame(for: evidence)
         let recordingSession = RecordingSessionFile(
             schemaVersion: "v1",
+            sceneId: CaptureBundleContext.sceneIdentifier(for: request),
+            captureId: CaptureBundleContext.captureIdentifier(for: request),
             siteVisitId: topology.siteVisitId ?? topology.captureSessionId,
             routeId: topology.routeId,
             passId: topology.passId,
@@ -980,6 +1351,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             passRole: topology.intendedPassRole,
             coordinateFrameSessionId: topology.coordinateFrameSessionId ?? topology.captureSessionId,
             arkitSessionId: topology.arkitSessionId ?? topology.coordinateFrameSessionId,
+            worldFrameDefinition: recordingWorldFrame.worldFrameDefinition,
+            units: recordingWorldFrame.units,
+            handedness: recordingWorldFrame.handedness,
+            gravityAligned: recordingWorldFrame.gravityAligned,
+            sessionResetCount: recordingWorldFrame.sessionResetCount,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let recordingSessionURL = directory.appendingPathComponent("recording_session.json")

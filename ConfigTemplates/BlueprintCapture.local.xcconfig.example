@@ -1,7 +1,21 @@
 // Copy to a local-only *.local.xcconfig file and keep it out of source control.
 // Public runtime config only. Do not put third-party API keys in shipped app resources.
 
-BLUEPRINT_BACKEND_BASE_URL = https://your-backend.example.com
+// General creator/account backend. Leave this unset for alpha builds if those routes
+// are not available yet.
+BLUEPRINT_BACKEND_BASE_URL =
+// Demand/ranking backend. If you point clients directly at the Firebase router
+// function, use: https://us-central1-your-project.cloudfunctions.net/api
+BLUEPRINT_DEMAND_BACKEND_BASE_URL = https://your-backend.example.com
+// Nearby/provider requests are proxied through BLUEPRINT_DEMAND_BACKEND_BASE_URL.
+// Do not add Places or Gemini client keys to mobile build settings.
+// Optional: keep default as places_nearby. Other supported value: gemini_maps_grounding
+// BLUEPRINT_NEARBY_DISCOVERY_PROVIDER = places_nearby
+// Optional: if enabled, the alternate provider is tried when the primary returns nothing or errors.
+// BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK = YES
 // Optional: enable this only for explicit local/demo builds that should show mock jobs
 // when Firestore denies access. Production-like builds should leave this unset.
 // BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = YES
+// Optional: internal-only current-location test space and demo cards.
+// Production-like builds should leave this unset.
+// BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE = YES

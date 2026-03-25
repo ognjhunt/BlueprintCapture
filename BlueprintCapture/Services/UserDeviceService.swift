@@ -11,8 +11,37 @@ import FirebaseAuth
 import FirebaseFirestore
 
 final class UserDeviceService {
+    enum FirebaseGuestBootstrapState: Equatable {
+        case idle
+        case bootstrapping
+        case ready(userId: String)
+        case failed(message: String)
+
+        var isReady: Bool {
+            if case .ready = self { return true }
+            return false
+        }
+    }
+
+    enum GuestBootstrapError: LocalizedError, Equatable {
+        case timedOut
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .timedOut:
+                return "Blueprint could not finish guest session setup in time. Check Firebase connectivity and Anonymous Auth configuration."
+            case .failed(let message):
+                return "Blueprint could not start a guest session. \(message)"
+            }
+        }
+    }
+
     private static let temporaryUserDefaultsKey = "temporaryUser"
     private static let temporaryUserIdKey = "temporaryUserId"
+    private static let guestBootstrapLock = NSLock()
+    private static var guestBootstrapState: FirebaseGuestBootstrapState = .idle
+    private static var pendingBootstrapCompletions: [() -> Void] = []
 
     /// Returns the currently resolved user identifier. If authenticated, returns the Firebase uid.
     /// Otherwise returns the device-local tempID (creating if necessary).
@@ -29,72 +58,93 @@ final class UserDeviceService {
         return !user.isAnonymous
     }
 
+    static func currentGuestBootstrapState() -> FirebaseGuestBootstrapState {
+        guestBootstrapLock.lock()
+        defer { guestBootstrapLock.unlock() }
+        return guestBootstrapState
+    }
+
     static func ensureAnonymousFirebaseUserIfNeeded(onReady: @escaping () -> Void = {}) {
+        if RuntimeConfig.current.isUITesting {
+            updateGuestBootstrapState(.ready(userId: resolvedUserId()))
+            NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+            onReady()
+            return
+        }
+
+        enqueueBootstrapCompletion(onReady)
+
         if let currentUser = Auth.auth().currentUser {
             if currentUser.isAnonymous {
-                bootstrapAnonymousUserDocument(for: currentUser, completion: onReady)
+                updateGuestBootstrapState(.bootstrapping)
+                bootstrapAnonymousUserDocument(for: currentUser) {
+                    if case .failed = currentGuestBootstrapState() {
+                        completeBootstrapCallbacks()
+                        return
+                    }
+                    updateGuestBootstrapState(.ready(userId: currentUser.uid))
+                    NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+                    completeBootstrapCallbacks()
+                }
             } else {
-                onReady()
+                updateGuestBootstrapState(.ready(userId: currentUser.uid))
+                NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+                completeBootstrapCallbacks()
             }
             return
         }
 
+        if currentGuestBootstrapState() == .bootstrapping {
+            return
+        }
+
+        updateGuestBootstrapState(.bootstrapping)
         Auth.auth().signInAnonymously { result, error in
             if let error {
-                print("⚠️ [Auth] \(describeAnonymousAuthFailure(error))")
-                onReady()
+                let message = describeAnonymousAuthFailure(error)
+                print("⚠️ [Auth] \(message)")
+                updateGuestBootstrapState(.failed(message: message))
+                completeBootstrapCallbacks()
                 return
             }
             guard let user = result?.user else {
-                onReady()
+                updateGuestBootstrapState(.failed(message: "Anonymous sign-in returned no Firebase user."))
+                completeBootstrapCallbacks()
                 return
             }
             bootstrapAnonymousUserDocument(for: user) {
+                if case .failed = currentGuestBootstrapState() {
+                    completeBootstrapCallbacks()
+                    return
+                }
+                updateGuestBootstrapState(.ready(userId: user.uid))
                 NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
-                onReady()
+                completeBootstrapCallbacks()
             }
         }
     }
 
     static func waitForAuthenticatedFirebaseUser(timeout: TimeInterval = 10) async -> Bool {
-        guard timeout > 0 else {
-            return Auth.auth().currentUser != nil
+        (try? await ensureFirebaseGuestSession(timeout: timeout)) != nil
+    }
+
+    static func ensureFirebaseGuestSession(timeout: TimeInterval = 10) async throws -> String {
+        if RuntimeConfig.current.isUITesting {
+            return resolvedUserId()
         }
-        if Auth.auth().currentUser != nil {
-            return true
+        if let uid = Auth.auth().currentUser?.uid, uid.isEmpty == false {
+            updateGuestBootstrapState(.ready(userId: uid))
+            return uid
         }
 
-        return await withCheckedContinuation { continuation in
-            let lock = NSLock()
-            var didResume = false
-            var observer: NSObjectProtocol?
-
-            let finish: (Bool) -> Void = { success in
-                lock.lock()
-                defer { lock.unlock() }
-                guard !didResume else { return }
-                didResume = true
-                if let observer {
-                    NotificationCenter.default.removeObserver(observer)
-                }
-                continuation.resume(returning: success)
-            }
-
-            observer = NotificationCenter.default.addObserver(
-                forName: .AuthStateDidChange,
-                object: nil,
-                queue: nil
-            ) { _ in
-                finish(Auth.auth().currentUser != nil)
-            }
-
-            ensureAnonymousFirebaseUserIfNeeded {
-                finish(Auth.auth().currentUser != nil)
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
-                finish(Auth.auth().currentUser != nil)
-            }
+        let state = await waitForGuestBootstrapState(timeout: timeout)
+        switch state {
+        case .ready(let userId):
+            return userId
+        case .failed(let message):
+            throw GuestBootstrapError.failed(message)
+        case .idle, .bootstrapping:
+            throw GuestBootstrapError.timedOut
         }
     }
 
@@ -111,6 +161,79 @@ final class UserDeviceService {
             }
         }
         return "Anonymous sign-in failed: \(error.localizedDescription)"
+    }
+
+    private static func waitForGuestBootstrapState(timeout: TimeInterval) async -> FirebaseGuestBootstrapState {
+        guard timeout > 0 else {
+            ensureAnonymousFirebaseUserIfNeeded()
+            return currentGuestBootstrapState()
+        }
+
+        let initial = currentGuestBootstrapState()
+        switch initial {
+        case .ready, .failed:
+            return initial
+        case .idle, .bootstrapping:
+            break
+        }
+
+        return await withCheckedContinuation { continuation in
+            let lock = NSLock()
+            var didResume = false
+            var observer: NSObjectProtocol?
+
+            let finish: (FirebaseGuestBootstrapState) -> Void = { state in
+                lock.lock()
+                defer { lock.unlock() }
+                guard !didResume else { return }
+                didResume = true
+                if let observer {
+                    NotificationCenter.default.removeObserver(observer)
+                }
+                continuation.resume(returning: state)
+            }
+
+            observer = NotificationCenter.default.addObserver(
+                forName: .FirebaseGuestBootstrapStateDidChange,
+                object: nil,
+                queue: nil
+            ) { _ in
+                let state = currentGuestBootstrapState()
+                switch state {
+                case .ready, .failed:
+                    finish(state)
+                case .idle, .bootstrapping:
+                    break
+                }
+            }
+
+            ensureAnonymousFirebaseUserIfNeeded()
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                finish(currentGuestBootstrapState())
+            }
+        }
+    }
+
+    private static func enqueueBootstrapCompletion(_ completion: @escaping () -> Void) {
+        guestBootstrapLock.lock()
+        pendingBootstrapCompletions.append(completion)
+        guestBootstrapLock.unlock()
+    }
+
+    private static func completeBootstrapCallbacks() {
+        guestBootstrapLock.lock()
+        let completions = pendingBootstrapCompletions
+        pendingBootstrapCompletions.removeAll()
+        guestBootstrapLock.unlock()
+        completions.forEach { $0() }
+    }
+
+    private static func updateGuestBootstrapState(_ state: FirebaseGuestBootstrapState) {
+        guestBootstrapLock.lock()
+        guestBootstrapState = state
+        guestBootstrapLock.unlock()
+        NotificationCenter.default.post(name: .FirebaseGuestBootstrapStateDidChange, object: nil)
     }
 
     /// Ensures a temporary local user exists in UserDefaults and returns its document.
@@ -222,6 +345,7 @@ final class UserDeviceService {
             userRef.setData(payload, merge: true) { writeError in
                 if let writeError {
                     print("⚠️ [Auth] Failed to bootstrap anonymous user document: \(writeError.localizedDescription)")
+                    updateGuestBootstrapState(.failed(message: "Anonymous user bootstrap document write failed: \(writeError.localizedDescription)"))
                 }
                 completion()
             }
