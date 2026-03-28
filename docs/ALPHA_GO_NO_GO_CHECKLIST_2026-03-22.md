@@ -1,6 +1,6 @@
 # BlueprintCapture Alpha Go / No-Go Checklist
 
-Last updated: 2026-03-22
+Last updated: 2026-03-26
 
 This checklist is the concrete launch gate for `BlueprintCapture`.
 
@@ -12,18 +12,18 @@ It is based on:
 - the cross-repo launch gate in `BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py`
 - the current implementation state observed on 2026-03-22
 
-## Current Status On 2026-03-22
+## Rollout Scope On 2026-03-26
 
-Immediate blocker:
-
-- `./scripts/alpha_readiness.sh` is failing
-- failure reason: `BlueprintCaptureTests/ScanHomeOpenCaptureTests.swift` does not compile under current actor isolation rules
-- exact issue: calls to `ScanHomeViewModel.nearbyItemsWithOpenCapture(...)` and `ScanHomeViewModel.alphaCurrentLocationJobID` from non-`@MainActor` test methods
+- External staged rollout remains iOS-only for the 10 -> 25 -> 100 tester ramp.
+- Android now has a repo-local release validator (`./scripts/android_alpha_readiness.sh`) and release build lane, but it is still gated out of the external rollout until:
+  - real release config is present locally
+  - the validator passes
+  - Firebase App Distribution release smoke is recorded on hardware
 
 Release rule:
 
-- Do not launch while `alpha_readiness.sh` is red.
-- Do not launch while the cross-repo external alpha gate is red.
+- Do not launch while `./scripts/alpha_readiness.sh` is red.
+- Do not launch while `python /Users/nijelhunt_1/workspace/BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py` is red.
 
 ## 1. Code Gate
 
@@ -34,14 +34,11 @@ What `alpha_readiness.sh` must prove:
 
 - boots the target simulator
 - passes cloud bridge tests
+- passes demand backend tests
 - passes focused iOS unit tests
 - passes focused iOS UI tests
 - builds the Release app bundle
-- verifies no forbidden secret packaging or forbidden release flags
-
-Current known blocker:
-
-- [ ] Fix actor-isolation compile failure in `BlueprintCaptureTests/ScanHomeOpenCaptureTests.swift`
+- verifies no forbidden secret packaging, forbidden release flags, or missing external support/legal config
 
 Release rule:
 
@@ -53,6 +50,14 @@ These must be true in the real release/TestFlight config:
 
 - [ ] `BLUEPRINT_BACKEND_BASE_URL` is set
 - [ ] `BLUEPRINT_DEMAND_BACKEND_BASE_URL` is set
+- [ ] `BLUEPRINT_MAIN_WEBSITE_URL` is set
+- [ ] `BLUEPRINT_HELP_CENTER_URL` is set
+- [ ] `BLUEPRINT_BUG_REPORT_URL` is set
+- [ ] `BLUEPRINT_TERMS_OF_SERVICE_URL` is set
+- [ ] `BLUEPRINT_PRIVACY_POLICY_URL` is set
+- [ ] `BLUEPRINT_CAPTURE_POLICY_URL` is set
+- [ ] `BLUEPRINT_ACCOUNT_DELETION_URL` is set
+- [ ] `BLUEPRINT_SUPPORT_EMAIL_ADDRESS` is set
 - [ ] `BLUEPRINT_NEARBY_DISCOVERY_PROVIDER=places_nearby`
 - [ ] `BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=NO`
 - [ ] `BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE=NO`
@@ -184,6 +189,8 @@ Run these on a real device and record results:
 - [ ] bridge artifacts appear in storage
 - [ ] APNs + FCM registration succeeds
 - [ ] wallet state is truthful
+- [ ] support/legal links open the correct public pages or support mailbox
+- [ ] in-app or support-routed account deletion path is reachable
 
 Release rule:
 
@@ -200,6 +207,9 @@ Required launch-week ownership:
 - [ ] someone watches bridge/pipeline handoff failures
 - [ ] someone watches payout-related exceptions downstream
 - [ ] someone watches launch logs daily during the first week
+- [ ] Firebase Analytics `blueprint_ops_event` and `blueprint_ops_error` are visible to the launch owner
+- [ ] Firestore `sessionEvents` operational failures are queryable
+- [ ] Cloud Logging alerts or saved queries exist for `Pipeline handoff publish failed`
 
 Operational truth:
 

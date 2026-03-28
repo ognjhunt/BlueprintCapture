@@ -11,13 +11,21 @@ RELEASE_XCCONFIG="${BLUEPRINT_RELEASE_XCCONFIG:-$ROOT/Config/BlueprintCapture.re
 cd "$ROOT"
 
 ensure_extract_frames_dependencies() {
-  local extract_frames_dir="${ROOT}/cloud/extract-frames"
-  if [[ -x "${extract_frames_dir}/node_modules/.bin/tsc" ]]; then
+  ensure_node_dependencies "${ROOT}/cloud/extract-frames"
+}
+
+ensure_referral_earnings_dependencies() {
+  ensure_node_dependencies "${ROOT}/cloud/referral-earnings"
+}
+
+ensure_node_dependencies() {
+  local package_dir="$1"
+  if [[ -x "${package_dir}/node_modules/.bin/tsc" ]]; then
     return 0
   fi
 
-  echo "==> Installing cloud bridge dependencies"
-  (cd "$extract_frames_dir" && npm ci >/dev/null)
+  echo "==> Installing dependencies for ${package_dir#$ROOT/}"
+  (cd "$package_dir" && npm ci >/dev/null)
 }
 
 resolve_swift_packages() {
@@ -90,10 +98,14 @@ xcrun simctl boot "$SIMULATOR_UDID" >/dev/null 2>&1 || true
 wait_for_simulator_boot
 
 ensure_extract_frames_dependencies
+ensure_referral_earnings_dependencies
 resolve_swift_packages "$DERIVED_DATA_PATH"
 
 echo "==> Running cloud bridge tests"
 (cd "$ROOT/cloud/extract-frames" && npm test)
+
+echo "==> Running demand backend tests"
+(cd "$ROOT/cloud/referral-earnings" && npm test)
 
 echo "==> Running focused iOS tests"
 xcodebuild test \
@@ -197,6 +209,27 @@ fi
 
 if ! grep -q "aps-environment" "$ROOT/BlueprintCapture/BlueprintCapture.entitlements"; then
   echo "BlueprintCapture.entitlements is missing aps-environment." >&2
+  exit 1
+fi
+
+for required_url_key in \
+  BLUEPRINT_MAIN_WEBSITE_URL \
+  BLUEPRINT_HELP_CENTER_URL \
+  BLUEPRINT_BUG_REPORT_URL \
+  BLUEPRINT_TERMS_OF_SERVICE_URL \
+  BLUEPRINT_PRIVACY_POLICY_URL \
+  BLUEPRINT_CAPTURE_POLICY_URL \
+  BLUEPRINT_ACCOUNT_DELETION_URL
+do
+  if [[ -z "$(plist_value "$required_url_key")" ]]; then
+    echo "$required_url_key must be configured for external builds so support and legal flows are not dead links." >&2
+    exit 1
+  fi
+done
+
+SUPPORT_EMAIL_ADDRESS="$(plist_value BLUEPRINT_SUPPORT_EMAIL_ADDRESS)"
+if [[ -z "$SUPPORT_EMAIL_ADDRESS" ]]; then
+  echo "BLUEPRINT_SUPPORT_EMAIL_ADDRESS must be configured for external builds." >&2
   exit 1
 fi
 

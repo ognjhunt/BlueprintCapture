@@ -56,6 +56,14 @@ struct RuntimeConfig: Equatable {
     let enableInternalTestSpace: Bool
     let enableOpenCaptureHere: Bool
     let enableRemoteNotifications: Bool
+    let websiteURL: URL?
+    let helpCenterURL: URL?
+    let bugReportURL: URL?
+    let termsOfServiceURL: URL?
+    let privacyPolicyURL: URL?
+    let capturePolicyURL: URL?
+    let accountDeletionURL: URL?
+    let supportEmailAddress: String?
 
     static var current: RuntimeConfig {
         load()
@@ -76,7 +84,15 @@ struct RuntimeConfig: Equatable {
         allowMockJobsFallback: Bool = false,
         enableInternalTestSpace: Bool = false,
         enableOpenCaptureHere: Bool = true,
-        enableRemoteNotifications: Bool = false
+        enableRemoteNotifications: Bool = false,
+        websiteURL: URL? = nil,
+        helpCenterURL: URL? = nil,
+        bugReportURL: URL? = nil,
+        termsOfServiceURL: URL? = nil,
+        privacyPolicyURL: URL? = nil,
+        capturePolicyURL: URL? = nil,
+        accountDeletionURL: URL? = nil,
+        supportEmailAddress: String? = nil
     ) {
         self.backendBaseURL = backendBaseURL
         self.demandBackendBaseURL = demandBackendBaseURL
@@ -93,6 +109,14 @@ struct RuntimeConfig: Equatable {
         self.enableInternalTestSpace = enableInternalTestSpace
         self.enableOpenCaptureHere = enableOpenCaptureHere
         self.enableRemoteNotifications = enableRemoteNotifications
+        self.websiteURL = websiteURL
+        self.helpCenterURL = helpCenterURL
+        self.bugReportURL = bugReportURL
+        self.termsOfServiceURL = termsOfServiceURL
+        self.privacyPolicyURL = privacyPolicyURL
+        self.capturePolicyURL = capturePolicyURL
+        self.accountDeletionURL = accountDeletionURL
+        self.supportEmailAddress = supportEmailAddress
     }
 
     static func load(
@@ -154,6 +178,38 @@ struct RuntimeConfig: Equatable {
                 environment["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"] ??
                 infoDictionary["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"],
                 defaultValue: false
+            ),
+            websiteURL: urlValue(
+                environment["BLUEPRINT_MAIN_WEBSITE_URL"] ??
+                (infoDictionary["BLUEPRINT_MAIN_WEBSITE_URL"] as? String)
+            ),
+            helpCenterURL: urlValue(
+                environment["BLUEPRINT_HELP_CENTER_URL"] ??
+                (infoDictionary["BLUEPRINT_HELP_CENTER_URL"] as? String)
+            ),
+            bugReportURL: urlValue(
+                environment["BLUEPRINT_BUG_REPORT_URL"] ??
+                (infoDictionary["BLUEPRINT_BUG_REPORT_URL"] as? String)
+            ),
+            termsOfServiceURL: urlValue(
+                environment["BLUEPRINT_TERMS_OF_SERVICE_URL"] ??
+                (infoDictionary["BLUEPRINT_TERMS_OF_SERVICE_URL"] as? String)
+            ),
+            privacyPolicyURL: urlValue(
+                environment["BLUEPRINT_PRIVACY_POLICY_URL"] ??
+                (infoDictionary["BLUEPRINT_PRIVACY_POLICY_URL"] as? String)
+            ),
+            capturePolicyURL: urlValue(
+                environment["BLUEPRINT_CAPTURE_POLICY_URL"] ??
+                (infoDictionary["BLUEPRINT_CAPTURE_POLICY_URL"] as? String)
+            ),
+            accountDeletionURL: urlValue(
+                environment["BLUEPRINT_ACCOUNT_DELETION_URL"] ??
+                (infoDictionary["BLUEPRINT_ACCOUNT_DELETION_URL"] as? String)
+            ),
+            supportEmailAddress: stringValue(
+                environment["BLUEPRINT_SUPPORT_EMAIL_ADDRESS"] ??
+                (infoDictionary["BLUEPRINT_SUPPORT_EMAIL_ADDRESS"] as? String)
             )
         )
     }
@@ -238,11 +294,19 @@ struct RuntimeConfig: Equatable {
     }
 
     private static func urlValue(_ raw: String?) -> URL? {
-        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+        guard let trimmed = stringValue(raw),
               trimmed.isEmpty == false else {
             return nil
         }
         return URL(string: trimmed)
+    }
+
+    private static func stringValue(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              trimmed.isEmpty == false else {
+            return nil
+        }
+        return trimmed
     }
 
     private static func nearbyDiscoveryProviderValue(_ raw: String?, defaultValue: NearbyDiscoveryProvider) -> NearbyDiscoveryProvider {

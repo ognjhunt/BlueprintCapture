@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.util.Log
 import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.config.LocalConfigProvider
+import app.blueprint.capture.data.ops.OperationalTelemetry
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,7 @@ class NotificationPreferencesRepository @Inject constructor(
     private val authRepository: AuthRepository,
     private val localConfigProvider: LocalConfigProvider,
     private val backendApi: NotificationBackendApi,
+    private val operationalTelemetry: OperationalTelemetry,
 ) {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val preferencesState = MutableStateFlow(load())
@@ -58,7 +60,12 @@ class NotificationPreferencesRepository @Inject constructor(
                 preferencesState.value = remote
                 persist(remote)
             }
+            operationalTelemetry.recordSuccess(operation = "notification_preferences_refresh")
         }.onFailure { error ->
+            operationalTelemetry.recordFailure(
+                operation = "notification_preferences_refresh",
+                detail = error.localizedMessage,
+            )
             Log.w(
                 "NotificationPrefs",
                 "Failed to refresh preferences: ${error.localizedMessage ?: "unknown error"}",
@@ -79,7 +86,12 @@ class NotificationPreferencesRepository @Inject constructor(
 
         runCatching {
             backendApi.updateNotificationPreferences(creatorId, preferencesState.value)
+            operationalTelemetry.recordSuccess(operation = "notification_preferences_sync")
         }.onFailure { error ->
+            operationalTelemetry.recordFailure(
+                operation = "notification_preferences_sync",
+                detail = error.localizedMessage,
+            )
             Log.w(
                 "NotificationPrefs",
                 "Failed to sync preferences: ${error.localizedMessage ?: "unknown error"}",

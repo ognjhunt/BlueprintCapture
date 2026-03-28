@@ -42,6 +42,52 @@ enum AppConfig {
         RuntimeConfig.current.enableRemoteNotifications
     }
 
+    static func mainWebsiteURL() -> URL? {
+        RuntimeConfig.current.websiteURL
+    }
+
+    static func helpCenterURL() -> URL? {
+        RuntimeConfig.current.helpCenterURL
+    }
+
+    static func bugReportURL() -> URL? {
+        RuntimeConfig.current.bugReportURL
+    }
+
+    static func termsOfServiceURL() -> URL? {
+        RuntimeConfig.current.termsOfServiceURL
+    }
+
+    static func privacyPolicyURL() -> URL? {
+        RuntimeConfig.current.privacyPolicyURL
+    }
+
+    static func capturePolicyURL() -> URL? {
+        RuntimeConfig.current.capturePolicyURL
+    }
+
+    static func accountDeletionURL() -> URL? {
+        RuntimeConfig.current.accountDeletionURL
+    }
+
+    static func supportEmailAddress() -> String? {
+        RuntimeConfig.current.supportEmailAddress
+    }
+
+    static func supportEmailURL(subject: String? = nil) -> URL? {
+        guard let address = supportEmailAddress(),
+              address.isEmpty == false else {
+            return nil
+        }
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = address
+        if let subject, subject.isEmpty == false {
+            components.queryItems = [URLQueryItem(name: "subject", value: subject)]
+        }
+        return components.url
+    }
+
     // MARK: - Reservation Guards
     static func maxReservationDriveMinutes() -> Int {
         RuntimeConfig.current.maxReservationDriveMinutes

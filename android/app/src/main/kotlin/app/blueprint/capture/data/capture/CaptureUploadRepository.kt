@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import app.blueprint.capture.data.model.UploadQueueItem
 import app.blueprint.capture.data.model.UploadQueueStatus
+import app.blueprint.capture.data.ops.OperationalTelemetry
 import app.blueprint.capture.data.session.SessionPreferences
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.FirebaseException
@@ -63,6 +64,7 @@ class CaptureUploadRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val workManager: WorkManager,
     private val sessionPreferences: SessionPreferences,
+    private val operationalTelemetry: OperationalTelemetry,
 ) {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val json = Json {
@@ -394,6 +396,10 @@ class CaptureUploadRepository @Inject constructor(
                 "CaptureUploadRepository",
                 "Deferring capture_submissions/${item.captureId.ifBlank { item.id }} write until Firebase auth is available",
             )
+            operationalTelemetry.recordFailure(
+                operation = "submission_registration",
+                detail = "waiting_for_firebase_auth",
+            )
             return false
         }
 
@@ -452,6 +458,10 @@ class CaptureUploadRepository @Inject constructor(
             .set(payload, SetOptions.merge())
             .awaitResult()
 
+        operationalTelemetry.recordSuccess(
+            operation = "submission_registration",
+            detail = captureId,
+        )
         updateItem(item.id) {
             it.copy(creatorId = authenticatedCreatorId)
         }
@@ -611,6 +621,10 @@ class CaptureUploadRepository @Inject constructor(
     ): CaptureUploadWorkOutcome {
         val item = _queue.value.firstOrNull { it.id == id } ?: return CaptureUploadWorkOutcome.Failure
         return if (runAttemptCount < MAX_AUTO_RETRIES) {
+            operationalTelemetry.recordFailure(
+                operation = "capture_upload_retry",
+                detail = reason,
+            )
             updateItem(id) {
                 it.copy(
                     status = UploadQueueStatus.Queued,
@@ -638,6 +652,10 @@ class CaptureUploadRepository @Inject constructor(
         submittedAtEpochMs: Long?,
         submissionDocumentPath: String?,
     ) {
+        operationalTelemetry.recordSuccess(
+            operation = "capture_upload",
+            detail = submissionDocumentPath ?: id,
+        )
         updateItem(id) {
             it.copy(
                 status = UploadQueueStatus.Completed,
@@ -650,6 +668,10 @@ class CaptureUploadRepository @Inject constructor(
     }
 
     private fun markFailed(id: String, reason: String) {
+        operationalTelemetry.recordFailure(
+            operation = "capture_upload",
+            detail = reason,
+        )
         updateItem(id) {
             it.copy(
                 status = UploadQueueStatus.Failed,
@@ -745,6 +767,10 @@ class CaptureUploadRepository @Inject constructor(
         Log.i(
             "CaptureUploadRepository",
             "Retrying ${deferredIds.size} deferred capture_submissions write(s) after Firebase auth became available for $currentUserId",
+        )
+        operationalTelemetry.recordSuccess(
+            operation = "submission_registration_retry",
+            detail = deferredIds.size.toString(),
         )
 
         deferredIds.forEach { id ->

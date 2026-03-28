@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.config.LocalConfigProvider
+import app.blueprint.capture.data.ops.OperationalTelemetry
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -26,6 +27,7 @@ class PushNotificationManager @Inject constructor(
     private val localConfigProvider: LocalConfigProvider,
     private val backendApi: NotificationBackendApi,
     private val notificationPreferencesRepository: NotificationPreferencesRepository,
+    private val operationalTelemetry: OperationalTelemetry,
 ) {
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val authorizationStatusState = MutableStateFlow(NotificationAuthorizationStatus.fromContext(context))
@@ -74,10 +76,19 @@ class PushNotificationManager @Inject constructor(
                 ),
             )
         }.onFailure { error ->
+            operationalTelemetry.recordFailure(
+                operation = "notification_device_sync",
+                detail = error.localizedMessage,
+            )
             Log.w(
                 "PushNotifications",
                 "Failed to sync device registration: ${error.localizedMessage ?: "unknown error"}",
                 error,
+            )
+        }.onSuccess {
+            operationalTelemetry.recordSuccess(
+                operation = "notification_device_sync",
+                detail = authorizationStatusState.value.name.lowercase(),
             )
         }
     }
@@ -91,7 +102,15 @@ class PushNotificationManager @Inject constructor(
             FirebaseMessaging.getInstance().token.await()
         }.onSuccess { token ->
             fcmTokenState.value = token.orEmpty()
+            operationalTelemetry.recordSuccess(
+                operation = "push_token_fetch",
+                detail = token?.length?.toString(),
+            )
         }.onFailure { error ->
+            operationalTelemetry.recordFailure(
+                operation = "push_token_fetch",
+                detail = error.localizedMessage,
+            )
             Log.w(
                 "PushNotifications",
                 "Failed to fetch FCM token: ${error.localizedMessage ?: "unknown error"}",

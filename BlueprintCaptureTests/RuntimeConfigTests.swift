@@ -21,6 +21,9 @@ struct RuntimeConfigTests {
         #expect(config.allowMockJobsFallback == false)
         #expect(config.enableInternalTestSpace == false)
         #expect(config.enableOpenCaptureHere == true)
+        #expect(config.websiteURL == nil)
+        #expect(config.termsOfServiceURL == nil)
+        #expect(config.supportEmailAddress == nil)
     }
 
     @Test
@@ -35,10 +38,14 @@ struct RuntimeConfigTests {
                 "BLUEPRINT_ENABLE_DIRECT_PROVIDER_FEATURES": "true",
                 "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK": "true",
                 "BLUEPRINT_MAX_RESERVATION_DRIVE_MINUTES": "90",
-                "BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES": "50.5"
+                "BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES": "50.5",
+                "BLUEPRINT_MAIN_WEBSITE_URL": "https://www.tryblueprint.io",
+                "BLUEPRINT_SUPPORT_EMAIL_ADDRESS": "support@blueprint.app"
             ],
             infoDictionary: [
-                "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com"
+                "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com",
+                "BLUEPRINT_TERMS_OF_SERVICE_URL": "https://www.tryblueprint.io/terms",
+                "BLUEPRINT_PRIVACY_POLICY_URL": "https://www.tryblueprint.io/privacy"
             ]
         )
 
@@ -56,5 +63,9 @@ struct RuntimeConfigTests {
         #expect(config.enableOpenCaptureHere == true)
         #expect(config.maxReservationDriveMinutes == 90)
         #expect(config.fallbackMaxReservationAirMiles == 50.5)
+        #expect(config.websiteURL?.absoluteString == "https://www.tryblueprint.io")
+        #expect(config.termsOfServiceURL?.absoluteString == "https://www.tryblueprint.io/terms")
+        #expect(config.privacyPolicyURL?.absoluteString == "https://www.tryblueprint.io/privacy")
+        #expect(config.supportEmailAddress == "support@blueprint.app")
     }
 }

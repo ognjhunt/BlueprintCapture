@@ -1,5 +1,7 @@
 package app.blueprint.capture.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,10 +42,12 @@ import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -64,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.blueprint.capture.data.notification.NotificationPreferenceKey
+import app.blueprint.capture.data.support.SupportLinks
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
 import app.blueprint.capture.ui.theme.BlueprintBlack
@@ -99,11 +104,14 @@ fun SettingsScreen(
     onBack: () -> Unit,
     settingsPreferencesViewModel: SettingsPreferencesViewModel = hiltViewModel(),
     glassesViewModel: GlassesViewModel = hiltViewModel(),
+    settingsAccountViewModel: SettingsAccountViewModel = hiltViewModel(),
 ) {
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     var showGlassesSheet by rememberSaveable { mutableStateOf(false) }
     var showPayouts by rememberSaveable { mutableStateOf(false) }
+    var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
+    val accountUiState by settingsAccountViewModel.uiState.collectAsState()
 
     if (showPayouts) {
         PayoutsScreen(onBack = { showPayouts = false })
@@ -126,6 +134,64 @@ fun SettingsScreen(
     } else {
         @Suppress("DEPRECATION")
         packageInfo?.versionCode?.toString() ?: "1"
+    }
+
+    fun launchExternalLink(uri: Uri) {
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching {
+            context.startActivity(intent)
+        }
+    }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = { Text("Delete Account") },
+            text = {
+                Text("This removes your Blueprint account and signs this device out. If deletion fails, use the deletion help link for manual removal.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        settingsAccountViewModel.deleteAccount(onDeleted = { })
+                    },
+                    enabled = !accountUiState.isDeletingAccount,
+                ) {
+                    Text(if (accountUiState.isDeletingAccount) "Deleting…" else "Delete Account")
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { launchExternalLink(SupportLinks.accountDeletionUri) }) {
+                        Text("Deletion Help")
+                    }
+                    TextButton(onClick = { showDeleteAccountDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            },
+        )
+    }
+
+    accountUiState.deletionErrorMessage?.let { errorMessage ->
+        AlertDialog(
+            onDismissRequest = settingsAccountViewModel::dismissDeletionError,
+            title = { Text("Account Deletion Failed") },
+            text = { Text(errorMessage) },
+            confirmButton = {
+                TextButton(onClick = settingsAccountViewModel::dismissDeletionError) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { launchExternalLink(SupportLinks.accountDeletionUri) }) {
+                    Text("Deletion Help")
+                }
+            },
+        )
     }
 
     Column(
@@ -352,7 +418,7 @@ fun SettingsScreen(
                 iconBg = BlueprintSurfaceInset,
                 iconTint = BlueprintTextMuted,
                 title = "Main Website",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.mainWebsiteUri) },
             )
             SettingsRowDivider()
             SettingsNavRow(
@@ -360,7 +426,7 @@ fun SettingsScreen(
                 iconBg = BlueprintSurfaceInset,
                 iconTint = BlueprintTextMuted,
                 title = "Help Center",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.helpCenterUri) },
             )
             SettingsRowDivider()
             SettingsNavRow(
@@ -368,7 +434,7 @@ fun SettingsScreen(
                 iconBg = IconBgBugRed,
                 iconTint = BlueprintError,
                 title = "Report a Bug",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.bugReportUri) },
             )
         }
 
@@ -383,7 +449,7 @@ fun SettingsScreen(
                 iconBg = BlueprintSurfaceInset,
                 iconTint = BlueprintTextMuted,
                 title = "Terms of Service",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.termsOfServiceUri) },
             )
             SettingsRowDivider()
             SettingsNavRow(
@@ -391,7 +457,7 @@ fun SettingsScreen(
                 iconBg = BlueprintSurfaceInset,
                 iconTint = BlueprintTextMuted,
                 title = "Privacy Policy",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.privacyPolicyUri) },
             )
             SettingsRowDivider()
             SettingsNavRow(
@@ -399,7 +465,7 @@ fun SettingsScreen(
                 iconBg = BlueprintSurfaceInset,
                 iconTint = BlueprintTextMuted,
                 title = "Capture Policy",
-                onClick = {},
+                onClick = { launchExternalLink(SupportLinks.capturePolicyUri) },
             )
         }
 
@@ -412,6 +478,16 @@ fun SettingsScreen(
             SettingsInfoRow(label = "Version", value = versionName)
             SettingsRowDivider(indented = false)
             SettingsInfoRow(label = "Build", value = versionCode)
+            if (isSignedIn) {
+                SettingsRowDivider(indented = false)
+                SettingsNavRow(
+                    icon = Icons.Rounded.Warning,
+                    iconBg = IconBgBugRed,
+                    iconTint = BlueprintError,
+                    title = "Delete Account",
+                    onClick = { showDeleteAccountDialog = true },
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(40.dp))

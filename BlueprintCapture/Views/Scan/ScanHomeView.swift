@@ -25,10 +25,6 @@ struct ScanHomeView: View {
         RuntimeConfig.current.isUITesting
     }
 
-    private var isUITesting: Bool {
-        RuntimeConfig.current.isUITesting
-    }
-
     init(
         glassesManager: GlassesCaptureManager,
         uploadQueue: UploadQueueViewModel,

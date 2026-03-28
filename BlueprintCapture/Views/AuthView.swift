@@ -5,6 +5,7 @@ import GoogleSignInSwift
 
 struct AuthView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @StateObject private var viewModel = AuthViewModel()
     @FocusState private var focusedField: FocusField?
 
@@ -102,26 +103,10 @@ struct AuthView: View {
                         .padding(.horizontal, 20)
 
                         // Footer
-                        VStack(spacing: 8) {
-                            Text("By continuing, you agree to Blueprint's ")
-                                .foregroundStyle(Color(white: 0.4))
-                            + Text("Terms of Service")
-                                .foregroundStyle(Color(white: 0.6))
-                                .underline()
-                            + Text(" and ")
-                                .foregroundStyle(Color(white: 0.4))
-                            + Text("Privacy Policy")
-                                .foregroundStyle(Color(white: 0.6))
-                                .underline()
-
-                            Text("Questions? Contact support@blueprint.app")
-                                .foregroundStyle(Color(white: 0.3))
-                        }
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 32)
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 40)
+                        legalFooter
+                            .padding(.top, 32)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 40)
                     }
                 }
             }
@@ -150,6 +135,49 @@ struct AuthView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var legalFooter: some View {
+        VStack(spacing: 10) {
+            Text("By continuing, you agree to Blueprint's")
+                .foregroundStyle(Color(white: 0.4))
+
+            HStack(spacing: 6) {
+                footerLink("Terms of Service", url: AppConfig.termsOfServiceURL())
+                Text("and")
+                    .foregroundStyle(Color(white: 0.4))
+                footerLink("Privacy Policy", url: AppConfig.privacyPolicyURL())
+            }
+
+            Button {
+                openSupportEmail()
+            } label: {
+                Text("Questions? Contact \(AppConfig.supportEmailAddress() ?? "support@blueprint.app")")
+                    .foregroundStyle(Color(white: 0.3))
+                    .underline()
+            }
+            .buttonStyle(.plain)
+        }
+        .font(.caption)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func footerLink(_ title: String, url: URL?) -> some View {
+        Button {
+            guard let url else { return }
+            openURL(url)
+        } label: {
+            Text(title)
+                .foregroundStyle(Color(white: 0.7))
+                .underline()
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func openSupportEmail() {
+        guard let url = AppConfig.supportEmailURL(subject: "Blueprint Support") else { return }
+        openURL(url)
     }
 
     // MARK: - Social buttons

@@ -2,6 +2,9 @@ import Foundation
 import FirebaseAuth
 import FirebaseFirestore
 import UIKit
+#if canImport(FirebaseAnalytics)
+import FirebaseAnalytics
+#endif
 
 final class SessionEventManager {
     static let shared = SessionEventManager()
@@ -192,6 +195,32 @@ final class SessionEventManager {
             doc["metadata"] = metadata
         }
         eventsCollection.addDocument(data: doc)
+        logAnalyticsEvent(
+            name: "blueprint_ops_error",
+            operation: errorCode,
+            status: "failure",
+            metadata: metadata
+        )
+    }
+
+    func logOperationalEvent(operation: String, status: String, metadata: [String: Any]? = nil) {
+        guard let sessionId = currentSessionId else {
+            logAnalyticsEvent(name: "blueprint_ops_event", operation: operation, status: status, metadata: metadata)
+            return
+        }
+        guard remoteWritesEnabled else {
+            logAnalyticsEvent(name: "blueprint_ops_event", operation: operation, status: status, metadata: metadata)
+            return
+        }
+
+        var doc = baseEventPayload(sessionId: sessionId, eventType: "operational")
+        doc["operation"] = operation
+        doc["status"] = status
+        if let metadata {
+            doc["metadata"] = metadata
+        }
+        eventsCollection.addDocument(data: doc)
+        logAnalyticsEvent(name: "blueprint_ops_event", operation: operation, status: status, metadata: metadata)
     }
 
     private func baseEventPayload(sessionId: String, eventType: String) -> [String: Any] {
@@ -211,5 +240,36 @@ final class SessionEventManager {
             doc["userId"] = currentUserId
         }
         return doc
+    }
+
+    private func logAnalyticsEvent(name: String, operation: String, status: String, metadata: [String: Any]?) {
+        #if canImport(FirebaseAnalytics)
+        var parameters: [String: Any] = [
+            "operation": analyticsSafeValue(operation),
+            "status": analyticsSafeValue(status),
+        ]
+        if let detail = analyticsDetail(from: metadata) {
+            parameters["detail"] = detail
+        }
+        Analytics.logEvent(name, parameters: parameters)
+        #endif
+    }
+
+    private func analyticsSafeValue(_ raw: String) -> String {
+        String(raw.prefix(100))
+    }
+
+    private func analyticsDetail(from metadata: [String: Any]?) -> String? {
+        guard let metadata else { return nil }
+        if let reason = metadata["reason"] as? String, !reason.isEmpty {
+            return analyticsSafeValue(reason)
+        }
+        if let operation = metadata["operation"] as? String, !operation.isEmpty {
+            return analyticsSafeValue(operation)
+        }
+        if let message = metadata["message"] as? String, !message.isEmpty {
+            return analyticsSafeValue(message)
+        }
+        return nil
     }
 }

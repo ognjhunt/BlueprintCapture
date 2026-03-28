@@ -62,6 +62,7 @@ capture automatically.
 - In scope: truthful capture selection, raw bundle packaging, upload queueing, wallet history sync, and explicit open-capture flow.
 - In scope on Android: phone capture and target-scoped Meta glasses capture that finalizes into the canonical bundle/upload pipeline.
 - Intentionally out of scope by default: direct-provider AI features, Street View previews, and Android payout onboarding UI that is not backed by a live provider contract.
+- External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
 - Current cross-modality runtime limits are documented in [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
 
 ## Main Areas
@@ -104,6 +105,13 @@ cd cloud/extract-frames
 npm test
 ```
 
+Demand backend:
+
+```bash
+cd cloud/referral-earnings
+npm test
+```
+
 Cross-repo external alpha gate:
 
 ```bash
@@ -115,6 +123,12 @@ Release config validation:
 ```bash
 BLUEPRINT_RELEASE_XCCONFIG=/absolute/path/to/BlueprintCapture.release.xcconfig \
 ./scripts/archive_external_alpha.sh --validate-config-only
+```
+
+Android internal-release validation:
+
+```bash
+./scripts/android_alpha_readiness.sh --validate-config-only
 ```
 
 Use the slash-helper form from [ConfigTemplates/BlueprintCapture.release.xcconfig.example](/Users/nijelhunt_1/workspace/BlueprintCapture/ConfigTemplates/BlueprintCapture.release.xcconfig.example) for any `https://...` xcconfig values so Xcode does not truncate them to `https:`.

@@ -105,6 +105,17 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    suspend fun deleteCurrentAccount() {
+        val currentUser = auth.currentUser?.takeUnless { it.isAnonymous }
+            ?: throw IllegalStateException("No signed-in Blueprint account is available to delete.")
+        val currentUserId = currentUser.uid
+
+        firestore.collection("users").document(currentUserId).delete().awaitResult()
+        currentUser.delete().awaitResult()
+        auth.signOut()
+        ensureAnonymousSession()
+    }
+
     fun currentUserId(): String? = auth.currentUser?.uid
 
     suspend fun currentIdToken(forceRefresh: Boolean = false): String? {

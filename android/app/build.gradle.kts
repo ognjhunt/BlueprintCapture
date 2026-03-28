@@ -37,6 +37,23 @@ android {
         val nearbyDiscoveryProvider = providers.gradleProperty("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER").orNull ?: "places_nearby"
         val enableGeminiMapsGroundingFallback =
             providers.gradleProperty("BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK").orNull ?: "false"
+        val mainWebsiteUrl = providers.gradleProperty("BLUEPRINT_MAIN_WEBSITE_URL").orNull ?: "https://www.tryblueprint.io"
+        val helpCenterUrl =
+            providers.gradleProperty("BLUEPRINT_HELP_CENTER_URL").orNull
+                ?: "mailto:support@blueprint.app?subject=Blueprint%20Help"
+        val bugReportUrl =
+            providers.gradleProperty("BLUEPRINT_BUG_REPORT_URL").orNull
+                ?: "mailto:bugs@blueprint.app?subject=Blueprint%20Bug%20Report"
+        val termsOfServiceUrl =
+            providers.gradleProperty("BLUEPRINT_TERMS_OF_SERVICE_URL").orNull ?: "https://www.tryblueprint.io/terms"
+        val privacyPolicyUrl =
+            providers.gradleProperty("BLUEPRINT_PRIVACY_POLICY_URL").orNull ?: "https://www.tryblueprint.io/privacy"
+        val capturePolicyUrl =
+            providers.gradleProperty("BLUEPRINT_CAPTURE_POLICY_URL").orNull ?: "https://www.tryblueprint.io/capture-policy"
+        val accountDeletionUrl =
+            providers.gradleProperty("BLUEPRINT_ACCOUNT_DELETION_URL").orNull ?: "https://www.tryblueprint.io/account/delete"
+        val supportEmailAddress =
+            providers.gradleProperty("BLUEPRINT_SUPPORT_EMAIL_ADDRESS").orNull ?: "support@blueprint.app"
 
         buildConfigField("String", "BACKEND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "DEMAND_BACKEND_BASE_URL", "\"$demandBackendBaseUrl\"")
@@ -45,6 +62,14 @@ android {
         buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
         buildConfigField("String", "NEARBY_DISCOVERY_PROVIDER", "\"$nearbyDiscoveryProvider\"")
         buildConfigField("boolean", "ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK", enableGeminiMapsGroundingFallback)
+        buildConfigField("String", "MAIN_WEBSITE_URL", "\"$mainWebsiteUrl\"")
+        buildConfigField("String", "HELP_CENTER_URL", "\"$helpCenterUrl\"")
+        buildConfigField("String", "BUG_REPORT_URL", "\"$bugReportUrl\"")
+        buildConfigField("String", "TERMS_OF_SERVICE_URL", "\"$termsOfServiceUrl\"")
+        buildConfigField("String", "PRIVACY_POLICY_URL", "\"$privacyPolicyUrl\"")
+        buildConfigField("String", "CAPTURE_POLICY_URL", "\"$capturePolicyUrl\"")
+        buildConfigField("String", "ACCOUNT_DELETION_URL", "\"$accountDeletionUrl\"")
+        buildConfigField("String", "SUPPORT_EMAIL_ADDRESS", "\"$supportEmailAddress\"")
         buildConfigField("boolean", "MWDAT_PRIVATE_SDK_ENABLED", useMwdatPrivateSdk.toString())
         manifestPlaceholders["blueprintAppScheme"] = "blueprint"
         manifestPlaceholders["mwdatApplicationId"] = mwdatAppId
@@ -97,6 +122,81 @@ android {
         if (!useMwdatPrivateSdk) {
             java.srcDir("src/metaStub/kotlin")
         }
+    }
+}
+
+tasks.register("validateExternalAlphaReleaseConfig") {
+    group = "verification"
+    description = "Validates Android release-safe config for the external alpha rollout."
+
+    doLast {
+        fun gradleProperty(name: String): String =
+            (project.findProperty(name) as String?)?.trim().orEmpty()
+
+        fun requireNonBlank(name: String, message: String) {
+            if (gradleProperty(name).isBlank()) {
+                throw org.gradle.api.GradleException(message)
+            }
+        }
+
+        requireNonBlank(
+            "BLUEPRINT_BACKEND_BASE_URL",
+            "BLUEPRINT_BACKEND_BASE_URL must be set for Android external alpha builds.",
+        )
+        requireNonBlank(
+            "BLUEPRINT_DEMAND_BACKEND_BASE_URL",
+            "BLUEPRINT_DEMAND_BACKEND_BASE_URL must be set for Android external alpha builds.",
+        )
+
+        if (gradleProperty("BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK").ifBlank { "false" }.toBoolean()) {
+            throw org.gradle.api.GradleException(
+                "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK must be false for Android external alpha builds.",
+            )
+        }
+
+        if (gradleProperty("BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK").ifBlank { "false" }.toBoolean()) {
+            throw org.gradle.api.GradleException(
+                "BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK must stay false for Android external alpha builds.",
+            )
+        }
+
+        val nearbyProvider = gradleProperty("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER").ifBlank { "places_nearby" }
+        if (nearbyProvider != "places_nearby") {
+            throw org.gradle.api.GradleException(
+                "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby for Android external alpha builds.",
+            )
+        }
+
+        listOf(
+            "BLUEPRINT_MAIN_WEBSITE_URL" to "website",
+            "BLUEPRINT_HELP_CENTER_URL" to "help center",
+            "BLUEPRINT_BUG_REPORT_URL" to "bug report",
+            "BLUEPRINT_TERMS_OF_SERVICE_URL" to "terms of service",
+            "BLUEPRINT_PRIVACY_POLICY_URL" to "privacy policy",
+            "BLUEPRINT_CAPTURE_POLICY_URL" to "capture policy",
+            "BLUEPRINT_ACCOUNT_DELETION_URL" to "account deletion",
+            "BLUEPRINT_SUPPORT_EMAIL_ADDRESS" to "support email",
+        ).forEach { (propertyName, label) ->
+            requireNonBlank(
+                propertyName,
+                "Set $propertyName for the Android external alpha build so the $label surface is not a dead end.",
+            )
+        }
+
+        if (!file("google-services.json").exists()) {
+            throw org.gradle.api.GradleException(
+                "android/app/google-services.json is required for Android external alpha builds.",
+            )
+        }
+
+        val manifestText = file("src/main/AndroidManifest.xml").readText()
+        if (!manifestText.contains("android.permission.POST_NOTIFICATIONS")) {
+            throw org.gradle.api.GradleException(
+                "AndroidManifest.xml must keep POST_NOTIFICATIONS declared for release validation.",
+            )
+        }
+
+        println("Android external alpha release config looks valid.")
     }
 }
 

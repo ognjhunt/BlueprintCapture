@@ -101,6 +101,13 @@ final class PushNotificationManager: NSObject, ObservableObject {
         guard remoteNotificationsEnabled else { return }
         Messaging.messaging().apnsToken = deviceToken
         UserDefaults.standard.set(deviceToken.hexString, forKey: "apnsToken")
+        SessionEventManager.shared.logOperationalEvent(
+            operation: "apns_registration",
+            status: "success",
+            metadata: [
+                "token_length": "\(deviceToken.count)"
+            ]
+        )
         print("✅ [Notifications] APNs registration succeeded")
         Task {
             await syncCurrentDevice()
@@ -109,6 +116,13 @@ final class PushNotificationManager: NSObject, ObservableObject {
 
     func didFailToRegisterForRemoteNotifications(_ error: Error) {
         guard remoteNotificationsEnabled else { return }
+        SessionEventManager.shared.logError(
+            errorCode: "notification_sync_failed",
+            metadata: [
+                "operation": "apns_registration",
+                "message": error.localizedDescription
+            ]
+        )
         print("⚠️ [Notifications] APNs registration failed: \(error.localizedDescription)")
     }
 
@@ -116,6 +130,10 @@ final class PushNotificationManager: NSObject, ObservableObject {
         guard canReachNotificationBackend(operation: "sync preferences") else { return }
         do {
             try await APIService.shared.updateNotificationPreferences(NotificationPreferencesStore.shared.preferences)
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "notification_preferences_sync",
+                status: "success"
+            )
         } catch {
             logNotificationFailure(operation: "sync preferences", error: error)
         }
@@ -136,6 +154,13 @@ final class PushNotificationManager: NSObject, ObservableObject {
                     appVersion: Self.appVersion,
                     lastSeenAt: Date()
                 )
+            )
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "notification_device_sync",
+                status: "success",
+                metadata: [
+                    "authorization_status": authorizationStatus.serverValue
+                ]
             )
         } catch {
             logNotificationFailure(operation: "sync device registration", error: error)

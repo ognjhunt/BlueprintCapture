@@ -1522,12 +1522,37 @@ export const extractFrames = onObjectFinalized(
       generated_at: new Date().toISOString(),
     };
 
-    await bucket
-      .file(`${pathInfo.capturesPrefix}/pipeline_handoff.json`)
-      .save(JSON.stringify(pipelineHandoffPayload, null, 2), {
-        contentType: "application/json",
+    let handoffMessageId: string;
+    try {
+      await bucket
+        .file(`${pathInfo.capturesPrefix}/pipeline_handoff.json`)
+        .save(JSON.stringify(pipelineHandoffPayload, null, 2), {
+          contentType: "application/json",
+        });
+      logger.info("Saved pipeline handoff payload", {
+        captureId: pathInfo.captureId,
+        sceneId: pathInfo.sceneId,
+        pipelineHandoffUri,
+        handoffTopic: PIPELINE_HANDOFF_TOPIC,
       });
-    const handoffMessageId = await publishPipelineHandoff(pipelineHandoffPayload);
+
+      handoffMessageId = await publishPipelineHandoff(pipelineHandoffPayload);
+      logger.info("Published pipeline handoff payload", {
+        captureId: pathInfo.captureId,
+        sceneId: pathInfo.sceneId,
+        handoffTopic: PIPELINE_HANDOFF_TOPIC,
+        handoffMessageId,
+      });
+    } catch (error) {
+      logger.error("Pipeline handoff publish failed", {
+        captureId: pathInfo.captureId,
+        sceneId: pathInfo.sceneId,
+        handoffTopic: PIPELINE_HANDOFF_TOPIC,
+        pipelineHandoffUri,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
 
     logger.info("Uploaded frames, descriptor, QA report, and pipeline handoff", {
       framesPrefix: pathInfo.framesPrefix,

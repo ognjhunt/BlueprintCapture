@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.openURL) private var openURL
     @StateObject private var viewModel = SettingsViewModel()
     @EnvironmentObject private var notificationPreferences: NotificationPreferencesStore
     @StateObject private var alertsManager = NearbyAlertsManager()
@@ -10,6 +11,7 @@ struct SettingsView: View {
     @State private var showingAuth = false
     @State private var showingGlassesCapture = false
     @State private var showNearbyAlertInfo = false
+    @State private var showDeleteAccountConfirmation = false
 
     // Toggle states
     @AppStorage("upload_wifi_only") private var wifiOnlyUploads = false
@@ -98,6 +100,26 @@ struct SettingsView: View {
         .task {
             await viewModel.loadUserData()
             await notificationPreferences.refreshFromBackendIfPossible()
+        }
+        .alert("Settings Error", isPresented: $viewModel.showError, presenting: viewModel.error) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { error in
+            Text(error.errorDescription ?? "Something went wrong.")
+        }
+        .alert("Delete Account?", isPresented: $showDeleteAccountConfirmation) {
+            Button("Delete Account", role: .destructive) {
+                Task {
+                    _ = await viewModel.deleteAccount()
+                }
+            }
+            if AppConfig.accountDeletionURL() != nil {
+                Button("Deletion Help") {
+                    openExternalLink(AppConfig.accountDeletionURL())
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This removes your Blueprint account and signs this device out. If deletion fails, use the support links to request manual removal.")
         }
         .alert("Nearby job alerts use Always Location", isPresented: $showNearbyAlertInfo) {
             Button("OK", role: .cancel) { }
@@ -297,11 +319,17 @@ struct SettingsView: View {
     private var usefulLinksCard: some View {
         kledCard {
             VStack(spacing: 0) {
-                settingsLinkRow(icon: "globe", iconBg: Color(white: 0.25), title: "Main Website")
+                settingsLinkRow(icon: "globe", iconBg: Color(white: 0.25), title: "Main Website") {
+                    openExternalLink(AppConfig.mainWebsiteURL())
+                }
                 kledRowDivider
-                settingsLinkRow(icon: "questionmark.circle.fill", iconBg: Color(white: 0.25), title: "Help Center")
+                settingsLinkRow(icon: "questionmark.circle.fill", iconBg: Color(white: 0.25), title: "Help Center") {
+                    openExternalLink(AppConfig.helpCenterURL())
+                }
                 kledRowDivider
-                settingsLinkRow(icon: "ant.fill", iconBg: Color.red.opacity(0.8), title: "Report a Bug")
+                settingsLinkRow(icon: "ant.fill", iconBg: Color.red.opacity(0.8), title: "Report a Bug") {
+                    openExternalLink(AppConfig.bugReportURL())
+                }
             }
         }
     }
@@ -311,11 +339,17 @@ struct SettingsView: View {
     private var legalCard: some View {
         kledCard {
             VStack(spacing: 0) {
-                settingsLinkRow(icon: "doc.text.fill", iconBg: Color(white: 0.25), title: "Terms of Service")
+                settingsLinkRow(icon: "doc.text.fill", iconBg: Color(white: 0.25), title: "Terms of Service") {
+                    openExternalLink(AppConfig.termsOfServiceURL())
+                }
                 kledRowDivider
-                settingsLinkRow(icon: "hand.raised.fill", iconBg: Color(white: 0.25), title: "Privacy Policy")
+                settingsLinkRow(icon: "hand.raised.fill", iconBg: Color(white: 0.25), title: "Privacy Policy") {
+                    openExternalLink(AppConfig.privacyPolicyURL())
+                }
                 kledRowDivider
-                settingsLinkRow(icon: "camera.fill", iconBg: Color(white: 0.25), title: "Capture Policy")
+                settingsLinkRow(icon: "camera.fill", iconBg: Color(white: 0.25), title: "Capture Policy") {
+                    openExternalLink(AppConfig.capturePolicyURL())
+                }
             }
         }
     }
@@ -331,6 +365,15 @@ struct SettingsView: View {
                 kledRowDivider
 
                 if viewModel.isAuthenticated {
+                    kledRowDivider
+                    settingsDestructiveRow(
+                        icon: "trash.fill",
+                        title: "Delete Account",
+                        detail: "Remove your account or request manual deletion"
+                    ) {
+                        showDeleteAccountConfirmation = true
+                    }
+
                     kledRowDivider
                     Button {
                         Task { await viewModel.signOut() }
@@ -434,8 +477,8 @@ struct SettingsView: View {
         )
     }
 
-    private func settingsLinkRow(icon: String, iconBg: Color, title: String) -> some View {
-        Button { } label: {
+    private func settingsLinkRow(icon: String, iconBg: Color, title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .font(.subheadline.weight(.semibold))
@@ -446,6 +489,36 @@ struct SettingsView: View {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.25))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func settingsDestructiveRow(icon: String, title: String, detail: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .frame(width: 36, height: 36)
+                    .background(Color.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.4))
+                }
 
                 Spacer()
 
@@ -496,6 +569,11 @@ struct SettingsView: View {
             .font(.caption.weight(.bold))
             .foregroundStyle(Color(white: 0.35))
             .tracking(1.0)
+    }
+
+    private func openExternalLink(_ url: URL?) {
+        guard let url else { return }
+        openURL(url)
     }
 }
 

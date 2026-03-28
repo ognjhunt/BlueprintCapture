@@ -7,6 +7,7 @@ enum SettingsError: LocalizedError {
     case networkError
     case invalidData
     case bankConnectionFailed
+    case accountDeletionFailed
     
     var errorDescription: String? {
         switch self {
@@ -16,6 +17,8 @@ enum SettingsError: LocalizedError {
             return "Invalid data received from server."
         case .bankConnectionFailed:
             return "Failed to connect bank account. Please try again."
+        case .accountDeletionFailed:
+            return "We couldn't delete this account automatically. Sign in again or use the support link for manual deletion."
         }
     }
 }
@@ -139,6 +142,32 @@ class SettingsViewModel: ObservableObject {
             self.error = .networkError
             self.showError = true
         }
+    }
+
+    func deleteAccount() async -> Bool {
+        guard UserDeviceService.hasRegisteredAccount() else {
+            return false
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        let deleted = await withCheckedContinuation { continuation in
+            FirestoreManager.deleteAccount { success in
+                continuation.resume(returning: success)
+            }
+        }
+
+        guard deleted else {
+            self.error = .accountDeletionFailed
+            self.showError = true
+            return false
+        }
+
+        UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
+        NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+        await loadUserData()
+        return true
     }
     
     func startEditingProfile() {

@@ -879,6 +879,14 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 fileUploaded = true
             }
             if !fileUploaded {
+                SessionEventManager.shared.logOperationalEvent(
+                    operation: "upload_file",
+                    status: "failure",
+                    metadata: [
+                        "path": remotePath,
+                        "message": uploadError?.localizedDescription ?? "unknown"
+                    ]
+                )
                 print("❌ [UploadService] File upload failed path=\(remotePath) error=\(uploadError?.localizedDescription ?? "unknown")")
                 markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
                 return false
@@ -897,6 +905,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 attempt: attempt
             )
             guard completionUploaded else {
+                SessionEventManager.shared.logOperationalEvent(
+                    operation: "upload_completion_marker",
+                    status: "failure",
+                    metadata: [
+                        "path": completionRemotePath
+                    ]
+                )
                 print("❌ [UploadService] Completion marker upload failed path=\(completionRemotePath)")
                 markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
                 return false
@@ -953,6 +968,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     print("⚠️ [UploadService] Failed to write capture_submissions/\(captureId): \(error.localizedDescription)")
                     continuation.resume(returning: false)
                 } else {
+                    SessionEventManager.shared.logOperationalEvent(
+                        operation: "submission_registration",
+                        status: "success",
+                        metadata: [
+                            "capture_id": captureId
+                        ]
+                    )
                     print("✅ [UploadService] capture_submissions/\(captureId) written")
                     continuation.resume(returning: true)
                 }
