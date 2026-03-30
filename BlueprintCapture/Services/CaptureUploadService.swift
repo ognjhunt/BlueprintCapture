@@ -525,6 +525,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case uploadFailed
         case authenticationRequired
         case missingStructuredIntake
+        case rawContractValidationFailed
         case submissionRegistrationFailed
 
         var errorDescription: String? {
@@ -539,6 +540,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Blueprint could not establish Firebase authentication for this capture. Enable Anonymous Auth or sign in before uploading."
             case .missingStructuredIntake:
                 return "Structured intake is required before upload."
+            case .rawContractValidationFailed:
+                return "Raw capture validation failed. Please retake and upload again."
             case .submissionRegistrationFailed:
                 return "Upload reached storage but Blueprint could not register the capture submission. Check Firebase Auth and Firestore production config before retrying."
             }
@@ -561,8 +564,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     private let subject = PassthroughSubject<Event, Never>()
     private let storageBucketURL = "gs://blueprint-8c1ca.appspot.com"
     private let finalizer: CaptureBundleFinalizerProtocol
-    init(finalizer: CaptureBundleFinalizerProtocol = CaptureBundleFinalizer()) {
+    private let rawContractValidator: CaptureRawContractV3Validator
+    init(
+        finalizer: CaptureBundleFinalizerProtocol = CaptureBundleFinalizer(),
+        rawContractValidator: CaptureRawContractV3Validator = CaptureRawContractV3Validator()
+    ) {
         self.finalizer = finalizer
+        self.rawContractValidator = rawContractValidator
     }
 
     func enqueue(_ request: CaptureUploadRequest) {
@@ -767,8 +775,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     // Upload all files under a directory, preserving relative paths beneath remoteBasePath
     private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, attempt: UUID, request: CaptureUploadRequest) async -> Bool {
         print("📁 [UploadService] Preparing directory upload at \(localDirectory.path)")
+        let finalizedBundle: FinalizedCaptureBundle
         do {
-            _ = try finalizer.finalize(
+            finalizedBundle = try finalizer.finalize(
                 request: request,
                 mode: .upload(
                     remoteRawPrefix: remoteBasePath,
@@ -783,9 +792,30 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
+
+        let uploadRoot = finalizedBundle.rawDirectoryURL
+        let rawContractValidation = rawContractValidator.validate(rawDirectoryURL: uploadRoot)
+        guard rawContractValidation.isValid else {
+            SessionEventManager.shared.logError(
+                errorCode: "raw_contract_v3_validation_failed",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                    "error_count": String(rawContractValidation.errors.count),
+                    "first_error": rawContractValidation.errors.first ?? "unknown"
+                ]
+            )
+            print("❌ [UploadService] Raw contract V3 validation failed captureId=\(CaptureBundleContext.captureIdentifier(for: request)) errors=\(rawContractValidation.errors.joined(separator: ","))")
+            markUploadFailed(id: id, attempt: attempt, error: .rawContractValidationFailed)
+            return false
+        }
+        if !rawContractValidation.warnings.isEmpty {
+            print("⚠️ [UploadService] Raw contract V3 warnings captureId=\(CaptureBundleContext.captureIdentifier(for: request)) warnings=\(rawContractValidation.warnings.joined(separator: ","))")
+        }
+
         // Gather files
-        guard let enumerator = FileManager.default.enumerator(at: localDirectory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
-            print("❌ [UploadService] Failed to enumerate directory at \(localDirectory.path)")
+        guard let enumerator = FileManager.default.enumerator(at: uploadRoot, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            print("❌ [UploadService] Failed to enumerate directory at \(uploadRoot.path)")
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
@@ -809,7 +839,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
         files.sort { $0.path < $1.path }
         guard !files.isEmpty || completionMarkerFile != nil else {
-            print("❌ [UploadService] No files found to upload under \(localDirectory.path)")
+            print("❌ [UploadService] No files found to upload under \(uploadRoot.path)")
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
@@ -818,7 +848,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         print("📁 [UploadService] Uploading \(files.count + (completionMarkerFile == nil ? 0 : 1)) files (\(totalBytes) bytes + completion marker) to basePath=\(remoteBasePath)")
         for file in files {
             if Task.isCancelled { return false }
-            let relPath = file.path.replacingOccurrences(of: localDirectory.path + "/", with: "")
+            let relPath = file.path.replacingOccurrences(of: uploadRoot.path + "/", with: "")
             let remotePath = remoteBasePath + relPath
             let ref = storage.reference(withPath: remotePath)
             let md = StorageMetadata()
