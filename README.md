@@ -48,7 +48,7 @@ capture automatically.
 
 ## Core Rules
 
-- Qualification comes first.
+- Capture comes first. World-model products and hosted access come second.
 - This repo is the evidence-capture layer, not the readiness-decision layer.
 - In-app quality, coverage, and earnings cues are advisory and immediate UX only.
 - Capture-backed scene memory is downstream of the raw bundle.
