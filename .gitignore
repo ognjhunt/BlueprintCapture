@@ -85,6 +85,7 @@ android/.idea/
 # Local build outputs
 build/
 builds/
+/.agents/
 
 # Cloud Functions
 cloud/**/node_modules/
