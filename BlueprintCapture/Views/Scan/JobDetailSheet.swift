@@ -277,32 +277,69 @@ struct JobDetailSheet: View {
         }
     }
 
-    // MARK: - Payout Banner (Kled "Contributing boosts your payout rate" style)
+    // MARK: - Payout / Review Banner
+
+    private var isUnpricedOpenCapture: Bool {
+        item.job.owner == "open-capture" && (item.job.quotedPayoutCents == nil && item.job.payoutCents <= 0)
+    }
 
     private var payoutBanner: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(BlueprintTheme.successGreen)
-                .frame(width: 3)
-                .cornerRadius(2)
+        Group {
+            if isUnpricedOpenCapture {
+                // Review-first messaging for open capture — no fabricated payout claims
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(BlueprintTheme.brandTeal)
+                        .frame(width: 3)
+                        .cornerRadius(2)
 
-            HStack(spacing: 10) {
-                Image(systemName: "dollarsign.circle.fill")
-                    .foregroundStyle(BlueprintTheme.successGreen)
-                    .font(.subheadline)
+                    HStack(spacing: 10) {
+                        Image(systemName: "eye.circle.fill")
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .font(.subheadline)
 
-                Text("Completing this capture earns \(item.payoutLabel).")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color(white: 0.85))
+                        Text("Open capture — submission will be reviewed before reuse.")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color(white: 0.85))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                }
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
+                )
+            } else if let cents = item.job.quotedPayoutCents ?? (item.job.payoutCents > 0 ? item.job.payoutCents : nil) {
+                // Payout banner only when there is a real quoted payout
+                HStack(spacing: 0) {
+                    Rectangle()
+                        .fill(BlueprintTheme.successGreen)
+                        .frame(width: 3)
+                        .cornerRadius(2)
+
+                    HStack(spacing: 10) {
+                        Image(systemName: "dollarsign.circle.fill")
+                            .foregroundStyle(BlueprintTheme.successGreen)
+                            .font(.subheadline)
+
+                        let dollars = NSDecimalNumber(decimal: Decimal(cents) / Decimal(100))
+                        Text("Completing this capture earns \(NumberFormatter.captureCurrency.string(from: dollars) ?? "$0").")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color(white: 0.85))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 14)
+                }
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(BlueprintTheme.successGreen.opacity(0.2), lineWidth: 1)
+                )
+            } else {
+                EmptyView()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(BlueprintTheme.successGreen.opacity(0.2), lineWidth: 1)
-        )
     }
 
     // MARK: - Capture Zone Block

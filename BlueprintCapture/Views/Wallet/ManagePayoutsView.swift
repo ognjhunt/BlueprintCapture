@@ -6,17 +6,11 @@ struct ManagePayoutsView: View {
     @State private var connectedMethods: Set<PayoutMethod> = []
 
     enum PayoutMethod: String, CaseIterable, Hashable {
-        case venmo = "Venmo"
-        case paypal = "PayPal"
-        case crypto = "Crypto"
         case stripe = "Bank / Stripe"
     }
 
     private let methods: [(PayoutMethod, String, Color, String)] = [
-        (.venmo,  "V",            Color(red: 0.17, green: 0.42, blue: 0.93), "v.circle.fill"),
-        (.paypal, "P",            Color(red: 0.0,  green: 0.46, blue: 0.84), "p.circle.fill"),
-        (.crypto, "Crypto",       Color(red: 0.44, green: 0.29, blue: 0.92), "bitcoinsign.circle.fill"),
-        (.stripe, "Bank / Stripe",Color(white: 0.55),                         "building.columns.fill"),
+        (.stripe, "Bank / Stripe", Color(white: 0.55), "building.columns.fill"),
     ]
 
     var body: some View {
