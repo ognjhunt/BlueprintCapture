@@ -134,6 +134,7 @@ export function validateRawCaptureBundleV3(
     "ios_build",
     "hardware_model_identifier",
     "device_model_marketing",
+    "capture_profile_id",
   ];
   const requiredManifestNumbers = ["capture_start_epoch_ms", "fps_source", "width", "height"];
   const requiredManifestBooleans = ["has_lidar", "depth_supported"];

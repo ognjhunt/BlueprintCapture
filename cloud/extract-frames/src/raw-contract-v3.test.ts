@@ -42,6 +42,7 @@ function makeValidInput() {
       ios_build: "22D68",
       hardware_model_identifier: "iPhone16,2",
       device_model_marketing: "iPhone 15 Pro",
+      capture_profile_id: "iphone_arkit_v3",
       has_lidar: true,
       depth_supported: true,
       fps_source: 30,

@@ -413,7 +413,7 @@ function hasStringArray(value: unknown): boolean {
 
 function captureObjectKind(objectName: string): CaptureObjectKind {
   const fileName = basename(objectName);
-  if (fileName === "walkthrough.mov") return "walkthrough";
+  if (fileName === "walkthrough.mov" || fileName === "walkthrough.mp4") return "walkthrough";
   if (fileName === "capture_upload_complete.json") return "completion_marker";
   return "other";
 }
@@ -999,13 +999,37 @@ export const extractFrames = onObjectFinalized(
     const siteIdentityObjectName = `${pathInfo.rawPrefix}/site_identity.json`;
     const captureTopologyObjectName = `${pathInfo.rawPrefix}/capture_topology.json`;
     const captureModeObjectName = `${pathInfo.rawPrefix}/capture_mode.json`;
-    const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
-    const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
-    const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
-    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
+
+    // Resolve walkthrough video: prefer manifest video_uri, fall back to canonical names
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
+    const manifestVideoUri = asString(rawManifest?.video_uri as string | undefined);
+    let walkthroughObjectName: string | null = null;
+    if (manifestVideoUri && manifestVideoUri.length > 0) {
+      // manifest video_uri is relative to the capture root (e.g. "raw/walkthrough.mp4")
+      const normalized = manifestVideoUri.replace(/^raw\//, "");
+      walkthroughObjectName = `${pathInfo.rawPrefix}/${normalized}`;
+      if (!(await fileExists(bucket, walkthroughObjectName))) {
+        walkthroughObjectName = null;
+      }
+    }
+    if (!walkthroughObjectName) {
+      // Legacy fallback: try .mov then .mp4
+      const movPath = `${pathInfo.rawPrefix}/walkthrough.mov`;
+      if (await fileExists(bucket, movPath)) {
+        walkthroughObjectName = movPath;
+      } else {
+        const mp4Path = `${pathInfo.rawPrefix}/walkthrough.mp4`;
+        if (await fileExists(bucket, mp4Path)) {
+          walkthroughObjectName = mp4Path;
+        }
+      }
+    }
+    if (!walkthroughObjectName) {
+      logger.error("No walkthrough video found", { rawPrefix: pathInfo.rawPrefix });
+      return;
+    }
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
     const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
     const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
