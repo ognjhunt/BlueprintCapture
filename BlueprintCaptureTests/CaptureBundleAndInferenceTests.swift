@@ -744,6 +744,58 @@ struct CaptureBundleAndInferenceTests {
         #expect(InferenceURLProtocol.capturedBodies.contains(where: { $0.contains("\"fps\":5") }))
         #expect(InferenceURLProtocol.capturedBodies.contains(where: { $0.contains("responseSchema") }))
     }
+
+    @Test
+    func validateRawBundleFailsForIncompleteBundle() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("incomplete-bundle-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // Only write a partial manifest — no walkthrough, no sidecars
+        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: root.appendingPathComponent("manifest.json"))
+
+        let finalizer = CaptureBundleFinalizer()
+        let reasons = finalizer.validateRawBundle(in: root)
+
+        #expect(reasons.contains("missing_walkthrough_video"))
+        #expect(reasons.contains("missing_rights_consent"))
+        #expect(reasons.contains("missing_capture_start_epoch_ms"))
+    }
+
+    @Test
+    func validateRawBundleAcceptsCompleteBundle() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("complete-bundle-\(UUID().uuidString)", isDirectory: true)
+        let arkitDir = root.appendingPathComponent("arkit", isDirectory: true)
+        try fileManager.createDirectory(at: arkitDir, withIntermediateDirectories: true)
+
+        try Data("video-content".utf8).write(to: root.appendingPathComponent("walkthrough.mov"))
+        let manifest: [String: Any] = [
+            "schema_version": "v3",
+            "scene_id": "scene-valid",
+            "capture_id": "cap-valid",
+            "video_uri": "raw/walkthrough.mov",
+            "capture_start_epoch_ms": 1_700_000_000,
+            "fps_source": 30.0,
+            "width": 1920,
+            "height": 1080
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: root.appendingPathComponent("manifest.json"))
+
+        // Write all required sidecars (empty objects)
+        let sidecars = ["rights_consent.json", "provenance.json", "capture_context.json",
+                        "intake_packet.json", "task_hypothesis.json", "recording_session.json",
+                        "capture_topology.json", "route_anchors.json", "checkpoint_events.json",
+                        "relocalization_events.json", "overlap_graph.json", "video_track.json",
+                        "hashes.json", "sync_map.jsonl", "motion.jsonl", "semantic_anchor_observations.jsonl"]
+        for sidecar in sidecars {
+            try Data("{}".utf8).write(to: root.appendingPathComponent(sidecar))
+        }
+
+        let finalizer = CaptureBundleFinalizer()
+        let reasons = finalizer.validateRawBundle(in: root)
+        #expect(reasons.isEmpty, "Complete bundle should pass raw validation")
+    }
 }
 
 private struct FailingInferenceService: CaptureIntakeInferenceServiceProtocol {

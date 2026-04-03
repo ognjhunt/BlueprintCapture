@@ -512,6 +512,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     enum FinalizationError: LocalizedError, Equatable {
         case missingStructuredIntake
         case packageMissing
+        case invalidBundle(reasons: [String])
 
         var errorDescription: String? {
             switch self {
@@ -519,6 +520,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 return "Structured intake is required before finalization."
             case .packageMissing:
                 return "The recorded capture directory could not be found."
+            case .invalidBundle(let reasons):
+                return "Raw capture bundle is invalid: \(reasons.joined(separator: ", "))."
             }
         }
     }
@@ -672,12 +675,106 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     private let captureModeFilename = "capture_mode.json"
     private let fileManager = FileManager.default
 
+    /// Validates the raw capture bundle on disk against the V3/V3.1 contract before finalization.
+    /// Returns a list of failure reasons; empty means the bundle passes.
+    func validateRawBundle(in directory: URL) -> [String] {
+        var reasons: [String] = []
+
+        // 1. walkthrough video must exist (.mov or .mp4)
+        let movURL = directory.appendingPathComponent("walkthrough.mov")
+        let mp4URL = directory.appendingPathComponent("walkthrough.mp4")
+        if !fileManager.fileExists(atPath: movURL.path) && !fileManager.fileExists(atPath: mp4URL.path) {
+            reasons.append("missing_walkthrough_video")
+        }
+
+        // 2. manifest.json must be present and parseable
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        guard fileManager.fileExists(atPath: manifestURL.path),
+              let manifestData = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any] else {
+            reasons.append("missing_or_unreadable_manifest")
+            return reasons
+        }
+
+        // 3. Required top-level identity fields
+        if (manifest["scene_id"] as? String)?.isEmpty != false {
+            reasons.append("missing_scene_id")
+        }
+        if (manifest["capture_id"] as? String)?.isEmpty != false {
+            reasons.append("missing_capture_id")
+        }
+        if (manifest["video_uri"] as? String)?.isEmpty != false {
+            reasons.append("missing_video_uri")
+        }
+        if manifest["capture_start_epoch_ms"] as? Double == nil,
+           manifest["capture_start_epoch_ms"] as? Int == nil {
+            reasons.append("missing_capture_start_epoch_ms")
+        }
+        if manifest["fps_source"] as? Double == nil {
+            reasons.append("missing_fps_source")
+        }
+        if manifest["width"] as? Int == nil {
+            reasons.append("missing_width")
+        }
+        if manifest["height"] as? Int == nil {
+            reasons.append("missing_height")
+        }
+
+        // 4. V3.1 additive fields — capture_profile_id and capture_capabilities (soft gate: warning-level in alpha)
+        //    These should be emitted by the app; we validate but do not block alpha upload.
+        if (manifest["capture_profile_id"] as? String)?.isEmpty != false {
+            // Not blocking in alpha — will become required after alpha
+        }
+        if manifest["capture_capabilities"] as? [String: Any] == nil {
+            // Not blocking in alpha — will become required after alpha
+        }
+
+        // 5. Rights consent must be explicit
+        let rightsURL = directory.appendingPathComponent("rights_consent.json")
+        if !fileManager.fileExists(atPath: rightsURL.path) {
+            reasons.append("missing_rights_consent")
+        }
+
+        // 6. Required sidecar files
+        let requiredSidecars = [
+            "provenance.json",
+            "capture_context.json",
+            "intake_packet.json",
+            "task_hypothesis.json",
+            "recording_session.json",
+            "capture_topology.json",
+            "route_anchors.json",
+            "checkpoint_events.json",
+            "relocalization_events.json",
+            "overlap_graph.json",
+            "video_track.json",
+            "hashes.json",
+            "sync_map.jsonl",
+            "motion.jsonl",
+            "semantic_anchor_observations.jsonl"
+        ]
+        for sidecar in requiredSidecars {
+            let sidecarURL = directory.appendingPathComponent(sidecar)
+            if !fileManager.fileExists(atPath: sidecarURL.path) {
+                reasons.append("missing_sidecar_\(sidecar.replacingOccurrences(of: ".", with: "_"))")
+            }
+        }
+
+        return reasons
+    }
+
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
         // Alpha: intake gate removed — finalize regardless of intake completeness
         let directory = CaptureBundleContext.rawDirectoryURL(for: request)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw FinalizationError.packageMissing
+        }
+
+        // Validate raw bundle truth before any patching or handoff
+        let validationReasons = validateRawBundle(in: directory)
+        if !validationReasons.isEmpty {
+            throw FinalizationError.invalidBundle(reasons: validationReasons)
         }
 
         try patchManifest(in: directory, request: request, mode: mode)

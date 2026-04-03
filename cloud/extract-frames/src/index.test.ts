@@ -134,10 +134,91 @@ test("validateManifest enforces additional v3 manifest fields", () => {
     depth_supported: true,
     capture_source: "iphone",
     capture_tier_hint: "tier1_iphone",
+    capture_profile_id: "iphone_arkit_lidar",
+    capture_capabilities: { camera_pose: true, depth: true },
   });
 
   assert.equal(validation.valid, true);
   assert.deepEqual(validation.missingRequired, []);
+});
+
+test("validateManifest enforces v3.1 capture_profile_id and capture_capabilities", () => {
+  // Missing v3.1 fields should fail
+  const validationMissing = validateManifest({
+    schema_version: "v3",
+    capture_schema_version: "3.1.0",
+    scene_id: "scene-123",
+    capture_id: "capture-456",
+    coordinate_frame_session_id: "cfs-1",
+    video_uri: "raw/walkthrough.mov",
+    device_model: "iPhone16,2",
+    device_model_marketing: "iPhone 15 Pro",
+    os_version: "18.3.1",
+    app_version: "1.0.0",
+    app_build: "100",
+    ios_version: "18.3.1",
+    ios_build: "22D68",
+    hardware_model_identifier: "iPhone16,2",
+    fps_source: 30,
+    width: 1920,
+    height: 1440,
+    capture_start_epoch_ms: 1_700_000_000_000,
+    has_lidar: true,
+    depth_supported: true,
+    capture_source: "iphone",
+    capture_tier_hint: "tier1_iphone",
+  });
+  assert.equal(validationMissing.valid, false);
+  assert.ok(validationMissing.missingRequired.includes("capture_profile_id"));
+  assert.ok(validationMissing.missingRequired.includes("capture_capabilities"));
+
+  // Present v3.1 fields should pass
+  const validationPresent = validateManifest({
+    schema_version: "v3",
+    capture_schema_version: "3.1.0",
+    scene_id: "scene-123",
+    capture_id: "capture-456",
+    coordinate_frame_session_id: "cfs-1",
+    video_uri: "raw/walkthrough.mov",
+    device_model: "iPhone16,2",
+    device_model_marketing: "iPhone 15 Pro",
+    os_version: "18.3.1",
+    app_version: "1.0.0",
+    app_build: "100",
+    ios_version: "18.3.1",
+    ios_build: "22D68",
+    hardware_model_identifier: "iPhone16,2",
+    fps_source: 30,
+    width: 1920,
+    height: 1440,
+    capture_start_epoch_ms: 1_700_000_000_000,
+    has_lidar: true,
+    depth_supported: true,
+    capture_source: "iphone",
+    capture_tier_hint: "tier1_iphone",
+    capture_profile_id: "iphone_arkit_lidar",
+    capture_capabilities: { camera_pose: true, depth: true },
+    scene_memory_capture: {
+      operator_notes: [],
+      inaccessible_areas: [],
+      sensor_availability: {
+        arkit_poses: true,
+        arkit_intrinsics: true,
+        arkit_depth: true,
+        arkit_confidence: true,
+        arkit_meshes: false,
+        motion: true,
+      },
+      semantic_anchors_observed: [],
+    },
+    capture_rights: {
+      consent_status: "documented",
+      consent_scope: [],
+      consent_notes: [],
+    },
+  });
+  assert.equal(validationPresent.valid, true);
+  assert.deepEqual(validationPresent.missingRequired, []);
 });
 
 test("deriveRequestedRouting preserves outputs and expands preview simulation lane", () => {

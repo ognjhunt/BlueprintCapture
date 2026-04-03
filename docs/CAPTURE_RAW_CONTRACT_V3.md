@@ -8,11 +8,18 @@ It is intentionally stricter than the bridge compatibility layer in [/Users/nije
 
 `capture_schema_version = 3.1.0` keeps `schema_version = "v3"` while extending the contract across iPhone, Android, and glasses modalities.
 
-New bundles remain backward-compatible but must additionally emit:
+New bundles **must** additionally emit:
 
-- top-level `capture_profile_id`
-- top-level `capture_capabilities`
+- top-level `capture_profile_id` (string, one of the values below)
+- top-level `capture_capabilities` (object with camera_pose, depth, etc.)
 - modality-specific sidecars under `arkit/`, `arcore/`, `glasses/`, and `companion_phone/` only when those signals are truthfully available
+
+Enforcement:
+
+- **iOS client**: `CaptureBundleFinalizer.validateRawBundle()` validates required fields before finalization; malformed bundles fail with `FinalizationError.invalidBundle(reasons:)`.
+- **Upload pipeline**: `CaptureUploadService` surfaces invalid-bundle failures as `UploadError.invalidBundle(reasons:)` with a user-visible error message. Retrying the same bundle without re-recording will fail.
+- **Bridge**: `validateManifest()` rejects manifests missing `capture_profile_id` or `capture_capabilities` when `schema_version = "v3"` or `capture_schema_version` starts with `"3."`.
+- **Backward compatibility**: The bridge falls back to legacy `.mov`/`.mp4` walkthrough resolution when `video_uri` is absent, and continues accepting legacy bundles that do not declare v3.1 fields.
 
 Raw first-party evidence remains authoritative. Derived geometry remains separate and non-authoritative.
 

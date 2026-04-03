@@ -880,6 +880,13 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
         missingRequired.push(field);
       }
     }
+    // V3.1 additive fields: capture_profile_id and capture_capabilities
+    if (!asString(manifest.capture_profile_id)) {
+      missingRequired.push("capture_profile_id");
+    }
+    if (!manifest.capture_capabilities || typeof manifest.capture_capabilities !== "object" || Array.isArray(manifest.capture_capabilities)) {
+      missingRequired.push("capture_capabilities");
+    }
   }
   warnings.push(...validateSceneMemoryCapture(manifest));
   warnings.push(...validateCaptureRights(manifest));
@@ -999,6 +1006,8 @@ export const extractFrames = onObjectFinalized(
     const siteIdentityObjectName = `${pathInfo.rawPrefix}/site_identity.json`;
     const captureTopologyObjectName = `${pathInfo.rawPrefix}/capture_topology.json`;
     const captureModeObjectName = `${pathInfo.rawPrefix}/capture_mode.json`;
+    const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
+    const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
 
     // Resolve walkthrough video: prefer manifest video_uri, fall back to canonical names
@@ -1030,6 +1039,7 @@ export const extractFrames = onObjectFinalized(
       logger.error("No walkthrough video found", { rawPrefix: pathInfo.rawPrefix });
       return;
     }
+    const walkthroughExists = walkthroughObjectName !== null;
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
     const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
     const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);

@@ -527,6 +527,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case missingStructuredIntake
         case rawContractValidationFailed
         case submissionRegistrationFailed
+        case invalidBundle(reasons: [String])
 
         var errorDescription: String? {
             switch self {
@@ -544,6 +545,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Raw capture validation failed. Please retake and upload again."
             case .submissionRegistrationFailed:
                 return "Upload reached storage but Blueprint could not register the capture submission. Check Firebase Auth and Firestore production config before retrying."
+            case .invalidBundle(let reasons):
+                return "Raw capture bundle is invalid and cannot be uploaded: \(reasons.joined(separator: ", ")). Please re-record the site walkthrough."
             }
         }
     }
@@ -785,7 +788,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 )
             )
         } catch let error as CaptureBundleFinalizer.FinalizationError {
-            let uploadError: UploadError = error == .missingStructuredIntake ? .missingStructuredIntake : .uploadFailed
+            let uploadError: UploadError
+            switch error {
+            case .missingStructuredIntake:
+                uploadError = .missingStructuredIntake
+            case .invalidBundle(let reasons):
+                uploadError = .invalidBundle(reasons: reasons)
+            default:
+                uploadError = .uploadFailed
+            }
             markUploadFailed(id: id, attempt: attempt, error: uploadError)
             return false
         } catch {
