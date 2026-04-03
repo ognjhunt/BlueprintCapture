@@ -10,6 +10,18 @@ RELEASE_XCCONFIG="${BLUEPRINT_RELEASE_XCCONFIG:-$ROOT/Config/BlueprintCapture.re
 
 cd "$ROOT"
 
+require_command() {
+  local command_name="$1"
+  local hint="$2"
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "$hint" >&2
+    exit 1
+  fi
+}
+
+require_command xcrun "Xcode command line tools are missing (xcrun not found). Install Xcode before running alpha readiness."
+require_command xcodebuild "Xcode is missing (xcodebuild not found). Install Xcode before running alpha readiness."
+
 ensure_extract_frames_dependencies() {
   ensure_node_dependencies "${ROOT}/cloud/extract-frames"
 }
