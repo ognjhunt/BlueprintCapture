@@ -38,15 +38,13 @@ Platform context you must preserve:
 Current known status as of 2026-03-22:
 
 - `BlueprintCapture` is not alpha-ready yet.
-- `./scripts/alpha_readiness.sh` currently fails.
-- the immediate blocker is a compile failure in:
-  - `/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCaptureTests/ScanHomeOpenCaptureTests.swift`
-- exact failure:
-  - non-`@MainActor` tests call main-actor-isolated APIs on `ScanHomeViewModel`
-  - `ScanHomeViewModel` is `@MainActor`
-  - `ScanHomeViewModel.nearbyItemsWithOpenCapture(...)` is actor-isolated
-  - `ScanHomeViewModel.alphaCurrentLocationJobID` is actor-isolated
-- the same issue also causes the cross-repo external alpha gate to fail
+- `./scripts/alpha_readiness.sh` still needs a clean rerun in a macOS/Xcode environment.
+- the `ScanHomeOpenCaptureTests.swift` actor-isolation fix is already in tree:
+  - `ScanHomeViewModel.nearbyItemsWithOpenCapture(...)` is `nonisolated`
+  - `ScanHomeViewModel.alphaCurrentLocationJobID` is `nonisolated`
+  - `BlueprintCaptureTests/ScanHomeOpenCaptureTests.swift` is present and should now be part of the focused iOS slice
+- the blocker in this runtime is verification access:
+  - `xcodebuild` is not available here, so the iOS slice and `./scripts/alpha_readiness.sh` cannot be rerun from this environment
 
 Relevant code references:
 
@@ -74,11 +72,11 @@ Important implementation truths already verified:
 
 What is still unproven and must be addressed:
 
-1. Fix the current compile/test failure so `./scripts/alpha_readiness.sh` passes.
+1. Rerun the focused iOS tests in an environment with Xcode installed.
 2. Rerun `./scripts/alpha_readiness.sh` and report exact results.
 3. Rerun:
    - `python /Users/nijelhunt_1/workspace/BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py`
-4. Identify any additional red tests or release-bundle failures after the compile fix.
+4. Identify any additional red tests or release-bundle failures after the verification rerun.
 5. Verify whether the current UI/integration coverage is sufficient for alpha.
 6. If coverage is not sufficient, add the smallest high-signal tests or scripts needed for alpha confidence.
 7. Produce a concrete remaining manual smoke checklist for real-device verification.
@@ -95,16 +93,15 @@ Constraints and decision rules:
 
 What I want from this session:
 
-1. Fix the actual blocking compile/test issue.
-2. Run the enforced launch gates.
-3. Tell me exactly what is still red after the fix.
-4. If there are additional blockers, categorize them as:
+1. Re-run the enforced launch gates.
+2. Tell me exactly what is still red after verification.
+3. If there are additional blockers, categorize them as:
    - code blocker
    - release-config blocker
    - backend integration blocker
    - hardware/manual verification blocker
    - downstream pipeline blocker
-5. Give me a final go/no-go answer based on the actual rerun results.
+4. Give me a final go/no-go answer based on the actual rerun results.
 
 Success condition:
 

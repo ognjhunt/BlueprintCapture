@@ -1,8 +1,11 @@
 # Capture Bundle Compatibility
 
-This guide describes the raw capture bundle that BlueprintCapture uploads for downstream processing.
+This guide describes the raw capture bundle that `BlueprintCapture` uploads for downstream bridge and GPU-side processing.
 
-The app preserves evidence. It does not perform reconstruction or scene generation.
+The app preserves evidence. It does not perform reconstruction or scene generation locally.
+
+For the canonical raw capture contract, see [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_RAW_CONTRACT_V3.md).
+For the bridge materialization contract, see [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_BRIDGE_CONTRACT.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURE_BRIDGE_CONTRACT.md).
 
 ## Upload Layout
 
@@ -19,118 +22,86 @@ gs://blueprint-8c1ca.appspot.com/scenes/{scene_id}/{source}/{capture_id}/raw/
 gs://blueprint-8c1ca.appspot.com/targets/{scene_id}/raw/
 ```
 
-## Required Files
+## Required Raw Files
 
-| File | Purpose |
-|------|---------|
-| `manifest.json` | Raw capture metadata |
-| `walkthrough.mov` | Source video |
+Core bundle files:
 
-## Optional Raw Evidence
+- `manifest.json`
+- `provenance.json`
+- `rights_consent.json`
+- `capture_context.json`
+- `intake_packet.json`
+- `task_hypothesis.json`
+- `recording_session.json`
+- `capture_topology.json`
+- `route_anchors.json`
+- `checkpoint_events.json`
+- `relocalization_events.json`
+- `overlap_graph.json`
+- `video_track.json`
+- `hashes.json`
+- `capture_upload_complete.json`
+- `walkthrough.mov`
+- `sync_map.jsonl`
+- `motion.jsonl`
+- `semantic_anchor_observations.jsonl`
 
-| File or Folder | Purpose |
-|------|---------|
-| `motion.jsonl` | Device motion samples |
-| `arkit/poses.jsonl` | Camera pose timeline |
-| `arkit/intrinsics.json` | Camera calibration |
-| `arkit/frames.jsonl` | ARKit frame timing |
-| `arkit/depth/*.png` | Depth evidence |
-| `arkit/confidence/*.png` | Depth confidence evidence |
-| `arkit/meshes/*.obj` | ARKit mesh evidence |
+Modality-specific files:
+
+- iPhone: `arkit/poses.jsonl`, `arkit/frames.jsonl`, `arkit/frame_quality.jsonl`, `arkit/session_intrinsics.json`
+- iPhone depth: `arkit/depth_manifest.json`, `arkit/confidence_manifest.json`, `arkit/depth/*.png`, `arkit/confidence/*.png`
+- Android ARCore: `arcore/poses.jsonl`, `arcore/frames.jsonl`, `arcore/session_intrinsics.json`, `arcore/tracking_state.jsonl`, `arcore/point_cloud.jsonl`, `arcore/planes.jsonl`, `arcore/light_estimates.jsonl`, `arcore/depth_manifest.json`, `arcore/confidence_manifest.json`
+- Glasses: `glasses/stream_metadata.json`, `glasses/frame_timestamps.jsonl`, `glasses/device_state.jsonl`, `glasses/health_events.jsonl`
+- Companion phone: `companion_phone/poses.jsonl`, `companion_phone/session_intrinsics.json`, `companion_phone/calibration.json`
+
+Optional high-value evidence:
+
+- `arkit/meshes/*.obj`
 
 ## Manifest Shape
 
-Required root fields:
+Current raw bundles write `schema_version = "v3"` and `capture_schema_version = "3.1.0"`.
 
-```json
-{
-  "scene_id": "string",
-  "video_uri": "string",
-  "device_model": "string",
-  "os_version": "string",
-  "fps_source": 30.0,
-  "width": 1920,
-  "height": 1440,
-  "capture_start_epoch_ms": 1702137045123,
-  "has_lidar": true,
-  "capture_schema_version": "2.0.0",
-  "capture_source": "iphone|android|glasses",
-  "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses"
-}
-```
+Required manifest fields include:
 
-Required normalized metadata blocks:
+- `scene_id`
+- `capture_id`
+- `capture_source`
+- `capture_tier_hint`
+- `capture_profile_id`
+- `capture_capabilities`
+- `coordinate_frame_session_id`
+- `video_uri`
+- `capture_start_epoch_ms`
+- `app_version`
+- `app_build`
+- `ios_version`
+- `ios_build`
+- `hardware_model_identifier`
+- `device_model_marketing`
+- `has_lidar`
+- `depth_supported`
+- `fps_source`
+- `width`
+- `height`
+- `rights_profile`
+- `requested_outputs`
 
-```json
-{
-  "scene_memory_capture": {
-    "continuity_score": null,
-    "lighting_consistency": "unknown",
-    "dynamic_object_density": "unknown",
-    "sensor_availability": {
-      "arkit_poses": false,
-      "arkit_intrinsics": false,
-      "arkit_depth": false,
-      "arkit_confidence": false,
-      "arkit_meshes": false,
-      "motion": false
-    },
-    "operator_notes": [],
-    "inaccessible_areas": [],
-    "world_model_candidate": false,
-    "motion_provenance": null,
-    "motion_timestamps_capture_relative": false
-  },
-  "capture_rights": {
-    "derived_scene_generation_allowed": false,
-    "data_licensing_allowed": false,
-    "capture_contributor_payout_eligible": false,
-    "consent_status": "documented|policy_only|unknown",
-    "permission_document_uri": null,
-    "consent_scope": [],
-    "consent_notes": []
-  }
-}
-```
-
-Validated evidence is reported separately:
-
-```json
-{
-  "capture_evidence": {
-    "arkit_frame_rows": 0,
-    "arkit_pose_rows": 0,
-    "arkit_intrinsics_valid": false,
-    "arkit_depth_frames": 0,
-    "arkit_confidence_frames": 0,
-    "arkit_mesh_files": 0,
-    "motion_samples": 0,
-    "motion_provenance": null,
-    "motion_timestamps_capture_relative": false
-  }
-}
-```
-
-Finalized bundles always include `task_hypothesis.json`, even when the task hypothesis is synthesized from authoritative or manual intake.
-
-## Why The ARKit Data Matters
-
-- `poses.jsonl` preserves camera motion aligned to the capture
-- `intrinsics.json` preserves camera calibration
-- `frames.jsonl` preserves timing
-- `depth` and `confidence` preserve geometric evidence
-- `meshes` preserve ARKit surface evidence
-
-These files help downstream scene-memory derivation stay capture-backed.
+`capture_capabilities` must truthfully describe what was captured. It is not a downstream inference summary.
 
 ## Bridge Outputs
 
 The bridge writes:
 
-```text
-scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl
-scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
-scenes/{scene_id}/captures/{capture_id}/qa_report.json
-```
+- `scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl`
+- `scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json`
+- `scenes/{scene_id}/captures/{capture_id}/qa_report.json`
+- `scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json`
 
-There is no generation request payload in this repo’s contract.
+The bridge then publishes the finalized handoff payload to Pub/Sub topic `blueprint-capture-pipeline-handoff`.
+
+## Compatibility Notes
+
+- Legacy `android_phone` bundles may still be accepted during migration, but the canonical downstream contract is now `android`.
+- Generated scenes are downstream derived products, not raw truth.
+- There is no generation request payload in this repo’s contract.

@@ -2,7 +2,7 @@
 
 BlueprintCapture is the evidence-capture app for Blueprint.
 
-It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream qualification and scene-memory derivation.
+It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream bridge processing and optional trust outputs.
 
 This repo sits on the contributor side of Blueprint's three-sided marketplace:
 
@@ -48,7 +48,7 @@ capture automatically.
 
 ## Core Rules
 
-- Capture comes first. World-model products and hosted access come second.
+- Qualification comes after truthful evidence capture.
 - This repo is the evidence-capture layer, not the readiness-decision layer.
 - In-app quality, coverage, and earnings cues are advisory and immediate UX only.
 - Capture-backed scene memory is downstream of the raw bundle.
