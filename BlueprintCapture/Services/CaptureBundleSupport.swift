@@ -161,6 +161,40 @@ enum CaptureBundleFinalizationMode: Equatable {
             return videoURI
         }
     }
+
+    /// Returns a copy of this mode with the videoURI corrected to match the actual
+    /// on-disk video file extension (.mov or .mp4). Falls back to the existing
+    /// videoURI if neither file is found.
+    func resolvingVideoExtension(in directory: URL) -> CaptureBundleFinalizationMode {
+        let fm = FileManager.default
+        // Strip any prefix (e.g. "raw/") to get the bare filename
+        let baseName = URL(fileURLWithPath: videoURI).lastPathComponent
+        let baseWithoutExt = (baseName as NSString).deletingPathExtension
+        let directoryURL = videoURI.hasSuffix(baseName) ? URL(fileURLWithPath: videoURI).deletingLastPathComponent() : directory
+
+        let movURL = directoryURL.appendingPathComponent(baseWithoutExt + ".mov")
+        let mp4URL = directoryURL.appendingPathComponent(baseWithoutExt + ".mp4")
+
+        let actualVideo: String
+        if fm.fileExists(atPath: mp4URL.path) {
+            let mp4Relative = (mp4URL.path as NSString).relativePath(from: directory.path)
+            actualVideo = mp4Relative.isEmpty ? baseWithoutExt + ".mp4" : mp4Relative
+        } else if fm.fileExists(atPath: movURL.path) {
+            let movRelative = (movURL.path as NSString).relativePath(from: directory.path)
+            actualVideo = movRelative.isEmpty ? baseWithoutExt + ".mov" : movRelative
+        } else {
+            return self  // Neither exists — keep the caller-provided URI
+        }
+
+        switch self {
+        case .upload(let prefix, _):
+            // For upload mode, preserve the remote prefix but fix the extension
+            let remoteFileName = (prefix as NSString).appendingPathComponent(baseWithoutExt + (actualVideo.hasSuffix(".mp4") ? ".mp4" : ".mov"))
+            return .upload(remoteRawPrefix: prefix, videoURI: remoteFileName)
+        case .localExport(let localRawPrefix, _):
+            return .localExport(localRawPrefix: localRawPrefix, videoURI: actualVideo)
+        }
+    }
 }
 
 struct CaptureManualIntakeDraft: Equatable, Identifiable {
@@ -777,8 +811,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             throw FinalizationError.invalidBundle(reasons: validationReasons)
         }
 
-        try patchManifest(in: directory, request: request, mode: mode)
-        try materializeSupplementalFiles(in: directory, request: request, mode: mode)
+        // Resolve the actual video URI based on what exists on disk (.mov or .mp4).
+        // This ensures the manifest video_uri and video_track.json reference the correct file
+        // regardless of which extension the encoder produced.
+        let resolvedMode = mode.resolvingVideoExtension(in: directory)
+
+        try patchManifest(in: directory, request: request, mode: resolvedMode)
+        try materializeSupplementalFiles(in: directory, request: request, mode: resolvedMode)
 
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
@@ -1499,7 +1538,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             in: directory,
             request: request,
             topology: topology,
-            rights: normalizedRights
+            rights: normalizedRights,
+            mode: mode
         )
     }
 
@@ -1548,7 +1588,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         in directory: URL,
         request: CaptureUploadRequest,
         topology: CaptureTopologyMetadata,
-        rights: CaptureRightsMetadata
+        rights: CaptureRightsMetadata,
+        mode: CaptureBundleFinalizationMode
     ) throws {
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
@@ -1598,12 +1639,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             encoding: .utf8
         )
 
-        try writeVideoTrackFile(in: directory)
+        try writeVideoTrackFile(in: directory, mode: mode)
         try writeHashesAndProvenance(in: directory, request: request)
     }
 
-    private func writeVideoTrackFile(in directory: URL) throws {
-        let videoURL = directory.appendingPathComponent("walkthrough.mov")
+    private func writeVideoTrackFile(in directory: URL, mode: CaptureBundleFinalizationMode) throws {
+        let videoFileURL = directory.appendingPathComponent(mode.videoURI)
+        let videoFileName = URL(fileURLWithPath: mode.videoURI).lastPathComponent
         let manifestURL = directory.appendingPathComponent("manifest.json")
         let manifestObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
         let frameRows = readJSONLines(from: directory.appendingPathComponent("arkit/frames.jsonl"))
@@ -1611,7 +1653,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let height = Int((manifestObject?["height"] as? NSNumber)?.doubleValue ?? 0)
         let fps = (manifestObject?["fps_source"] as? NSNumber)?.doubleValue ?? 0.0
 
-        let asset = AVURLAsset(url: videoURL)
+        let asset = AVURLAsset(url: videoFileURL)
         let durationSeconds = asset.duration.seconds.isFinite ? max(0.0, asset.duration.seconds) : 0.0
         let videoTrack = asset.tracks(withMediaType: .video).first
         let trackSize = videoTrack?.naturalSize ?? .zero
@@ -1625,7 +1667,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
         let videoTrackPayload: [String: Any] = [
             "schema_version": "v1",
-            "video_file": "walkthrough.mov",
+            "video_file": videoFileName,
             "duration_sec": durationSeconds,
             "frame_count": estimatedFrameCount,
             "nominal_fps": Double(nominalFPS),

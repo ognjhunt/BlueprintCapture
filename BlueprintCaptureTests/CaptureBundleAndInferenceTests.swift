@@ -796,6 +796,56 @@ struct CaptureBundleAndInferenceTests {
         let reasons = finalizer.validateRawBundle(in: root)
         #expect(reasons.isEmpty, "Complete bundle should pass raw validation")
     }
+
+    @Test
+    func validateRawBundleAcceptsMP4FallbackVideo() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mp4-bundle-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // .mp4 video instead of .mov
+        try Data("mp4-video-content".utf8).write(to: root.appendingPathComponent("walkthrough.mp4"))
+        let manifest: [String: Any] = [
+            "schema_version": "v3",
+            "scene_id": "scene-mp4",
+            "capture_id": "cap-mp4",
+            "video_uri": "walkthrough.mp4",
+            "capture_start_epoch_ms": 1_700_000_000,
+            "fps_source": 30.0,
+            "width": 1920,
+            "height": 1080
+        ]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: root.appendingPathComponent("manifest.json"))
+
+        // Required sidecars
+        let sidecars = ["rights_consent.json", "provenance.json", "capture_context.json",
+                        "intake_packet.json", "task_hypothesis.json", "recording_session.json",
+                        "capture_topology.json", "route_anchors.json", "checkpoint_events.json",
+                        "relocalization_events.json", "overlap_graph.json", "video_track.json",
+                        "hashes.json", "sync_map.jsonl", "motion.jsonl", "semantic_anchor_observations.jsonl"]
+        for sidecar in sidecars {
+            try Data("{}".utf8).write(to: root.appendingPathComponent(sidecar))
+        }
+
+        let finalizer = CaptureBundleFinalizer()
+        let reasons = finalizer.validateRawBundle(in: root)
+        #expect(reasons.isEmpty, "Bundle with .mp4 video should pass raw validation")
+    }
+
+    @Test
+    func validateRawBundleFailsWhenNeitherMovNorMP4Present() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("no-video-bundle-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // No walkthrough.mov or walkthrough.mp4 — only an unrelated file
+        try Data("not-a-video".utf8).write(to: root.appendingPathComponent("other.mp4"))
+        try Data("{}".utf8).write(to: root.appendingPathComponent("manifest.json"))
+
+        let finalizer = CaptureBundleFinalizer()
+        let reasons = finalizer.validateRawBundle(in: root)
+        #expect(reasons.contains("missing_walkthrough_video"))
+    }
 }
 
 private struct FailingInferenceService: CaptureIntakeInferenceServiceProtocol {
@@ -902,5 +952,76 @@ private extension URLRequest {
             data.append(buffer, count: read)
         }
         return data
+    }
+}
+
+// MARK: - Video Resolution Support Tests
+
+extension CaptureBundleAndInferenceTests {
+
+    /// Verify that a bundle using `.mp4` instead of `.mov` passes validation and
+    /// patching. The manifest `video_uri` and `video_track.json` should reference
+    /// the actual on-disk `.mp4` file, not a hardcoded `.mov` path.
+    @Test
+    func finalizerSupportsMp4VideoFallback() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-mp4-fallback-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        try fileManager.createDirectory(at: raw, withIntermediateDirectories: true)
+
+        // Use walkthrough.mp4 instead of walkthrough.mov
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mp4"))
+        try Data("{\"scene_id\":\"mp4-scene\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("{\"rights_consent_given\":true,\"version\":\"v3\"}".utf8).write(to: raw.appendingPathComponent("rights_consent.json"))
+
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "mp4-scene",
+            reservationId: nil,
+            jobId: "mp4-scene",
+            captureJobId: "mp4-scene",
+            buyerRequestId: nil,
+            siteSubmissionId: "mp4-scene",
+            regionId: nil,
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .curatedNearby,
+            priorityWeight: 1.0,
+            quotedPayoutCents: nil,
+            rightsProfile: nil,
+            requestedOutputs: ["qualification"],
+            intakePacket: QualificationIntakePacket(workflowName: "MP4 walk"),
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: nil,
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
+        )
+        let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
+
+        let finalizer = CaptureBundleFinalizer()
+        // The default mode uses .mov, but the finalizer should auto-detect .mp4
+        _ = try finalizer.finalize(request: request, mode: .localExport())
+
+        let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
+        let manifest = try #require(manifestObject as? [String: Any])
+
+        // The video_uri must reference the .mp4 file, not .mov
+        #expect(manifest["video_uri"] as? String == "raw/walkthrough.mp4")
+        #expect(manifest["scene_id"] as? String == "mp4-scene")
+
+        // Both .mov and .mp4 paths should not coexist — only .mp4 should be on disk
+        let movURL = raw.appendingPathComponent("walkthrough.mov")
+        let mp4URL = raw.appendingPathComponent("walkthrough.mp4")
+        #expect(!fileManager.fileExists(atPath: movURL.path))
+        #expect(fileManager.fileExists(atPath: mp4URL.path))
     }
 }
