@@ -1,16 +1,24 @@
 # Platform Context
 
+> **Source of truth:** [Blueprint Knowledge](https://www.notion.so/16d80154161d80db869bcfba4fe70be3) — Platform Doctrine
+> This file is the repo-authoritative mirror of Blueprint Knowledge for core system framing.
+> All Blueprint agent roles and developers consuming this file should treat Notion as the canonical
+> operational surface and this file as the definitional source of truth within the repo.
+> When changes are made to Notion Knowledge, the Notion Manager agent is responsible for pushing
+> mirror updates to this file. When changes are made here, they should be reconciled back.
+
 <!-- SHARED_PLATFORM_CONTEXT_START -->
 ## Shared Platform Doctrine
 
 ### System Framing
 
 - `BlueprintCapture` is the capture client and supply-side evidence collection tool.
-- `BlueprintCapturePipeline` turns capture bundles into site-specific world-model packages, hosted-session artifacts, and optional trust / review outputs.
+- `BlueprintCapturePipeline` turns capture bundles through the bridge and GPU compatibility contracts into site-specific world-model packages, hosted-session artifacts, and optional trust / review outputs.
 - `Blueprint-WebApp` is the buyer, licensing, ops, and hosted-access surface around those packages.
 - `BlueprintValidation` remains optional downstream infrastructure for deeper benchmarking, robot evaluation, and specialized runtime checks.
 
 This platform is capture-first and world-model-product-first.
+The bridge materialization contract and GPU compatibility contract are downstream compatibility layers, not sources of capture truth.
 
 ### Product Center of Gravity
 

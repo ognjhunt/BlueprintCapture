@@ -1,5 +1,12 @@
 # World Model Strategy Context
 
+> **Source of truth:** [Blueprint Knowledge](https://www.notion.so/16d80154161d80db869bcfba4fe70be3) — World Model Strategy
+> This file is the repo-authoritative mirror of Blueprint Knowledge for world-model strategy framing.
+> All Blueprint agent roles and developers consuming this file should treat Notion as the canonical
+> operational surface and this file as the definitional source of truth within the repo.
+> When changes are made to Notion Knowledge, the Notion Manager agent is responsible for pushing
+> mirror updates to this file. When changes are made here, they should be reconciled back.
+
 <!-- SHARED_WORLD_MODEL_STRATEGY_START -->
 ## Strategic Doctrine
 
@@ -71,6 +78,8 @@ These should be treated as long-lived platform contracts:
 - raw capture bundle structure
 - timestamps, poses, intrinsics, depth, and device metadata
 - consent, rights, privacy, and provenance metadata
+- bridge materialization contract
+- GPU pipeline compatibility contract
 - site-specific package manifests
 - hosted-session and runtime session contracts
 - buyer attachment, licensing, and sync contracts
@@ -148,7 +157,7 @@ Future model quality and package quality will depend heavily on data quality and
 
 Each repo should optimize for the same posture:
 
-- `BlueprintCapture`: capture the richest, cleanest, most reusable real-site evidence possible
+- `BlueprintCapture`: capture the richest, cleanest, most reusable real-site evidence possible while keeping the bridge and GPU compatibility surfaces aligned with the raw bundle truth
 - `BlueprintCapturePipeline`: turn that evidence into site-specific world-model products, hosted-session artifacts, and optional trust layers without coupling the platform to one backend
 - `Blueprint-WebApp`: sell, deliver, and operate those products through clear buyer and ops surfaces
 
