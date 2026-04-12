@@ -68,6 +68,45 @@ function nextReferralStatus(current: ReferralStatus): ReferralStatus {
   return "active";
 }
 
+function operationalStateForCaptureStatus(status: string) {
+  switch (status) {
+    case "approved":
+    case "paid":
+      return {
+        upload_state: "uploaded",
+        qa_state: "reviewed",
+        qa_outcome: "pass",
+        repeat_ready: true,
+      };
+    case "needs_fix":
+      return {
+        upload_state: "uploaded",
+        qa_state: "reviewed",
+        qa_outcome: "borderline",
+        repeat_ready: false,
+      };
+    case "rejected":
+      return {
+        upload_state: "uploaded",
+        qa_state: "reviewed",
+        qa_outcome: "fail",
+        repeat_ready: false,
+      };
+    case "under_review":
+      return {
+        upload_state: "uploaded",
+        qa_state: "under_review",
+        repeat_ready: false,
+      };
+    default:
+      return {
+        upload_state: "uploaded",
+        qa_state: "queued",
+        repeat_ready: false,
+      };
+  }
+}
+
 export const onCaptureApproved = onDocumentWritten(
   {
     document: "capture_submissions/{captureId}",
@@ -236,7 +275,7 @@ export const onCaptureApproved = onDocumentWritten(
  * Body: {
  *   captureId:  string,   // Firestore document ID (= CaptureBundleContext.captureIdentifier)
  *   creatorId:  string,   // Firebase UID of the capturer
- *   status:     "approved" | "paid" | "rejected" | "needs_fix",
+ *   status:     "submitted" | "under_review" | "approved" | "paid" | "rejected" | "needs_fix",
  *   payoutCents: number,  // final payout amount in cents (0 for non-paying statuses)
  * }
  */
@@ -277,10 +316,17 @@ export const updateCaptureStatus = onRequest(
       payout_cents: cents,
       updated_at: Timestamp.now(),
     };
+    const operationalState = operationalStateForCaptureStatus(status);
+    for (const [key, value] of Object.entries(operationalState)) {
+      update[`operational_state.${key}`] = value;
+    }
 
     // Only stamp approved_at / paid_at on the relevant transitions
     if (status === "approved") update["approved_at"] = Timestamp.now();
     if (status === "paid") update["paid_at"] = Timestamp.now();
+    if (status === "approved" || status === "paid" || status === "needs_fix" || status === "rejected") {
+      update["qa_reviewed_at"] = Timestamp.now();
+    }
 
     try {
       await docRef.set(update, { merge: true });

@@ -985,6 +985,32 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let db = Firestore.firestore()
         let docRef = db.collection("capture_submissions").document(captureId)
+        let submittedAt = request.metadata.uploadedAt ?? Date()
+        let assignmentState = request.metadata.captureJobId == nil
+            ? "unassigned_or_open_capture"
+            : "assigned_capture_job"
+
+        var siteIdentityPayload: [String: Any]? = nil
+        if let siteIdentity = request.metadata.siteIdentity {
+            siteIdentityPayload = [
+                "site_id": siteIdentity.siteId,
+                "site_id_source": siteIdentity.siteIdSource,
+                "place_id": siteIdentity.placeId as Any,
+                "site_name": siteIdentity.siteName as Any,
+                "address_full": siteIdentity.addressFull as Any,
+                "building_id": siteIdentity.buildingId as Any,
+                "floor_id": siteIdentity.floorId as Any,
+                "room_id": siteIdentity.roomId as Any,
+                "zone_id": siteIdentity.zoneId as Any
+            ]
+            if let geo = siteIdentity.geo {
+                siteIdentityPayload?["geo"] = [
+                    "latitude": geo.latitude,
+                    "longitude": geo.longitude,
+                    "accuracy_m": geo.accuracyM
+                ]
+            }
+        }
 
         let payload: [String: Any] = [
             "capture_id": captureId,
@@ -992,11 +1018,50 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             "creator_id": request.metadata.creatorId,
             "job_id": request.metadata.jobId,
             "capture_source": request.metadata.captureSource.rawValue,
-            "submitted_at": Timestamp(date: request.metadata.uploadedAt ?? Date()),
-            "created_at": Timestamp(date: Date())
+            "submitted_at": Timestamp(date: submittedAt),
+            "created_at": Timestamp(date: Date()),
+            "requested_outputs": request.metadata.requestedOutputs,
+            "status": "submitted",
+            "has_site_identity": request.metadata.siteIdentity != nil,
+            "has_capture_topology": request.metadata.captureTopology != nil,
+            "operational_state": [
+                "assignment_state": assignmentState,
+                "upload_state": "uploaded",
+                "qa_state": "queued",
+                "qa_outcome": NSNull(),
+                "repeat_ready": false
+            ],
+            "lifecycle": [
+                "capture_uploaded_at": Timestamp(date: submittedAt)
+            ]
         ]
+        var mutablePayload = payload
+        if let captureJobId = request.metadata.captureJobId {
+            mutablePayload["capture_job_id"] = captureJobId
+        }
+        if let buyerRequestId = request.metadata.buyerRequestId {
+            mutablePayload["buyer_request_id"] = buyerRequestId
+        }
+        if let siteSubmissionId = request.metadata.siteSubmissionId {
+            mutablePayload["site_submission_id"] = siteSubmissionId
+        }
+        if let regionId = request.metadata.regionId {
+            mutablePayload["region_id"] = regionId
+        }
+        if let quotedPayoutCents = request.metadata.quotedPayoutCents {
+            mutablePayload["estimated_payout_cents"] = quotedPayoutCents
+        }
+        if let rightsProfile = request.metadata.rightsProfile {
+            mutablePayload["rights_profile"] = rightsProfile
+        }
+        if let addressFull = request.metadata.siteIdentity?.addressFull {
+            mutablePayload["target_address"] = addressFull
+        }
+        if let siteIdentityPayload {
+            mutablePayload["site_identity"] = siteIdentityPayload
+        }
         return await withCheckedContinuation { continuation in
-            docRef.setData(payload, merge: true) { error in
+            docRef.setData(mutablePayload, merge: true) { error in
                 if let error = error {
                     SessionEventManager.shared.logError(
                         errorCode: "submission_write_failed",

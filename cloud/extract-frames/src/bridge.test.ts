@@ -72,6 +72,26 @@ test("parsePoseRows supports v2 schema and preserves frame_id/t_device_sec", () 
   assert.equal(rows[0].pose_schema_version, "2.0");
 });
 
+test("parsePoseRows rejects malformed JSONL", () => {
+  assert.throws(
+    () =>
+      parsePoseRows([
+        JSON.stringify({
+          frame_id: "000001",
+          t_device_sec: 0.0,
+          T_world_camera: [
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+          ],
+        }),
+        '{"frame_id":"000002"',
+      ].join("\n")),
+    /invalid_jsonl:arkit\/poses\.jsonl:2/
+  );
+});
+
 test("findClosestPoseByTime falls back to nearest timestamp", () => {
   const rows = parsePoseRows(
     [

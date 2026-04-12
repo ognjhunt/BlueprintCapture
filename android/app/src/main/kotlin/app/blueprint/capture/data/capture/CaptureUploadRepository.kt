@@ -415,10 +415,22 @@ class CaptureUploadRepository @Inject constructor(
             "submitted_at" to Timestamp(Date(submittedAtEpochMs)),
             "created_at" to Timestamp(Date()),
             "capture_start_epoch_ms" to item.captureStartEpochMs,
+            "status" to "submitted",
+            "operational_state" to linkedMapOf(
+                "assignment_state" to if (item.captureJobId.isNullOrBlank()) "unassigned_or_open_capture" else "assigned_capture_job",
+                "upload_state" to "uploaded",
+                "qa_state" to "queued",
+                "repeat_ready" to false,
+            ),
+            "lifecycle" to linkedMapOf(
+                "capture_uploaded_at" to Timestamp(Date(submittedAtEpochMs)),
+            ),
         )
 
         item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
+        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["capture_job_id"] = it }
         item.siteSubmissionId?.takeIf(String::isNotBlank)?.let { payload["site_submission_id"] = it }
+        item.quotedPayoutCents?.let { payload["estimated_payout_cents"] = it }
         item.captureDurationMs?.let { payload["capture_duration_ms"] = it }
         if (item.requestedOutputs.isNotEmpty()) {
             payload["requested_outputs"] = item.requestedOutputs

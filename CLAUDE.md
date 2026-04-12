@@ -21,3 +21,8 @@ cd cloud/extract-frames && npm test
 ./scripts/archive_external_alpha.sh --validate-config-only
 ./scripts/android_alpha_readiness.sh --validate-config-only
 ```
+
+## gstack
+
+- Use the repo-local gstack install at `.agents/skills/gstack` when you need slash-skill workflows.
+- Prefer `/investigate`, `/review`, `/codex`, and `/cso` for runtime bugs, capture regressions, and security-sensitive changes.

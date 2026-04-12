@@ -21,10 +21,7 @@ import {
   type PoseRow,
   type PoseIndex,
 } from "./bridge.js";
-import {
-  validateRawCaptureBundleV3,
-  type RawCaptureBundleV3ValidationResult,
-} from "./raw-contract-v3.js";
+import { parseStrictJsonLines } from "./jsonl.js";
 
 const storage = new Storage();
 const pubsub = new PubSub();
@@ -80,38 +77,15 @@ async function loadArkitPoses(
   const localPosesPath = join(tmpDir, `arkit-poses-${Date.now()}.jsonl`);
   try {
     await posesFile.download({ destination: localPosesPath });
+    const content = readFileSync(localPosesPath, { encoding: "utf8" });
+    const rows = parsePoseRows(content);
+    const index = buildPoseIndex(rows);
+    logger.info("Loaded ARKit pose entries", { posesObjectName, count: rows.length });
+    return index;
   } catch (error) {
-    logger.error("Failed to download ARKit pose log", { posesObjectName, error });
-    return { byFrameId: new Map(), byTime: [] };
+    logger.error("Failed to load ARKit pose log", { posesObjectName, error });
+    throw error;
   }
-
-  let content: string;
-  try {
-    content = readFileSync(localPosesPath, { encoding: "utf8" });
-  } catch (error) {
-    logger.error("Failed to read downloaded ARKit pose log", { posesObjectName, error });
-    return { byFrameId: new Map(), byTime: [] };
-  }
-
-  const rows = parsePoseRows(content);
-  const index = buildPoseIndex(rows);
-  logger.info("Loaded ARKit pose entries", { posesObjectName, count: rows.length });
-  return index;
-}
-
-function parseJsonLines(content: string): Record<string, unknown>[] {
-  return content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .flatMap((line) => {
-      try {
-        const parsed = JSON.parse(line) as Record<string, unknown>;
-        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? [parsed] : [];
-      } catch {
-        return [];
-      }
-    });
 }
 
 async function loadArkitFrameQuality(
@@ -136,7 +110,7 @@ async function loadArkitFrameQuality(
   try {
     await frameLogFile.download({ destination: localFrameLogPath });
     const raw = readFileSync(localFrameLogPath, "utf8");
-    const rows = parseJsonLines(raw);
+    const rows = parseStrictJsonLines(raw, "arkit/frames.jsonl");
     const byFrameId = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
       const frameId = asString(row.frame_id) ?? asString(row.frameId);
@@ -146,8 +120,8 @@ async function loadArkitFrameQuality(
     }
     return byFrameId;
   } catch (error) {
-    logger.warn("Failed to load ARKit frame log", { frameLogObjectName, error });
-    return new Map();
+    logger.error("Failed to load ARKit frame log", { frameLogObjectName, error });
+    throw error;
   }
 }
 
@@ -270,39 +244,6 @@ async function loadJsonObject(
   }
 }
 
-async function loadJsonLinesObject(
-  bucket: StorageBucket,
-  objectName: string,
-  tmpDir: string
-): Promise<Record<string, unknown>[]> {
-  const localPath = join(tmpDir, `jsonl-${Date.now()}-${basename(objectName)}`);
-  try {
-    await bucket.file(objectName).download({ destination: localPath });
-    const raw = readFileSync(localPath, "utf8");
-    return parseJsonLines(raw);
-  } catch (error) {
-    logger.warn("Failed to load JSONL object", { objectName, error });
-    return [];
-  }
-}
-
-async function listRawFilesPresent(bucket: StorageBucket, rawPrefix: string): Promise<Set<string>> {
-  const filesPresent = new Set<string>();
-  const canonicalPrefix = `${rawPrefix}/`;
-  try {
-    const [files] = await bucket.getFiles({ prefix: canonicalPrefix });
-    for (const file of files) {
-      if (!file.name.startsWith(canonicalPrefix)) continue;
-      const relativePath = file.name.slice(canonicalPrefix.length);
-      if (relativePath.length === 0 || relativePath.endsWith("/")) continue;
-      filesPresent.add(relativePath);
-    }
-  } catch (error) {
-    logger.warn("Failed to enumerate raw capture files for V3 validation", { rawPrefix, error });
-  }
-  return filesPresent;
-}
-
 export function mergeManifestWithSidecars(
   manifest: Record<string, unknown> | null,
   sidecars: {
@@ -413,7 +354,7 @@ function hasStringArray(value: unknown): boolean {
 
 function captureObjectKind(objectName: string): CaptureObjectKind {
   const fileName = basename(objectName);
-  if (fileName === "walkthrough.mov" || fileName === "walkthrough.mp4") return "walkthrough";
+  if (fileName === "walkthrough.mov") return "walkthrough";
   if (fileName === "capture_upload_complete.json") return "completion_marker";
   return "other";
 }
@@ -880,13 +821,6 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
         missingRequired.push(field);
       }
     }
-    // V3.1 additive fields: capture_profile_id and capture_capabilities
-    if (!asString(manifest.capture_profile_id)) {
-      missingRequired.push("capture_profile_id");
-    }
-    if (!manifest.capture_capabilities || typeof manifest.capture_capabilities !== "object" || Array.isArray(manifest.capture_capabilities)) {
-      missingRequired.push("capture_capabilities");
-    }
   }
   warnings.push(...validateSceneMemoryCapture(manifest));
   warnings.push(...validateCaptureRights(manifest));
@@ -896,48 +830,6 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
     missingRequired,
     warnings,
   };
-}
-
-function validateRawContractV3OrDefault(input: {
-  shouldValidate: boolean;
-  manifest: Record<string, unknown> | null;
-  provenance: Record<string, unknown> | null;
-  rightsConsent: Record<string, unknown> | null;
-  captureContext: Record<string, unknown> | null;
-  recordingSession: Record<string, unknown> | null;
-  captureTopology: Record<string, unknown> | null;
-  completionMarker: Record<string, unknown> | null;
-  hashes: Record<string, unknown> | null;
-  sessionIntrinsics: Record<string, unknown> | null;
-  depthManifest: Record<string, unknown> | null;
-  confidenceManifest: Record<string, unknown> | null;
-  poses: Record<string, unknown>[];
-  frames: Record<string, unknown>[];
-  frameQuality: Record<string, unknown>[];
-  syncMap: Record<string, unknown>[];
-  filesPresent: Set<string>;
-}): RawCaptureBundleV3ValidationResult {
-  if (!input.shouldValidate) {
-    return { valid: true, blockers: [], warnings: [] };
-  }
-  return validateRawCaptureBundleV3({
-    manifest: input.manifest,
-    provenance: input.provenance,
-    rightsConsent: input.rightsConsent,
-    captureContext: input.captureContext,
-    recordingSession: input.recordingSession,
-    captureTopology: input.captureTopology,
-    completionMarker: input.completionMarker,
-    hashes: input.hashes,
-    sessionIntrinsics: input.sessionIntrinsics,
-    depthManifest: input.depthManifest,
-    confidenceManifest: input.confidenceManifest,
-    poses: input.poses,
-    frames: input.frames,
-    frameQuality: input.frameQuality,
-    syncMap: input.syncMap,
-    filesPresent: input.filesPresent,
-  });
 }
 
 /**
@@ -1009,37 +901,10 @@ export const extractFrames = onObjectFinalized(
     const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
     const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
-
-    // Resolve walkthrough video: prefer manifest video_uri, fall back to canonical names
+    const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
+    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
-    const manifestVideoUri = asString(rawManifest?.video_uri as string | undefined);
-    let walkthroughObjectName: string | null = null;
-    if (manifestVideoUri && manifestVideoUri.length > 0) {
-      // manifest video_uri is relative to the capture root (e.g. "raw/walkthrough.mp4")
-      const normalized = manifestVideoUri.replace(/^raw\//, "");
-      walkthroughObjectName = `${pathInfo.rawPrefix}/${normalized}`;
-      if (!(await fileExists(bucket, walkthroughObjectName))) {
-        walkthroughObjectName = null;
-      }
-    }
-    if (!walkthroughObjectName) {
-      // Legacy fallback: try .mov then .mp4
-      const movPath = `${pathInfo.rawPrefix}/walkthrough.mov`;
-      if (await fileExists(bucket, movPath)) {
-        walkthroughObjectName = movPath;
-      } else {
-        const mp4Path = `${pathInfo.rawPrefix}/walkthrough.mp4`;
-        if (await fileExists(bucket, mp4Path)) {
-          walkthroughObjectName = mp4Path;
-        }
-      }
-    }
-    if (!walkthroughObjectName) {
-      logger.error("No walkthrough video found", { rawPrefix: pathInfo.rawPrefix });
-      return;
-    }
-    const walkthroughExists = walkthroughObjectName !== null;
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
     const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
     const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
@@ -1057,74 +922,6 @@ export const extractFrames = onObjectFinalized(
         ? await loadJsonObject(bucket, completionMarkerObjectName, tmp)
         : null;
     const manifestValidation = validateManifest(manifest);
-    const shouldValidateRawContractV3 =
-      objectKind === "completion_marker" &&
-      (asString(rawManifest?.schema_version) === "v3" ||
-        (asString(rawManifest?.capture_schema_version)?.startsWith("3.") ?? false));
-    const [
-      rawProvenance,
-      rawRightsConsent,
-      rawCaptureContext,
-      rawRecordingSession,
-      rawHashes,
-      rawSessionIntrinsics,
-      rawDepthManifest,
-      rawConfidenceManifest,
-      rawPoses,
-      rawFrames,
-      rawFrameQuality,
-      rawSyncMap,
-      rawFilesPresent,
-    ] = shouldValidateRawContractV3
-      ? await Promise.all([
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/provenance.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/rights_consent.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/capture_context.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/recording_session.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/hashes.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/arkit/session_intrinsics.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/arkit/depth_manifest.json`, tmp),
-          loadJsonObject(bucket, `${pathInfo.rawPrefix}/arkit/confidence_manifest.json`, tmp),
-          loadJsonLinesObject(bucket, `${pathInfo.rawPrefix}/arkit/poses.jsonl`, tmp),
-          loadJsonLinesObject(bucket, `${pathInfo.rawPrefix}/arkit/frames.jsonl`, tmp),
-          loadJsonLinesObject(bucket, `${pathInfo.rawPrefix}/arkit/frame_quality.jsonl`, tmp),
-          loadJsonLinesObject(bucket, `${pathInfo.rawPrefix}/sync_map.jsonl`, tmp),
-          listRawFilesPresent(bucket, pathInfo.rawPrefix),
-        ])
-      : [
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          [],
-          [],
-          [],
-          [],
-          new Set<string>(),
-        ];
-    const rawContractV3Validation = validateRawContractV3OrDefault({
-      shouldValidate: shouldValidateRawContractV3,
-      manifest: rawManifest,
-      provenance: rawProvenance,
-      rightsConsent: rawRightsConsent,
-      captureContext: rawCaptureContext,
-      recordingSession: rawRecordingSession,
-      captureTopology: sidecarCaptureTopology,
-      completionMarker,
-      hashes: rawHashes,
-      sessionIntrinsics: rawSessionIntrinsics,
-      depthManifest: rawDepthManifest,
-      confidenceManifest: rawConfidenceManifest,
-      poses: rawPoses,
-      frames: rawFrames,
-      frameQuality: rawFrameQuality,
-      syncMap: rawSyncMap,
-      filesPresent: rawFilesPresent,
-    });
 
     const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
     const arkitFrameQuality = await loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp);
@@ -1417,16 +1214,8 @@ export const extractFrames = onObjectFinalized(
     });
 
     const finalReasons = [...qualityGate.reasons];
-    const finalWarnings = [
-      ...manifestValidation.warnings,
-      ...qualityGate.warnings,
-      ...rawContractV3Validation.warnings.map((warning) => `raw_contract_v3:${warning}`),
-    ];
+    const finalWarnings = [...manifestValidation.warnings, ...qualityGate.warnings];
     let finalStatus = qualityGate.status;
-    if (!rawContractV3Validation.valid) {
-      finalStatus = "blocked";
-      finalReasons.push(...rawContractV3Validation.blockers.map((blocker) => `raw_contract_v3:${blocker}`));
-    }
 
     const rawPrefixUri = gsUri(bucketName, pathInfo.rawPrefix);
     const framesIndexUri = gsUri(bucketName, `${pathInfo.framesPrefix}/index.jsonl`);
@@ -1646,12 +1435,6 @@ export const extractFrames = onObjectFinalized(
         valid: manifestValidation.valid,
         missing_required: manifestValidation.missingRequired,
         warnings: manifestValidation.warnings,
-      },
-      raw_contract_v3_validation: {
-        validated: shouldValidateRawContractV3,
-        valid: rawContractV3Validation.valid,
-        blockers: rawContractV3Validation.blockers,
-        warnings: rawContractV3Validation.warnings,
       },
       quality: {
         frame_count: sortedFiles.length,

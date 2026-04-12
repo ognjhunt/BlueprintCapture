@@ -14,6 +14,8 @@ export type RawCaptureBundleV3Input = {
   frames: Record<string, unknown>[];
   frameQuality: Record<string, unknown>[];
   syncMap: Record<string, unknown>[];
+  motion: Record<string, unknown>[];
+  semanticAnchorObservations: Record<string, unknown>[];
   filesPresent: Set<string>;
 };
 
@@ -86,6 +88,93 @@ function validateFrameSeries(
   }
 }
 
+function validateRequiredKeys(
+  label: string,
+  rows: Record<string, unknown>[],
+  requiredKeys: string[],
+  blockers: string[]
+): void {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    for (const key of requiredKeys) {
+      if (!(key in row) || row[key] === undefined || row[key] === null) {
+        blockers.push(`${label}_missing_field:${key}:line_${i + 1}`);
+      }
+    }
+  }
+}
+
+function validateMotionSamples(
+  rows: Record<string, unknown>[],
+  blockers: string[]
+): void {
+  const requiredKeys = [
+    "timestamp", "t_capture_sec", "t_monotonic_ns", "wall_time",
+    "motion_provenance", "attitude", "rotation_rate", "gravity", "user_acceleration"
+  ];
+  validateRequiredKeys("motion", rows, requiredKeys, blockers);
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const att = row.attitude;
+    if (att !== undefined && att !== null) {
+      const attitude = asRecord(att);
+      if (!attitude) {
+        blockers.push(`motion_attitude_not_object:line_${i + 1}`);
+      } else {
+        for (const subKey of ["roll", "pitch", "yaw", "quaternion"]) {
+          if (!(subKey in attitude) || attitude[subKey] === undefined || attitude[subKey] === null) {
+            blockers.push(`motion_attitude_missing_field:${subKey}:line_${i + 1}`);
+          }
+        }
+        const quat = asRecord(attitude.quaternion);
+        if (quat) {
+          for (const subKey of ["x", "y", "z", "w"]) {
+            if (!(subKey in quat) || quat[subKey] === undefined || quat[subKey] === null) {
+              blockers.push(`motion_quaternion_missing_field:${subKey}:line_${i + 1}`);
+            }
+          }
+        } else if (attitude.quaternion !== undefined && attitude.quaternion !== null) {
+          blockers.push(`motion_quaternion_not_object:line_${i + 1}`);
+        }
+      }
+    }
+
+    const vecFields: Array<[keyof Record<string, unknown>, string]> = [
+      ["rotation_rate", "motion_rotation_rate"],
+      ["gravity", "motion_gravity"],
+      ["user_acceleration", "motion_user_acceleration"]
+    ];
+    for (let j = 0; j < vecFields.length; j++) {
+      const [fieldKey, labelPrefix] = vecFields[j];
+      const vec = row[fieldKey];
+      if (vec !== undefined && vec !== null) {
+        const vecObj = asRecord(vec);
+        if (!vecObj) {
+          blockers.push(`${labelPrefix}_not_object:line_${i + 1}`);
+        } else {
+          for (const subKey of ["x", "y", "z"]) {
+            if (!(subKey in vecObj) || vecObj[subKey] === undefined || vecObj[subKey] === null) {
+              blockers.push(`${labelPrefix}_missing_field:${subKey}:line_${i + 1}`);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+function validateSemanticAnchorObservations(
+  rows: Record<string, unknown>[],
+  blockers: string[]
+): void {
+  const requiredKeys = [
+    "anchor_instance_id", "anchor_type", "frame_id",
+    "t_capture_sec", "coordinate_frame_session_id", "observation_method"
+  ];
+  validateRequiredKeys("semantic_anchor", rows, requiredKeys, blockers);
+}
+
 export function validateRawCaptureBundleV3(
   input: RawCaptureBundleV3Input
 ): RawCaptureBundleV3ValidationResult {
@@ -97,14 +186,25 @@ export function validateRawCaptureBundleV3(
     "provenance.json",
     "rights_consent.json",
     "capture_context.json",
+    "intake_packet.json",
+    "task_hypothesis.json",
     "recording_session.json",
     "capture_topology.json",
+    "route_anchors.json",
+    "checkpoint_events.json",
+    "relocalization_events.json",
+    "overlap_graph.json",
+    "video_track.json",
+    "walkthrough.mov",
+    "motion.jsonl",
+    "semantic_anchor_observations.jsonl",
     "capture_upload_complete.json",
     "hashes.json",
     "sync_map.jsonl",
     "arkit/poses.jsonl",
     "arkit/frames.jsonl",
     "arkit/frame_quality.jsonl",
+    "arkit/per_frame_camera_state.jsonl",
     "arkit/session_intrinsics.json",
     "arkit/depth_manifest.json",
     "arkit/confidence_manifest.json",
@@ -185,6 +285,9 @@ export function validateRawCaptureBundleV3(
   validateFrameSeries("frames", input.frames, blockers);
   validateFrameSeries("frame_quality", input.frameQuality, blockers);
   validateFrameSeries("sync_map", input.syncMap, blockers);
+
+  validateMotionSamples(input.motion, blockers);
+  validateSemanticAnchorObservations(input.semanticAnchorObservations, blockers);
 
   if (input.poses.length > 0 && input.syncMap.length === 0) {
     blockers.push("sync_map_missing_rows");

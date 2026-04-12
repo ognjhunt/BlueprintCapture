@@ -4,6 +4,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.annotation.RawRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -144,7 +146,7 @@ fun OnboardingWalkthroughScreen(
         listOf(
             DeviceCapability(
                 icon = Icons.Rounded.CameraAlt,
-                title = "ARKit",
+                title = "ARCore",
                 subtitle = if (arCoreSupported) "Supported" else "Not supported",
             ),
             DeviceCapability(
@@ -274,16 +276,20 @@ private fun DeviceIntroPage(
     capabilities: List<DeviceCapability>,
     onContinue: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 24.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Column(
+            modifier = Modifier
+                .weight(1f, fill = false)
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(modifier = Modifier.height(22.dp))
@@ -321,6 +327,8 @@ private fun DeviceIntroPage(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         OnboardingPrimaryButton(
             text = "Continue",

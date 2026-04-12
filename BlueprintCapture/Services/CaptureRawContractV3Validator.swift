@@ -177,6 +177,12 @@ final class CaptureRawContractV3Validator {
         let companionPhonePoses = loadJSONLinesIfPresent(at: rawDirectoryURL.appendingPathComponent("companion_phone/poses.jsonl"), errors: &errors)
         let syncMap = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("sync_map.jsonl"), errors: &errors)
 
+        let motionRows = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("motion.jsonl"), errors: &errors)
+        let semanticAnchorRows = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("semantic_anchor_observations.jsonl"), errors: &errors)
+
+        validateMotionRows(motionRows, errors: &errors)
+        validateSemanticAnchorObservations(semanticAnchorRows, errors: &errors)
+
         validateIdentityConsistency(
             sceneId: manifest["scene_id"] as? String,
             captureId: manifest["capture_id"] as? String,
@@ -564,5 +570,67 @@ final class CaptureRawContractV3Validator {
         #else
         return data.base64EncodedString()
         #endif
+    }
+
+    private func validateMotionRows(_ rows: [[String: Any]], errors: inout [String]) {
+        let requiredKeys = [
+            "timestamp", "t_capture_sec", "t_monotonic_ns", "wall_time",
+            "motion_provenance", "attitude", "rotation_rate", "gravity", "user_acceleration"
+        ]
+        for (index, row) in rows.enumerated() {
+            for key in requiredKeys where isMissingJSONValue(row[key]) {
+                errors.append("motion_missing_field:\(key):line_\(index + 1)")
+            }
+            if let attitude = row["attitude"] as? [String: Any] {
+                for subKey in ["roll", "pitch", "yaw", "quaternion"] where attitude[subKey] == nil {
+                    errors.append("motion_attitude_missing_field:\(subKey):line_\(index + 1)")
+                }
+                if let quat = attitude["quaternion"] as? [String: Any] {
+                    for subKey in ["x", "y", "z", "w"] where quat[subKey] == nil {
+                        errors.append("motion_quaternion_missing_field:\(subKey):line_\(index + 1)")
+                    }
+                }
+            } else if row["attitude"] != nil {
+                errors.append("motion_attitude_not_object:line_\(index + 1)")
+            }
+            if let rr = row["rotation_rate"] as? [String: Any] {
+                for subKey in ["x", "y", "z"] where rr[subKey] == nil {
+                    errors.append("motion_rotation_rate_missing_field:\(subKey):line_\(index + 1)")
+                }
+            } else if row["rotation_rate"] != nil {
+                errors.append("motion_rotation_rate_not_object:line_\(index + 1)")
+            }
+            if let grav = row["gravity"] as? [String: Any] {
+                for subKey in ["x", "y", "z"] where grav[subKey] == nil {
+                    errors.append("motion_gravity_missing_field:\(subKey):line_\(index + 1)")
+                }
+            } else if row["gravity"] != nil {
+                errors.append("motion_gravity_not_object:line_\(index + 1)")
+            }
+            if let ua = row["user_acceleration"] as? [String: Any] {
+                for subKey in ["x", "y", "z"] where ua[subKey] == nil {
+                    errors.append("motion_user_acceleration_missing_field:\(subKey):line_\(index + 1)")
+                }
+            } else if row["user_acceleration"] != nil {
+                errors.append("motion_user_acceleration_not_object:line_\(index + 1)")
+            }
+        }
+    }
+
+    private func validateSemanticAnchorObservations(_ rows: [[String: Any]], errors: inout [String]) {
+        let requiredKeys = [
+            "anchor_instance_id", "anchor_type", "frame_id",
+            "t_capture_sec", "coordinate_frame_session_id", "observation_method"
+        ]
+        for (index, row) in rows.enumerated() {
+            for key in requiredKeys where isMissingJSONValue(row[key]) {
+                errors.append("semantic_anchor_missing_field:\(key):line_\(index + 1)")
+            }
+        }
+    }
+
+    private func isMissingJSONValue(_ value: Any?) -> Bool {
+        guard let value else { return true }
+        return value is NSNull
     }
 }

@@ -21,4 +21,20 @@ class BlueprintCaptureRootStageResolutionTest {
 
         assertThat(stage).isEqualTo(RootStage.Permissions)
     }
+
+    @Test
+    fun `resolveRootStage returns walkthrough when permissions are complete and startup permission is granted`() {
+        val stage = resolveRootStage(
+            onboardingComplete = true,
+            hasRegisteredUser = true,
+            authSkipped = false,
+            inviteCodeComplete = true,
+            permissionsComplete = true,
+            hasStartupPermissions = true,
+            walkthroughComplete = false,
+            glassesSetupComplete = false,
+        )
+
+        assertThat(stage).isEqualTo(RootStage.Walkthrough)
+    }
 }

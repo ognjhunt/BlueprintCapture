@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -47,13 +48,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.blueprint.capture.data.permissions.StartupPermissionChecker
 import app.blueprint.capture.ui.theme.BlueprintAccent
 import app.blueprint.capture.ui.theme.BlueprintBorder
 import app.blueprint.capture.ui.theme.BlueprintBlack
 import app.blueprint.capture.ui.theme.BlueprintError
 import app.blueprint.capture.ui.theme.BlueprintSurfaceCard
-import app.blueprint.capture.ui.theme.BlueprintSurfaceInset
 import app.blueprint.capture.ui.theme.BlueprintSuccess
 import app.blueprint.capture.ui.theme.BlueprintTextMuted
 import app.blueprint.capture.ui.theme.BlueprintTextPrimary
@@ -72,6 +75,7 @@ fun PermissionsScreen(
     onEnable: () -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val startupPermissionChecker = remember(context.applicationContext) {
         StartupPermissionChecker(context.applicationContext)
     }
@@ -112,20 +116,36 @@ fun PermissionsScreen(
     }
 
     val grantedMap = remember {
-        mutableStateMapOf<String, Boolean>().also { map ->
+        mutableStateMapOf<String, Boolean>()
+    }
+    val refreshPermissionStatuses = remember(context, permissionItems) {
+        {
             permissionItems.forEach { item ->
-                map[item.permission] = ContextCompat.checkSelfPermission(
+                grantedMap[item.permission] = ContextCompat.checkSelfPermission(
                     context, item.permission,
                 ) == PackageManager.PERMISSION_GRANTED
             }
         }
     }
 
+    DisposableEffect(lifecycleOwner, refreshPermissionStatuses) {
+        refreshPermissionStatuses()
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshPermissionStatuses()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val permissionsToRequest = permissionItems.map { it.permission }.toTypedArray()
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions(),
-    ) { results ->
-        results.forEach { (perm, granted) -> grantedMap[perm] = granted }
+    ) {
+        refreshPermissionStatuses()
         if (startupPermissionChecker.hasRequiredStartupPermission()) {
             permissionError = null
             onEnable()
@@ -231,7 +251,12 @@ fun PermissionsScreen(
                 .background(BlueprintAccent)
                 .clickable {
                     permissionError = null
-                    launcher.launch(permissionsToRequest)
+                    refreshPermissionStatuses()
+                    if (startupPermissionChecker.hasRequiredStartupPermission()) {
+                        onEnable()
+                    } else {
+                        launcher.launch(permissionsToRequest)
+                    }
                 }
                 .padding(vertical = 18.dp),
             contentAlignment = Alignment.Center,

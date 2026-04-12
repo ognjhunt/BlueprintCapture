@@ -32,6 +32,20 @@ struct CaptureRawContractV3ValidatorTests {
     }
 
     @Test
+    func validatorRejectsMalformedJsonl() throws {
+        let root = try makeValidBundle()
+        try writeLines([
+            #"{"frame_id":"000001","t_capture_sec":0.0}"#,
+            #"{"frame_id":"000002""#,
+        ], to: root.appendingPathComponent("arkit/frames.jsonl"))
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("invalid_jsonl:frames.jsonl"))
+    }
+
+    @Test
     func validatorAcceptsNonLiDARIPhoneBundleWithoutDepth() throws {
         let root = try makeValidBundle()
         let manifestURL = root.appendingPathComponent("manifest.json")
@@ -119,6 +133,45 @@ struct CaptureRawContractV3ValidatorTests {
         let root = try makeGlassesBundle(includeCompanionPhone: true)
         let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
         #expect(result.isValid == true)
+    }
+
+    @Test
+    func validatorRejectsMalformedMotionJsonlContent() throws {
+        let root = try makeValidBundle()
+        try writeLines([
+            #"{\"timestamp\":1.0}"#,
+        ], to: root.appendingPathComponent("motion.jsonl"))
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("invalid_jsonl:motion.jsonl"))
+    }
+
+    @Test
+    func validatorRejectsNullMotionJsonlFields() throws {
+        let root = try makeValidBundle()
+        try writeLines([
+            #"{"timestamp":1.0,"t_capture_sec":0.0,"t_monotonic_ns":0,"wall_time":"2026-03-20T14:00:29.857Z","motion_provenance":null,"attitude":{"roll":0.0,"pitch":0.0,"yaw":0.0,"quaternion":{"x":0.0,"y":0.0,"z":0.0,"w":1.0}},"rotation_rate":{"x":0.0,"y":0.0,"z":0.0},"gravity":{"x":0.0,"y":0.0,"z":0.0},"user_acceleration":{"x":0.0,"y":0.0,"z":0.0}}"#,
+        ], to: root.appendingPathComponent("motion.jsonl"))
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("motion_missing_field:motion_provenance:line_1"))
+    }
+
+    @Test
+    func validatorRejectsMalformedSemanticAnchorJsonlContent() throws {
+        let root = try makeValidBundle()
+        try writeLines([
+            #"{\"anchor_instance_id\":\"a1\"}"#,
+        ], to: root.appendingPathComponent("semantic_anchor_observations.jsonl"))
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("invalid_jsonl:semantic_anchor_observations.jsonl"))
     }
 
     @Test

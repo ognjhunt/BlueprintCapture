@@ -1,3 +1,5 @@
+import { parseStrictJsonLines } from "./jsonl.js";
+
 export type PoseRow = {
   pose_schema_version?: string;
   frame_id?: string;
@@ -92,18 +94,7 @@ export function zeroPad(n: number, width: number): string {
 }
 
 export function parsePoseRows(content: string): PoseRow[] {
-  const rows: Record<string, unknown>[] = [];
-  const lines = content.split(/\r?\n/);
-  for (const lineRaw of lines) {
-    const line = lineRaw.trim();
-    if (!line) continue;
-    try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      rows.push(parsed);
-    } catch {
-      continue;
-    }
-  }
+  const rows = parseStrictJsonLines(content, "arkit/poses.jsonl");
 
   const legacyTimestampRows = rows
     .map((row) => ({
