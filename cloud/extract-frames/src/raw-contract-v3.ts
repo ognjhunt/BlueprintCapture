@@ -248,6 +248,9 @@ export function validateRawCaptureBundleV3(
   for (const key of requiredManifestBooleans) {
     if (typeof manifest[key] !== "boolean") blockers.push(`manifest_missing_boolean:${key}`);
   }
+  if (!asRecord(manifest.capture_capabilities)) {
+    blockers.push("manifest_missing_object:capture_capabilities");
+  }
 
   const sceneId = asString(manifest.scene_id);
   const captureId = asString(manifest.capture_id);

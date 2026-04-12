@@ -193,6 +193,22 @@ final class APIService {
         return try decoder.decode(DemandOpportunityFeedResponse.self, from: data)
     }
 
+    func fetchCityLaunchTargets(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> CityLaunchTargetsResponse {
+        var components = URLComponents(url: try baseURL().appendingPathComponent("v1/creator/city-launch/targets"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lng", value: String(lng)),
+            URLQueryItem(name: "radius_m", value: String(radiusMeters)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        guard let url = components.url else {
+            throw APIError.invalidResponse(statusCode: -1)
+        }
+        let request = buildRequest(url: url, method: "GET")
+        let data = try await perform(request: request, expecting: 200)
+        return try decoder.decode(CityLaunchTargetsResponse.self, from: data)
+    }
+
     // MARK: Helpers
     private func baseURL() throws -> URL {
         guard let url = AppConfig.backendBaseURL() else {
@@ -271,7 +287,23 @@ final class APIService {
 
 extension APIService: DemandIntelligenceServiceProtocol {}
 
+protocol CityLaunchTargetsServiceProtocol {
+    func fetchCityLaunchTargets(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> CityLaunchTargetsResponse
+}
+
+extension APIService: CityLaunchTargetsServiceProtocol {}
+
 // MARK: - DTOs & Models
+
+struct CityLaunchTargetsResponse: Codable, Equatable {
+    let generatedAt: Date?
+    let targets: [Target]
+
+    enum CodingKeys: String, CodingKey {
+        case generatedAt
+        case targets
+    }
+}
 
 private struct EarningsResponse: Codable {
     let totalEarnedCents: Int

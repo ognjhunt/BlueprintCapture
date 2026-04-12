@@ -809,6 +809,7 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
       "ios_build",
       "hardware_model_identifier",
       "device_model_marketing",
+      "capture_profile_id",
     ];
     const v3RequiredBooleans = ["depth_supported"];
     for (const field of v3RequiredStrings) {
@@ -820,6 +821,9 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
       if (typeof manifest[field] !== "boolean") {
         missingRequired.push(field);
       }
+    }
+    if (!asRecord(manifest.capture_capabilities)) {
+      missingRequired.push("capture_capabilities");
     }
   }
   warnings.push(...validateSceneMemoryCapture(manifest));

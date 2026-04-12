@@ -16,6 +16,7 @@ struct Target: Identifiable, Codable, Equatable {
     let demandScore: Double?
     let sizeSqFt: Int?
     let category: String?
+    let launchContext: LaunchTargetContext?
 
     // Transient values (not part of API) – compute in ViewModel
     var computedDistanceMeters: Double?
@@ -30,6 +31,55 @@ struct Target: Identifiable, Codable, Equatable {
         case demandScore
         case sizeSqFt
         case category
+        case launchContext
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        sku: SKU,
+        lat: Double,
+        lng: Double,
+        address: String?,
+        demandScore: Double?,
+        sizeSqFt: Int?,
+        category: String?,
+        launchContext: LaunchTargetContext? = nil,
+        computedDistanceMeters: Double?
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.sku = sku
+        self.lat = lat
+        self.lng = lng
+        self.address = address
+        self.demandScore = demandScore
+        self.sizeSqFt = sizeSqFt
+        self.category = category
+        self.launchContext = launchContext
+        self.computedDistanceMeters = computedDistanceMeters
+    }
+}
+
+struct LaunchTargetContext: Codable, Equatable {
+    let city: String
+    let citySlug: String
+    let activationStatus: String
+    let prospectStatus: String
+    let sourceBucket: String
+    let workflowFit: String?
+    let priorityNote: String?
+    let researchBacked: Bool
+
+    var badgeLabel: String {
+        switch prospectStatus {
+        case "capturing":
+            return "Launch Live"
+        case "onboarded":
+            return "Launch Ready"
+        default:
+            return "Launch Priority"
+        }
     }
 }
 
@@ -46,5 +96,3 @@ extension Target: PlaceWithPolicy {
     var policyTypes: [String] { category.map { [$0] } ?? [] }
     var policyPlaceId: String? { id }
 }
-
-

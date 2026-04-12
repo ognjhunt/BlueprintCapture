@@ -54,6 +54,7 @@ function makeValidInput(): RawCaptureBundleV3Input {
       hardware_model_identifier: "iPhone16,2",
       device_model_marketing: "iPhone 15 Pro",
       capture_profile_id: "iphone_arkit_v3",
+      capture_capabilities: { camera_pose: true, depth: true, motion: true },
       has_lidar: true,
       depth_supported: true,
       fps_source: 30,

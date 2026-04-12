@@ -176,11 +176,21 @@ enum CaptureBundleFinalizationMode: Equatable {
         let mp4URL = directoryURL.appendingPathComponent(baseWithoutExt + ".mp4")
 
         let actualVideo: String
+        let relativePath: (URL) -> String = { url in
+            let path = url.standardizedFileURL.path
+            let basePath = directory.standardizedFileURL.path
+            guard path.hasPrefix(basePath) else { return url.lastPathComponent }
+            var relative = String(path.dropFirst(basePath.count))
+            while relative.hasPrefix("/") {
+                relative.removeFirst()
+            }
+            return relative.isEmpty ? url.lastPathComponent : relative
+        }
         if fm.fileExists(atPath: mp4URL.path) {
-            let mp4Relative = (mp4URL.path as NSString).relativePath(from: directory.path)
+            let mp4Relative = relativePath(mp4URL)
             actualVideo = mp4Relative.isEmpty ? baseWithoutExt + ".mp4" : mp4Relative
         } else if fm.fileExists(atPath: movURL.path) {
-            let movRelative = (movURL.path as NSString).relativePath(from: directory.path)
+            let movRelative = relativePath(movURL)
             actualVideo = movRelative.isEmpty ? baseWithoutExt + ".mov" : movRelative
         } else {
             return self  // Neither exists — keep the caller-provided URI

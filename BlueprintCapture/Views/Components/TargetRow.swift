@@ -28,6 +28,12 @@ struct TargetRow: View {
 
                 // Distance, status, and policy
                 HStack(spacing: 8) {
+                    if let launchContext = item.target.launchContext {
+                        Label(launchContext.badgeLabel, systemImage: "scope")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(BlueprintTheme.brandTeal)
+                    }
+
                     if isOnSite {
                         Label("Here", systemImage: "location.fill")
                             .font(.caption.weight(.medium))

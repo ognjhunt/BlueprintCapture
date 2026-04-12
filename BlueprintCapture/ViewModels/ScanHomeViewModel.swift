@@ -943,7 +943,7 @@ extension ScanHomeViewModel {
     }
 }
 
-private extension NumberFormatter {
+extension NumberFormatter {
     static let captureCurrency: NumberFormatter = {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency

@@ -2,6 +2,40 @@ import Foundation
 import Testing
 @testable import BlueprintCapture
 
+private func makeRawManifestData(
+    sceneId: String,
+    captureId: String,
+    videoUri: String,
+    captureProfileId: String,
+    captureCapabilities: [String: Any]
+) throws -> Data {
+    let manifest: [String: Any] = [
+        "schema_version": "v3",
+        "capture_schema_version": "3.1.0",
+        "scene_id": sceneId,
+        "capture_id": captureId,
+        "capture_source": "iphone",
+        "capture_tier_hint": "tier1_iphone",
+        "coordinate_frame_session_id": "cfs-1",
+        "video_uri": videoUri,
+        "capture_start_epoch_ms": 1_700_000_000_000,
+        "app_version": "1.0.0",
+        "app_build": "100",
+        "ios_version": "18.3.1",
+        "ios_build": "22D68",
+        "hardware_model_identifier": "iPhone16,2",
+        "device_model_marketing": "iPhone 15 Pro",
+        "capture_profile_id": captureProfileId,
+        "capture_capabilities": captureCapabilities,
+        "has_lidar": true,
+        "depth_supported": true,
+        "fps_source": 30.0,
+        "width": 1920,
+        "height": 1440,
+    ]
+    return try JSONSerialization.data(withJSONObject: manifest)
+}
+
 struct CaptureBundleAndInferenceTests {
 
     @Test
@@ -13,7 +47,17 @@ struct CaptureBundleAndInferenceTests {
         try fileManager.createDirectory(at: arkit, withIntermediateDirectories: true)
 
         try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
-        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try makeRawManifestData(
+            sceneId: "scene-123",
+            captureId: "capture-123",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_non_lidar",
+            captureCapabilities: [
+                "camera_pose": false,
+                "depth": false,
+                "motion": false
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{}".utf8).write(to: arkit.appendingPathComponent("intrinsics.json"))
 
         let metadata = CaptureUploadMetadata(
@@ -164,7 +208,17 @@ struct CaptureBundleAndInferenceTests {
         try fileManager.createDirectory(at: arkit.appendingPathComponent("meshes", isDirectory: true), withIntermediateDirectories: true)
 
         try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
-        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try makeRawManifestData(
+            sceneId: "scene-sidecars",
+            captureId: "capture-sidecars",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_lidar",
+            captureCapabilities: [
+                "camera_pose": true,
+                "depth": true,
+                "motion": true
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{\"fx\":1200,\"fy\":1195,\"cx\":640,\"cy\":360,\"width\":1280,\"height\":720}".utf8)
             .write(to: arkit.appendingPathComponent("intrinsics.json"))
         try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
@@ -259,7 +313,17 @@ struct CaptureBundleAndInferenceTests {
         try fileManager.createDirectory(at: arkit.appendingPathComponent("confidence", isDirectory: true), withIntermediateDirectories: true)
 
         try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
-        try Data("{\"scene_id\":\"\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try makeRawManifestData(
+            sceneId: "scene-sidecars",
+            captureId: "capture-sidecars",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_lidar",
+            captureCapabilities: [
+                "camera_pose": true,
+                "depth": true,
+                "motion": true
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{\"fx\":1200,\"fy\":1195,\"cx\":640,\"cy\":360,\"width\":1280,\"height\":720}".utf8)
             .write(to: arkit.appendingPathComponent("intrinsics.json"))
         try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
@@ -971,7 +1035,17 @@ extension CaptureBundleAndInferenceTests {
 
         // Use walkthrough.mp4 instead of walkthrough.mov
         try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mp4"))
-        try Data("{\"scene_id\":\"mp4-scene\",\"video_uri\":\"\"}".utf8).write(to: raw.appendingPathComponent("manifest.json"))
+        try makeRawManifestData(
+            sceneId: "mp4-scene",
+            captureId: "capture-mp4",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_non_lidar",
+            captureCapabilities: [
+                "camera_pose": false,
+                "depth": false,
+                "motion": false
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{\"rights_consent_given\":true,\"version\":\"v3\"}".utf8).write(to: raw.appendingPathComponent("rights_consent.json"))
 
         let metadata = CaptureUploadMetadata(

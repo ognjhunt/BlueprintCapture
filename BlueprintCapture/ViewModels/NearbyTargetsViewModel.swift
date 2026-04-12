@@ -35,7 +35,8 @@ final class NearbyTargetsViewModel: ObservableObject {
         let estimatedPayoutUsd: Int
         let recordingPolicy: RecordingPolicyResult
         var accessibilityLabel: String {
-            "\(target.displayName), SKU \(target.sku.rawValue), payout $\(estimatedPayoutUsd), distance \(String(format: "%.1f", distanceMiles)) miles"
+            let launchLabel = target.launchContext == nil ? "" : ", launch priority"
+            return "\(target.displayName)\(launchLabel), SKU \(target.sku.rawValue), payout $\(estimatedPayoutUsd), distance \(String(format: "%.1f", distanceMiles)) miles"
         }
 
         static func == (lhs: NearbyItem, rhs: NearbyItem) -> Bool {
@@ -71,6 +72,7 @@ final class NearbyTargetsViewModel: ObservableObject {
     private let notifications: NotificationServiceProtocol
     private let recordingPolicyService: RecordingPolicyService
     private let demandIntelligenceService: DemandIntelligenceServiceProtocol
+    private let cityLaunchTargetsService: CityLaunchTargetsServiceProtocol
 
     // Data
     private var pricing: [SKU: SkuPricing] = defaultPricing
@@ -93,11 +95,12 @@ final class NearbyTargetsViewModel: ObservableObject {
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          // discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(), // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
-         nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
+            nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
          placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
          notifications: NotificationServiceProtocol = NotificationService(),
          recordingPolicyService: RecordingPolicyService = .shared,
-         demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared) {
+         demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared,
+         cityLaunchTargetsService: CityLaunchTargetsServiceProtocol = APIService.shared) {
          self.locationService = locationService
         self.targetsAPI = targetsAPI
         self.pricingAPI = pricingAPI
@@ -111,6 +114,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.notifications = notifications
         self.recordingPolicyService = recordingPolicyService
         self.demandIntelligenceService = demandIntelligenceService
+        self.cityLaunchTargetsService = cityLaunchTargetsService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -319,6 +323,17 @@ final class NearbyTargetsViewModel: ObservableObject {
                 print("🎯 [Pipeline] Using Places results: \(targets.count) targets")
             }
 
+            if AppConfig.hasBackendBaseURL() {
+                if let launchResponse = try? await cityLaunchTargetsService.fetchCityLaunchTargets(
+                    lat: loc.coordinate.latitude,
+                    lng: loc.coordinate.longitude,
+                    radiusMeters: meters,
+                    limit: limit
+                ) {
+                    targets = Self.mergeLaunchPriorityTargets(baseTargets: targets, launchTargets: launchResponse.targets)
+                }
+            }
+
             // Parallelize missing address resolution instead of sequential
             let geocoding = self.geocoding
             let targetsToGeocode = targets.indices.filter { targets[$0].address == nil }
@@ -385,6 +400,7 @@ final class NearbyTargetsViewModel: ObservableObject {
                         let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
                         let coverage = 1.0
+                        let launchPriorityBoost = t.launchContext == nil ? 1.0 : 1.15
                         // Boost score for safer venues (safe=1.0, unknown=0.9, caution=0.7, restricted=0.3)
                         let safetyMultiplier: Double = {
                             switch policy.risk {
@@ -394,7 +410,7 @@ final class NearbyTargetsViewModel: ObservableObject {
                             case .restricted: return 0.3
                             }
                         }()
-                        let score = Double(payout) * demand * proximity * coverage * safetyMultiplier
+                        let score = Double(payout) * demand * proximity * coverage * safetyMultiplier * launchPriorityBoost
                         let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, recordingPolicy: policy)
                         return (item, score)
                     }
@@ -507,7 +523,8 @@ final class NearbyTargetsViewModel: ObservableObject {
                         let demand = max(0.3, min(1.0, t.demandScore ?? 0.6))
                         let proximity = max(0.3, 1.0 - min(1.0, miles / (self?.selectedRadius.rawValue ?? 1.0)))
                         let coverage = 1.0
-                        let score = Double(payout) * demand * proximity * coverage
+                        let launchPriorityBoost = t.launchContext == nil ? 1.0 : 1.15
+                        let score = Double(payout) * demand * proximity * coverage * launchPriorityBoost
                         let item = NearbyItem(id: t.id, target: t, distanceMiles: miles, estimatedPayoutUsd: payout, recordingPolicy: policy)
                         return (item, score)
                     }
@@ -862,6 +879,43 @@ extension NearbyTargetsViewModel {
                 category: item.siteType ?? item.placeTypes.first,
                 computedDistanceMeters: nil
             )
+        }
+    }
+
+    static func mergeLaunchPriorityTargets(baseTargets: [Target], launchTargets: [Target]) -> [Target] {
+        var mergedByKey: [String: Target] = [:]
+
+        func merge(_ current: Target?, with incoming: Target) -> Target {
+            guard let current else { return incoming }
+            return Target(
+                id: current.id,
+                displayName: incoming.launchContext != nil ? incoming.displayName : current.displayName,
+                sku: incoming.launchContext != nil ? incoming.sku : current.sku,
+                lat: incoming.launchContext != nil ? incoming.lat : current.lat,
+                lng: incoming.launchContext != nil ? incoming.lng : current.lng,
+                address: incoming.address ?? current.address,
+                demandScore: max(incoming.demandScore ?? 0, current.demandScore ?? 0),
+                sizeSqFt: incoming.sizeSqFt ?? current.sizeSqFt,
+                category: incoming.category ?? current.category,
+                launchContext: incoming.launchContext ?? current.launchContext,
+                computedDistanceMeters: incoming.computedDistanceMeters ?? current.computedDistanceMeters
+            )
+        }
+
+        for target in baseTargets {
+            mergedByKey[target.id] = merge(mergedByKey[target.id], with: target)
+        }
+        for target in launchTargets {
+            mergedByKey[target.id] = merge(mergedByKey[target.id], with: target)
+        }
+
+        return mergedByKey.values.sorted { left, right in
+            let leftPriority = left.launchContext == nil ? 0 : 1
+            let rightPriority = right.launchContext == nil ? 0 : 1
+            if leftPriority != rightPriority {
+                return leftPriority > rightPriority
+            }
+            return (left.demandScore ?? 0) > (right.demandScore ?? 0)
         }
     }
 

@@ -110,4 +110,44 @@ struct APIServiceTests {
         #expect(response.captureJobs.first?.opportunityScore == 0.93)
         #expect(response.captureJobs.first?.siteType == "warehouse")
     }
+
+    @Test
+    func cityLaunchTargetContractsDecodeLaunchPriorityContext() throws {
+        let json = """
+        {
+          "generatedAt": "2026-04-12T14:00:00Z",
+          "targets": [
+            {
+              "id": "prospect-1",
+              "displayName": "Dock One",
+              "sku": "B",
+              "lat": 30.2672,
+              "lng": -97.7431,
+              "address": "100 Logistics Way",
+              "demandScore": 0.92,
+              "sizeSqFt": null,
+              "category": "warehouse",
+              "launchContext": {
+                "city": "Austin, TX",
+                "citySlug": "austin-tx",
+                "activationStatus": "activation_ready",
+                "prospectStatus": "approved",
+                "sourceBucket": "industrial_warehouse",
+                "workflowFit": "dock handoff",
+                "priorityNote": "High exact-site value",
+                "researchBacked": true
+              }
+            }
+          ]
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let response = try decoder.decode(CityLaunchTargetsResponse.self, from: Data(json.utf8))
+
+        #expect(response.targets.count == 1)
+        #expect(response.targets.first?.launchContext?.citySlug == "austin-tx")
+        #expect(response.targets.first?.launchContext?.badgeLabel == "Launch Priority")
+    }
 }

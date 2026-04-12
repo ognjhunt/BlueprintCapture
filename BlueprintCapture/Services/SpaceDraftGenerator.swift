@@ -1,4 +1,5 @@
 import Foundation
+#if canImport(FoundationModels)
 import FoundationModels
 
 /// Generates context notes for space submission drafts using the on-device LLM.
@@ -243,3 +244,63 @@ final class SpaceDraftGenerator {
         }
     }
 }
+#else
+/// Fallback stub for toolchains that do not ship FoundationModels.
+@MainActor
+final class SpaceDraftGenerator {
+
+    static let shared = SpaceDraftGenerator()
+    private init() {}
+
+    var isAvailable: Bool { false }
+
+    func generateDraft(placeName: String, address: String?) async -> (contextNotes: String, suggestedCategory: String)? {
+        nil
+    }
+
+    func streamFocusTip(
+        jobTitle: String,
+        description: String,
+        requirements: [String],
+        restrictedAreas: [String],
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        nil
+    }
+
+    func streamProfileDigest(
+        tier: String,
+        totalCaptures: Int,
+        approvedCaptures: Int,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        nil
+    }
+
+    func streamRecordingGuidance(
+        jobTitle: String,
+        requirements: [String],
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        nil
+    }
+
+    func streamEarningsInsight(
+        totalCaptures: Int,
+        approvedCaptures: Int,
+        totalEarnings: String,
+        pendingCount: Int,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> String? {
+        nil
+    }
+
+    func streamDraft(
+        placeName: String,
+        address: String?,
+        onPartial: @escaping @Sendable (String) -> Void
+    ) async -> (contextNotes: String, suggestedCategory: String)? {
+        nil
+    }
+}
+#endif
