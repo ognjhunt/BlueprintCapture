@@ -7,10 +7,10 @@ import CoreMotion
 
 // Import Meta DAT SDK modules when available
 // The SDK provides: MWDATCore, MWDATCamera, MWDATMockDevice
-#if canImport(MWDATCore)
+#if canImport(MWDATCore) && !targetEnvironment(simulator)
 import MWDATCore
 #endif
-#if canImport(MWDATCamera)
+#if canImport(MWDATCamera) && !targetEnvironment(simulator)
 import MWDATCamera
 #endif
 #if canImport(MWDATMockDevice)
@@ -22,6 +22,15 @@ import MWDATMockDevice
 @MainActor
 final class GlassesCaptureManager: NSObject, ObservableObject {
     private static let logPrefix = "[BlueprintGlasses]"
+    private static let unsupportedRealWearablesMessage = "Meta glasses require a physical iPhone build. Use MockDeviceKit in the simulator."
+
+    static var supportsRealWearables: Bool {
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
 
     // MARK: - Types
 
@@ -102,7 +111,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let id: String
         let name: String
         let isMock: Bool
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         let datIdentifier: DeviceIdentifier?
         #endif
     }
@@ -122,7 +131,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     private var mockDeviceKit: MWMockDeviceKit?
     private var cameraSession: MWCameraSession?
-    #if canImport(MWDATCore)
+    #if canImport(MWDATCore) && !targetEnvironment(simulator)
     private let wearables: WearablesInterface = Wearables.shared
     private var registrationTask: Task<Void, Never>?
     private var devicesTask: Task<Void, Never>?
@@ -194,7 +203,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             print("\(Self.logPrefix) mockDeviceKit unavailable: \(error)")
         }
 
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         registrationState = wearables.registrationState
         print("\(Self.logPrefix) initial registrationState=\(registrationState)")
         startWearablesObservers()
@@ -212,7 +221,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             // Use MockDeviceKit for testing
             startMockDeviceScan()
         } else {
-            #if canImport(MWDATCore)
+            #if canImport(MWDATCore) && !targetEnvironment(simulator)
             if registrationState == .registered {
                 syncConnectionStateFromWearables(forceRefresh: true)
             } else {
@@ -235,7 +244,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 }
             }
             #else
-            connectionState = .error("Meta DAT SDK is unavailable in this build.")
+            connectionState = .error(Self.unsupportedRealWearablesMessage)
             #endif
         }
     }
@@ -252,7 +261,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 // Add simulated discovery delay for realistic UX
                 try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
 
-                #if canImport(MWDATCore)
+                #if canImport(MWDATCore) && !targetEnvironment(simulator)
                 let mockDevice = DiscoveredDevice(
                     id: "mock-rayban-meta-001",
                     name: "Ray-Ban Meta (Mock)",
@@ -282,7 +291,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     func stopScanning() {
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         if useMockDevice {
             connectionState = .disconnected
             discoveredDevices = []
@@ -307,10 +316,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         if device.isMock {
             connectToMockDevice(device)
         } else {
-            #if canImport(MWDATCore)
+            #if canImport(MWDATCore) && !targetEnvironment(simulator)
             connectToRealDevice(device)
             #else
-            connectionState = .error("Meta DAT SDK is unavailable in this build.")
+            connectionState = .error(Self.unsupportedRealWearablesMessage)
             #endif
         }
     }
@@ -345,7 +354,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    #if canImport(MWDATCore)
+    #if canImport(MWDATCore) && !targetEnvironment(simulator)
     private func connectToRealDevice(_ device: DiscoveredDevice) {
         Task {
             do {
@@ -411,7 +420,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         cameraSession = nil
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         Task {
             await self.streamSession?.stop()
         }
@@ -437,7 +446,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             return nil
         }
         let isMock = UserDefaults.standard.bool(forKey: lastDeviceIsMockKey)
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         return DiscoveredDevice(id: id, name: name, isMock: isMock, datIdentifier: nil)
         #else
         return DiscoveredDevice(id: id, name: name, isMock: isMock)
@@ -462,7 +471,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         UserDefaults.standard.set(device.isMock, forKey: lastDeviceIsMockKey)
     }
 
-    #if canImport(MWDATCore)
+    #if canImport(MWDATCore) && !targetEnvironment(simulator)
     private func startWearablesObservers() {
         registrationTask?.cancel()
         devicesTask?.cancel()
@@ -642,7 +651,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
     #endif
 
-    #if !canImport(MWDATCore)
+    #if !canImport(MWDATCore) || targetEnvironment(simulator)
     func handleWearablesCallback(_ url: URL) -> Bool {
         false
     }
@@ -995,7 +1004,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func startCameraStream() async throws {
-        #if canImport(MWDATCamera)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if let session = streamSession, !isConnectedToMockDevice {
             await session.start()
             return
@@ -1080,7 +1089,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     func pauseCapture() {
         guard case .streaming = captureState else { return }
-        #if canImport(MWDATCamera)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if let session = streamSession, !isConnectedToMockDevice {
             Task { await session.stop() }
         } else {
@@ -1095,7 +1104,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     func resumeCapture() {
         guard captureState == .paused else { return }
-        #if canImport(MWDATCamera)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if let session = streamSession, !isConnectedToMockDevice {
             Task { await session.start() }
         } else {
@@ -1116,7 +1125,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         print("⏹️ [GlassesCapture] Stopping capture...")
 
         // Stop camera stream
-        #if canImport(MWDATCamera)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if let session = streamSession, !isConnectedToMockDevice {
             Task { await session.stop() }
         } else {
@@ -1264,7 +1273,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             ])
         }
 
-        #if canImport(MWDATCamera)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if let session = streamSession, !isConnectedToMockDevice {
             return try await withCheckedThrowingContinuation { continuation in
                 pendingPhotoContinuation = continuation

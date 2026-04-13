@@ -14,6 +14,7 @@ import Darwin
 import ZIPFoundation
 #endif
 
+@MainActor
 final class VideoCaptureManager: NSObject, ObservableObject {
     enum CaptureState {
         case idle

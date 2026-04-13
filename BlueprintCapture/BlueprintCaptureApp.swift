@@ -1,6 +1,6 @@
 import SwiftUI
 import AVFoundation
-#if canImport(MWDATCore)
+#if canImport(MWDATCore) && !targetEnvironment(simulator)
 import MWDATCore
 #endif
 
@@ -15,7 +15,7 @@ struct BlueprintCaptureApp: App {
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
 
     init() {
-        #if canImport(MWDATCore)
+        #if canImport(MWDATCore) && !targetEnvironment(simulator)
         do {
             try Wearables.configure()
         } catch {
