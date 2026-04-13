@@ -192,7 +192,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     static let stationaryDepthSnapshotIntervalSeconds: TimeInterval = 1.0
     static let minimumDepthTravelMeters: Float = 0.05
 
-    static func deviceTimeSeconds(frameTimestamp: TimeInterval, firstFrameTimestamp: TimeInterval?) -> Double {
+    nonisolated static func deviceTimeSeconds(frameTimestamp: TimeInterval, firstFrameTimestamp: TimeInterval?) -> Double {
         let base = firstFrameTimestamp ?? frameTimestamp
         return max(0.0, frameTimestamp - base)
     }

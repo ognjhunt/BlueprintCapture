@@ -68,7 +68,7 @@ final class NearbyAlertsManager: NSObject, ObservableObject {
     }
 }
 
-extension NearbyAlertsManager: CLLocationManagerDelegate {
+@MainActor extension NearbyAlertsManager: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         authorizationStatus = status
     }
