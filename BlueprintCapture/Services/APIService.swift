@@ -209,6 +209,46 @@ final class APIService {
         return try decoder.decode(CityLaunchTargetsResponse.self, from: data)
     }
 
+    func fetchCreatorLaunchStatus(city: String?, stateCode: String?) async throws -> CreatorLaunchStatusResponse {
+        var components = URLComponents(url: try baseURL().appendingPathComponent("v1/creator/launch-status"), resolvingAgainstBaseURL: false)!
+        var queryItems: [URLQueryItem] = []
+        if let city, !city.isEmpty {
+            queryItems.append(URLQueryItem(name: "city", value: city))
+        }
+        if let stateCode, !stateCode.isEmpty {
+            queryItems.append(URLQueryItem(name: "state_code", value: stateCode))
+        }
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        guard let url = components.url else {
+            throw APIError.invalidResponse(statusCode: -1)
+        }
+        let request = buildRequest(url: url, method: "GET")
+        let data = try await perform(request: request, expecting: 200)
+        return try decoder.decode(CreatorLaunchStatusResponse.self, from: data)
+    }
+
+    func submitCityLaunchCandidateSignals(_ payload: CityLaunchCandidateSignalSubmissionRequest) async throws {
+        var request = try makeRequest(path: "v1/creator/city-launch/candidate-signals", method: "POST")
+        request.httpBody = try encoder.encode(payload)
+        _ = try await perform(request: request, expecting: 201)
+    }
+
+    func fetchCityLaunchReviewCandidates(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> CityLaunchReviewCandidatesResponse {
+        var components = URLComponents(url: try baseURL().appendingPathComponent("v1/creator/city-launch/review-candidates"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lng", value: String(lng)),
+            URLQueryItem(name: "radius_m", value: String(radiusMeters)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        guard let url = components.url else {
+            throw APIError.invalidResponse(statusCode: -1)
+        }
+        let request = buildRequest(url: url, method: "GET")
+        let data = try await perform(request: request, expecting: 200)
+        return try decoder.decode(CityLaunchReviewCandidatesResponse.self, from: data)
+    }
+
     // MARK: Helpers
     private func baseURL() throws -> URL {
         guard let url = AppConfig.backendBaseURL() else {
@@ -293,6 +333,18 @@ protocol CityLaunchTargetsServiceProtocol {
 
 extension APIService: CityLaunchTargetsServiceProtocol {}
 
+protocol CreatorLaunchStatusServiceProtocol {
+    func fetchCreatorLaunchStatus(city: String?, stateCode: String?) async throws -> CreatorLaunchStatusResponse
+}
+
+protocol CityLaunchCandidateSignalServiceProtocol {
+    func submitCityLaunchCandidateSignals(_ payload: CityLaunchCandidateSignalSubmissionRequest) async throws
+    func fetchCityLaunchReviewCandidates(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> CityLaunchReviewCandidatesResponse
+}
+
+extension APIService: CreatorLaunchStatusServiceProtocol {}
+extension APIService: CityLaunchCandidateSignalServiceProtocol {}
+
 // MARK: - DTOs & Models
 
 struct CityLaunchTargetsResponse: Codable, Equatable {
@@ -303,6 +355,88 @@ struct CityLaunchTargetsResponse: Codable, Equatable {
         case generatedAt
         case targets
     }
+}
+
+struct CreatorLaunchStatusResponse: Codable, Equatable {
+    struct SupportedCity: Codable, Equatable, Identifiable {
+        let city: String
+        let stateCode: String
+        let displayName: String
+        let citySlug: String
+
+        var id: String { citySlug }
+
+        enum CodingKeys: String, CodingKey {
+            case city
+            case stateCode
+            case displayName
+            case citySlug
+        }
+    }
+
+    struct CurrentCity: Codable, Equatable {
+        let city: String
+        let stateCode: String?
+        let displayName: String
+        let citySlug: String?
+        let isSupported: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case city
+            case stateCode
+            case displayName
+            case citySlug
+            case isSupported
+        }
+    }
+
+    let supportedCities: [SupportedCity]
+    let currentCity: CurrentCity?
+}
+
+struct CityLaunchCandidateSignalSubmissionRequest: Codable, Equatable {
+    struct Candidate: Codable, Equatable {
+        let city: String
+        let name: String
+        let address: String?
+        let lat: Double
+        let lng: Double
+        let provider: String
+        let providerPlaceId: String?
+        let types: [String]
+        let sourceContext: String
+
+        enum CodingKeys: String, CodingKey {
+            case city
+            case name
+            case address
+            case lat
+            case lng
+            case provider
+            case providerPlaceId = "provider_place_id"
+            case types
+            case sourceContext = "source_context"
+        }
+    }
+
+    let candidates: [Candidate]
+}
+
+struct CityLaunchReviewCandidate: Codable, Equatable, Identifiable {
+    let id: String
+    let city: String
+    let citySlug: String
+    let name: String
+    let address: String?
+    let lat: Double
+    let lng: Double
+    let status: String
+    let reviewState: String
+}
+
+struct CityLaunchReviewCandidatesResponse: Codable, Equatable {
+    let generatedAt: Date?
+    let candidates: [CityLaunchReviewCandidate]
 }
 
 private struct EarningsResponse: Codable {

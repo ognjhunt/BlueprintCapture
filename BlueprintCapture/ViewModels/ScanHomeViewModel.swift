@@ -228,6 +228,7 @@ final class ScanHomeViewModel: ObservableObject {
     @Published private(set) var submissionSummary: [SubmissionSummaryItem] = []
     @Published private(set) var currentLocation: CLLocation?
     @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var reviewCandidates: [ReviewCandidateItem] = []
 
     @Published var showErrorAlert: Bool = false
     @Published var errorMessage: String?
@@ -239,9 +240,18 @@ final class ScanHomeViewModel: ObservableObject {
     private let captureHistoryService: CaptureHistoryServiceProtocol
     private let demandIntelligenceService: DemandIntelligenceServiceProtocol
     private let nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol
+    private let nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol
+    private let cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
     private let inferredNearbyLimit: Int = 8
+
+    struct ReviewCandidateItem: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let reviewState: String
+    }
 
     init(
         jobsRepository: JobsRepositoryProtocol = JobsRepository(),
@@ -250,7 +260,9 @@ final class ScanHomeViewModel: ObservableObject {
         alertsManager: NearbyAlertsManager,
         captureHistoryService: CaptureHistoryServiceProtocol = APIService.shared,
         demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared,
-        nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService()
+        nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
+        nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol = NearbyCandidateReviewSubmissionService(),
+        cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol = APIService.shared
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService
@@ -259,6 +271,8 @@ final class ScanHomeViewModel: ObservableObject {
         self.captureHistoryService = captureHistoryService
         self.demandIntelligenceService = demandIntelligenceService
         self.nearbyDiscoveryService = nearbyDiscoveryService
+        self.nearbyCandidateReviewSubmissionService = nearbyCandidateReviewSubmissionService
+        self.cityLaunchCandidateSignalService = cityLaunchCandidateSignalService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -272,7 +286,7 @@ final class ScanHomeViewModel: ObservableObject {
         alertsManager.refreshNotificationStatus()
         locationService.requestWhenInUseAuthorization()
         locationService.startUpdatingLocation()
-        if state == .idle {
+        if state == .idle && items.isEmpty {
             state = .loading
         }
     }
@@ -283,11 +297,15 @@ final class ScanHomeViewModel: ObservableObject {
 
     func refresh() async {
         guard let loc = currentLocation else {
-            state = .loading
+            if items.isEmpty {
+                state = .error(Self.missingLocationMessage(for: locationService.authorizationStatus))
+            }
             return
         }
 
-        state = .loading
+        if items.isEmpty {
+            state = .loading
+        }
 
         do {
             _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
@@ -321,16 +339,11 @@ final class ScanHomeViewModel: ObservableObject {
             let hydrated = await hydrate(items: visible)
             self.items = hydrated
             let nearbyDynamic = hydrated.filter { $0.opportunityKind == .nearby }
-            let openCaptureItem = RuntimeConfig.current.enableOpenCaptureHere
-                ? await Self.makeCurrentLocationItem(at: loc)
-                : nil
-            self.nearbyItems = Self.nearbyItemsWithOpenCapture(
-                nearbyDynamic: nearbyDynamic,
-                openCaptureItem: openCaptureItem
-            )
+            self.nearbyItems = nearbyDynamic
             self.specialItems = hydrated.filter { $0.opportunityKind == .special }
             self.readyNow = self.nearbyItems.first(where: { $0.isReadyNow && $0.permissionTier == .approved })
             self.submissionSummary = await loadSubmissionSummary()
+            self.reviewCandidates = await loadReviewCandidates(near: loc)
             self.lastUpdatedAt = Date()
             self.state = .loaded
 
@@ -376,6 +389,23 @@ final class ScanHomeViewModel: ObservableObject {
             return "Network error. Check your connection and pull down to refresh."
         }
         return error.localizedDescription
+    }
+
+    private static func missingLocationMessage(for status: CLAuthorizationStatus) -> String {
+        switch status {
+        case .authorizedAlways, .authorizedWhenInUse:
+            #if targetEnvironment(simulator)
+            return "Nearby spaces need a simulated location. Set one in Simulator and pull to refresh."
+            #else
+            return "Nearby spaces need your current location. Check location access and try again."
+            #endif
+        case .denied, .restricted:
+            return "Nearby spaces need location access. Enable it in Settings and try again."
+        case .notDetermined:
+            return "Waiting for location so nearby spaces can load."
+        @unknown default:
+            return "Nearby spaces need location information before they can load."
+        }
     }
 
     func nearbyPolicyCount(for tier: CapturePermissionTier) -> Int {
@@ -532,15 +562,10 @@ final class ScanHomeViewModel: ObservableObject {
     }
 
     private func fetchRankedJobs(userLocation: CLLocation) async throws -> [ScanJob] {
-        let candidatePlaces = await loadNearbyCandidatePlaces(userLocation: userLocation)
+        _ = await loadNearbyCandidatePlaces(userLocation: userLocation)
 
         guard AppConfig.hasDemandBackendBaseURL() else {
-            let curated = try await jobsRepository.fetchActiveJobs(limit: 200)
-            guard !candidatePlaces.isEmpty else { return curated }
-            return Self.mergeCuratedAndInferredJobs(
-                curated,
-                inferred: candidatePlaces.map { Self.makeInferredNearbyJob(from: $0) }
-            )
+            return try await jobsRepository.fetchActiveJobs(limit: 200)
         }
 
         let request = DemandOpportunityFeedRequest(
@@ -548,26 +573,13 @@ final class ScanHomeViewModel: ObservableObject {
             lng: userLocation.coordinate.longitude,
             radiusMeters: Int(feedRadiusMeters.rounded()),
             limit: 200,
-            candidatePlaces: candidatePlaces.map {
-                OpportunityCandidatePlace(
-                    placeId: $0.placeId,
-                    displayName: $0.displayName,
-                    formattedAddress: $0.formattedAddress,
-                    lat: $0.lat,
-                    lng: $0.lng,
-                    placeTypes: $0.types ?? []
-                )
-            }
+            candidatePlaces: []
         )
 
         do {
             let response = try await demandIntelligenceService.fetchDemandOpportunityFeed(request)
-            let merged = Self.mergeCuratedAndInferredJobs(
-                response.captureJobs,
-                inferred: response.nearbyOpportunities.map(Self.makeInferredNearbyJob(from:))
-            )
-            if !merged.isEmpty {
-                return merged
+            if !response.captureJobs.isEmpty {
+                return response.captureJobs
             }
         } catch {
             SessionEventManager.shared.logError(
@@ -579,12 +591,7 @@ final class ScanHomeViewModel: ObservableObject {
             print("⚠️ [ScanHome] Demand opportunity feed failed, falling back to Firestore jobs: \(error.localizedDescription)")
         }
 
-        let curated = try await jobsRepository.fetchActiveJobs(limit: 200)
-        guard !candidatePlaces.isEmpty else { return curated }
-        return Self.mergeCuratedAndInferredJobs(
-            curated,
-            inferred: candidatePlaces.map { Self.makeInferredNearbyJob(from: $0) }
-        )
+        return try await jobsRepository.fetchActiveJobs(limit: 200)
     }
 
     private func loadNearbyCandidatePlaces(userLocation: CLLocation) async -> [PlaceDetailsLite] {
@@ -593,14 +600,43 @@ final class ScanHomeViewModel: ObservableObject {
         }
 
         do {
-            return try await nearbyDiscoveryService.discoverCandidatePlaces(
+            let candidates = try await nearbyDiscoveryService.discoverCandidatePlaces(
                 userLocation: userLocation.coordinate,
                 radiusMeters: Int(feedRadiusMeters.rounded()),
                 limit: inferredNearbyLimit,
                 includedTypes: Self.inferredNearbyIncludedTypes
             )
+            await nearbyCandidateReviewSubmissionService.submitCandidatesIfNeeded(
+                userLocation: userLocation,
+                sourceContext: "app_open_scan",
+                candidates: candidates
+            )
+            return candidates
         } catch {
             print("⚠️ [ScanHome] Nearby candidate discovery failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    private func loadReviewCandidates(near userLocation: CLLocation) async -> [ReviewCandidateItem] {
+        guard AppConfig.hasBackendBaseURL() else { return [] }
+
+        do {
+            let response = try await cityLaunchCandidateSignalService.fetchCityLaunchReviewCandidates(
+                lat: userLocation.coordinate.latitude,
+                lng: userLocation.coordinate.longitude,
+                radiusMeters: Int(feedRadiusMeters.rounded()),
+                limit: 12
+            )
+            return response.candidates.map {
+                ReviewCandidateItem(
+                    id: $0.id,
+                    title: $0.name,
+                    subtitle: $0.address ?? $0.city,
+                    reviewState: $0.reviewState
+                )
+            }
+        } catch {
             return []
         }
     }

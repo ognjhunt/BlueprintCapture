@@ -59,6 +59,10 @@ struct ScanHomeView: View {
                         featuredSection
                             .padding(.bottom, 28)
 
+                        underReviewSection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, viewModel.reviewCandidates.isEmpty ? 0 : 28)
+
                         categoryFilterRow
                             .padding(.bottom, 16)
 
@@ -241,7 +245,7 @@ struct ScanHomeView: View {
     private var featuredSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Nearby Spaces")
+                Text("Open to Capture")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
                 let visibleCount = featuredItems.count + fallbackDemoItems.count
@@ -273,27 +277,77 @@ struct ScanHomeView: View {
                     .foregroundStyle(Color(white: 0.4))
                     .padding(.horizontal, 20)
             case .loaded:
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 14) {
-                        ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
-                            Button { handleItemSelection(item) } label: {
-                                FeaturedCaptureCard(item: item)
-                                    .frame(width: 280)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("scan-home-featured-\(index)")
-                            .accessibilityIdentifier("scan-home-featured-\(item.id)")
-                        }
-                        ForEach(fallbackDemoItems) { demo in
-                            Button { selectedDemo = demo } label: {
-                                DemoFeaturedCard(demo: demo)
-                                    .frame(width: 280)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                if featuredItems.isEmpty && fallbackDemoItems.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(viewModel.reviewCandidates.isEmpty ? "We’re not live nearby yet" : "Nothing open yet")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                        Text(viewModel.reviewCandidates.isEmpty
+                             ? "Blueprint is still scanning and qualifying spaces in this area."
+                             : "We’re reviewing nearby spaces for launch fit. If one is approved, we’ll notify you.")
+                            .font(.caption)
+                            .foregroundStyle(Color(white: 0.5))
                     }
                     .padding(.horizontal, 20)
-                    .padding(.vertical, 2)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
+                                Button { handleItemSelection(item) } label: {
+                                    FeaturedCaptureCard(item: item)
+                                        .frame(width: 280)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("scan-home-featured-\(index)")
+                                .accessibilityIdentifier("scan-home-featured-\(item.id)")
+                            }
+                            ForEach(fallbackDemoItems) { demo in
+                                Button { selectedDemo = demo } label: {
+                                    DemoFeaturedCard(demo: demo)
+                                        .frame(width: 280)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var underReviewSection: some View {
+        if !viewModel.reviewCandidates.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Under Review Near You")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+
+                Text("We’re checking nearby spaces against launch criteria. If one is approved, we’ll notify you.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color(white: 0.55))
+
+                ForEach(viewModel.reviewCandidates) { candidate in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(candidate.title)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                        Text(candidate.subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(Color(white: 0.65))
+                        Text(candidate.reviewState.replacingOccurrences(of: "_", with: " ").capitalized)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.85))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .background(Color(white: 0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    )
                 }
             }
         }
@@ -579,7 +633,7 @@ struct ScanHomeView: View {
         case .waitingForDevice: return "Keep the glasses connected in Meta AI and nearby."
         case .permissionRequired(let deviceName): return "Grant camera access for \(deviceName) in Meta AI."
         case .error(let message): return message
-        case .disconnected: return "Required for approved capture opportunities."
+        case .disconnected: return OnboardingCaptureUXCopy.disconnectedGlassesSubtitle
         }
     }
 
