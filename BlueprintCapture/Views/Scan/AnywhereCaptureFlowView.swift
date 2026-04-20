@@ -21,7 +21,7 @@ struct AnywhereCaptureFlowView: View {
                 case .collectProfile:
                     ProfileReviewView(
                         profile: viewModel.profile,
-                        onContinue: viewModel.requestLocation,
+                        onContinue: { viewModel.requestLocation() },
                         title: "Before you capture",
                         subtitle: "We review these submissions before they become approved capture opportunities. Confirm your details, then tell us about the space.",
                         buttonTitle: "Continue"

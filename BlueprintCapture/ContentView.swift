@@ -8,7 +8,7 @@ struct ContentView: View {
             Group {
                 switch viewModel.step {
                 case .collectProfile:
-                    ProfileReviewView(profile: viewModel.profile, onContinue: viewModel.requestLocation)
+                    ProfileReviewView(profile: viewModel.profile, onContinue: { viewModel.requestLocation() })
                 case .confirmLocation:
                     LocationConfirmationView(viewModel: viewModel)
                 case .requestPermissions:

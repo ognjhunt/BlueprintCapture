@@ -52,7 +52,7 @@ jobs:
           xcodebuild build-for-testing \
             -project BlueprintCapture.xcodeproj \
             -scheme BlueprintCapture \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" \
             -configuration Debug \
             -skipPackageUpdates \
             -allowProvisioningUpdates \
@@ -63,7 +63,7 @@ jobs:
           xcodebuild test-without-building \
             -project BlueprintCapture.xcodeproj \
             -scheme BlueprintCapture \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" \
             -configuration Debug \
             -skipPackageUpdates
 

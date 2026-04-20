@@ -24,7 +24,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     private static let logPrefix = "[BlueprintGlasses]"
     private static let unsupportedRealWearablesMessage = "Meta glasses require a physical iPhone build. Use MockDeviceKit in the simulator."
 
-    static var supportsRealWearables: Bool {
+    nonisolated static var supportsRealWearables: Bool {
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         true
         #else

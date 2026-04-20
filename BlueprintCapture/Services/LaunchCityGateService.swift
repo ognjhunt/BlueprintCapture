@@ -66,7 +66,8 @@ final class LaunchCityGateViewModel {
     private let launchStatusService: CreatorLaunchStatusServiceProtocol
     private var hasStarted = false
     private var lastResolvedLocation: CLLocation?
-    private var evaluationTask: Task<Void, Never>?
+    // This task is cancelled during teardown from a nonisolated deinit.
+    nonisolated(unsafe) private var evaluationTask: Task<Void, Never>?
 
     var state: State = .checking
     var supportedCities: [CreatorLaunchStatusResponse.SupportedCity] = []
