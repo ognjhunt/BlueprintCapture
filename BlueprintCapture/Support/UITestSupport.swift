@@ -264,6 +264,7 @@ enum UITestFixtures {
         )
     ]
 
+    @MainActor
     static func makeScanHomeViewModel(alertsManager: NearbyAlertsManager) -> ScanHomeViewModel {
         ScanHomeViewModel(
             jobsRepository: UITestJobsRepository(),
@@ -274,6 +275,7 @@ enum UITestFixtures {
         )
     }
 
+    @MainActor
     static func makeUploadQueueViewModel() -> UploadQueueViewModel {
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
         try? FileManager.default.removeItem(at: tempURL)
@@ -284,6 +286,7 @@ enum UITestFixtures {
         )
     }
 
+    @MainActor
     static func makeWalletViewModel() -> WalletViewModel {
         let model = WalletViewModel()
         model.isAuthenticated = true
@@ -310,12 +313,14 @@ struct UITestRootView: View {
     private let scanHomeViewModel: ScanHomeViewModel
     private let walletViewModel: WalletViewModel
 
-    init(scenario: RuntimeConfig.UITestScenario = RuntimeConfig.current.uiTestScenario) {
+    @MainActor
+    init(scenario: RuntimeConfig.UITestScenario? = nil) {
+        let resolvedScenario = scenario ?? RuntimeConfig.current.uiTestScenario
         let alertsManager = NearbyAlertsManager()
         _glassesManager = StateObject(wrappedValue: GlassesCaptureManager())
         _uploadQueue = StateObject(wrappedValue: UITestFixtures.makeUploadQueueViewModel())
         _alertsManager = StateObject(wrappedValue: alertsManager)
-        self.scenario = scenario
+        self.scenario = resolvedScenario
         self.scanHomeViewModel = UITestFixtures.makeScanHomeViewModel(alertsManager: alertsManager)
         self.walletViewModel = UITestFixtures.makeWalletViewModel()
     }

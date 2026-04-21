@@ -4,6 +4,7 @@ import Testing
 struct GlassesCaptureManagerTests {
 
     @Test
+    @MainActor
     func simulatorBuildsDisableRealWearables() {
         #if targetEnvironment(simulator)
         #expect(GlassesCaptureManager.supportsRealWearables == false)

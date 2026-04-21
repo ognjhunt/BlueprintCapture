@@ -633,7 +633,7 @@ struct ScanHomeView: View {
         case .waitingForDevice: return "Keep the glasses connected in Meta AI and nearby."
         case .permissionRequired(let deviceName): return "Grant camera access for \(deviceName) in Meta AI."
         case .error(let message): return message
-        case .disconnected: return OnboardingCaptureUXCopy.disconnectedGlassesSubtitle
+        case .disconnected: return "Keep the glasses connected in Meta AI and nearby."
         }
     }
 

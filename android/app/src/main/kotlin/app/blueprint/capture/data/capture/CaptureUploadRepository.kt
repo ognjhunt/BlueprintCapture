@@ -49,6 +49,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 enum class CaptureUploadWorkOutcome {
     Success,
@@ -243,6 +246,10 @@ class CaptureUploadRepository @Inject constructor(
             val latestItem = _queue.value.firstOrNull { it.id == id } ?: initialItem
             throwIfCancellationRequested(latestItem)
             if (latestItem.uploadCompletedAtEpochMs == null) {
+                val didRegisterLifecycleStart = registerCaptureLifecycleStart(latestItem)
+                if (!didRegisterLifecycleStart) {
+                    return CaptureUploadWorkOutcome.Success
+                }
                 uploadBundleFiles(latestItem, onItemUpdated)
             } else {
                 updateItemAndEmit(id, onItemUpdated) { item ->
@@ -382,6 +389,248 @@ class CaptureUploadRepository @Inject constructor(
         }
     }
 
+    private fun slugifyCity(value: String): String = value
+        .trim()
+        .lowercase()
+        .replace(Regex("[^a-z0-9]+"), "-")
+        .trim('-')
+
+    private data class BundleSiteIdentity(
+        val siteId: String?,
+        val siteIdSource: String?,
+        val siteName: String?,
+        val addressFull: String?,
+    )
+
+    private data class BundleContextHints(
+        val workflowFit: String?,
+    )
+
+    private fun readBundleSiteIdentity(item: UploadQueueItem): BundleSiteIdentity? {
+        val bundlePath = item.localBundlePath ?: return null
+        val siteFile = File(bundlePath).resolve("raw").resolve("site_identity.json")
+        if (!siteFile.exists()) {
+            return null
+        }
+        return runCatching {
+            val root = json.parseToJsonElement(siteFile.readText()).jsonObject
+            BundleSiteIdentity(
+                siteId = root["site_id"]?.jsonPrimitive?.contentOrNull,
+                siteIdSource = root["site_id_source"]?.jsonPrimitive?.contentOrNull,
+                siteName = root["site_name"]?.jsonPrimitive?.contentOrNull,
+                addressFull = root["address_full"]?.jsonPrimitive?.contentOrNull,
+            )
+        }.getOrNull()
+    }
+
+    private fun readBundleContextHints(item: UploadQueueItem): BundleContextHints {
+        val bundlePath = item.localBundlePath ?: return BundleContextHints(workflowFit = item.label)
+        val rawDir = File(bundlePath).resolve("raw")
+        val contextFile = rawDir.resolve("capture_context.json")
+        val contextWorkflowFit = runCatching {
+            if (!contextFile.exists()) {
+                null
+            } else {
+                val root = json.parseToJsonElement(contextFile.readText()).jsonObject
+                root["task_text_hint"]?.jsonPrimitive?.contentOrNull
+            }
+        }.getOrNull()
+        val hypothesisFile = rawDir.resolve("task_hypothesis.json")
+        val hypothesisWorkflowFit = runCatching {
+            if (!hypothesisFile.exists()) {
+                null
+            } else {
+                val root = json.parseToJsonElement(hypothesisFile.readText()).jsonObject
+                root["workflow_name"]?.jsonPrimitive?.contentOrNull
+            }
+        }.getOrNull()
+        return BundleContextHints(
+            workflowFit = contextWorkflowFit ?: hypothesisWorkflowFit ?: item.label,
+        )
+    }
+
+    private fun buildCityContext(addressFull: String?): Map<String, Any>? {
+        val normalized = addressFull?.trim().orEmpty()
+        if (normalized.isEmpty()) {
+            return null
+        }
+
+        if (normalized.contains("·")) {
+            val city = normalized.substringAfterLast("·").trim()
+            if (city.isNotEmpty()) {
+                return mapOf(
+                    "city" to city,
+                    "city_slug" to slugifyCity(city),
+                )
+            }
+        }
+
+        val commaParts = normalized.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (commaParts.size >= 2) {
+            val city = commaParts[commaParts.size - 2]
+            if (city.isNotEmpty()) {
+                return mapOf(
+                    "city" to city,
+                    "city_slug" to slugifyCity(city),
+                )
+            }
+        }
+
+        return null
+    }
+
+    private fun resolvedBuyerRequestId(
+        item: UploadQueueItem,
+        siteIdentity: BundleSiteIdentity?,
+    ): String? {
+        val source = siteIdentity?.siteIdSource?.trim().orEmpty()
+        val siteId = siteIdentity?.siteId?.trim().orEmpty()
+        return if (source == "buyer_request" && siteId.isNotEmpty()) siteId else null
+    }
+
+    private fun buildCaptureSubmissionPayload(
+        item: UploadQueueItem,
+        creatorId: String,
+        recordedAtEpochMs: Long,
+        uploadState: String,
+        includeUploadStart: Boolean,
+        includeUploadCompletion: Boolean,
+        includeSubmittedAt: Boolean,
+    ): MutableMap<String, Any> {
+        val captureId = item.captureId.ifBlank { item.id }
+        val sceneId = item.sceneId.ifBlank { captureId }
+        val recordedAt = Timestamp(Date(recordedAtEpochMs))
+        val siteIdentity = readBundleSiteIdentity(item)
+        val contextHints = readBundleContextHints(item)
+
+        val lifecycle = linkedMapOf<String, Any>(
+            "capture_started_at" to Timestamp(Date(item.captureStartEpochMs)),
+        )
+        if (includeUploadStart) {
+            lifecycle["upload_started_at"] = recordedAt
+        }
+        if (includeUploadCompletion) {
+            lifecycle["capture_uploaded_at"] = recordedAt
+        }
+
+        val payload = linkedMapOf<String, Any>(
+            "capture_id" to captureId,
+            "scene_id" to sceneId,
+            "creator_id" to creatorId,
+            "capture_source" to item.captureSource,
+            "created_at" to recordedAt,
+            "capture_start_epoch_ms" to item.captureStartEpochMs,
+            "status" to "submitted",
+            "operational_state" to linkedMapOf(
+                "assignment_state" to if (item.captureJobId.isNullOrBlank()) "unassigned_or_open_capture" else "assigned_capture_job",
+                "upload_state" to uploadState,
+                "qa_state" to "queued",
+                "repeat_ready" to false,
+            ),
+            "lifecycle" to lifecycle,
+        )
+
+        if (includeSubmittedAt) {
+            payload["submitted_at"] = recordedAt
+        }
+        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
+        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["capture_job_id"] = it }
+        item.siteSubmissionId?.takeIf(String::isNotBlank)?.let { payload["site_submission_id"] = it }
+        resolvedBuyerRequestId(item, siteIdentity)?.let { payload["buyer_request_id"] = it }
+        item.quotedPayoutCents?.let { payload["estimated_payout_cents"] = it }
+        item.captureDurationMs?.let { payload["capture_duration_ms"] = it }
+        if (item.requestedOutputs.isNotEmpty()) {
+            payload["requested_outputs"] = item.requestedOutputs
+        }
+        item.remotePrefix?.takeIf(String::isNotBlank)?.let { payload["raw_prefix"] = "${it}raw/" }
+        if (item.motionSampleCount > 0) {
+            payload["motion_sample_count"] = item.motionSampleCount
+            payload["motion_provenance"] = "phone_imu_accelerometer_gyroscope"
+        }
+        if (item.priorityWeight > 0) payload["priority_weight"] = item.priorityWeight
+        item.reservationId?.takeIf(String::isNotBlank)?.let { payload["reservation_id"] = it }
+
+        if (siteIdentity != null) {
+            payload["has_site_identity"] = true
+            payload["site_identity"] = linkedMapOf<String, Any?>(
+                "site_id" to siteIdentity.siteId,
+                "site_id_source" to siteIdentity.siteIdSource,
+                "site_name" to siteIdentity.siteName,
+                "address_full" to siteIdentity.addressFull,
+            )
+            siteIdentity.addressFull?.takeIf(String::isNotBlank)?.let { payload["target_address"] = it }
+            buildCityContext(siteIdentity.addressFull)?.let { payload["city_context"] = it }
+            val targetId = siteIdentity.siteId?.takeIf(String::isNotBlank)
+            val workflowFit = contextHints.workflowFit?.takeIf { it.isNotBlank() }
+            if (targetId != null || workflowFit != null) {
+                payload["target_context"] = linkedMapOf<String, Any>().apply {
+                    targetId?.let { put("target_id", it) }
+                    workflowFit?.let { put("workflow_fit", it) }
+                }
+            }
+        }
+
+        val bundlePath = item.localBundlePath
+        if (!bundlePath.isNullOrBlank()) {
+            val rawDir = File(bundlePath).resolve("raw")
+            if (rawDir.resolve("capture_topology.json").exists()) {
+                payload["has_capture_topology"] = true
+            }
+            if (rawDir.resolve("imu_samples.jsonl").exists() && rawDir.resolve("imu_samples.jsonl").length() > 0) {
+                payload["imu_samples_available"] = true
+            }
+        }
+
+        return payload
+    }
+
+    private suspend fun registerCaptureLifecycleStart(item: UploadQueueItem): Boolean {
+        val authenticatedCreatorId = auth.currentUser?.uid
+        if (authenticatedCreatorId.isNullOrBlank()) {
+            updateItem(item.id) {
+                it.copy(
+                    status = UploadQueueStatus.Queued,
+                    progress = it.progress.coerceAtLeast(0.01f),
+                    detail = "Waiting for Firebase auth before starting upload",
+                )
+            }
+            Log.i(
+                "CaptureUploadRepository",
+                "Deferring capture_in_progress write for capture_submissions/${item.captureId.ifBlank { item.id }} until Firebase auth is available",
+            )
+            operationalTelemetry.recordFailure(
+                operation = "capture_lifecycle_start",
+                detail = "waiting_for_firebase_auth",
+            )
+            return false
+        }
+
+        val captureId = item.captureId.ifBlank { item.id }
+        val payload = buildCaptureSubmissionPayload(
+            item = item,
+            creatorId = authenticatedCreatorId,
+            recordedAtEpochMs = System.currentTimeMillis(),
+            uploadState = "uploading",
+            includeUploadStart = true,
+            includeUploadCompletion = false,
+            includeSubmittedAt = false,
+        )
+
+        firestore.collection("capture_submissions")
+            .document(captureId)
+            .set(payload, SetOptions.merge())
+            .awaitResult()
+
+        operationalTelemetry.recordSuccess(
+            operation = "capture_lifecycle_start",
+            detail = captureId,
+        )
+        updateItem(item.id) {
+            it.copy(creatorId = authenticatedCreatorId)
+        }
+        return true
+    }
+
     private suspend fun registerSubmission(item: UploadQueueItem): Boolean {
         val authenticatedCreatorId = auth.currentUser?.uid
         if (authenticatedCreatorId.isNullOrBlank()) {
@@ -404,66 +653,17 @@ class CaptureUploadRepository @Inject constructor(
         }
 
         val captureId = item.captureId.ifBlank { item.id }
-        val sceneId = item.sceneId.ifBlank { captureId }
         val submittedAtEpochMs = item.uploadCompletedAtEpochMs ?: System.currentTimeMillis()
         val submissionDocumentPath = "capture_submissions/$captureId"
-        val payload = linkedMapOf<String, Any>(
-            "capture_id" to captureId,
-            "scene_id" to sceneId,
-            "creator_id" to authenticatedCreatorId,
-            "capture_source" to item.captureSource,
-            "submitted_at" to Timestamp(Date(submittedAtEpochMs)),
-            "created_at" to Timestamp(Date()),
-            "capture_start_epoch_ms" to item.captureStartEpochMs,
-            "status" to "submitted",
-            "operational_state" to linkedMapOf(
-                "assignment_state" to if (item.captureJobId.isNullOrBlank()) "unassigned_or_open_capture" else "assigned_capture_job",
-                "upload_state" to "uploaded",
-                "qa_state" to "queued",
-                "repeat_ready" to false,
-            ),
-            "lifecycle" to linkedMapOf(
-                "capture_uploaded_at" to Timestamp(Date(submittedAtEpochMs)),
-            ),
+        val payload = buildCaptureSubmissionPayload(
+            item = item,
+            creatorId = authenticatedCreatorId,
+            recordedAtEpochMs = submittedAtEpochMs,
+            uploadState = "uploaded",
+            includeUploadStart = false,
+            includeUploadCompletion = true,
+            includeSubmittedAt = true,
         )
-
-        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
-        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["capture_job_id"] = it }
-        item.siteSubmissionId?.takeIf(String::isNotBlank)?.let { payload["site_submission_id"] = it }
-        item.quotedPayoutCents?.let { payload["estimated_payout_cents"] = it }
-        item.captureDurationMs?.let { payload["capture_duration_ms"] = it }
-        if (item.requestedOutputs.isNotEmpty()) {
-            payload["requested_outputs"] = item.requestedOutputs
-        }
-        item.remotePrefix?.takeIf(String::isNotBlank)?.let { payload["raw_prefix"] = "${it}raw/" }
-
-        // Sensor / ranking metadata enrichment
-        if (item.motionSampleCount > 0) {
-            payload["motion_sample_count"] = item.motionSampleCount
-            payload["motion_provenance"] = "phone_imu_accelerometer_gyroscope"
-        }
-        if (item.priorityWeight > 0) payload["priority_weight"] = item.priorityWeight
-        item.reservationId?.takeIf(String::isNotBlank)?.let { payload["reservation_id"] = it }
-
-        // Attempt to read site_identity and capture_topology from bundle for submission doc
-        val bundlePath = item.localBundlePath
-        if (!bundlePath.isNullOrBlank()) {
-            val rawDir = File(bundlePath).resolve("raw")
-            runCatching {
-                val siteFile = rawDir.resolve("site_identity.json")
-                if (siteFile.exists()) payload["has_site_identity"] = true
-            }
-            runCatching {
-                val topoFile = rawDir.resolve("capture_topology.json")
-                if (topoFile.exists()) payload["has_capture_topology"] = true
-            }
-            runCatching {
-                val imuFile = rawDir.resolve("imu_samples.jsonl")
-                if (imuFile.exists() && imuFile.length() > 0) {
-                    payload["imu_samples_available"] = true
-                }
-            }
-        }
 
         firestore.collection("capture_submissions")
             .document(captureId)
@@ -766,9 +966,11 @@ class CaptureUploadRepository @Inject constructor(
         val currentUserId = auth.currentUser?.uid ?: return
         val deferredIds = _queue.value
             .filter { item ->
-                item.uploadCompletedAtEpochMs != null &&
-                    item.submittedAtEpochMs == null &&
-                    item.cancelRequestedAtEpochMs == null
+                item.submittedAtEpochMs == null &&
+                    item.cancelRequestedAtEpochMs == null &&
+                    item.status != UploadQueueStatus.Saved &&
+                    item.status != UploadQueueStatus.Completed &&
+                    item.status != UploadQueueStatus.Failed
             }
             .map { it.id }
 
@@ -778,7 +980,7 @@ class CaptureUploadRepository @Inject constructor(
 
         Log.i(
             "CaptureUploadRepository",
-            "Retrying ${deferredIds.size} deferred capture_submissions write(s) after Firebase auth became available for $currentUserId",
+            "Retrying ${deferredIds.size} deferred capture lifecycle/submission sync operation(s) after Firebase auth became available for $currentUserId",
         )
         operationalTelemetry.recordSuccess(
             operation = "submission_registration_retry",

@@ -1,7 +1,12 @@
 import SwiftUI
 
 struct ContentView: View {
-    @StateObject private var viewModel = CaptureFlowViewModel()
+    @StateObject private var viewModel: CaptureFlowViewModel
+
+    @MainActor
+    init() {
+        _viewModel = StateObject(wrappedValue: CaptureFlowViewModel())
+    }
 
     var body: some View {
         NavigationStack {

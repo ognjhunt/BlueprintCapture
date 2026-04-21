@@ -526,6 +526,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case authenticationRequired
         case missingStructuredIntake
         case rawContractValidationFailed
+        case captureLifecycleRegistrationFailed
         case submissionRegistrationFailed
         case invalidBundle(reasons: [String])
 
@@ -543,6 +544,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Structured intake is required before upload."
             case .rawContractValidationFailed:
                 return "Raw capture validation failed. Please retake and upload again."
+            case .captureLifecycleRegistrationFailed:
+                return "Blueprint could not register this capture as in-progress before upload started. Check Firebase Auth and Firestore configuration before retrying."
             case .submissionRegistrationFailed:
                 return "Upload reached storage but Blueprint could not register the capture submission. Check Firebase Auth and Firestore production config before retrying."
             case .invalidBundle(let reasons):
@@ -666,6 +669,11 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         let storage = Storage.storage(url: storageBucketURL)
+        let lifecycleWritten = await ensureCaptureLifecycleRecordWritten(for: record.request)
+        guard lifecycleWritten else {
+            markUploadFailed(id: id, attempt: attempt, error: .captureLifecycleRegistrationFailed)
+            return
+        }
         var isDir: ObjCBool = false
         _ = FileManager.default.fileExists(atPath: packageURL.path, isDirectory: &isDir)
 
@@ -962,6 +970,271 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return true
     }
 
+    private func slugifyCity(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+    }
+
+    private func parseCityContext(addressFull: String?, regionId: String?) -> [String: Any]? {
+        if let addressFull {
+            let normalized = addressFull.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalized.isEmpty {
+                if normalized.contains("·"),
+                   let explicitCity = normalized
+                    .components(separatedBy: "·")
+                    .last?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                   !explicitCity.isEmpty {
+                    return [
+                        "city": explicitCity,
+                        "city_slug": slugifyCity(explicitCity)
+                    ]
+                }
+
+                let commaParts = normalized
+                    .components(separatedBy: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                if commaParts.count >= 2 {
+                    let city = commaParts[commaParts.count - 2]
+                    if !city.isEmpty {
+                        return [
+                            "city": city,
+                            "city_slug": slugifyCity(city)
+                        ]
+                    }
+                }
+            }
+        }
+
+        if let regionId {
+            let normalizedRegion = regionId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let regionPattern = #"^[a-z0-9]+(?:-[a-z0-9]+)*-[a-z]{2}$"#
+            if normalizedRegion.range(of: regionPattern, options: .regularExpression) != nil {
+                let parts = normalizedRegion.split(separator: "-")
+                if let state = parts.last {
+                    let city = parts.dropLast().map { $0.capitalized }.joined(separator: " ")
+                    if !city.isEmpty {
+                        return [
+                            "city": "\(city), \(state.uppercased())",
+                            "city_slug": normalizedRegion
+                        ]
+                    }
+                }
+            }
+        }
+
+        return nil
+    }
+
+    private func targetContextPayload(for request: CaptureUploadRequest) -> [String: Any]? {
+        var payload: [String: Any] = [:]
+        if let targetId = request.metadata.targetId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !targetId.isEmpty {
+            payload["target_id"] = targetId
+        }
+        let workflowFit =
+            request.metadata.taskHypothesis?.workflowName
+            ?? request.metadata.intakePacket?.workflowName
+            ?? request.metadata.captureContextHint
+        if let workflowFit = workflowFit?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workflowFit.isEmpty {
+            payload["workflow_fit"] = workflowFit
+        }
+        return payload.isEmpty ? nil : payload
+    }
+
+    private func siteIdentityPayload(for request: CaptureUploadRequest) -> [String: Any]? {
+        guard let siteIdentity = request.metadata.siteIdentity else {
+            return nil
+        }
+
+        var payload: [String: Any] = [
+            "site_id": siteIdentity.siteId,
+            "site_id_source": siteIdentity.siteIdSource,
+            "place_id": siteIdentity.placeId as Any,
+            "site_name": siteIdentity.siteName as Any,
+            "address_full": siteIdentity.addressFull as Any,
+            "building_id": siteIdentity.buildingId as Any,
+            "floor_id": siteIdentity.floorId as Any,
+            "room_id": siteIdentity.roomId as Any,
+            "zone_id": siteIdentity.zoneId as Any
+        ]
+        if let geo = siteIdentity.geo {
+            payload["geo"] = [
+                "latitude": geo.latitude,
+                "longitude": geo.longitude,
+                "accuracy_m": geo.accuracyM
+            ]
+        }
+        return payload
+    }
+
+    private func resolvedBuyerRequestId(for request: CaptureUploadRequest) -> String? {
+        if let explicit = request.metadata.buyerRequestId?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !explicit.isEmpty {
+            return explicit
+        }
+        if let siteIdentity = request.metadata.siteIdentity,
+           siteIdentity.siteIdSource == "buyer_request" {
+            let inferred = siteIdentity.siteId.trimmingCharacters(in: .whitespacesAndNewlines)
+            return inferred.isEmpty ? nil : inferred
+        }
+        return nil
+    }
+
+    private func captureSubmissionPayload(
+        for request: CaptureUploadRequest,
+        recordedAt: Date,
+        uploadState: String,
+        includeUploadStart: Bool,
+        includeUploadCompletion: Bool,
+        includeSubmittedAt: Bool
+    ) -> [String: Any] {
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        let assignmentState = request.metadata.captureJobId == nil
+            ? "unassigned_or_open_capture"
+            : "assigned_capture_job"
+
+        var lifecycle: [String: Any] = [
+            "capture_started_at": Timestamp(date: request.metadata.capturedAt)
+        ]
+        if includeUploadStart {
+            lifecycle["upload_started_at"] = Timestamp(date: recordedAt)
+        }
+        if includeUploadCompletion {
+            lifecycle["capture_uploaded_at"] = Timestamp(date: recordedAt)
+        }
+
+        var payload: [String: Any] = [
+            "capture_id": captureId,
+            "scene_id": sceneId,
+            "creator_id": request.metadata.creatorId,
+            "job_id": request.metadata.jobId,
+            "capture_source": request.metadata.captureSource.rawValue,
+            "status": "submitted",
+            "requested_outputs": request.metadata.requestedOutputs,
+            "has_site_identity": request.metadata.siteIdentity != nil,
+            "has_capture_topology": request.metadata.captureTopology != nil,
+            "created_at": Timestamp(date: recordedAt),
+            "operational_state": [
+                "assignment_state": assignmentState,
+                "upload_state": uploadState,
+                "qa_state": "queued",
+                "qa_outcome": NSNull(),
+                "repeat_ready": false
+            ],
+            "lifecycle": lifecycle
+        ]
+
+        if includeSubmittedAt {
+            payload["submitted_at"] = Timestamp(date: recordedAt)
+        }
+        if let captureJobId = request.metadata.captureJobId {
+            payload["capture_job_id"] = captureJobId
+        }
+        if let buyerRequestId = resolvedBuyerRequestId(for: request) {
+            payload["buyer_request_id"] = buyerRequestId
+        }
+        if let siteSubmissionId = request.metadata.siteSubmissionId {
+            payload["site_submission_id"] = siteSubmissionId
+        }
+        if let regionId = request.metadata.regionId {
+            payload["region_id"] = regionId
+        }
+        if let quotedPayoutCents = request.metadata.quotedPayoutCents {
+            payload["estimated_payout_cents"] = quotedPayoutCents
+        }
+        if let rightsProfile = request.metadata.rightsProfile {
+            payload["rights_profile"] = rightsProfile
+        }
+        if let addressFull = request.metadata.siteIdentity?.addressFull {
+            payload["target_address"] = addressFull
+        }
+        if let siteIdentityPayload = siteIdentityPayload(for: request) {
+            payload["site_identity"] = siteIdentityPayload
+        }
+        if let cityContext = parseCityContext(
+            addressFull: request.metadata.siteIdentity?.addressFull,
+            regionId: request.metadata.regionId
+        ) {
+            payload["city_context"] = cityContext
+        }
+        if let targetContext = targetContextPayload(for: request) {
+            payload["target_context"] = targetContext
+        }
+        if request.packageURL.hasDirectoryPath {
+            payload["raw_prefix"] = "\(makeBaseDirectoryPath(for: request))raw/"
+        }
+
+        return payload
+    }
+
+    private func ensureCaptureLifecycleRecordWritten(for request: CaptureUploadRequest) async -> Bool {
+        #if canImport(FirebaseFirestore)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        do {
+            _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "capture_lifecycle_write_failed",
+                metadata: [
+                    "capture_id": captureId,
+                    "reason": "guest_session_unavailable",
+                    "message": error.localizedDescription
+                ]
+            )
+            print("❌ [UploadService] capture_submissions/\(captureId) cannot be marked capture_in_progress because Firebase auth is unavailable")
+            return false
+        }
+
+        let db = Firestore.firestore()
+        let docRef = db.collection("capture_submissions").document(captureId)
+        let now = Date()
+        let payload = captureSubmissionPayload(
+            for: request,
+            recordedAt: now,
+            uploadState: "uploading",
+            includeUploadStart: true,
+            includeUploadCompletion: false,
+            includeSubmittedAt: false
+        )
+
+        return await withCheckedContinuation { continuation in
+            docRef.setData(payload, merge: true) { error in
+                if let error = error {
+                    SessionEventManager.shared.logError(
+                        errorCode: "capture_lifecycle_write_failed",
+                        metadata: [
+                            "capture_id": captureId,
+                            "reason": "firestore_write_failed",
+                            "message": error.localizedDescription
+                        ]
+                    )
+                    print("⚠️ [UploadService] Failed to write capture_in_progress for capture_submissions/\(captureId): \(error.localizedDescription)")
+                    continuation.resume(returning: false)
+                } else {
+                    SessionEventManager.shared.logOperationalEvent(
+                        operation: "capture_lifecycle_start",
+                        status: "success",
+                        metadata: [
+                            "capture_id": captureId
+                        ]
+                    )
+                    print("✅ [UploadService] capture_submissions/\(captureId) marked capture_in_progress")
+                    continuation.resume(returning: true)
+                }
+            }
+        }
+        #else
+        return true
+        #endif
+    }
+
     /// Writes `capture_submissions/{captureId}` before the upload is reported as complete.
     /// This keeps the iPhone launch path fail-closed: raw storage upload alone is not success
     /// unless downstream submission registration also succeeds.
@@ -982,84 +1255,17 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             print("❌ [UploadService] capture_submissions/\(captureId) cannot be written because Firebase auth is unavailable")
             return false
         }
-        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let db = Firestore.firestore()
         let docRef = db.collection("capture_submissions").document(captureId)
         let submittedAt = request.metadata.uploadedAt ?? Date()
-        let assignmentState = request.metadata.captureJobId == nil
-            ? "unassigned_or_open_capture"
-            : "assigned_capture_job"
-
-        var siteIdentityPayload: [String: Any]? = nil
-        if let siteIdentity = request.metadata.siteIdentity {
-            siteIdentityPayload = [
-                "site_id": siteIdentity.siteId,
-                "site_id_source": siteIdentity.siteIdSource,
-                "place_id": siteIdentity.placeId as Any,
-                "site_name": siteIdentity.siteName as Any,
-                "address_full": siteIdentity.addressFull as Any,
-                "building_id": siteIdentity.buildingId as Any,
-                "floor_id": siteIdentity.floorId as Any,
-                "room_id": siteIdentity.roomId as Any,
-                "zone_id": siteIdentity.zoneId as Any
-            ]
-            if let geo = siteIdentity.geo {
-                siteIdentityPayload?["geo"] = [
-                    "latitude": geo.latitude,
-                    "longitude": geo.longitude,
-                    "accuracy_m": geo.accuracyM
-                ]
-            }
-        }
-
-        let payload: [String: Any] = [
-            "capture_id": captureId,
-            "scene_id": sceneId,
-            "creator_id": request.metadata.creatorId,
-            "job_id": request.metadata.jobId,
-            "capture_source": request.metadata.captureSource.rawValue,
-            "submitted_at": Timestamp(date: submittedAt),
-            "created_at": Timestamp(date: Date()),
-            "requested_outputs": request.metadata.requestedOutputs,
-            "status": "submitted",
-            "has_site_identity": request.metadata.siteIdentity != nil,
-            "has_capture_topology": request.metadata.captureTopology != nil,
-            "operational_state": [
-                "assignment_state": assignmentState,
-                "upload_state": "uploaded",
-                "qa_state": "queued",
-                "qa_outcome": NSNull(),
-                "repeat_ready": false
-            ],
-            "lifecycle": [
-                "capture_uploaded_at": Timestamp(date: submittedAt)
-            ]
-        ]
-        var mutablePayload = payload
-        if let captureJobId = request.metadata.captureJobId {
-            mutablePayload["capture_job_id"] = captureJobId
-        }
-        if let buyerRequestId = request.metadata.buyerRequestId {
-            mutablePayload["buyer_request_id"] = buyerRequestId
-        }
-        if let siteSubmissionId = request.metadata.siteSubmissionId {
-            mutablePayload["site_submission_id"] = siteSubmissionId
-        }
-        if let regionId = request.metadata.regionId {
-            mutablePayload["region_id"] = regionId
-        }
-        if let quotedPayoutCents = request.metadata.quotedPayoutCents {
-            mutablePayload["estimated_payout_cents"] = quotedPayoutCents
-        }
-        if let rightsProfile = request.metadata.rightsProfile {
-            mutablePayload["rights_profile"] = rightsProfile
-        }
-        if let addressFull = request.metadata.siteIdentity?.addressFull {
-            mutablePayload["target_address"] = addressFull
-        }
-        if let siteIdentityPayload {
-            mutablePayload["site_identity"] = siteIdentityPayload
-        }
+        let mutablePayload = captureSubmissionPayload(
+            for: request,
+            recordedAt: submittedAt,
+            uploadState: "uploaded",
+            includeUploadStart: false,
+            includeUploadCompletion: true,
+            includeSubmittedAt: true
+        )
         return await withCheckedContinuation { continuation in
             docRef.setData(mutablePayload, merge: true) { error in
                 if let error = error {

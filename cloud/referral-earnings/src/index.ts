@@ -21,6 +21,8 @@
  * }
  */
 
+import crypto from "node:crypto";
+
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -105,6 +107,217 @@ function operationalStateForCaptureStatus(status: string) {
         repeat_ready: false,
       };
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asIsoString(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  if (value instanceof Timestamp) {
+    return value.toDate().toISOString();
+  }
+  if (typeof value === "object" && value && "toDate" in value && typeof (value as { toDate: () => Date }).toDate === "function") {
+    const parsed = (value as { toDate: () => Date }).toDate();
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  return null;
+}
+
+function slugifyCity(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildOperatingGraphEventId(input: {
+  eventKey: string;
+  stage: "capture_in_progress" | "capture_uploaded";
+  recordedAtIso: string;
+}) {
+  return crypto
+    .createHash("sha256")
+    .update(`${input.eventKey}|${input.stage}|${input.recordedAtIso}`)
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function captureRunEntityId(captureId: string) {
+  return `capture_run:${captureId}`;
+}
+
+function deriveCaptureLifecycleStage(after: Record<string, unknown>) {
+  const lifecycle = asRecord(after.lifecycle);
+  const operationalState = asRecord(after.operational_state);
+  const captureUploadedAtIso =
+    asIsoString(lifecycle.capture_uploaded_at) || asIsoString(after.capture_uploaded_at);
+  if (captureUploadedAtIso) {
+    return {
+      stage: "capture_uploaded" as const,
+      recordedAtIso: captureUploadedAtIso,
+      summary: "Capture uploaded and durably registered.",
+    };
+  }
+
+  const captureStartedAtIso = asIsoString(lifecycle.capture_started_at);
+  const uploadStartedAtIso = asIsoString(lifecycle.upload_started_at);
+  const uploadState = asString(operationalState.upload_state);
+  if (captureStartedAtIso || uploadStartedAtIso || ["uploading", "registering"].includes(uploadState)) {
+    return {
+      stage: "capture_in_progress" as const,
+      recordedAtIso: uploadStartedAtIso || captureStartedAtIso || Timestamp.now().toDate().toISOString(),
+      summary: "Capture is in progress and upload has started.",
+    };
+  }
+
+  return null;
+}
+
+function buildCaptureCanonicalForeignKeys(after: Record<string, unknown>) {
+  const cityContext = asRecord(after.city_context);
+  const canonicalForeignKeys = Object.fromEntries(
+    Object.entries({
+      city_program_id: asString(cityContext.city_slug)
+        ? `city_program:${asString(cityContext.city_slug)}:unscoped`
+        : undefined,
+      capture_id: asString(after.capture_id),
+      capture_run_id: captureRunEntityId(asString(after.capture_id)),
+      site_submission_id: asString(after.site_submission_id) || undefined,
+      scene_id: asString(after.scene_id) || undefined,
+      buyer_request_id: asString(after.buyer_request_id) || undefined,
+      capture_job_id: asString(after.capture_job_id) || undefined,
+    }).filter(([, value]) => value !== undefined),
+  );
+  return {
+    capture_id: asString(after.capture_id),
+    capture_run_id: captureRunEntityId(asString(after.capture_id)),
+    site_submission_id: asString(after.site_submission_id),
+    scene_id: asString(after.scene_id),
+    buyer_request_id: asString(after.buyer_request_id),
+    capture_job_id: asString(after.capture_job_id),
+    canonical_foreign_keys: canonicalForeignKeys,
+  };
+}
+
+async function syncCaptureLifecycleOperatingGraph(params: {
+  captureId: string;
+  before: Record<string, unknown> | undefined;
+  after: Record<string, unknown>;
+}) {
+  const lifecycle = deriveCaptureLifecycleStage(params.after);
+  if (!lifecycle) {
+    return;
+  }
+
+  const beforeLifecycle = params.before ? deriveCaptureLifecycleStage(params.before) : null;
+  if (
+    beforeLifecycle?.stage === lifecycle.stage &&
+    beforeLifecycle.recordedAtIso === lifecycle.recordedAtIso
+  ) {
+    return;
+  }
+
+  const cityContext = asRecord(params.after.city_context);
+  const city = asString(cityContext.city);
+  const citySlug = asString(cityContext.city_slug) || slugifyCity(city);
+  if (!city || !citySlug) {
+    logger.info("Skipping capture lifecycle operating-graph sync because city context is missing", {
+      captureId: params.captureId,
+      stage: lifecycle.stage,
+    });
+    return;
+  }
+
+  const entityId = captureRunEntityId(params.captureId);
+  const metadata = buildCaptureCanonicalForeignKeys(params.after);
+  const eventKey = `capture_lifecycle:${params.captureId}:${lifecycle.stage}`;
+  const eventId = buildOperatingGraphEventId({
+    eventKey,
+    stage: lifecycle.stage,
+    recordedAtIso: lifecycle.recordedAtIso,
+  });
+
+  const eventPayload = {
+    id: eventId,
+    event_key: eventKey,
+    entity_type: "capture_run",
+    entity_id: entityId,
+    city,
+    city_slug: citySlug,
+    stage: lifecycle.stage,
+    summary: lifecycle.summary,
+    source_repo: "BlueprintCapture",
+    source_kind: "capture_lifecycle",
+    origin: {
+      repo: "BlueprintCapture",
+      sourceCollection: "capture_submissions",
+      sourceDocId: params.captureId,
+    },
+    blocking_conditions: [],
+    external_confirmations: [],
+    next_actions: [],
+    metadata,
+    recorded_at_iso: lifecycle.recordedAtIso,
+    recorded_at: lifecycle.recordedAtIso,
+    updated_at: FieldValue.serverTimestamp(),
+  };
+
+  await db.collection("operatingGraphEvents").doc(eventId).set(eventPayload, { merge: true });
+
+  const stateRef = db.collection("operatingGraphState").doc(entityId);
+  const existingState = await stateRef.get();
+  const current = existingState.exists ? asRecord(existingState.data()) : {};
+  const currentLatestAtIso = asIsoString(current.latest_event_at_iso);
+  const shouldPromoteCurrentStage =
+    !currentLatestAtIso ||
+    Date.parse(lifecycle.recordedAtIso) >= Date.parse(currentLatestAtIso);
+  const stagesSeen = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(current.stages_seen) ? current.stages_seen.filter((value): value is string => typeof value === "string") : []),
+        lifecycle.stage,
+      ],
+    ),
+  );
+
+  await stateRef.set(
+    {
+      state_key: entityId,
+      entity_type: "capture_run",
+      entity_id: entityId,
+      city,
+      city_slug: citySlug,
+      stages_seen: stagesSeen,
+      ...(shouldPromoteCurrentStage
+        ? {
+            current_stage: lifecycle.stage,
+            latest_summary: lifecycle.summary,
+            latest_source_repo: "BlueprintCapture",
+            latest_event_id: eventId,
+            latest_event_at_iso: lifecycle.recordedAtIso,
+          }
+        : {}),
+      blocking_conditions: [],
+      external_confirmations: [],
+      next_actions: [],
+      canonical_foreign_keys: metadata.canonical_foreign_keys,
+      updated_at: FieldValue.serverTimestamp(),
+    },
+    { merge: true },
+  );
 }
 
 export const onCaptureApproved = onDocumentWritten(
@@ -263,6 +476,27 @@ export const onCaptureApproved = onDocumentWritten(
       newReferralStatus,
     });
   }
+);
+
+export const syncCaptureLifecycleToOperatingGraph = onDocumentWritten(
+  {
+    document: "capture_submissions/{captureId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const captureId = event.params.captureId;
+    const before = event.data?.before?.data() as Record<string, unknown> | undefined;
+    const after = event.data?.after?.data() as Record<string, unknown> | undefined;
+    if (!after) {
+      return;
+    }
+
+    await syncCaptureLifecycleOperatingGraph({
+      captureId,
+      before,
+      after,
+    });
+  },
 );
 
 /**
