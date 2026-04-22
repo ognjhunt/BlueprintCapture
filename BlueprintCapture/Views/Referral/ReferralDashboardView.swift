@@ -7,7 +7,7 @@ struct ReferralDashboardView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -43,6 +43,7 @@ struct ReferralDashboardView: View {
             }
             .refreshable { await viewModel.load() }
         }
+        .blueprintAppBackground()
         .navigationBarHidden(true)
         .task { await viewModel.load() }
         .preferredColorScheme(.dark)
@@ -57,18 +58,18 @@ struct ReferralDashboardView: View {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 13, weight: .semibold))
                     Text("Back")
-                        .font(.subheadline.weight(.semibold))
+                        .font(BlueprintTheme.body(14, weight: .semibold))
                 }
-                .foregroundStyle(Color(white: 0.6))
+                .foregroundStyle(BlueprintTheme.textSecondary)
             }
             .padding(.bottom, 16)
 
             Text("Affiliate Center")
-                .font(.largeTitle.weight(.bold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.display(34, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
             Text("Track your referral earnings")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.45))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
     }
 
@@ -84,16 +85,16 @@ struct ReferralDashboardView: View {
             HStack(spacing: 10) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.55))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("10% kickback on referrals")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.85))
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("Share your code. When friends complete their first payout, you get 10% and they get 10% extra.")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -102,11 +103,7 @@ struct ReferralDashboardView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color(white: 0.14), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Stats Grid (2x2 like Kled Affiliate Center)

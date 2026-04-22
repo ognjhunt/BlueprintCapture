@@ -15,7 +15,7 @@ struct PostCaptureSummaryView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
@@ -23,18 +23,18 @@ struct PostCaptureSummaryView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 52))
-                            .foregroundStyle(Color(red: 0.2, green: 0.85, blue: 0.45))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                             .padding(.top, 48)
 
                         Text(spaceTitle.isEmpty ? "Capture complete" : spaceTitle)
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.display(32, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                             .multilineTextAlignment(.center)
 
                         if let address = spaceAddress, !address.isEmpty {
                             Text(address)
-                                .font(.subheadline)
-                                .foregroundStyle(Color(white: 0.5))
+                                .font(BlueprintTheme.body(14, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -47,8 +47,7 @@ struct PostCaptureSummaryView: View {
                         Divider().background(Color(white: 0.15))
                         summaryRow(label: "Size", value: formattedDataSize)
                     }
-                    .background(Color(white: 0.07))
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .blueprintEditorialCard(radius: 16, fill: BlueprintTheme.panel)
                     .padding(.horizontal, 20)
 
                     if let workflowReview {
@@ -59,13 +58,12 @@ struct PostCaptureSummaryView: View {
 
                     // ── Notes ─────────────────────────────────────────────
                     TextField("Add a note (optional)", text: $userNotes, axis: .vertical)
-                        .font(.subheadline)
-                        .foregroundStyle(.white)
-                        .tint(Color(red: 0.22, green: 0.9, blue: 0.78))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+                        .tint(Color.white)
                         .lineLimit(2...4)
                         .padding(14)
-                        .background(Color(white: 0.07))
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .blueprintEditorialCard(radius: 16, fill: BlueprintTheme.panel)
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
 
@@ -73,15 +71,15 @@ struct PostCaptureSummaryView: View {
                         HStack(spacing: 10) {
                             if isBusy {
                                 ProgressView()
-                                    .tint(Color(red: 0.22, green: 0.9, blue: 0.78))
+                                    .tint(Color.white)
                             } else {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(BlueprintTheme.textPrimary)
                             }
 
                             Text(statusMessage)
-                                .font(.subheadline)
-                                .foregroundStyle(isBusy ? .white : .red.opacity(0.95))
+                                .font(BlueprintTheme.body(14, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
 
                             Spacer()
                         }
@@ -105,7 +103,7 @@ struct PostCaptureSummaryView: View {
                                 .foregroundStyle(.black)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 17)
-                                .background(Color(red: 0.22, green: 0.9, blue: 0.78))
+                                .background(Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             }
                             .disabled(isBusy)
@@ -146,11 +144,11 @@ struct PostCaptureSummaryView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
-                            .background(Color(white: 0.12))
+                            .background(BlueprintTheme.panelStrong)
                             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(Color(white: 0.2), lineWidth: 1)
+                                    .stroke(BlueprintTheme.hairline, lineWidth: 1)
                             )
                         }
                         .disabled(isBusy)
@@ -159,8 +157,8 @@ struct PostCaptureSummaryView: View {
                         // Tertiary — save for later
                         Button(action: onUploadLater) {
                             Text("Save for later")
-                                .font(.subheadline)
-                                .foregroundStyle(Color(white: 0.4))
+                                .font(BlueprintTheme.body(14, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
                         }
                         .disabled(isBusy)
                         .accessibilityIdentifier("post-capture-save-later")
@@ -172,6 +170,7 @@ struct PostCaptureSummaryView: View {
                 }
             }
         }
+        .blueprintAppBackground()
     }
 
     // MARK: - Row helper
@@ -179,12 +178,12 @@ struct PostCaptureSummaryView: View {
     private func summaryRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.55))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
             Spacer()
             Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.body(14, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
@@ -195,26 +194,26 @@ struct PostCaptureSummaryView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(review.title)
-                        .font(.headline)
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(15, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(review.summary)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.7))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(review.tone.title)
-                        .font(.caption.weight(.semibold))
+                        .font(BlueprintTheme.body(12, weight: .semibold))
                         .foregroundStyle(reviewToneColor(review.tone))
                     Text("\(review.score)")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(22, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                 }
             }
 
             Text("Workflow progress \(review.completedRequiredPasses)/\(review.totalRequiredPasses)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(white: 0.7))
+                .font(BlueprintTheme.body(12, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textSecondary)
 
             if !review.completedItems.isEmpty {
                 workflowList(title: "Completed", items: review.completedItems, tint: Color(red: 0.2, green: 0.85, blue: 0.45))
@@ -226,13 +225,12 @@ struct PostCaptureSummaryView: View {
 
             if let weakSignalSummary = review.weakSignalSummary {
                 Text(weakSignalSummary.replacingOccurrences(of: "weak_signal:", with: "Weak signal: "))
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.76))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
         }
         .padding(14)
-        .background(Color(white: 0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .blueprintEditorialCard(radius: 16, fill: BlueprintTheme.panel)
     }
 
     private func workflowList(title: String, items: [String], tint: Color) -> some View {

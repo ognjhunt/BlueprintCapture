@@ -13,6 +13,7 @@ struct BlueprintCaptureApp: App {
     @StateObject private var uploadQueue = UploadQueueViewModel()
     @StateObject private var alertsManager = NearbyAlertsManager()
     @StateObject private var notificationPreferences = NotificationPreferencesStore.shared
+    @State private var launchCityGateViewModel = LaunchCityGateViewModel()
 
     init() {
         #if canImport(MWDATCore) && !targetEnvironment(simulator)
@@ -30,11 +31,13 @@ struct BlueprintCaptureApp: App {
                 if RuntimeConfig.current.isUITesting {
                     UITestRootView()
                 } else if isOnboarded {
-                    MainTabView(
-                        glassesManager: glassesManager,
-                        uploadQueue: uploadQueue,
-                        alertsManager: alertsManager
-                    )
+                    LaunchCityGateRootView(viewModel: launchCityGateViewModel) {
+                        MainTabView(
+                            glassesManager: glassesManager,
+                            uploadQueue: uploadQueue,
+                            alertsManager: alertsManager
+                        )
+                    }
                 } else {
                     OnboardingFlowView(
                         glassesManager: glassesManager,

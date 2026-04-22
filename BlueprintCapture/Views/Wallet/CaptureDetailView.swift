@@ -82,11 +82,11 @@ struct CaptureDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(statusHeadline)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.primary)
+                        .font(BlueprintTheme.display(26, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(statusSubheadline)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
 
                 Spacer()
@@ -96,47 +96,41 @@ struct CaptureDetailView: View {
 
             HStack(spacing: 12) {
                 Label(capturedAt.formatted(.dateTime.month().day()), systemImage: "calendar")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                 if let payout = estimatedPayout {
                     HStack(spacing: 4) {
                         Image(systemName: "dollarsign.circle.fill")
                         Text("Est. \(payout, format: .currency(code: "USD"))")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 }
             }
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private var stageOverviewCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label(stageLabel, systemImage: stageIcon)
-                .font(.headline)
+                .font(BlueprintTheme.body(15, weight: .semibold))
                 .foregroundStyle(stageColor)
 
             Text(stageMessage)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textPrimary)
 
             if let helper = stageHelper {
                 Text(helper)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(stageColor.opacity(0.1))
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private var statusBadge: some View {
@@ -144,7 +138,7 @@ struct CaptureDetailView: View {
             Image(systemName: statusIcon)
                 .font(.caption)
             Text(statusLabel)
-                .font(.caption.weight(.semibold))
+                .font(BlueprintTheme.body(12, weight: .semibold))
         }
         .foregroundStyle(statusColor)
         .padding(.horizontal, 10)
@@ -158,50 +152,41 @@ struct CaptureDetailView: View {
     private var locationCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Capture location", systemImage: "mappin.circle.fill")
-                .font(.headline)
+                .font(BlueprintTheme.body(15, weight: .semibold))
 
             Text(targetAddress)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private var loadingCard: some View {
         HStack(spacing: 12) {
             ProgressView()
-                .tint(BlueprintTheme.brandTeal)
+                .tint(BlueprintTheme.textPrimary)
             Text("Loading capture details…")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
             Spacer()
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private func unavailableCard(message: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Detail Unavailable", systemImage: "info.circle.fill")
-                .font(.headline)
+                .font(BlueprintTheme.body(15, weight: .semibold))
             Text(message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private func qualityCard(_ quality: CaptureQualityBreakdown) -> some View {

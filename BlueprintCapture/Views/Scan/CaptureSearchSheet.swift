@@ -102,18 +102,18 @@ struct CaptureSearchSheet: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Header bar
                 HStack {
-                    Image(systemName: "b.square.fill")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                    Text("Search")
+                        .font(BlueprintTheme.display(28, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Spacer()
                     Button("Cancel") { dismiss() }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -123,7 +123,7 @@ struct CaptureSearchSheet: View {
                 HStack(spacing: 10) {
                     Image(systemName: isSearchingAddresses ? "arrow.clockwise" : "magnifyingglass")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(fieldFocused ? BlueprintTheme.brandTeal : Color(white: 0.4))
+                        .foregroundStyle(fieldFocused ? BlueprintTheme.textPrimary : BlueprintTheme.textSecondary)
                         .rotationEffect(.degrees(isSearchingAddresses ? 360 : 0))
                         .animation(isSearchingAddresses ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isSearchingAddresses)
 
@@ -160,10 +160,10 @@ struct CaptureSearchSheet: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 14)
-                .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(fieldFocused ? BlueprintTheme.brandTeal.opacity(0.5) : Color(white: 0.14), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(fieldFocused ? Color.white.opacity(0.18) : BlueprintTheme.hairline, lineWidth: 1)
                 )
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
@@ -171,10 +171,10 @@ struct CaptureSearchSheet: View {
                 // Searching jobs indicator
                 if isSearchingJobs {
                     HStack(spacing: 8) {
-                        ProgressView().tint(BlueprintTheme.brandTeal).scaleEffect(0.75)
+                        ProgressView().tint(BlueprintTheme.textPrimary).scaleEffect(0.75)
                         Text("Finding captures near \(selectedAddressLabel)…")
-                            .font(.caption)
-                            .foregroundStyle(Color(white: 0.4))
+                            .font(BlueprintTheme.body(12, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                         Spacer()
                     }
                     .padding(.horizontal, 20)
@@ -200,6 +200,7 @@ struct CaptureSearchSheet: View {
                 }
             }
         }
+        .blueprintAppBackground()
         .preferredColorScheme(.dark)
         .onAppear {
             if let coord = userLocation?.coordinate {
@@ -224,11 +225,11 @@ struct CaptureSearchSheet: View {
 
             VStack(spacing: 6) {
                 Text("Find Nearby Opportunities")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.4))
+                    .font(BlueprintTheme.display(24, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Search a mall, store, or address to see\nif there's an active capture job nearby.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.25))
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
@@ -270,25 +271,24 @@ struct CaptureSearchSheet: View {
                     .foregroundStyle(Color(white: 0.4))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.55))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .lineLimit(1)
                     if !subtitle.isEmpty {
                         Text(subtitle)
-                            .font(.caption2)
-                            .foregroundStyle(Color(white: 0.3))
+                            .font(BlueprintTheme.body(11, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                             .lineLimit(1)
                     }
                 }
                 Spacer()
                 Image(systemName: "arrow.up.left")
                     .font(.caption2)
-                    .foregroundStyle(Color(white: 0.25))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, subtitle.isEmpty ? 12 : 10)
-            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(white: 0.12), lineWidth: 1))
+            .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
         }
         .buttonStyle(.plain)
     }
@@ -312,19 +312,19 @@ struct CaptureSearchSheet: View {
                             HStack(spacing: 14) {
                                 Image(systemName: "mappin.circle.fill")
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(.white)
+                                    .foregroundStyle(BlueprintTheme.textPrimary)
                                     .frame(width: 36, height: 36)
-                                    .background(BlueprintTheme.brandTeal.opacity(0.2), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(completion.title)
-                                        .font(.subheadline.weight(.semibold))
-                                        .foregroundStyle(.white)
+                                        .font(BlueprintTheme.body(14, weight: .semibold))
+                                        .foregroundStyle(BlueprintTheme.textPrimary)
                                         .lineLimit(1)
                                     if !completion.subtitle.isEmpty {
                                         Text(completion.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(Color(white: 0.4))
+                                            .font(BlueprintTheme.body(12, weight: .medium))
+                                            .foregroundStyle(BlueprintTheme.textSecondary)
                                             .lineLimit(1)
                                     }
                                 }
@@ -333,7 +333,7 @@ struct CaptureSearchSheet: View {
 
                                 Image(systemName: "chevron.right")
                                     .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Color(white: 0.2))
+                                    .foregroundStyle(BlueprintTheme.textTertiary)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 13)
@@ -345,8 +345,7 @@ struct CaptureSearchSheet: View {
                         }
                     }
                 }
-                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(white: 0.12), lineWidth: 1))
+                .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
             }
         }
     }
@@ -359,8 +358,8 @@ struct CaptureSearchSheet: View {
                 sectionLabel("\(jobResults.count) capture\(jobResults.count == 1 ? "" : "s") near \(selectedAddressLabel)")
                 Spacer()
                 Text("within 2 mi")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.25))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
             .padding(.bottom, 14)
 
@@ -386,10 +385,10 @@ struct CaptureSearchSheet: View {
         let item = result.item
         let (tierColor, tierLabel): (Color, String) = {
             switch item.permissionTier {
-            case .approved:         return (BlueprintTheme.successGreen, "Approved")
-            case .reviewRequired:   return (BlueprintTheme.brandTeal,    "Review")
-            case .permissionRequired: return (Color(red: 0.9, green: 0.55, blue: 0.1), "Permission")
-            case .blocked:          return (Color(white: 0.3),           "Blocked")
+            case .approved:         return (BlueprintTheme.textPrimary, "Approved")
+            case .reviewRequired:   return (BlueprintTheme.textSecondary, "Review")
+            case .permissionRequired: return (BlueprintTheme.textSecondary, "Permission")
+            case .blocked:          return (BlueprintTheme.textTertiary, "Blocked")
             }
         }()
 
@@ -397,33 +396,37 @@ struct CaptureSearchSheet: View {
             // Thumbnail
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(white: 0.13))
+                    .fill(BlueprintTheme.panelStrong)
                     .frame(width: 52, height: 52)
 
-                CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
+                CapturePreviewView(
+                    coordinate: item.job.coordinate,
+                    remoteImageURL: nil,
+                    preferredAssetName: preferredAssetName(for: item)
+                )
                     .frame(width: 52, height: 52)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.job.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .lineLimit(1)
                 Text(item.job.address)
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.4))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .lineLimit(1)
                 HStack(spacing: 8) {
                     Label(item.payoutLabel, systemImage: "dollarsign.circle.fill")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .font(BlueprintTheme.body(12, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("·")
-                        .foregroundStyle(Color(white: 0.3))
-                        .font(.caption)
+                        .foregroundStyle(BlueprintTheme.textTertiary)
+                        .font(BlueprintTheme.body(12, weight: .medium))
                     Text(result.distanceLabel)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.4))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
             }
 
@@ -433,22 +436,21 @@ struct CaptureSearchSheet: View {
                 HStack(spacing: 4) {
                     Circle().fill(tierColor).frame(width: 6, height: 6)
                     Text(tierLabel)
-                        .font(.caption2.weight(.bold))
+                        .font(BlueprintTheme.body(11, weight: .semibold))
                         .foregroundStyle(tierColor)
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(tierColor.opacity(0.12), in: Capsule())
+                .background(BlueprintTheme.panelStrong, in: Capsule())
 
                 Image(systemName: "chevron.right")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.2))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Color(white: 0.12), lineWidth: 1))
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Empty State
@@ -468,11 +470,11 @@ struct CaptureSearchSheet: View {
 
             VStack(spacing: 6) {
                 Text("No captures here yet")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.5))
+                    .font(BlueprintTheme.display(22, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("There's no active capture job registered\nnear \(selectedAddressLabel).")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.3))
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
@@ -495,20 +497,20 @@ struct CaptureSearchSheet: View {
         } label: {
             HStack(spacing: 0) {
                 Rectangle()
-                    .fill(BlueprintTheme.brandTeal)
+                    .fill(BlueprintTheme.textPrimary)
                     .frame(width: 3)
                     .cornerRadius(2)
 
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .frame(width: 36)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Submit This Space for Review")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.body(14, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
 
                         if isGeneratingDraft {
                             HStack(spacing: 5) {
@@ -521,15 +523,15 @@ struct CaptureSearchSheet: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "sparkles")
                                     .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(BlueprintTheme.brandTeal)
+                                    .foregroundStyle(BlueprintTheme.textPrimary)
                                 Text("Context pre-filled by AI")
-                                    .font(.caption)
-                                    .foregroundStyle(BlueprintTheme.brandTeal)
+                                    .font(BlueprintTheme.body(12, weight: .medium))
+                                    .foregroundStyle(BlueprintTheme.textSecondary)
                             }
                         } else {
                             Text("Nominate it to become an approved capture job")
-                                .font(.caption)
-                                .foregroundStyle(Color(white: 0.4))
+                                .font(BlueprintTheme.body(12, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
                         }
                     }
 
@@ -537,16 +539,12 @@ struct CaptureSearchSheet: View {
 
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.25))
+                        .foregroundStyle(BlueprintTheme.textTertiary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 14)
             }
-            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(BlueprintTheme.brandTeal.opacity(generatedDraftContext != nil ? 0.5 : 0.25), lineWidth: 1)
-            )
+            .blueprintEditorialCard(radius: 16, fill: BlueprintTheme.panel)
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.2), value: isGeneratingDraft)
@@ -608,10 +606,18 @@ struct CaptureSearchSheet: View {
     // MARK: - Logic
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.caption.weight(.bold))
-            .foregroundStyle(Color(white: 0.35))
+        Text(text)
+            .font(BlueprintTheme.display(22, weight: .semibold))
+            .foregroundStyle(BlueprintTheme.textPrimary)
             .tracking(1.0)
+    }
+
+    private func preferredAssetName(for item: ScanHomeViewModel.JobItem) -> String {
+        let category = (item.job.category ?? "").lowercased()
+        if category.contains("industrial") || category.contains("warehouse") || category.contains("logistics") {
+            return "CaptureWarehouseHero"
+        }
+        return "CaptureRetailHero"
     }
 
     /// Resolves an MKLocalSearchCompletion to real coordinates, then passes it

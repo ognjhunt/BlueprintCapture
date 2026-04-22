@@ -47,7 +47,7 @@ struct ScanRecordingView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 16) {
                 topBar
@@ -63,6 +63,7 @@ struct ScanRecordingView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
+        .blueprintAppBackground()
         .sheet(isPresented: $showConnectSheet) {
             GlassesConnectSheet(glassesManager: glassesManager) {
                 showConnectSheet = false
@@ -109,12 +110,12 @@ struct ScanRecordingView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(24, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .lineLimit(1)
                 Text(job.address)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.65))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .lineLimit(1)
             }
 
@@ -125,9 +126,9 @@ struct ScanRecordingView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 32, height: 32)
-                    .background(Color.white.opacity(0.12), in: Circle())
+                    .background(BlueprintTheme.panelStrong, in: Circle())
             }
         }
     }

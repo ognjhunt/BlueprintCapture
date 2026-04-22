@@ -30,7 +30,7 @@ struct OnboardingFlowView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             switch step {
             case .welcome:
@@ -55,7 +55,7 @@ struct OnboardingFlowView: View {
                 OnboardingGlassesView(glassesManager: glassesManager, onContinue: advance)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             case .complete:
-                OnboardingCompleteView {
+                OnboardingCompleteView(glassesConnected: isGlassesConnected) {
                     isOnboarded = true
                     UserDeviceService.updateLocalUser(fields: ["finishedOnboarding": true])
                     AppSessionService.shared.log("onboardingComplete")
@@ -63,8 +63,16 @@ struct OnboardingFlowView: View {
                 .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             }
         }
+        .blueprintOnboardingBackground()
         .preferredColorScheme(.dark)
         .animation(.spring(response: 0.45, dampingFraction: 0.88), value: step)
+    }
+
+    private var isGlassesConnected: Bool {
+        if case .connected = glassesManager.connectionState {
+            return true
+        }
+        return false
     }
 }
 
@@ -75,38 +83,38 @@ private struct OnboardingWelcomeView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer()
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("BlueprintCapture")
+                        .font(BlueprintTheme.body(12, weight: .semibold))
+                        .tracking(2.4)
+                        .foregroundStyle(BlueprintTheme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 28)
 
-                VStack(spacing: 16) {
-                    Image(systemName: "camera.viewfinder")
-                        .font(.system(size: 72))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
-
-                    Text("Get paid to\nscan spaces")
-                        .font(.system(size: 34, weight: .bold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-
-                    Text("Capture spaces for Blueprint review. We check rights, coverage, and quality before anything moves downstream.")
-                        .font(.body)
-                        .foregroundStyle(Color(white: 0.45))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 28)
+                    Text("Contributor Onboarding")
+                        .font(BlueprintTheme.display(34, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 24)
                 }
+                .padding(.bottom, 20)
 
-                Spacer()
+                heroCard
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 20)
 
-                VStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 12) {
                     featureRow(icon: "location.viewfinder", text: "Nearby spaces and approved opportunities")
                     featureRow(icon: "hand.raised.fill", text: "Rights and policy checks before reuse")
-                    featureRow(icon: "dollarsign.circle", text: "Payout only after review approval")
+                    featureRow(icon: "cube.transparent", text: "Truthful capture feeds downstream world models")
                 }
                 .padding(.horizontal, 28)
 
-                Spacer()
+                Spacer(minLength: 16)
 
                 kledPrimaryButton("Get Started", action: onContinue)
                     .accessibilityIdentifier("onboarding-get-started")
@@ -116,19 +124,66 @@ private struct OnboardingWelcomeView: View {
         }
     }
 
+    private var heroCard: some View {
+        ZStack(alignment: .bottomLeading) {
+            Image("OnboardingHero")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+
+            LinearGradient(
+                colors: [Color.black.opacity(0.08), Color.black.opacity(0.24), Color.black.opacity(0.72)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Spacer()
+                    Image(systemName: "camera.metering.matrix")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .padding(14)
+                }
+
+                Spacer()
+
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("Get paid\nto scan spaces")
+                        .font(BlueprintTheme.display(28, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+
+                    Rectangle()
+                        .fill(BlueprintTheme.hairline)
+                        .frame(width: 58, height: 1)
+
+                    Text("Capture real places.\nProvide truthful data.\nPower world models.")
+                        .font(BlueprintTheme.body(16, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(24)
+            }
+        }
+        .frame(height: 420)
+        .blueprintEditorialCard(radius: 34, fill: BlueprintTheme.panel)
+    }
+
     private func featureRow(icon: String, text: String) -> some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.body.weight(.semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 24)
 
             Text(text)
-                .font(.body)
-                .foregroundStyle(Color(white: 0.55))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
 
             Spacer()
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .blueprintPanelBackground(radius: 16, fill: BlueprintTheme.panelMuted)
     }
 }
 
@@ -144,32 +199,32 @@ private struct InviteCodeStepView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Top bar with skip
                 HStack {
                     Spacer()
                     Button("Skip for now") { onContinue() }
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 60)
                 .padding(.bottom, 32)
 
-                VStack(spacing: 16) {
+                VStack(spacing: 14) {
                     Image(systemName: "gift.fill")
                         .font(.system(size: 52))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("Got an Invite?")
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(28, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("Enter your friend's invite code below.\nYou'll both get 10% extra on your first payout.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(15, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }
@@ -178,8 +233,8 @@ private struct InviteCodeStepView: View {
                 // Code input
                 VStack(alignment: .leading, spacing: 8) {
                     Text("INVITE CODE")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color(white: 0.35))
+                        .font(BlueprintTheme.body(12, weight: .bold))
+                        .foregroundStyle(BlueprintTheme.textTertiary)
                         .tracking(1.0)
 
                     TextField("e.g. AB12CD", text: $codeInput)
@@ -190,11 +245,11 @@ private struct InviteCodeStepView: View {
                         .tint(BlueprintTheme.brandTeal)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
-                        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
                                 .stroke(
-                                    validationError != nil ? Color(red: 0.95, green: 0.35, blue: 0.35).opacity(0.6) : Color(white: 0.18),
+                                    validationError != nil ? Color.white.opacity(0.35) : BlueprintTheme.hairline,
                                     lineWidth: 1
                                 )
                         )
@@ -214,8 +269,8 @@ private struct InviteCodeStepView: View {
 
                     if let err = validationError {
                         Text(err)
-                            .font(.caption)
-                            .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.35))
+                            .font(BlueprintTheme.body(12, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -230,15 +285,15 @@ private struct InviteCodeStepView: View {
                             ProgressView().tint(.black).controlSize(.small)
                         } else {
                             Text("Apply Code")
-                                .font(.body.weight(.semibold))
+                                .font(BlueprintTheme.body(16, weight: .semibold))
                                 .foregroundStyle(.black)
                         }
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
                     .background(
-                        codeInput.trimmingCharacters(in: .whitespaces).isEmpty ? Color(white: 0.2) : Color.white,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        codeInput.trimmingCharacters(in: .whitespaces).isEmpty ? Color.white.opacity(0.32) : Color.white,
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                     )
                 }
                 .buttonStyle(.plain)
@@ -320,7 +375,7 @@ private struct AuthStepView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
@@ -328,8 +383,8 @@ private struct AuthStepView: View {
                     HStack {
                         Spacer()
                         Button("Skip for now") { onContinue() }
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.5))
+                            .font(BlueprintTheme.body(14, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 60)
@@ -338,11 +393,11 @@ private struct AuthStepView: View {
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Create your account")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.display(34, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text("Sign up to track earnings and get paid.")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(15, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
@@ -363,10 +418,10 @@ private struct AuthStepView: View {
                             .padding(.horizontal, 16)
                             .frame(height: 52)
                             .frame(maxWidth: .infinity)
-                            .background(Color(white: 0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(Color(white: 0.18), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(BlueprintTheme.hairline, lineWidth: 1)
                                 )
                         }
                         .buttonStyle(.plain)
@@ -377,7 +432,7 @@ private struct AuthStepView: View {
                             Rectangle().fill(Color(white: 0.15)).frame(height: 1)
                             Text("or")
                                 .font(.caption.weight(.medium))
-                                .foregroundStyle(Color(white: 0.4))
+                                .foregroundStyle(BlueprintTheme.textTertiary)
                             Rectangle().fill(Color(white: 0.15)).frame(height: 1)
                         }
                         .padding(.vertical, 2)
@@ -403,10 +458,10 @@ private struct AuthStepView: View {
                             }
                         }
                         .padding(4)
-                        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(BlueprintTheme.panelMuted, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color(white: 0.12), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(BlueprintTheme.hairline, lineWidth: 1)
                         )
 
                         // Fields
@@ -443,7 +498,7 @@ private struct AuthStepView: View {
                             .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.35))
                             .padding(12)
                             .background(
-                                Color(red: 0.95, green: 0.35, blue: 0.35).opacity(0.12),
+                                Color.white.opacity(0.06),
                                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                             )
                         }
@@ -464,8 +519,8 @@ private struct AuthStepView: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: 52)
                             .background(
-                                vm.canSubmit ? Color.white : Color(white: 0.25),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                vm.canSubmit ? Color.white : Color.white.opacity(0.28),
+                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                             )
                         }
                         .buttonStyle(.plain)
@@ -478,9 +533,6 @@ private struct AuthStepView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
             onContinue()
-        }
-        .task {
-            vm.consumePasteboardReferralIfNeeded()
         }
     }
 
@@ -617,7 +669,7 @@ private struct OnboardingPermissionsView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -625,15 +677,15 @@ private struct OnboardingPermissionsView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "checkmark.shield.fill")
                         .font(.system(size: 52))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("Enable Permissions")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(30, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("We use these to find nearby spaces, capture stronger evidence, and keep review states up to date.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(15, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }
@@ -683,9 +735,9 @@ private struct OnboardingPermissionsView: View {
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                 )
 
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                Text(title)
+                .font(BlueprintTheme.body(15, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
 
             Spacer()
 
@@ -695,7 +747,11 @@ private struct OnboardingPermissionsView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(BlueprintTheme.hairline, lineWidth: 1)
+                )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color(white: 0.12), lineWidth: 1)
@@ -718,15 +774,15 @@ private struct OnboardingPermissionsView: View {
         Task {
             let cam = await AVCaptureDevice.requestAccess(for: .video)
             UserDeviceService.setPermission("camera", granted: cam)
-            alertsManager.requestWhenInUseAuthorization()
-            UserDeviceService.setPermission("location", granted: alertsManager.isLocationAuthorized)
+            let location = await LocationPermissionRequester.requestWhenInUse()
+            UserDeviceService.setPermission("location", granted: location)
             let motion = await MotionPermissionHelper.requestAuthorization()
             UserDeviceService.setPermission("motion", granted: motion)
             await notificationService.requestAuthorizationIfNeeded()
             alertsManager.refreshNotificationStatus()
-            UserDeviceService.setPermission("notifications", granted: alertsManager.notificationsGranted)
             await MainActor.run {
                 refreshStatuses()
+                UserDeviceService.setPermission("notifications", granted: notificationsGranted)
                 isRequesting = false
                 if requiredGranted { onContinue() } else { showAlert = true }
             }
@@ -744,7 +800,7 @@ private struct OnboardingGlassesView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -752,19 +808,43 @@ private struct OnboardingGlassesView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "eyeglasses")
                         .font(.system(size: 56))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("Connect Smart Glasses")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(30, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("Optional — pair Meta smart glasses for hands-free capture.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                    Text("Pair Meta smart glasses for hands-free capture, or skip and start with your iPhone.")
+                        .font(BlueprintTheme.body(15, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }
                 .padding(.bottom, 36)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 14) {
+                        Image(systemName: "wave.3.right")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                            .frame(width: 42, height: 42)
+                            .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Connect once")
+                                .font(BlueprintTheme.body(15, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                            Text("Then move straight into hands-free capture whenever a site opens.")
+                                .font(BlueprintTheme.body(13, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
+                        }
+
+                        Spacer()
+                    }
+                }
+                .padding(18)
+                .padding(.horizontal, 24)
+                .blueprintEditorialCard(radius: 20, fill: BlueprintTheme.panel)
 
                 Spacer()
 
@@ -777,8 +857,8 @@ private struct OnboardingGlassesView: View {
                         }
 
                         Button("Skip — Use iPhone Only", action: onContinue)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(14, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -808,11 +888,12 @@ private struct OnboardingGlassesView: View {
 // MARK: - Step 8: Complete
 
 private struct OnboardingCompleteView: View {
+    let glassesConnected: Bool
     let onFinish: () -> Void
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 Spacer()
@@ -820,15 +901,15 @@ private struct OnboardingCompleteView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 72))
-                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("You're All Set")
-                        .font(.title.weight(.bold))
-                        .foregroundStyle(.white)
+                    Text(OnboardingCaptureUXCopy.completionTitle(glassesConnected: glassesConnected))
+                        .font(BlueprintTheme.display(30, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("We'll notify you when approved capture opportunities are nearby.")
-                        .font(.body)
-                        .foregroundStyle(Color(white: 0.45))
+                    Text(OnboardingCaptureUXCopy.completionMessage(glassesConnected: glassesConnected))
+                        .font(BlueprintTheme.body(16, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 28)
                 }

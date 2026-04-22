@@ -49,13 +49,18 @@ struct MapSnapshotView: View {
 struct CapturePreviewView: View {
     let coordinate: CLLocationCoordinate2D
     let remoteImageURL: URL?
+    var preferredAssetName: String? = nil
     @Environment(\.displayScale) private var displayScale
     @State private var preview: LocationPreviewResult?
 
     var body: some View {
         GeometryReader { geo in
             Group {
-                if let remoteImageURL {
+                if let preferredAssetName {
+                    Image(preferredAssetName)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else if let remoteImageURL {
                     AsyncImage(url: remoteImageURL) { phase in
                         switch phase {
                         case .success(let image):
@@ -113,4 +118,3 @@ struct CapturePreviewView: View {
         "\(Int(size.width.rounded()))x\(Int(size.height.rounded()))"
     }
 }
-

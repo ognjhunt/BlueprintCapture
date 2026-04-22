@@ -29,7 +29,9 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.black.ignoresSafeArea()
+            Rectangle()
+                .fill(BlueprintTheme.kledBackground)
+                .ignoresSafeArea()
 
             TabView(selection: $selectedTab) {
                 ScanHomeView(
@@ -50,9 +52,8 @@ struct MainTabView: View {
 
             // Upload progress overlay
             UploadProgressOverlayView(viewModel: uploadQueue)
-                .padding(.bottom, 60)
+                .padding(.bottom, 76)
 
-            // Custom Kled-style tab bar
             kledTabBar
         }
         .ignoresSafeArea(edges: .bottom)
@@ -75,40 +76,43 @@ struct MainTabView: View {
     }
 
     private var kledTabBar: some View {
-        HStack(spacing: 0) {
-            tabButton(index: 0, icon: "location.viewfinder", activeIcon: "location.viewfinder")
-            tabButton(index: 1, icon: "creditcard", activeIcon: "creditcard.fill")
-            tabButton(index: 2, icon: "person.circle", activeIcon: "person.circle.fill")
+        HStack(spacing: 10) {
+            tabButton(index: 0, icon: "location.viewfinder", activeIcon: "location.viewfinder", title: "Captures")
+            tabButton(index: 1, icon: "creditcard", activeIcon: "creditcard.fill", title: "Wallet")
+            tabButton(index: 2, icon: "person.circle", activeIcon: "person.circle.fill", title: "Profile")
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 16)
         .padding(.top, 12)
-        .padding(.bottom, 28)
+        .padding(.bottom, 30)
         .background(
-            Color(white: 0.06)
-                .overlay(
-                    Rectangle()
-                        .fill(Color(white: 0.14))
-                        .frame(height: 1),
-                    alignment: .top
-                )
+            BlueprintTheme.panelMuted
+                .overlay(Rectangle().fill(BlueprintTheme.hairline).frame(height: 1), alignment: .top)
         )
     }
 
-    private func tabButton(index: Int, icon: String, activeIcon: String) -> some View {
+    private func tabButton(index: Int, icon: String, activeIcon: String, title: String) -> some View {
         Button {
             selectedTab = index
         } label: {
-            ZStack {
-                if selectedTab == index {
-                    Circle()
-                        .fill(Color(white: 0.15))
-                        .frame(width: 52, height: 52)
-                }
+            VStack(spacing: 6) {
                 Image(systemName: selectedTab == index ? activeIcon : icon)
-                    .font(.system(size: 22, weight: selectedTab == index ? .semibold : .regular))
-                    .foregroundStyle(selectedTab == index ? .white : Color(white: 0.45))
-                    .frame(width: 52, height: 52)
+                    .font(.system(size: 18, weight: selectedTab == index ? .semibold : .regular))
+                    .foregroundStyle(selectedTab == index ? BlueprintTheme.textPrimary : BlueprintTheme.textTertiary)
+
+                Text(title)
+                    .font(BlueprintTheme.body(11, weight: selectedTab == index ? .semibold : .medium))
+                    .foregroundStyle(selectedTab == index ? BlueprintTheme.textPrimary : BlueprintTheme.textTertiary)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(selectedTab == index ? BlueprintTheme.panelStrong : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(selectedTab == index ? BlueprintTheme.hairline : Color.clear, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)

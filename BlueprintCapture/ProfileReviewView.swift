@@ -9,17 +9,17 @@ struct ProfileReviewView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 // Title
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
-                        .font(.largeTitle.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(34, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(subtitle)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(15, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 64)
@@ -27,8 +27,8 @@ struct ProfileReviewView: View {
 
                 // Section label
                 Text("YOUR DETAILS")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color(white: 0.35))
+                    .font(BlueprintTheme.body(12, weight: .bold))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
                     .tracking(1.0)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 12)
@@ -43,11 +43,7 @@ struct ProfileReviewView: View {
                     rowDivider
                     profileRow(label: "Company", value: profile.company)
                 }
-                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color(white: 0.12), lineWidth: 1)
-                )
+                .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
                 .padding(.horizontal, 20)
 
                 Spacer()
@@ -55,28 +51,29 @@ struct ProfileReviewView: View {
                 // CTA
                 Button(action: onContinue) {
                     Text(buttonTitle)
-                        .font(.headline.weight(.semibold))
+                        .font(BlueprintTheme.body(16, weight: .semibold))
                         .foregroundStyle(.black)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(BlueprintTheme.brandTeal, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 48)
             }
         }
+        .blueprintAppBackground()
     }
 
     private func profileRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.4))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
             Spacer()
             Text(value.isEmpty ? "—" : value)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.body(14, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 16)
@@ -87,7 +84,7 @@ struct ProfileReviewView: View {
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color(white: 0.12))
+            .fill(BlueprintTheme.hairline)
             .frame(height: 1)
             .padding(.leading, 16)
     }

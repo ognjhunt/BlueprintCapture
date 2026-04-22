@@ -14,18 +14,18 @@ struct AuthView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 0) {
                         // Header
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Welcome to Blueprint")
-                                .font(.largeTitle.weight(.bold))
-                                .foregroundStyle(.white)
+                                .font(BlueprintTheme.display(34, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
                             Text("Capture spaces for review. Get paid after approval.")
-                                .font(.subheadline)
-                                .foregroundStyle(Color(white: 0.45))
+                                .font(BlueprintTheme.body(14, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 20)
@@ -44,7 +44,7 @@ struct AuthView: View {
                                     .frame(height: 1)
                                 Text("or")
                                     .font(.caption.weight(.medium))
-                                    .foregroundStyle(Color(white: 0.4))
+                                    .foregroundStyle(BlueprintTheme.textSecondary)
                                 Rectangle()
                                     .fill(Color(white: 0.15))
                                     .frame(height: 1)
@@ -66,10 +66,10 @@ struct AuthView: View {
                                         .font(.caption)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.35))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
                                 .padding(12)
                                 .background(
-                                    Color(red: 0.95, green: 0.35, blue: 0.35).opacity(0.12),
+                                    BlueprintTheme.panelStrong,
                                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 )
                             }
@@ -110,6 +110,7 @@ struct AuthView: View {
                     }
                 }
             }
+            .blueprintAppBackground()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -119,9 +120,9 @@ struct AuthView: View {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 13, weight: .semibold))
                             Text("Close")
-                                .font(.subheadline.weight(.semibold))
+                                .font(BlueprintTheme.body(14, weight: .semibold))
                         }
-                        .foregroundStyle(Color(white: 0.6))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 }
             }
@@ -130,9 +131,6 @@ struct AuthView: View {
             .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
                 dismiss()
             }
-            .task {
-                viewModel.consumePasteboardReferralIfNeeded()
-            }
         }
         .preferredColorScheme(.dark)
     }
@@ -140,12 +138,12 @@ struct AuthView: View {
     private var legalFooter: some View {
         VStack(spacing: 10) {
             Text("By continuing, you agree to Blueprint's")
-                .foregroundStyle(Color(white: 0.4))
+                .foregroundStyle(BlueprintTheme.textSecondary)
 
             HStack(spacing: 6) {
                 footerLink("Terms of Service", url: AppConfig.termsOfServiceURL())
                 Text("and")
-                    .foregroundStyle(Color(white: 0.4))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                 footerLink("Privacy Policy", url: AppConfig.privacyPolicyURL())
             }
 
@@ -153,7 +151,7 @@ struct AuthView: View {
                 openSupportEmail()
             } label: {
                 Text("Questions? Contact \(AppConfig.supportEmailAddress() ?? "support@blueprint.app")")
-                    .foregroundStyle(Color(white: 0.3))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .underline()
             }
             .buttonStyle(.plain)
@@ -169,7 +167,7 @@ struct AuthView: View {
             openURL(url)
         } label: {
             Text(title)
-                .foregroundStyle(Color(white: 0.7))
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .underline()
         }
         .buttonStyle(.plain)

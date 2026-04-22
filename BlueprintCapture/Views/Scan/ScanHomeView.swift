@@ -40,7 +40,7 @@ struct ScanHomeView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
-                Color.black.ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -83,6 +83,7 @@ struct ScanHomeView: View {
             }
             .navigationBarHidden(true)
         }
+        .blueprintAppBackground()
         .sheet(isPresented: $showConnectSheet) {
             GlassesConnectSheet(glassesManager: glassesManager) { showConnectSheet = false }
         }
@@ -162,30 +163,33 @@ struct ScanHomeView: View {
     private var pageHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 5) {
+                Text("Blueprint")
+                    .font(BlueprintTheme.display(20, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Captures")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
-                Text("Capture spaces for Blueprint review")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.5))
+                    .font(BlueprintTheme.display(36, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
+                Text("Open opportunities and review-gated submissions.")
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
             Spacer()
             HStack(spacing: 10) {
                 Button { showingSearch = true } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(white: 0.6))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .frame(width: 38, height: 38)
-                        .background(Color(white: 0.12), in: Circle())
+                        .background(BlueprintTheme.panelStrong, in: Circle())
                 }
                 Button {
                     Task { await viewModel.refresh() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color(white: 0.6))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .frame(width: 38, height: 38)
-                        .background(Color(white: 0.12), in: Circle())
+                        .background(BlueprintTheme.panelStrong, in: Circle())
                 }
             }
         }
@@ -246,16 +250,16 @@ struct ScanHomeView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Open to Capture")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(22, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 let visibleCount = featuredItems.count + fallbackDemoItems.count
                 if visibleCount > 0 {
                     Text("\(visibleCount)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(11, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color(white: 0.15), in: Capsule())
+                        .background(BlueprintTheme.panelStrong, in: Capsule())
                 }
                 Spacer()
             }
@@ -280,13 +284,13 @@ struct ScanHomeView: View {
                 if featuredItems.isEmpty && fallbackDemoItems.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(viewModel.reviewCandidates.isEmpty ? "We’re not live nearby yet" : "Nothing open yet")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.body(15, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text(viewModel.reviewCandidates.isEmpty
                              ? "Blueprint is still scanning and qualifying spaces in this area."
                              : "We’re reviewing nearby spaces for launch fit. If one is approved, we’ll notify you.")
-                            .font(.caption)
-                            .foregroundStyle(Color(white: 0.5))
+                            .font(BlueprintTheme.body(13, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                 } else {
@@ -322,32 +326,28 @@ struct ScanHomeView: View {
         if !viewModel.reviewCandidates.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Under Review Near You")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(22, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
 
                 Text("We’re checking nearby spaces against launch criteria. If one is approved, we’ll notify you.")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.55))
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
 
                 ForEach(viewModel.reviewCandidates) { candidate in
                     VStack(alignment: .leading, spacing: 6) {
                         Text(candidate.title)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.92))
+                            .font(BlueprintTheme.body(15, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text(candidate.subtitle)
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.65))
+                            .font(BlueprintTheme.body(13, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                         Text(candidate.reviewState.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.85))
+                            .font(BlueprintTheme.body(12, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textTertiary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16)
-                    .background(Color(white: 0.10), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                    )
+                    .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panelMuted)
                 }
             }
         }
@@ -358,11 +358,11 @@ struct ScanHomeView: View {
     private var capturePolicySection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("What you may capture")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.display(22, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
             Text("Common areas and approved opportunities are fine. Faces, screens, paperwork, and restricted zones are not.")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.55))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
 
             HStack(spacing: 10) {
                 policyPill(color: BlueprintTheme.successGreen, title: "Approved", subtitle: "Clear to capture")
@@ -380,20 +380,16 @@ struct ScanHomeView: View {
             HStack(spacing: 6) {
                 Circle().fill(color).frame(width: 8, height: 8)
                 Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(12, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
             }
             Text(subtitle)
-                .font(.caption2)
-                .foregroundStyle(Color(white: 0.55))
+                .font(BlueprintTheme.body(11, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(color.opacity(0.2), lineWidth: 1)
-        )
+        .blueprintPanelBackground(radius: 14, fill: BlueprintTheme.panelMuted)
     }
 
 
@@ -455,14 +451,14 @@ struct ScanHomeView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("Capture opportunities")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(22, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("\(allItems.count)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(11, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color(white: 0.15), in: Capsule())
+                        .background(BlueprintTheme.panelStrong, in: Capsule())
                     Spacer()
                 }
 
@@ -488,8 +484,8 @@ struct ScanHomeView: View {
         if !summary.isEmpty {
             VStack(alignment: .leading, spacing: 14) {
                 Text("My Submissions")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(22, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
 
                 HStack(spacing: 10) {
                     ForEach(summary) { item in
@@ -510,30 +506,26 @@ struct ScanHomeView: View {
             HStack(spacing: 14) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title3)
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Submit a new space")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(15, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("Address first · Workflow notes · Review-gated")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.3))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
-            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(white: 0.14), lineWidth: 1)
-            )
+            .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
         }
         .buttonStyle(.plain)
     }
@@ -563,11 +555,11 @@ struct ScanHomeView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .lineLimit(2)
                 }
 
@@ -575,23 +567,19 @@ struct ScanHomeView: View {
 
                 if let actionTitle {
                     Button(actionTitle, action: action)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(tone.accentColor)
+                        .font(BlueprintTheme.body(12, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(
-                            Capsule().fill(tone.accentColor.opacity(0.14))
+                            Capsule().fill(BlueprintTheme.panelStrong)
                         )
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(tone.accentColor.opacity(0.2), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
     }
 
     private enum KledBannerTone {
@@ -599,9 +587,9 @@ struct ScanHomeView: View {
 
         var accentColor: Color {
             switch self {
-            case .neutral: return BlueprintTheme.brandTeal
-            case .warning: return Color(red: 0.9, green: 0.55, blue: 0.1)
-            case .good: return BlueprintTheme.successGreen
+            case .neutral: return BlueprintTheme.textSecondary
+            case .warning: return BlueprintTheme.textSecondary
+            case .good: return BlueprintTheme.textPrimary
             }
         }
     }
@@ -737,7 +725,7 @@ private struct DemoCapture: Identifiable {
             distance: "0.8 mi",
             estMinutes: 35,
             coordinate: CLLocationCoordinate2D(latitude: 37.7899, longitude: -122.4014),
-            gradientColors: [Color(red: 0.12, green: 0.18, blue: 0.28), Color(white: 0.08)],
+            gradientColors: [Color(white: 0.14), Color(white: 0.08)],
             permission: "Review",
             permissionColor: BlueprintTheme.brandTeal
         ),
@@ -750,9 +738,9 @@ private struct DemoCapture: Identifiable {
             distance: "2.1 mi",
             estMinutes: 60,
             coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.3886),
-            gradientColors: [Color(red: 0.22, green: 0.14, blue: 0.08), Color(white: 0.08)],
+            gradientColors: [Color(white: 0.16), Color(white: 0.08)],
             permission: "Special",
-            permissionColor: Color(red: 0.9, green: 0.55, blue: 0.1)
+            permissionColor: BlueprintTheme.textSecondary
         ),
     ]
 }
@@ -762,7 +750,11 @@ private struct DemoFeaturedCard: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            CapturePreviewView(coordinate: demo.coordinate, remoteImageURL: nil)
+            CapturePreviewView(
+                coordinate: demo.coordinate,
+                remoteImageURL: nil,
+                preferredAssetName: demo.category.contains("INDUSTRIAL") ? "CaptureWarehouseHero" : "CaptureRetailHero"
+            )
 
             // Bottom gradient
             LinearGradient(
@@ -775,36 +767,36 @@ private struct DemoFeaturedCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Text(demo.category)
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(11, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 5)
-                        .background(Color(white: 0.22), in: Capsule())
+                        .background(BlueprintTheme.panelStrong, in: Capsule())
 
                     Spacer()
 
                     HStack(spacing: 5) {
                         Circle().fill(demo.permissionColor).frame(width: 7, height: 7)
                         Text(demo.permission)
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.body(11, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                     }
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
-                    .background(Color(white: 0.18), in: Capsule())
+                    .background(BlueprintTheme.panelStrong, in: Capsule())
                 }
 
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(demo.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(24, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .lineLimit(2)
 
                     Text(demo.address)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.65))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .lineLimit(1)
 
                     HStack(spacing: 12) {
@@ -816,11 +808,11 @@ private struct DemoFeaturedCard: View {
 
                 HStack {
                     Text(demo.id.hasPrefix("poi_") ? "Nearby · Tap to submit" : "Review-only sample")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(12, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                     Image(systemName: demo.id.hasPrefix("poi_") ? "arrow.up.circle" : "clock.arrow.circlepath")
                         .font(.caption)
-                        .foregroundStyle(Color(white: 0.4))
+                        .foregroundStyle(BlueprintTheme.textTertiary)
                 }
             }
             .padding(16)
@@ -829,7 +821,7 @@ private struct DemoFeaturedCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color(white: 0.15), lineWidth: 1)
+                .stroke(BlueprintTheme.hairline, lineWidth: 1)
         )
     }
 }
@@ -866,13 +858,13 @@ private struct FeaturedCaptureCard: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(item.job.title)
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(24, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .lineLimit(2)
 
                     Text(item.job.address)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.65))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .lineLimit(1)
 
                     HStack(spacing: 12) {
@@ -885,11 +877,11 @@ private struct FeaturedCaptureCard: View {
                 // View button
                 HStack {
                     Text("Review space")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(12, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.caption)
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                 }
             }
             .padding(16)
@@ -898,7 +890,7 @@ private struct FeaturedCaptureCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color(white: 0.15), lineWidth: 1)
+                .stroke(BlueprintTheme.hairline, lineWidth: 1)
         )
     }
 }
@@ -925,12 +917,12 @@ private struct CaptureListRow: View {
                         CategoryTag(label: cat.uppercased())
                     }
                     Text(item.job.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(15, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .lineLimit(1)
                     Text(item.job.address)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.6))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .lineLimit(1)
                 }
                 .padding(12)
@@ -939,11 +931,11 @@ private struct CaptureListRow: View {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(item.payoutLabel)
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .font(BlueprintTheme.body(15, weight: .bold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(item.distanceLabel)
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.5))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.trailing, 14)
                 .padding(.bottom, 12)
@@ -953,7 +945,7 @@ private struct CaptureListRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
+                .stroke(BlueprintTheme.hairline, lineWidth: 1)
         )
     }
 }
@@ -969,20 +961,20 @@ private struct SubmissionPill: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(pillColor)
             Text("\(item.count) \(item.stage.title)")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.body(12, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(white: 0.1), in: Capsule())
+        .background(BlueprintTheme.panelStrong, in: Capsule())
         .overlay(Capsule().stroke(pillColor.opacity(0.3), lineWidth: 1))
     }
 
     private var pillColor: Color {
         switch item.stage {
-        case .inReview: return BlueprintTheme.brandTeal
-        case .needsRecapture: return .orange
-        case .paid: return BlueprintTheme.successGreen
+        case .inReview: return BlueprintTheme.textSecondary
+        case .needsRecapture: return BlueprintTheme.textSecondary
+        case .paid: return BlueprintTheme.textPrimary
         }
     }
 }
@@ -997,12 +989,12 @@ private struct CategoryPill: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isSelected ? .black : Color(white: 0.65))
+                .font(BlueprintTheme.body(12, weight: .semibold))
+                .foregroundStyle(isSelected ? .black : BlueprintTheme.textSecondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
                 .background(
-                    Capsule().fill(isSelected ? .white : Color(white: 0.15))
+                    Capsule().fill(isSelected ? .white : BlueprintTheme.panelStrong)
                 )
         }
         .buttonStyle(.plain)
@@ -1016,11 +1008,11 @@ private struct CategoryTag: View {
 
     var body: some View {
         Text(label)
-            .font(.caption2.weight(.bold))
-            .foregroundStyle(.white)
+            .font(BlueprintTheme.body(11, weight: .semibold))
+            .foregroundStyle(BlueprintTheme.textPrimary)
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .background(Color(white: 0.18), in: Capsule())
+            .background(BlueprintTheme.panelStrong, in: Capsule())
     }
 }
 
@@ -1035,20 +1027,20 @@ private struct PermissionDot: View {
                 .fill(color)
                 .frame(width: 7, height: 7)
             Text(tier.shortLabel)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.body(11, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .background(Color(white: 0.18), in: Capsule())
+        .background(BlueprintTheme.panelStrong, in: Capsule())
     }
 
     private var color: Color {
         switch tier {
-        case .approved: return BlueprintTheme.successGreen
-        case .reviewRequired: return BlueprintTheme.brandTeal
-        case .permissionRequired: return .orange
-        case .blocked: return .red
+        case .approved: return BlueprintTheme.textPrimary
+        case .reviewRequired: return BlueprintTheme.textSecondary
+        case .permissionRequired: return BlueprintTheme.textSecondary
+        case .blocked: return BlueprintTheme.textTertiary
         }
     }
 }
@@ -1065,9 +1057,9 @@ private struct CardMetric: View {
             Image(systemName: icon)
                 .foregroundStyle(color)
             Text(text)
-                .foregroundStyle(Color(white: 0.8))
+                .foregroundStyle(BlueprintTheme.textPrimary)
         }
-        .font(.caption.weight(.semibold))
+        .font(BlueprintTheme.body(11, weight: .semibold))
     }
 }
 
@@ -1077,7 +1069,19 @@ private struct CaptureCardArtwork: View {
     let item: ScanHomeViewModel.JobItem
 
     var body: some View {
-        CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
+        CapturePreviewView(
+            coordinate: item.job.coordinate,
+            remoteImageURL: nil,
+            preferredAssetName: preferredAssetName
+        )
+    }
+
+    private var preferredAssetName: String {
+        let category = (item.job.category ?? "").lowercased()
+        if category.contains("industrial") || category.contains("warehouse") || category.contains("logistics") {
+            return "CaptureWarehouseHero"
+        }
+        return "CaptureRetailHero"
     }
 }
 
@@ -1088,11 +1092,11 @@ private struct ShimmerFeaturedCard: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: 20, style: .continuous)
-            .fill(Color(white: 0.1))
+            .fill(BlueprintTheme.panelStrong)
             .frame(width: 280, height: 230)
             .overlay(
                 LinearGradient(
-                    colors: [Color.clear, Color(white: 0.18), Color.clear],
+                    colors: [Color.clear, Color.white.opacity(0.12), Color.clear],
                     startPoint: .init(x: shimmerOffset, y: 0),
                     endPoint: .init(x: shimmerOffset + 0.6, y: 0)
                 )
@@ -1127,7 +1131,11 @@ private struct DemoDetailSheet: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Hero
                     ZStack(alignment: .top) {
-                        CapturePreviewView(coordinate: demo.coordinate, remoteImageURL: nil)
+                        CapturePreviewView(
+                            coordinate: demo.coordinate,
+                            remoteImageURL: nil,
+                            preferredAssetName: demo.category.contains("INDUSTRIAL") ? "CaptureWarehouseHero" : "CaptureRetailHero"
+                        )
                         .frame(height: 320)
 
                         LinearGradient(

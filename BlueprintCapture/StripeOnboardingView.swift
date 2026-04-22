@@ -12,7 +12,7 @@ struct StripeOnboardingView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -20,11 +20,11 @@ struct StripeOnboardingView: View {
                     HStack {
                         Image(systemName: "b.square.fill")
                             .font(.title3.weight(.semibold))
-                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Spacer()
                         Button("Done") { dismiss() }
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.body(14, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
@@ -33,11 +33,11 @@ struct StripeOnboardingView: View {
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Payouts")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.display(34, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text("Set up identity verification and payouts")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 28)
@@ -131,8 +131,8 @@ struct StripeOnboardingView: View {
                         .padding(.bottom, 12)
 
                     Text("We never sell or share your personal information.")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.3))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 48)
@@ -146,6 +146,7 @@ struct StripeOnboardingView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .blueprintAppBackground()
         .preferredColorScheme(.dark)
         .alert("Done", isPresented: $showConfirmation) {
             Button("OK") { showConfirmation = false }

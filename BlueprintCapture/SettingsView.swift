@@ -20,7 +20,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -88,6 +88,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .blueprintAppBackground()
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.black, for: .navigationBar)
@@ -133,11 +134,11 @@ struct SettingsView: View {
     private var pageHeader: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Settings")
-                .font(.largeTitle.weight(.bold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.display(34, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
             Text("Manage your account and preferences")
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.45))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
     }
 

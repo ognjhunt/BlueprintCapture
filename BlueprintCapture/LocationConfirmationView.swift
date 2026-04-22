@@ -10,20 +10,20 @@ struct LocationConfirmationView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text(viewModel.isSpaceReviewMode ? "Submit a Space" : "Confirm Location")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.display(34, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text(viewModel.isSpaceReviewMode
                              ? "Tell us where the space is, why it matters, and confirm capture guardrails."
                              : "We use your current position to anchor the walkthrough to an exact address.")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(15, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 64)
@@ -46,9 +46,9 @@ struct LocationConfirmationView: View {
                                 Image(systemName: viewModel.hasSeedAddress ? "arrow.triangle.2.circlepath" : "pencil.circle")
                                     .font(.caption)
                                 Text(viewModel.hasSeedAddress ? "Change location" : "Can't find it? Enter address manually")
-                                    .font(.caption.weight(.medium))
+                                    .font(BlueprintTheme.body(12, weight: .medium))
                             }
-                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                         }
                         .buttonStyle(.plain)
                         .padding(.horizontal, 20)
@@ -85,6 +85,7 @@ struct LocationConfirmationView: View {
                 }
             }
         }
+        .blueprintAppBackground()
         .task {
             if viewModel.currentAddress == nil && !viewModel.hasSeedAddress {
                 viewModel.locationManager.requestLocation()
@@ -107,37 +108,37 @@ struct LocationConfirmationView: View {
         HStack(spacing: 14) {
             Image(systemName: viewModel.hasSeedAddress ? "mappin.circle.fill" : "mappin.and.ellipse")
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(viewModel.hasSeedAddress ? BlueprintTheme.brandTeal : .white)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 36, height: 36)
                 .background(
-                    (viewModel.hasSeedAddress ? BlueprintTheme.brandTeal : Color.white).opacity(0.12),
+                    BlueprintTheme.panelStrong,
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                 )
 
             VStack(alignment: .leading, spacing: 3) {
                 if let address = viewModel.currentAddress {
                     Text(address)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .lineLimit(2)
                     if viewModel.hasSeedAddress {
                         Text("From your search")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(BlueprintTheme.brandTeal.opacity(0.8))
+                            .font(BlueprintTheme.body(11, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 } else if let error = viewModel.locationError {
                     Text(error)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(red: 0.85, green: 0.3, blue: 0.3))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .lineLimit(2)
                 } else {
                     HStack(spacing: 8) {
                         ProgressView()
-                            .tint(BlueprintTheme.brandTeal)
+                            .tint(BlueprintTheme.textPrimary)
                             .scaleEffect(0.8)
                         Text("Detecting location…")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.4))
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 }
             }
@@ -146,14 +147,7 @@ struct LocationConfirmationView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(
-                    viewModel.hasSeedAddress ? BlueprintTheme.brandTeal.opacity(0.3) : Color(white: 0.12),
-                    lineWidth: 1
-                )
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Manual Entry Card
@@ -162,8 +156,8 @@ struct LocationConfirmationView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Search address")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Spacer()
                 Button("Cancel") {
                     showManualEntry = false
@@ -171,7 +165,7 @@ struct LocationConfirmationView: View {
                     viewModel.addressSearchResults = []
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
+                .foregroundStyle(BlueprintTheme.textSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -184,10 +178,10 @@ struct LocationConfirmationView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.caption)
-                    .foregroundStyle(Color(white: 0.4))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                 TextField("Street address, city…", text: $searchQuery)
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .autocorrectionDisabled()
                     .textContentType(.addressCityAndState)
                     .onChange(of: searchQuery) { _, newValue in
@@ -205,8 +199,8 @@ struct LocationConfirmationView: View {
                 HStack(spacing: 8) {
                     ProgressView().tint(BlueprintTheme.brandTeal).scaleEffect(0.75)
                     Text("Searching…")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.4))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                     Spacer()
                 }
                 .padding(.horizontal, 16)
@@ -222,18 +216,18 @@ struct LocationConfirmationView: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(result.title)
-                                        .font(.subheadline.weight(.medium))
-                                        .foregroundStyle(.white)
+                                        .font(BlueprintTheme.body(14, weight: .medium))
+                                        .foregroundStyle(BlueprintTheme.textPrimary)
                                     if !result.subtitle.isEmpty {
                                         Text(result.subtitle)
-                                            .font(.caption)
-                                            .foregroundStyle(Color(white: 0.4))
+                                            .font(BlueprintTheme.body(12, weight: .medium))
+                                            .foregroundStyle(BlueprintTheme.textSecondary)
                                     }
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.caption2)
-                                    .foregroundStyle(Color(white: 0.25))
+                                    .foregroundStyle(BlueprintTheme.textTertiary)
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
@@ -248,11 +242,7 @@ struct LocationConfirmationView: View {
                 }
             }
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Context Card
@@ -261,15 +251,15 @@ struct LocationConfirmationView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Why is this space worth reviewing?")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Spacer()
                 if isGeneratingDraft {
                     HStack(spacing: 5) {
                         ProgressView().tint(BlueprintTheme.brandTeal).scaleEffect(0.65)
                         Text("AI drafting…")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .font(BlueprintTheme.body(11, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 } else if SpaceDraftGenerator.shared.isAvailable && viewModel.spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {
@@ -282,10 +272,10 @@ struct LocationConfirmationView: View {
                             Text("Auto-fill")
                                 .font(.caption2.weight(.semibold))
                         }
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(BlueprintTheme.brandTeal.opacity(0.1), in: Capsule())
+                        .background(BlueprintTheme.panelStrong, in: Capsule())
                     }
                 }
             }
@@ -296,8 +286,8 @@ struct LocationConfirmationView: View {
             ZStack(alignment: .topLeading) {
                 if viewModel.spaceContextNotes.isEmpty && !isGeneratingDraft {
                     Text("Tell us what makes this space valuable to capture…")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.3))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .allowsHitTesting(false)
@@ -305,24 +295,20 @@ struct LocationConfirmationView: View {
                 TextEditor(text: $viewModel.spaceContextNotes)
                     .frame(minHeight: 100)
                     .scrollContentBackground(.hidden)
-                    .font(.subheadline)
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .padding(.horizontal, 12)
                     .background(Color.clear)
                     .opacity(isGeneratingDraft ? 0.4 : 1)
             }
 
             Text("Example: active loading area, repeated congestion, strong coverage potential, or buyer-requested zone.")
-                .font(.caption)
-                .foregroundStyle(Color(white: 0.35))
+                .font(BlueprintTheme.body(12, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
                 .padding(.horizontal, 16)
                 .padding(.bottom, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isGeneratingDraft ? BlueprintTheme.brandTeal.opacity(0.3) : Color(white: 0.12), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
         .animation(.easeInOut(duration: 0.2), value: isGeneratingDraft)
     }
 
@@ -357,11 +343,11 @@ struct LocationConfirmationView: View {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.subheadline)
-                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .frame(width: 22)
                     Text(item)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.55))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                 }
@@ -376,21 +362,17 @@ struct LocationConfirmationView: View {
 
             HStack {
                 Text("I can follow these capture rules")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Spacer()
                 Toggle("", isOn: $viewModel.confirmedCaptureGuidelines)
                     .labelsHidden()
-                    .tint(BlueprintTheme.brandTeal)
+                    .tint(Color.white)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     // MARK: - CTA Button
@@ -409,13 +391,13 @@ struct LocationConfirmationView: View {
             }
         } label: {
             Text(label)
-                .font(.headline.weight(.semibold))
+                .font(BlueprintTheme.body(16, weight: .semibold))
                 .foregroundStyle(canContinue ? .black : Color(white: 0.4))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(
-                    canContinue ? BlueprintTheme.successGreen : Color(white: 0.15),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    canContinue ? Color.white : Color.white.opacity(0.28),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
         .buttonStyle(.plain)
@@ -426,9 +408,9 @@ struct LocationConfirmationView: View {
     // MARK: - Helper
 
     private func sectionLabel(_ text: String) -> some View {
-        Text(text.uppercased())
-            .font(.caption.weight(.bold))
-            .foregroundStyle(Color(white: 0.35))
+        Text(text)
+            .font(BlueprintTheme.display(22, weight: .semibold))
+            .foregroundStyle(BlueprintTheme.textPrimary)
             .tracking(1.0)
     }
 }

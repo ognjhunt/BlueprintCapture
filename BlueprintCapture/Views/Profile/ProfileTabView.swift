@@ -12,7 +12,7 @@ struct ProfileTabView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
-                Color.black.ignoresSafeArea()
+                Color.clear.ignoresSafeArea()
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -65,6 +65,7 @@ struct ProfileTabView: View {
             }
             .navigationBarHidden(true)
         }
+        .blueprintAppBackground()
         .task { await vm.load() }
         .onChange(of: vm.totalCaptures) { _, count in
             guard count > 0, profileDigest == nil else { return }
@@ -92,14 +93,14 @@ struct ProfileTabView: View {
     private var aiDigestCard: some View {
         HStack(spacing: 0) {
             Rectangle()
-                .fill(BlueprintTheme.brandTeal)
+                .fill(BlueprintTheme.textPrimary)
                 .frame(width: 3)
                 .cornerRadius(2)
 
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 22)
 
                 if isLoadingDigest && profileDigest == nil {
@@ -108,13 +109,13 @@ struct ProfileTabView: View {
                             .scaleEffect(0.75)
                             .tint(Color(white: 0.5))
                         Text("Generating your digest…")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(13, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 } else {
                     Text(profileDigest ?? "")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color(white: 0.85))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -123,11 +124,7 @@ struct ProfileTabView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Header
@@ -135,17 +132,21 @@ struct ProfileTabView: View {
     private var pageHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 5) {
+                Text("Profile")
+                    .font(BlueprintTheme.body(12, weight: .semibold))
+                    .tracking(2)
+                    .foregroundStyle(BlueprintTheme.textTertiary)
                 Text("My Account")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(36, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 if let email = Auth.auth().currentUser?.email {
                     Text(email)
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 } else {
                     Text("Not signed in")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
             }
             Spacer()
@@ -154,9 +155,9 @@ struct ProfileTabView: View {
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Color(white: 0.6))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .frame(width: 38, height: 38)
-                    .background(Color(white: 0.12), in: Circle())
+                    .background(BlueprintTheme.panelStrong, in: Circle())
             }
         }
     }

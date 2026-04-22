@@ -29,7 +29,7 @@ struct WalletView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -89,6 +89,7 @@ struct WalletView: View {
             }
             .refreshable { await viewModel.load() }
         }
+        .blueprintAppBackground()
         .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
         .sheet(isPresented: $showingAuth) { AuthView() }
         .sheet(item: $selectedCaptureRoute) { selection in
@@ -159,14 +160,14 @@ struct WalletView: View {
     private var aiEarningsInsightCard: some View {
         HStack(spacing: 0) {
             Rectangle()
-                .fill(BlueprintTheme.brandTeal)
+                .fill(BlueprintTheme.textPrimary)
                 .frame(width: 3)
                 .cornerRadius(2)
 
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 22)
 
                 if isLoadingInsight && earningsInsight == nil {
@@ -175,13 +176,13 @@ struct WalletView: View {
                             .scaleEffect(0.75)
                             .tint(Color(white: 0.5))
                         Text("Generating earnings insight…")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(13, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 } else {
                     Text(earningsInsight ?? "")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color(white: 0.85))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -190,11 +191,7 @@ struct WalletView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Header
@@ -202,12 +199,15 @@ struct WalletView: View {
     private var pageHeader: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 5) {
+                Text("Blueprint")
+                    .font(BlueprintTheme.display(20, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Wallet")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.display(36, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Your earnings and payout history")
-                    .font(.subheadline)
-                    .foregroundStyle(Color(white: 0.5))
+                    .font(BlueprintTheme.body(14, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
             Spacer()
             Button {
@@ -215,11 +215,11 @@ struct WalletView: View {
             } label: {
                 Image(systemName: viewModel.isLoading ? "arrow.clockwise" : "arrow.clockwise")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(viewModel.isLoading ? BlueprintTheme.brandTeal : Color(white: 0.5))
+                    .foregroundStyle(viewModel.isLoading ? BlueprintTheme.textPrimary : BlueprintTheme.textSecondary)
                     .rotationEffect(.degrees(viewModel.isLoading ? 360 : 0))
                     .animation(viewModel.isLoading ? .linear(duration: 1).repeatForever(autoreverses: false) : .default, value: viewModel.isLoading)
                     .frame(width: 38, height: 38)
-                    .background(Color(white: 0.12), in: Circle())
+                    .background(BlueprintTheme.panelStrong, in: Circle())
             }
         }
     }

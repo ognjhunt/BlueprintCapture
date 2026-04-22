@@ -39,7 +39,7 @@ struct JobDetailSheet: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -148,6 +148,7 @@ struct JobDetailSheet: View {
             .padding(.horizontal, 20)
             .padding(.top, 56)
         }
+        .blueprintAppBackground()
         .preferredColorScheme(.dark)
         .onAppear {
             Task { await generateFocusTip() }
@@ -199,7 +200,7 @@ struct JobDetailSheet: View {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 22)
 
                 if isLoadingTip && focusTip == nil {
@@ -208,13 +209,13 @@ struct JobDetailSheet: View {
                             .scaleEffect(0.75)
                             .tint(Color(white: 0.5))
                         Text("Generating focus tip…")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(13, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                 } else {
                     Text(focusTip ?? "")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color(white: 0.85))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -223,18 +224,18 @@ struct JobDetailSheet: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
         }
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Hero Block
 
     private var heroBlock: some View {
         ZStack(alignment: .bottomLeading) {
-            CapturePreviewView(coordinate: item.job.coordinate, remoteImageURL: item.previewURL)
+            CapturePreviewView(
+                coordinate: item.job.coordinate,
+                remoteImageURL: nil,
+                preferredAssetName: preferredAssetName
+            )
             .frame(height: 320)
             .clipped()
 
@@ -253,19 +254,19 @@ struct JobDetailSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             if let cat = item.job.category {
                 Text(cat.uppercased())
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(Color(white: 0.5))
+                    .font(BlueprintTheme.body(11, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
                     .tracking(1.2)
             }
 
             Text(item.job.title)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.display(30, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
 
             HStack(spacing: 14) {
                 Label(item.job.address, systemImage: "location.fill")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.5))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .lineLimit(1)
             }
 
@@ -289,27 +290,23 @@ struct JobDetailSheet: View {
                 // Review-first messaging for open capture — no fabricated payout claims
                 HStack(spacing: 0) {
                     Rectangle()
-                        .fill(BlueprintTheme.brandTeal)
+                        .fill(BlueprintTheme.textPrimary)
                         .frame(width: 3)
                         .cornerRadius(2)
 
                     HStack(spacing: 10) {
                         Image(systemName: "eye.circle.fill")
-                            .foregroundStyle(BlueprintTheme.brandTeal)
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                             .font(.subheadline)
 
                         Text("Open capture — submission will be reviewed before reuse.")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color(white: 0.85))
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 14)
                 }
-                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(BlueprintTheme.brandTeal.opacity(0.2), lineWidth: 1)
-                )
+                .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
             } else if let cents = item.job.quotedPayoutCents ?? (item.job.payoutCents > 0 ? item.job.payoutCents : nil) {
                 // Payout banner only when there is a real quoted payout
                 HStack(spacing: 0) {
@@ -325,17 +322,13 @@ struct JobDetailSheet: View {
 
                         let dollars = NSDecimalNumber(decimal: Decimal(cents) / Decimal(100))
                         Text("Completing this capture earns \(NumberFormatter.captureCurrency.string(from: dollars) ?? "$0").")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color(white: 0.85))
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 14)
                 }
-                .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(BlueprintTheme.successGreen.opacity(0.2), lineWidth: 1)
-                )
+                .blueprintEditorialCard(radius: 14, fill: BlueprintTheme.panel)
             } else {
                 EmptyView()
             }
@@ -350,7 +343,7 @@ struct JobDetailSheet: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
-                        Color(white: 0.2),
+                        BlueprintTheme.hairline,
                         style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
                     )
                     .frame(height: 110)
@@ -358,13 +351,13 @@ struct JobDetailSheet: View {
                 VStack(spacing: 8) {
                     Image(systemName: "camera.viewfinder")
                         .font(.title2)
-                        .foregroundStyle(Color(white: 0.35))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                     Text("Capture Content to Upload")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(Color(white: 0.4))
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("All captures are reviewed. Only submit content that matches the requirements.")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.3))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 20)
                 }
@@ -376,14 +369,14 @@ struct JobDetailSheet: View {
             // Disclaimer
             if !isOnSite && item.permissionTier != .blocked {
                 Text("Move within \(item.job.checkinRadiusM)m of the address to start an approved capture.")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.35))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             } else if item.permissionTier == .blocked {
                 Text("This location is restricted. Do not capture it.")
-                    .font(.caption)
-                    .foregroundStyle(.red.opacity(0.7))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
             }
@@ -426,7 +419,7 @@ struct JobDetailSheet: View {
     }
 
     private var actionTextColor: Color {
-        item.permissionTier == .blocked ? Color(white: 0.3) : .white
+        item.permissionTier == .blocked ? BlueprintTheme.textTertiary : .black
     }
 
     private func primaryAction() {
@@ -457,8 +450,8 @@ struct JobDetailSheet: View {
     private func detailSection(title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.body(15, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -467,12 +460,12 @@ struct JobDetailSheet: View {
     private func requirementRow(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Circle()
-                .fill(Color(white: 0.3))
+                .fill(BlueprintTheme.textTertiary)
                 .frame(width: 5, height: 5)
                 .padding(.top, 7)
             Text(text)
-                .font(.subheadline)
-                .foregroundStyle(Color(white: 0.72))
+                .font(BlueprintTheme.body(14, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -482,8 +475,16 @@ struct JobDetailSheet: View {
             Image(systemName: icon)
                 .foregroundStyle(color)
             Text(text)
-                .foregroundStyle(Color(white: 0.7))
+                .foregroundStyle(BlueprintTheme.textPrimary)
         }
-        .font(.caption.weight(.semibold))
+        .font(BlueprintTheme.body(11, weight: .semibold))
+    }
+
+    private var preferredAssetName: String {
+        let category = (item.job.category ?? "").lowercased()
+        if category.contains("industrial") || category.contains("warehouse") || category.contains("logistics") {
+            return "CaptureWarehouseHero"
+        }
+        return "CaptureRetailHero"
     }
 }

@@ -5,20 +5,20 @@ struct PermissionRequestView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 0) {
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text(viewModel.isSpaceReviewMode ? "Enable Capture Access" : "Enable Capture Sensors")
-                            .font(.largeTitle.weight(.bold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.display(34, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text(viewModel.isSpaceReviewMode
                              ? "We use these sensors to review the space accurately and decide whether it qualifies as an approved capture opportunity."
                              : "We need access to your camera, microphone, and motion data to produce a metrically accurate walkthrough.")
-                            .font(.subheadline)
-                            .foregroundStyle(Color(white: 0.45))
+                            .font(BlueprintTheme.body(15, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 64)
@@ -26,8 +26,8 @@ struct PermissionRequestView: View {
 
                     // Section label
                     Text("PERMISSIONS")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(Color(white: 0.35))
+                        .font(BlueprintTheme.body(12, weight: .bold))
+                        .foregroundStyle(BlueprintTheme.textTertiary)
                         .tracking(1.0)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
@@ -58,11 +58,7 @@ struct PermissionRequestView: View {
                             granted: viewModel.motionAuthorized
                         )
                     }
-                    .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color(white: 0.12), lineWidth: 1)
-                    )
+                    .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 48)
 
@@ -71,11 +67,11 @@ struct PermissionRequestView: View {
                         viewModel.requestPermissions()
                     } label: {
                         Text(viewModel.isSpaceReviewMode ? "Allow Access & Continue" : "Grant Permissions")
-                            .font(.headline.weight(.semibold))
+                            .font(BlueprintTheme.body(16, weight: .semibold))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
-                            .background(BlueprintTheme.successGreen, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(Color.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 20)
@@ -83,6 +79,7 @@ struct PermissionRequestView: View {
                 }
             }
         }
+        .blueprintAppBackground()
     }
 
     private func permissionRow(icon: String, iconColor: Color, title: String, description: String, granted: Bool) -> some View {
@@ -95,26 +92,27 @@ struct PermissionRequestView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text(description)
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.4))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
 
             Spacer()
 
             Image(systemName: granted ? "checkmark.circle.fill" : "circle")
                 .font(.subheadline)
-                .foregroundStyle(granted ? BlueprintTheme.successGreen : Color(white: 0.25))
+                .foregroundStyle(granted ? BlueprintTheme.textPrimary : BlueprintTheme.textTertiary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
+        .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var rowDivider: some View {
         Rectangle()
-            .fill(Color(white: 0.12))
+            .fill(BlueprintTheme.hairline)
             .frame(height: 1)
             .padding(.leading, 66)
     }

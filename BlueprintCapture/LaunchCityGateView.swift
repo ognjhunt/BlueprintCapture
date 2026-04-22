@@ -33,22 +33,17 @@ struct LaunchCityGateView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [BlueprintTheme.bgDarker, BlueprintTheme.bgDark, .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 header
                     .padding(.top, 68)
                     .padding(.horizontal, 24)
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 22)
 
                 statusCard
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 16)
 
                 liveCitiesCard
                     .padding(.horizontal, 20)
@@ -60,22 +55,23 @@ struct LaunchCityGateView: View {
                     .padding(.bottom, 34)
             }
         }
+        .blueprintAppBackground()
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Blueprint city launch")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
-                .tracking(1.2)
+                .font(BlueprintTheme.body(12, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textTertiary)
+                .tracking(2.0)
 
             Text("We’re only live in a few cities right now.")
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(BlueprintTheme.display(38, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
 
             Text("Your location determines whether the capture network unlocks. Launch availability follows Blueprint's active city program.")
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.62))
+                .font(BlueprintTheme.body(15, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -88,12 +84,12 @@ struct LaunchCityGateView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(statusTitle)
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(24, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text(statusMessage)
-                        .font(.subheadline)
-                        .foregroundStyle(Color.white.opacity(0.7))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -102,75 +98,58 @@ struct LaunchCityGateView: View {
                case .unsupported = viewModel.state {
                 HStack(spacing: 8) {
                     Image(systemName: "location.circle.fill")
-                        .foregroundStyle(BlueprintTheme.warningOrange)
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                     Text("Detected: \(resolvedCity.displayName)")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.88))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                 }
             }
 
             if case .checking = viewModel.state {
                 ProgressView()
-                    .tint(BlueprintTheme.brandTeal)
+                    .tint(BlueprintTheme.textPrimary)
             }
         }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .padding(22)
+        .blueprintEditorialCard(radius: 24, fill: BlueprintTheme.panel)
     }
 
     private var liveCitiesCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Currently live")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+            Text("Supported cities")
+                .font(BlueprintTheme.body(14, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
 
             Text(viewModel.supportedCities.isEmpty
                  ? "We’ll show supported launch cities as soon as availability syncs."
                  : "These cities are synced from Blueprint's current launch program.")
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.62))
+                .font(BlueprintTheme.body(13, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             ForEach(viewModel.supportedCities) { city in
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(city.displayName)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .font(BlueprintTheme.body(15, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
                         Text("Launch market")
-                            .font(.caption)
-                            .foregroundStyle(Color.white.opacity(0.5))
+                            .font(BlueprintTheme.body(12, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textTertiary)
                     }
 
                     Spacer()
 
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
-                )
+                .blueprintPanelBackground(radius: 16, fill: BlueprintTheme.panelMuted)
             }
         }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
+        .padding(22)
+        .blueprintEditorialCard(radius: 24, fill: BlueprintTheme.panel)
     }
 
     private var footerActions: some View {
@@ -181,20 +160,13 @@ struct LaunchCityGateView: View {
                 viewModel.refresh()
             } label: {
                 Text("Check again")
-                    .font(.body.weight(.semibold))
+                    .font(BlueprintTheme.body(16, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 54)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    )
+                    .blueprintPanelBackground(radius: 16, fill: BlueprintTheme.panelStrong)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(BlueprintTheme.textPrimary)
         }
     }
 
@@ -236,13 +208,13 @@ struct LaunchCityGateView: View {
 
     private func primaryLabel(_ title: String) -> some View {
         Text(title)
-            .font(.body.weight(.semibold))
+            .font(BlueprintTheme.body(16, weight: .semibold))
             .foregroundStyle(.black)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(BlueprintTheme.brandTeal)
+                    .fill(Color.white)
             )
     }
 
@@ -286,33 +258,33 @@ struct LaunchCityGateView: View {
         case .checking:
             Image(systemName: "location.magnifyingglass")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 50, height: 50)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .locationPermissionRequired, .locationPermissionDenied:
             Image(systemName: "location.slash.fill")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BlueprintTheme.warningOrange)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 50, height: 50)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .supported:
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BlueprintTheme.brandTeal)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 50, height: 50)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .unsupported:
             Image(systemName: "lock.circle.fill")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BlueprintTheme.warningOrange)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 50, height: 50)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(BlueprintTheme.warningOrange)
+                .foregroundStyle(BlueprintTheme.textPrimary)
                 .frame(width: 50, height: 50)
-                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 }

@@ -15,18 +15,18 @@ struct ManagePayoutsView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
                 // Header bar
                 HStack {
                     Image(systemName: "b.square.fill")
                         .font(.title3.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Spacer()
                     Button("Done") { dismiss() }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
@@ -35,19 +35,19 @@ struct ManagePayoutsView: View {
                 // Title
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Manage Payouts")
-                        .font(.largeTitle.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(34, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("View and manage your payout settings")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 28)
 
                 // Section label
                 Text("PAYOUT METHODS")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color(white: 0.35))
+                    .font(BlueprintTheme.body(12, weight: .bold))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
                     .tracking(1.2)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 12)
@@ -68,6 +68,7 @@ struct ManagePayoutsView: View {
                 Spacer()
             }
         }
+        .blueprintAppBackground()
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingStripe) {
             StripeOnboardingView()
@@ -97,26 +98,22 @@ struct ManagePayoutsView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text(connected ? "Connected" : "Not Connected")
-                        .font(.caption)
-                        .foregroundStyle(connected ? BlueprintTheme.successGreen : Color(white: 0.4))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(connected ? BlueprintTheme.textPrimary : BlueprintTheme.textSecondary)
                 }
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.3))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 16)
-            .background(Color(white: 0.09), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(connected ? BlueprintTheme.successGreen.opacity(0.3) : Color(white: 0.14), lineWidth: 1)
-            )
+            .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
         }
         .buttonStyle(.plain)
     }

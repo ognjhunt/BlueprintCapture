@@ -12,7 +12,7 @@ struct GlassesConnectSheet: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Color.black.ignoresSafeArea()
+            Color.clear.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Drag handle
@@ -23,18 +23,24 @@ struct GlassesConnectSheet: View {
                     .padding(.bottom, 28)
 
                 // Icon + title
-                VStack(spacing: 10) {
-                    Image(systemName: "eyeglasses")
-                        .font(.system(size: 48))
-                        .foregroundStyle(BlueprintTheme.brandTeal)
+                VStack(spacing: 14) {
+                    Image("CaptureGlassesHero")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .stroke(BlueprintTheme.hairline, lineWidth: 1)
+                        )
 
                     Text("Smart Glasses")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.display(28, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
 
                     Text("Connect once. Then one-tap scans.")
-                        .font(.subheadline)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
                 }
                 .padding(.bottom, 32)
@@ -72,6 +78,7 @@ struct GlassesConnectSheet: View {
                 }
             }
         }
+        .blueprintAppBackground()
         .preferredColorScheme(.dark)
         .onChange(of: glassesManager.connectionState) { _, newValue in
             if case .connected = newValue { onConnected?() }
@@ -111,17 +118,17 @@ struct GlassesConnectSheet: View {
                     HStack(spacing: 14) {
                         Image(systemName: "arrow.clockwise")
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.65))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
                             .frame(width: 36, height: 36)
-                            .background(Color(white: 0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Reconnect")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.white)
+                                .font(BlueprintTheme.body(14, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
                             Text(last.name)
-                                .font(.caption)
-                                .foregroundStyle(Color(white: 0.45))
+                                .font(BlueprintTheme.body(12, weight: .medium))
+                                .foregroundStyle(BlueprintTheme.textSecondary)
                                 .lineLimit(1)
                         }
 
@@ -129,15 +136,11 @@ struct GlassesConnectSheet: View {
 
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color(white: 0.25))
+                            .foregroundStyle(BlueprintTheme.textTertiary)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
-                    .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color(white: 0.12), lineWidth: 1)
-                    )
+                    .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
                 }
                 .buttonStyle(.plain)
             }
@@ -146,11 +149,11 @@ struct GlassesConnectSheet: View {
                 glassesManager.startScanning()
             } label: {
                 Text("Connect with Meta AI")
-                    .font(.body.weight(.semibold))
+                    .font(BlueprintTheme.body(16, weight: .semibold))
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 52)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(.white, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -161,31 +164,27 @@ struct GlassesConnectSheet: View {
     private var registeringCard: some View {
         HStack(spacing: 14) {
             ProgressView()
-                .tint(BlueprintTheme.brandTeal)
+                .tint(BlueprintTheme.textPrimary)
                 .frame(width: 36, height: 36)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Finishing Meta setup…")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Approve Blueprint in Meta AI, then return here.")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.45))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
 
             Spacer()
 
             Button("Cancel") { glassesManager.stopScanning() }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(white: 0.5))
+                .font(BlueprintTheme.body(13, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     // MARK: - Waiting
@@ -193,31 +192,27 @@ struct GlassesConnectSheet: View {
     private var scanningCard: some View {
         HStack(spacing: 14) {
             ProgressView()
-                .tint(BlueprintTheme.brandTeal)
+                .tint(BlueprintTheme.textPrimary)
                 .frame(width: 36, height: 36)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Waiting for glasses…")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .font(BlueprintTheme.body(14, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                 Text("Keep your glasses connected in Meta AI and nearby.")
-                    .font(.caption)
-                    .foregroundStyle(Color(white: 0.45))
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
             }
 
             Spacer()
 
             Button("Cancel") { glassesManager.stopScanning() }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color(white: 0.5))
+                .font(BlueprintTheme.body(13, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textSecondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
-        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 0.12), lineWidth: 1)
-        )
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
     }
 
     private func permissionRequiredCard(deviceName: String) -> some View {
@@ -225,17 +220,17 @@ struct GlassesConnectSheet: View {
             HStack(spacing: 14) {
                 Image(systemName: "hand.raised.fill")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
                     .frame(width: 36, height: 36)
-                    .background(BlueprintTheme.brandTeal.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Camera permission required")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
                     Text("Grant camera access in Meta AI for \(deviceName).")
-                        .font(.caption)
-                        .foregroundStyle(Color(white: 0.45))
+                        .font(BlueprintTheme.body(12, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -250,11 +245,11 @@ struct GlassesConnectSheet: View {
                 }
             } label: {
                 Text("Open Meta Permission Flow")
-                    .font(.subheadline.weight(.semibold))
+                    .font(BlueprintTheme.body(14, weight: .semibold))
                     .foregroundStyle(.black)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(.white, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
         }
