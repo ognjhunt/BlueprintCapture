@@ -95,9 +95,9 @@ final class NearbyTargetsViewModel: ObservableObject {
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          // discoveryService: GeminiDiscoveryServiceProtocol = GeminiDiscoveryService(), // 🔕 Gemini grounding temporarily disabled (using Places Nearby only)
          placesDetailsService: PlacesDetailsServiceProtocol = PlacesDetailsService(),
-            nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
+         nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
          placesAutocomplete: PlacesAutocompleteServiceProtocol = PlacesAutocompleteService(),
-         notifications: NotificationServiceProtocol = NotificationService(),
+         notifications: NotificationServiceProtocol? = nil,
          recordingPolicyService: RecordingPolicyService = .shared,
          demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared,
          cityLaunchTargetsService: CityLaunchTargetsServiceProtocol = APIService.shared) {
@@ -111,7 +111,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         self.placesDetailsService = placesDetailsService
         self.nearbyDiscoveryService = nearbyDiscoveryService
         self.placesAutocomplete = placesAutocomplete
-        self.notifications = notifications
+        self.notifications = notifications ?? NotificationService()
         self.recordingPolicyService = recordingPolicyService
         self.demandIntelligenceService = demandIntelligenceService
         self.cityLaunchTargetsService = cityLaunchTargetsService

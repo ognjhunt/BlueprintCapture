@@ -31,6 +31,7 @@ struct ProximityScanJobTarget {
     }
 }
 
+@MainActor
 protocol NotificationServiceProtocol: AnyObject {
     func requestAuthorizationIfNeeded() async
     func scheduleProximityNotifications(for targets: [ProximityNotificationTarget], maxRegions: Int, radiusMeters: CLLocationDistance)
@@ -42,6 +43,7 @@ protocol NotificationServiceProtocol: AnyObject {
     func cancelReservationExpiryNotification(for targetId: String)
 }
 
+@MainActor
 final class NotificationService: NSObject, NotificationServiceProtocol {
     private let center: UNUserNotificationCenter
     private let proximityPrefix = "proximity_"
@@ -233,11 +235,12 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
     }
 
     func clearProximityNotifications() {
-        center.getPendingNotificationRequests { [weak self] requests in
-            guard let self = self else { return }
-            let ids = requests.map { $0.identifier }.filter { $0.hasPrefix(self.proximityPrefix) }
+        let center = center
+        let proximityPrefix = proximityPrefix
+        center.getPendingNotificationRequests { requests in
+            let ids = requests.map { $0.identifier }.filter { $0.hasPrefix(proximityPrefix) }
             if !ids.isEmpty {
-                self.center.removePendingNotificationRequests(withIdentifiers: ids)
+                center.removePendingNotificationRequests(withIdentifiers: ids)
             }
         }
     }

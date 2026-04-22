@@ -1,5 +1,6 @@
 import SwiftUI
 
+@MainActor
 struct ContentView: View {
     @StateObject private var viewModel: CaptureFlowViewModel
 

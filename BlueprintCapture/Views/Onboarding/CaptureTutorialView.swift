@@ -3,6 +3,7 @@ import AVFoundation
 
 // MARK: - Main view
 
+@MainActor
 struct CaptureTutorialView: View {
     let onContinue: () -> Void
 
@@ -228,7 +229,7 @@ final class LoopingPlayerUIView: UIView {
     }
 
     func configure(url: URL) {
-        let item = AVPlayerItem(asset: AVAsset(url: url))
+        let item = AVPlayerItem(asset: AVURLAsset(url: url))
         let player = AVQueuePlayer()
         playerLooper = AVPlayerLooper(player: player, templateItem: item)
         queuePlayer = player
