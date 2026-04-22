@@ -18,6 +18,44 @@ struct ResolvedLaunchCity: Equatable {
     }
 }
 
+enum LaunchCityMatcher {
+    static let supportedCities: [CreatorLaunchStatusResponse.SupportedCity] = [
+        .init(city: "Austin", stateCode: "TX", displayName: "Austin, TX", citySlug: "austin-tx"),
+        .init(city: "Durham", stateCode: "NC", displayName: "Durham, NC", citySlug: "durham-nc"),
+        .init(city: "San Francisco", stateCode: "CA", displayName: "San Francisco, CA", citySlug: "san-francisco-ca")
+    ]
+
+    static func supportedCity(for city: ResolvedLaunchCity) -> CreatorLaunchStatusResponse.SupportedCity? {
+        let normalizedCity = normalizeToken(city.city)
+        let normalizedState = normalizeStateToken(city.stateCode)
+
+        return supportedCities.first { supportedCity in
+            normalizeToken(supportedCity.city) == normalizedCity
+                && normalizeStateToken(supportedCity.stateCode) == normalizedState
+        }
+    }
+
+    private static func normalizeToken(_ value: String?) -> String {
+        String(value ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+    }
+
+    private static func normalizeStateToken(_ value: String?) -> String {
+        switch normalizeToken(value) {
+        case "california":
+            return "ca"
+        case "north carolina":
+            return "nc"
+        case "texas":
+            return "tx"
+        default:
+            return normalizeToken(value)
+        }
+    }
+}
+
 protocol LaunchCityResolving {
     func resolveCity(for location: CLLocation) async throws -> ResolvedLaunchCity?
 }
@@ -136,6 +174,8 @@ final class LaunchCityGateViewModel {
             }
             if let latestLocation = locationService.latestLocation {
                 handleLocationUpdate(latestLocation, forceRefresh: forceRefresh)
+            } else {
+                locationService.requestCurrentLocation()
             }
         case .notDetermined:
             state = .locationPermissionRequired
@@ -165,8 +205,9 @@ final class LaunchCityGateViewModel {
         state = .checking
         evaluationTask?.cancel()
         evaluationTask = Task { [resolver, launchStatusService] in
+            var resolvedCity: ResolvedLaunchCity?
             do {
-                let resolvedCity = try await resolver.resolveCity(for: location)
+                resolvedCity = try await resolver.resolveCity(for: location)
                 let launchStatus = try await launchStatusService.fetchCreatorLaunchStatus(
                     city: resolvedCity?.city,
                     stateCode: resolvedCity?.stateCode
@@ -179,7 +220,7 @@ final class LaunchCityGateViewModel {
             } catch {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
-                    self.state = .failed("Blueprint couldn’t verify your city right now. Try again in a moment.")
+                    self.state = .failed(Self.failureMessage(for: error, resolvedCity: resolvedCity))
                 }
             }
         }
@@ -194,5 +235,17 @@ final class LaunchCityGateViewModel {
         }
 
         state = .unsupported(launchStatus.currentCity)
+    }
+
+    private static func failureMessage(for error: Error, resolvedCity: ResolvedLaunchCity?) -> String {
+        if let apiError = error as? APIService.APIError,
+           apiError == .missingBaseURL {
+            if let resolvedCity {
+                return "Blueprint found your location (\(resolvedCity.displayName)), but this build cannot verify launch access because BLUEPRINT_BACKEND_BASE_URL is not configured."
+            }
+            return "This build cannot verify launch access because BLUEPRINT_BACKEND_BASE_URL is not configured."
+        }
+
+        return "Blueprint couldn’t verify your city right now. Try again in a moment."
     }
 }

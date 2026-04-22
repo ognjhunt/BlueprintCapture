@@ -18,6 +18,10 @@ final class UITestLocationService: LocationServiceProtocol {
         listener?(latestLocation)
     }
 
+    func requestCurrentLocation() {
+        listener?(latestLocation)
+    }
+
     func startUpdatingLocation() {
         listener?(latestLocation)
     }

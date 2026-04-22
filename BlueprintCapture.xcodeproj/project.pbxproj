@@ -49,7 +49,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				Support/Secrets.local.plist,
 			);
 			target = 8901D86B2EA7DB6000DF72ED /* BlueprintCapture */;
 		};
@@ -482,17 +481,22 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				BLUEPRINT_ACCOUNT_DELETION_URL = "https://www.tryblueprint.io/account/delete";
-				BLUEPRINT_BACKEND_BASE_URL = "";
+				BLUEPRINT_BACKEND_BASE_URL = "https://tryblueprint.io";
 				BLUEPRINT_BUG_REPORT_URL = "mailto:bugs@blueprint.app?subject=Blueprint%20Bug%20Report";
 				BLUEPRINT_CAPTURE_POLICY_URL = "https://www.tryblueprint.io/capture-policy";
 				BLUEPRINT_DEMAND_BACKEND_BASE_URL = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api";
+				BLUEPRINT_HELP_CENTER_URL = "mailto:support@blueprint.app?subject=Blueprint%20Help";
+				BLUEPRINT_MAIN_WEBSITE_URL = "https://www.tryblueprint.io";
+				BLUEPRINT_PRIVACY_POLICY_URL = "https://www.tryblueprint.io/privacy";
+				BLUEPRINT_SUPPORT_EMAIL_ADDRESS = "support@blueprint.app";
+				BLUEPRINT_TERMS_OF_SERVICE_URL = "https://www.tryblueprint.io/terms";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TUCA8KAYA;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BlueprintCapture/Info.plist;
-				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_ACCOUNT_DELETION_URL = "$(BLUEPRINT_ACCOUNT_DELETION_URL)";
+				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_BACKEND_BASE_URL = "$(BLUEPRINT_BACKEND_BASE_URL)";
 				INFOPLIST_KEY_BLUEPRINT_BUG_REPORT_URL = "$(BLUEPRINT_BUG_REPORT_URL)";
 				INFOPLIST_KEY_BLUEPRINT_CAPTURE_POLICY_URL = "$(BLUEPRINT_CAPTURE_POLICY_URL)";
@@ -515,11 +519,6 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = Public.BlueprintCapture;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				BLUEPRINT_HELP_CENTER_URL = "mailto:support@blueprint.app?subject=Blueprint%20Help";
-				BLUEPRINT_MAIN_WEBSITE_URL = "https://www.tryblueprint.io";
-				BLUEPRINT_PRIVACY_POLICY_URL = "https://www.tryblueprint.io/privacy";
-				BLUEPRINT_SUPPORT_EMAIL_ADDRESS = "support@blueprint.app";
-				BLUEPRINT_TERMS_OF_SERVICE_URL = "https://www.tryblueprint.io/terms";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -536,17 +535,22 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				BLUEPRINT_ACCOUNT_DELETION_URL = "https://www.tryblueprint.io/account/delete";
-				BLUEPRINT_BACKEND_BASE_URL = "";
+				BLUEPRINT_BACKEND_BASE_URL = "https://tryblueprint.io";
 				BLUEPRINT_BUG_REPORT_URL = "mailto:bugs@blueprint.app?subject=Blueprint%20Bug%20Report";
 				BLUEPRINT_CAPTURE_POLICY_URL = "https://www.tryblueprint.io/capture-policy";
 				BLUEPRINT_DEMAND_BACKEND_BASE_URL = "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api";
+				BLUEPRINT_HELP_CENTER_URL = "mailto:support@blueprint.app?subject=Blueprint%20Help";
+				BLUEPRINT_MAIN_WEBSITE_URL = "https://www.tryblueprint.io";
+				BLUEPRINT_PRIVACY_POLICY_URL = "https://www.tryblueprint.io/privacy";
+				BLUEPRINT_SUPPORT_EMAIL_ADDRESS = "support@blueprint.app";
+				BLUEPRINT_TERMS_OF_SERVICE_URL = "https://www.tryblueprint.io/terms";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3TUCA8KAYA;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BlueprintCapture/Info.plist;
-				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_ACCOUNT_DELETION_URL = "$(BLUEPRINT_ACCOUNT_DELETION_URL)";
+				INFOPLIST_KEY_BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO;
 				INFOPLIST_KEY_BLUEPRINT_BACKEND_BASE_URL = "$(BLUEPRINT_BACKEND_BASE_URL)";
 				INFOPLIST_KEY_BLUEPRINT_BUG_REPORT_URL = "$(BLUEPRINT_BUG_REPORT_URL)";
 				INFOPLIST_KEY_BLUEPRINT_CAPTURE_POLICY_URL = "$(BLUEPRINT_CAPTURE_POLICY_URL)";
@@ -569,11 +573,6 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = Public.BlueprintCapture;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				BLUEPRINT_HELP_CENTER_URL = "mailto:support@blueprint.app?subject=Blueprint%20Help";
-				BLUEPRINT_MAIN_WEBSITE_URL = "https://www.tryblueprint.io";
-				BLUEPRINT_PRIVACY_POLICY_URL = "https://www.tryblueprint.io/privacy";
-				BLUEPRINT_SUPPORT_EMAIL_ADDRESS = "support@blueprint.app";
-				BLUEPRINT_TERMS_OF_SERVICE_URL = "https://www.tryblueprint.io/terms";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;

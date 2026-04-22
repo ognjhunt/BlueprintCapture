@@ -5,6 +5,7 @@ protocol LocationServiceProtocol: AnyObject {
     var authorizationStatus: CLAuthorizationStatus { get }
     var latestLocation: CLLocation? { get }
     func requestWhenInUseAuthorization()
+    func requestCurrentLocation()
     func startUpdatingLocation()
     func stopUpdatingLocation()
     func setListener(_ listener: @escaping (CLLocation?) -> Void)
@@ -36,6 +37,10 @@ final class LocationService: NSObject, LocationServiceProtocol {
 
     func requestWhenInUseAuthorization() {
         manager.requestWhenInUseAuthorization()
+    }
+
+    func requestCurrentLocation() {
+        manager.requestLocation()
     }
 
     func startUpdatingLocation() {
@@ -73,5 +78,4 @@ extension LocationService: CLLocationManagerDelegate {
         listener?(latestLocation)
     }
 }
-
 

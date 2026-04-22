@@ -26,48 +26,72 @@ struct LaunchCityGateView: View {
     @Environment(\.openURL) private var openURL
 
     private var launchRequestURL: URL? {
-        AppConfig.mainWebsiteURL()
-            ?? AppConfig.helpCenterURL()
+        if let websiteURL = AppConfig.mainWebsiteURL() {
+            var components = URLComponents(
+                url: websiteURL.appendingPathComponent("capture-app/launch-access"),
+                resolvingAgainstBaseURL: false
+            )
+            var queryItems = [URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")]
+            if let resolvedCity = viewModel.resolvedCity?.displayName {
+                queryItems.append(URLQueryItem(name: "city", value: resolvedCity))
+            }
+            components?.queryItems = queryItems
+            return components?.url
+        }
+
+        return AppConfig.helpCenterURL()
             ?? AppConfig.supportEmailURL(subject: "Request launch access")
     }
 
     var body: some View {
-        ZStack {
-            Color.clear.ignoresSafeArea()
+        GeometryReader { proxy in
+            let metrics = LaunchCityGateLayoutMetrics(containerWidth: proxy.size.width)
 
-            VStack(alignment: .leading, spacing: 0) {
-                header
-                    .padding(.top, 68)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 22)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 0) {
+                    header(metrics: metrics)
+                        .padding(.top, metrics.headerTopPadding)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 22)
 
-                statusCard
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    statusCard(metrics: metrics)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 16)
 
-                liveCitiesCard
-                    .padding(.horizontal, 20)
-
-                Spacer(minLength: 28)
-
+                    liveCitiesCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 24)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .safeAreaInset(edge: .bottom) {
                 footerActions
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 34)
+                    .padding(.top, 14)
+                    .padding(.bottom, 18)
+                    .background(
+                        Rectangle()
+                            .fill(Color.black.opacity(0.92))
+                            .ignoresSafeArea(edges: .bottom)
+                    )
             }
+            .blueprintAppBackground()
         }
-        .blueprintAppBackground()
     }
 
-    private var header: some View {
+    private func header(metrics: LaunchCityGateLayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Blueprint city launch")
                 .font(BlueprintTheme.body(12, weight: .semibold))
                 .foregroundStyle(BlueprintTheme.textTertiary)
                 .tracking(2.0)
+                .lineLimit(1)
 
             Text("We’re only live in a few cities right now.")
-                .font(BlueprintTheme.display(38, weight: .semibold))
+                .font(BlueprintTheme.display(metrics.heroTitleSize, weight: .semibold))
                 .foregroundStyle(BlueprintTheme.textPrimary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("Your location determines whether the capture network unlocks. Launch availability follows Blueprint's active city program.")
                 .font(BlueprintTheme.body(15, weight: .medium))
@@ -77,20 +101,41 @@ struct LaunchCityGateView: View {
     }
 
     @ViewBuilder
-    private var statusCard: some View {
+    private func statusCard(metrics: LaunchCityGateLayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .center, spacing: 14) {
-                statusIcon
+            if metrics.usesVerticalStatusLayout {
+                VStack(alignment: .leading, spacing: 14) {
+                    statusIcon
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(statusTitle)
-                        .font(BlueprintTheme.display(24, weight: .semibold))
-                        .foregroundStyle(BlueprintTheme.textPrimary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(statusTitle)
+                            .font(BlueprintTheme.display(metrics.statusTitleSize, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    Text(statusMessage)
-                        .font(BlueprintTheme.body(14, weight: .medium))
-                        .foregroundStyle(BlueprintTheme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        Text(statusMessage)
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 14) {
+                    statusIcon
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(statusTitle)
+                            .font(BlueprintTheme.display(metrics.statusTitleSize, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(statusMessage)
+                            .font(BlueprintTheme.body(14, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -133,6 +178,8 @@ struct LaunchCityGateView: View {
                         Text(city.displayName)
                             .font(BlueprintTheme.body(15, weight: .semibold))
                             .foregroundStyle(BlueprintTheme.textPrimary)
+                            .lineLimit(nil)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text("Launch market")
                             .font(BlueprintTheme.body(12, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textTertiary)
@@ -287,6 +334,16 @@ struct LaunchCityGateView: View {
                 .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
+}
+
+struct LaunchCityGateLayoutMetrics: Equatable {
+    let containerWidth: CGFloat
+
+    var isCompactWidth: Bool { containerWidth <= 400 }
+    var heroTitleSize: CGFloat { isCompactWidth ? 32 : 38 }
+    var statusTitleSize: CGFloat { isCompactWidth ? 20 : 24 }
+    var headerTopPadding: CGFloat { isCompactWidth ? 52 : 68 }
+    var usesVerticalStatusLayout: Bool { isCompactWidth }
 }
 
 #Preview("Unsupported City") {
