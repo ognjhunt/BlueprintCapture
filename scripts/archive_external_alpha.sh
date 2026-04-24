@@ -82,19 +82,56 @@ build_setting_value() {
   ' "$BUILD_SETTINGS_PATH"
 }
 
+write_release_build_settings() {
+  local settings_args=(
+    -showBuildSettings
+    -project BlueprintCapture.xcodeproj
+    -scheme BlueprintCapture
+    -configuration Release
+    -derivedDataPath "$DERIVED_DATA_PATH"
+    -xcconfig "$RELEASE_XCCONFIG"
+  )
+
+  if xcodebuild "${settings_args[@]}" > "$BUILD_SETTINGS_PATH"; then
+    return 0
+  fi
+
+  echo "==> Repairing stale Swift package state for release build settings" >&2
+  rm -rf "$DERIVED_DATA_PATH/SourcePackages"
+  xcodebuild "${settings_args[@]}" > "$BUILD_SETTINGS_PATH"
+}
+
 lint_release_inputs() {
   require_xcconfig_value "BLUEPRINT_BACKEND_BASE_URL"
   require_xcconfig_value "BLUEPRINT_DEMAND_BACKEND_BASE_URL"
+  require_xcconfig_value "BLUEPRINT_MAIN_WEBSITE_URL"
+  require_xcconfig_value "BLUEPRINT_HELP_CENTER_URL"
+  require_xcconfig_value "BLUEPRINT_BUG_REPORT_URL"
+  require_xcconfig_value "BLUEPRINT_TERMS_OF_SERVICE_URL"
+  require_xcconfig_value "BLUEPRINT_PRIVACY_POLICY_URL"
+  require_xcconfig_value "BLUEPRINT_CAPTURE_POLICY_URL"
+  require_xcconfig_value "BLUEPRINT_ACCOUNT_DELETION_URL"
+  require_xcconfig_value "BLUEPRINT_SUPPORT_EMAIL_ADDRESS"
   require_xcconfig_bool "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK" "no"
   require_xcconfig_bool "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE" "no"
   require_xcconfig_bool "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS" "yes"
 
+  local nearby_provider
+  nearby_provider="$(trim "$(xcconfig_value "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER")")"
+  if [[ "$nearby_provider" != "places_nearby" ]]; then
+    echo "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in $RELEASE_XCCONFIG." >&2
+    exit 1
+  fi
+
+  local aps_environment
+  aps_environment="$(trim "$(xcconfig_value "APS_ENVIRONMENT")")"
+  if [[ "$aps_environment" != "production" ]]; then
+    echo "APS_ENVIRONMENT must be production in $RELEASE_XCCONFIG for TestFlight/external alpha." >&2
+    exit 1
+  fi
+
   mkdir -p "$(dirname "$BUILD_SETTINGS_PATH")"
-  xcodebuild -showBuildSettings \
-    -project BlueprintCapture.xcodeproj \
-    -scheme BlueprintCapture \
-    -configuration Release \
-    -xcconfig "$RELEASE_XCCONFIG" > "$BUILD_SETTINGS_PATH"
+  write_release_build_settings
 
   local resolved_backend_url
   local resolved_demand_url
@@ -181,6 +218,31 @@ fi
 
 if [[ -z "$(plist_value BLUEPRINT_DEMAND_BACKEND_BASE_URL)" ]]; then
   echo "BLUEPRINT_DEMAND_BACKEND_BASE_URL must be set in the archive." >&2
+  exit 1
+fi
+
+if [[ "$(plist_value BLUEPRINT_NEARBY_DISCOVERY_PROVIDER)" != "places_nearby" ]]; then
+  echo "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in the archive." >&2
+  exit 1
+fi
+
+for required_url_key in \
+  BLUEPRINT_MAIN_WEBSITE_URL \
+  BLUEPRINT_HELP_CENTER_URL \
+  BLUEPRINT_BUG_REPORT_URL \
+  BLUEPRINT_TERMS_OF_SERVICE_URL \
+  BLUEPRINT_PRIVACY_POLICY_URL \
+  BLUEPRINT_CAPTURE_POLICY_URL \
+  BLUEPRINT_ACCOUNT_DELETION_URL
+do
+  if [[ -z "$(plist_value "$required_url_key")" ]]; then
+    echo "$required_url_key must be configured in the archive." >&2
+    exit 1
+  fi
+done
+
+if [[ -z "$(plist_value BLUEPRINT_SUPPORT_EMAIL_ADDRESS)" ]]; then
+  echo "BLUEPRINT_SUPPORT_EMAIL_ADDRESS must be configured in the archive." >&2
   exit 1
 fi
 

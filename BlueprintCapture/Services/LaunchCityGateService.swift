@@ -19,13 +19,10 @@ struct ResolvedLaunchCity: Equatable {
 }
 
 enum LaunchCityMatcher {
-    static let supportedCities: [CreatorLaunchStatusResponse.SupportedCity] = [
-        .init(city: "Austin", stateCode: "TX", displayName: "Austin, TX", citySlug: "austin-tx"),
-        .init(city: "Durham", stateCode: "NC", displayName: "Durham, NC", citySlug: "durham-nc"),
-        .init(city: "San Francisco", stateCode: "CA", displayName: "San Francisco, CA", citySlug: "san-francisco-ca")
-    ]
-
-    static func supportedCity(for city: ResolvedLaunchCity) -> CreatorLaunchStatusResponse.SupportedCity? {
+    static func supportedCity(
+        for city: ResolvedLaunchCity,
+        in supportedCities: [CreatorLaunchStatusResponse.SupportedCity]
+    ) -> CreatorLaunchStatusResponse.SupportedCity? {
         let normalizedCity = normalizeToken(city.city)
         let normalizedState = normalizeStateToken(city.stateCode)
 

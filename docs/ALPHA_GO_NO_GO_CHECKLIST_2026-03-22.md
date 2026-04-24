@@ -62,6 +62,7 @@ These must be true in the real release/TestFlight config:
 - [ ] `BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=NO`
 - [ ] `BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE=NO`
 - [ ] `BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS=YES`
+- [ ] `APS_ENVIRONMENT=production`
 - [ ] `aps-environment` exists in `BlueprintCapture.entitlements`
 - [ ] `GoogleService-Info.plist` is bundled correctly
 
@@ -90,6 +91,7 @@ Release rule:
 Release rule:
 
 - Do not launch if the app only works with mock jobs, internal test space, or direct client provider keys.
+- Run `./scripts/archive_external_alpha.sh --validate-config-only` before any city proof signoff.
 
 ## 4. Capture Flow Gate
 
@@ -221,6 +223,7 @@ Operational truth:
 Go only when all of these are true:
 
 - `./scripts/alpha_readiness.sh` passes
+- `./scripts/launch_city_readiness.sh` passes with a real city proof artifact, not `ops/launch-readiness/example.launch-proof.json`
 - cross-repo external alpha gate passes
 - release bundle contains no secrets or provider keys
 - live auth + live discovery + real approved-job capture flow works

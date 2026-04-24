@@ -167,31 +167,23 @@ enum CaptureBundleFinalizationMode: Equatable {
     /// videoURI if neither file is found.
     func resolvingVideoExtension(in directory: URL) -> CaptureBundleFinalizationMode {
         let fm = FileManager.default
-        // Strip any prefix (e.g. "raw/") to get the bare filename
-        let baseName = URL(fileURLWithPath: videoURI).lastPathComponent
+        let uri = URL(fileURLWithPath: videoURI)
+        let baseName = uri.lastPathComponent
         let baseWithoutExt = (baseName as NSString).deletingPathExtension
-        let directoryURL = videoURI.hasSuffix(baseName) ? URL(fileURLWithPath: videoURI).deletingLastPathComponent() : directory
+        let uriDirectory = uri.deletingLastPathComponent().relativePath
+        let uriPrefix = uriDirectory == "." ? "" : uriDirectory
 
-        let movURL = directoryURL.appendingPathComponent(baseWithoutExt + ".mov")
-        let mp4URL = directoryURL.appendingPathComponent(baseWithoutExt + ".mp4")
+        let movURL = directory.appendingPathComponent(baseWithoutExt + ".mov")
+        let mp4URL = directory.appendingPathComponent(baseWithoutExt + ".mp4")
 
         let actualVideo: String
-        let relativePath: (URL) -> String = { url in
-            let path = url.standardizedFileURL.path
-            let basePath = directory.standardizedFileURL.path
-            guard path.hasPrefix(basePath) else { return url.lastPathComponent }
-            var relative = String(path.dropFirst(basePath.count))
-            while relative.hasPrefix("/") {
-                relative.removeFirst()
-            }
-            return relative.isEmpty ? url.lastPathComponent : relative
+        let uriForFileName: (String) -> String = { fileName in
+            uriPrefix.isEmpty ? fileName : (uriPrefix as NSString).appendingPathComponent(fileName)
         }
         if fm.fileExists(atPath: mp4URL.path) {
-            let mp4Relative = relativePath(mp4URL)
-            actualVideo = mp4Relative.isEmpty ? baseWithoutExt + ".mp4" : mp4Relative
+            actualVideo = uriForFileName(baseWithoutExt + ".mp4")
         } else if fm.fileExists(atPath: movURL.path) {
-            let movRelative = relativePath(movURL)
-            actualVideo = movRelative.isEmpty ? baseWithoutExt + ".mov" : movRelative
+            actualVideo = uriForFileName(baseWithoutExt + ".mov")
         } else {
             return self  // Neither exists — keep the caller-provided URI
         }
@@ -267,7 +259,7 @@ enum IntakeResolutionOutcome {
     case needsManualEntry(request: CaptureUploadRequest, draft: CaptureManualIntakeDraft)
 }
 
-struct CaptureEvidenceSummary: Equatable, Codable {
+struct CaptureEvidenceSummary: Equatable, Encodable {
     let arkitFrameRows: Int
     let arkitPoseRows: Int
     let arkitIntrinsicsValid: Bool
@@ -299,6 +291,89 @@ struct CaptureEvidenceSummary: Equatable, Codable {
     let motionSamples: Int
     let motionProvenance: String?
     let motionTimestampsCaptureRelative: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case arkitFrameRows
+        case arkitPoseRows
+        case arkitIntrinsicsValid
+        case arkitDepthFrames
+        case arkitConfidenceFrames
+        case arkitMeshFiles
+        case arkitFeaturePointRows
+        case arkitPlaneRows
+        case arkitTrackingStateRows
+        case arkitRelocalizationEventRows
+        case arkitLightEstimateRows
+        case arcoreFrameRows
+        case arcorePoseRows
+        case arcoreIntrinsicsValid
+        case arcoreDepthFrames
+        case arcoreConfidenceFrames
+        case arcorePointCloudSamples
+        case arcorePlaneRows
+        case arcoreTrackingStateRows
+        case arcoreLightEstimateRows
+        case glassesFrameTimestampRows
+        case glassesDeviceStateRows
+        case glassesHealthEventRows
+        case companionPhonePoseRows
+        case companionPhoneIntrinsicsValid
+        case companionPhoneCalibrationPresent
+        case poseMatchRate
+        case p95PoseDeltaSec
+        case motionSamples
+        case motionProvenance
+        case motionTimestampsCaptureRelative
+        case poseAuthority
+        case intrinsicsAuthority
+        case depthAuthority
+        case motionAuthority
+        case geometrySource
+        case geometryExpectedDownstream
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(arkitFrameRows, forKey: .arkitFrameRows)
+        try container.encode(arkitPoseRows, forKey: .arkitPoseRows)
+        try container.encode(arkitIntrinsicsValid, forKey: .arkitIntrinsicsValid)
+        try container.encode(arkitDepthFrames, forKey: .arkitDepthFrames)
+        try container.encode(arkitConfidenceFrames, forKey: .arkitConfidenceFrames)
+        try container.encode(arkitMeshFiles, forKey: .arkitMeshFiles)
+        try container.encode(arkitFeaturePointRows, forKey: .arkitFeaturePointRows)
+        try container.encode(arkitPlaneRows, forKey: .arkitPlaneRows)
+        try container.encode(arkitTrackingStateRows, forKey: .arkitTrackingStateRows)
+        try container.encode(arkitRelocalizationEventRows, forKey: .arkitRelocalizationEventRows)
+        try container.encode(arkitLightEstimateRows, forKey: .arkitLightEstimateRows)
+        try container.encode(arcoreFrameRows, forKey: .arcoreFrameRows)
+        try container.encode(arcorePoseRows, forKey: .arcorePoseRows)
+        try container.encode(arcoreIntrinsicsValid, forKey: .arcoreIntrinsicsValid)
+        try container.encode(arcoreDepthFrames, forKey: .arcoreDepthFrames)
+        try container.encode(arcoreConfidenceFrames, forKey: .arcoreConfidenceFrames)
+        try container.encode(arcorePointCloudSamples, forKey: .arcorePointCloudSamples)
+        try container.encode(arcorePlaneRows, forKey: .arcorePlaneRows)
+        try container.encode(arcoreTrackingStateRows, forKey: .arcoreTrackingStateRows)
+        try container.encode(arcoreLightEstimateRows, forKey: .arcoreLightEstimateRows)
+        try container.encode(glassesFrameTimestampRows, forKey: .glassesFrameTimestampRows)
+        try container.encode(glassesDeviceStateRows, forKey: .glassesDeviceStateRows)
+        try container.encode(glassesHealthEventRows, forKey: .glassesHealthEventRows)
+        try container.encode(companionPhonePoseRows, forKey: .companionPhonePoseRows)
+        try container.encode(companionPhoneIntrinsicsValid, forKey: .companionPhoneIntrinsicsValid)
+        try container.encode(companionPhoneCalibrationPresent, forKey: .companionPhoneCalibrationPresent)
+        try container.encodeIfPresent(poseMatchRate, forKey: .poseMatchRate)
+        try container.encodeIfPresent(p95PoseDeltaSec, forKey: .p95PoseDeltaSec)
+        try container.encode(motionSamples, forKey: .motionSamples)
+        try container.encodeIfPresent(motionProvenance, forKey: .motionProvenance)
+        try container.encode(motionTimestampsCaptureRelative, forKey: .motionTimestampsCaptureRelative)
+
+        let capabilities = captureCapabilities
+        try container.encode(capabilities.poseAuthority, forKey: .poseAuthority)
+        try container.encode(capabilities.intrinsicsAuthority, forKey: .intrinsicsAuthority)
+        try container.encode(capabilities.depthAuthority, forKey: .depthAuthority)
+        try container.encode(capabilities.motionAuthority, forKey: .motionAuthority)
+        try container.encodeIfPresent(capabilities.geometrySource, forKey: .geometrySource)
+        try container.encode(capabilities.geometryExpectedDownstream, forKey: .geometryExpectedDownstream)
+    }
 
     var sensorAvailability: [String: Bool] {
         [
@@ -570,7 +645,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
     }
 
-    private struct CaptureContextFile: Codable {
+    private struct CaptureContextFile: Encodable {
         let schemaVersion: String
         let sceneId: String
         let captureId: String
@@ -815,12 +890,6 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             throw FinalizationError.packageMissing
         }
 
-        // Validate raw bundle truth before any patching or handoff
-        let validationReasons = validateRawBundle(in: directory)
-        if !validationReasons.isEmpty {
-            throw FinalizationError.invalidBundle(reasons: validationReasons)
-        }
-
         // Resolve the actual video URI based on what exists on disk (.mov or .mp4).
         // This ensures the manifest video_uri and video_track.json reference the correct file
         // regardless of which extension the encoder produced.
@@ -828,6 +897,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
         try patchManifest(in: directory, request: request, mode: resolvedMode)
         try materializeSupplementalFiles(in: directory, request: request, mode: resolvedMode)
+
+        // Validate the fully materialized raw bundle before upload/export handoff.
+        // Several contract sidecars are intentionally derived during finalization,
+        // so validating before this point rejects otherwise valid fresh captures.
+        let validationReasons = validateRawBundle(in: directory)
+        if !validationReasons.isEmpty {
+            throw FinalizationError.invalidBundle(reasons: validationReasons)
+        }
 
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
@@ -1654,7 +1731,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     }
 
     private func writeVideoTrackFile(in directory: URL, mode: CaptureBundleFinalizationMode) throws {
-        let videoFileURL = directory.appendingPathComponent(mode.videoURI)
+        let videoFileURL = resolvedVideoFileURL(in: directory, videoURI: mode.videoURI)
         let videoFileName = URL(fileURLWithPath: mode.videoURI).lastPathComponent
         let manifestURL = directory.appendingPathComponent("manifest.json")
         let manifestObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
@@ -1692,6 +1769,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let videoTrackURL = directory.appendingPathComponent("video_track.json")
         let data = try JSONSerialization.data(withJSONObject: videoTrackPayload, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: videoTrackURL, options: .atomic)
+    }
+
+    private func resolvedVideoFileURL(in directory: URL, videoURI: String) -> URL {
+        let candidate = directory.appendingPathComponent(videoURI)
+        if fileManager.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+        return directory.appendingPathComponent(URL(fileURLWithPath: videoURI).lastPathComponent)
     }
 
     private func writeHashesAndProvenance(in directory: URL, request: CaptureUploadRequest) throws {
@@ -1783,14 +1868,20 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     private func writeARKitDerivedSidecars(in directory: URL, coordinateFrameSessionId: String?) throws {
         let arkitDirectory = directory.appendingPathComponent("arkit", isDirectory: true)
         let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
-        guard fileManager.fileExists(atPath: framesURL.path) else { return }
+        let syncMapURL = directory.appendingPathComponent("sync_map.jsonl")
+        guard fileManager.fileExists(atPath: framesURL.path) else {
+            try "".write(to: syncMapURL, atomically: true, encoding: .utf8)
+            return
+        }
 
         let frameRows = readJSONLines(from: framesURL)
-        guard !frameRows.isEmpty else { return }
+        guard !frameRows.isEmpty else {
+            try "".write(to: syncMapURL, atomically: true, encoding: .utf8)
+            return
+        }
 
         let frameQualityURL = arkitDirectory.appendingPathComponent("frame_quality.jsonl")
         let perFrameCameraStateURL = arkitDirectory.appendingPathComponent("per_frame_camera_state.jsonl")
-        let syncMapURL = directory.appendingPathComponent("sync_map.jsonl")
         let depthManifestURL = arkitDirectory.appendingPathComponent("depth_manifest.json")
         let confidenceManifestURL = arkitDirectory.appendingPathComponent("confidence_manifest.json")
         let sessionIntrinsicsURL = arkitDirectory.appendingPathComponent("session_intrinsics.json")

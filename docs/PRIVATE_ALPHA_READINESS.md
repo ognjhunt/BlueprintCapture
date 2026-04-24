@@ -28,6 +28,7 @@
 - Mobile should not assume the public `tryblueprint.io` gateway forwards the new demand POST routes.
 - Release/TestFlight builds must keep `BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=NO` and `BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE=NO`.
 - Remote push is part of the alpha release gate, so release/TestFlight builds must also keep `BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS=YES`.
+- Release/TestFlight builds must set `APS_ENVIRONMENT=production` in the release xcconfig.
 
 ## Automated verification
 - Run `./scripts/alpha_readiness.sh`.
@@ -35,6 +36,7 @@
   - `cloud/extract-frames`
   - `cloud/referral-earnings`
 - Use `./scripts/archive_external_alpha.sh` with an untracked release xcconfig copied from `ConfigTemplates/BlueprintCapture.release.xcconfig.example` before any external archive/export.
+- Run `./scripts/launch_city_readiness.sh` with a real `BLUEPRINT_LAUNCH_PROOF_PATH`, authenticated `BLUEPRINT_LAUNCH_AUTH_TOKEN`, `BLUEPRINT_LAUNCH_CITY_SLUG`, `BLUEPRINT_LAUNCH_LAT`, and `BLUEPRINT_LAUNCH_LNG` before marketing a city. The example proof under `ops/launch-readiness/` is only for contract validation.
 - `alpha_readiness.sh` preboots a simulator, runs the cloud tests, runs the focused iOS unit/UI suite, builds the release app bundle, and fails if the bundle contains `Secrets*.plist`, provider keys, mock-job fallback, internal test space, missing remote notifications, missing backend URLs, or missing support/legal config.
 - Use `./scripts/android_alpha_readiness.sh` for Android internal release validation. It validates release-safe config, runs `testDebugUnitTest`, and builds `assembleRelease`.
 

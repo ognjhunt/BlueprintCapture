@@ -59,6 +59,7 @@ struct CaptureBundleAndInferenceTests {
             ]
         ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{}".utf8).write(to: arkit.appendingPathComponent("intrinsics.json"))
+        try Data("".utf8).write(to: raw.appendingPathComponent("motion.jsonl"))
 
         let metadata = CaptureUploadMetadata(
             id: UUID(),
@@ -113,6 +114,7 @@ struct CaptureBundleAndInferenceTests {
 
         let finalizer = CaptureBundleFinalizer()
         _ = try finalizer.finalize(request: request, mode: .localExport())
+        #expect(finalizer.validateRawBundle(in: raw).isEmpty)
 
         let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
         let manifest = try #require(manifestObject as? [String: Any])
@@ -194,6 +196,9 @@ struct CaptureBundleAndInferenceTests {
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("manifest.json").path))
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("walkthrough.mov").path))
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("arkit/intrinsics.json").path))
+        #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("rights_consent.json").path))
+        #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("provenance.json").path))
+        #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("sync_map.jsonl").path))
         #expect(fileManager.fileExists(atPath: (bundle.shareURL ?? bundle.captureRootURL).path))
     }
 
@@ -333,6 +338,8 @@ struct CaptureBundleAndInferenceTests {
 """.utf8).write(to: arkit.appendingPathComponent("frames.jsonl"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
+        try Data("{\"timestamp\":1.0,\"t_capture_sec\":0.1,\"motion_provenance\":\"phone_imu\"}\n".utf8)
+            .write(to: raw.appendingPathComponent("motion.jsonl"))
 
         let metadata = CaptureUploadMetadata(
             id: UUID(),
@@ -1047,6 +1054,7 @@ extension CaptureBundleAndInferenceTests {
             ]
         ).write(to: raw.appendingPathComponent("manifest.json"))
         try Data("{\"rights_consent_given\":true,\"version\":\"v3\"}".utf8).write(to: raw.appendingPathComponent("rights_consent.json"))
+        try Data("".utf8).write(to: raw.appendingPathComponent("motion.jsonl"))
 
         let metadata = CaptureUploadMetadata(
             id: UUID(),

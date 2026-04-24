@@ -1,0 +1,52 @@
+{
+  "contract_only": true,
+  "city_slug": "example-city-st",
+  "evidence_generated_at": "2026-04-24T00:00:00Z",
+  "release": {
+    "config_validated_by_archive_script": true
+  },
+  "city": {
+    "backend_supported": true,
+    "live_approved_job_count": 1,
+    "live_capture_target_count": 1,
+    "mock_fallback_disabled": true,
+    "internal_test_space_disabled": true
+  },
+  "capture": {
+    "real_device_capture_uploaded": true,
+    "capture_submissions_document_exists": true,
+    "raw_upload_complete_exists": true
+  },
+  "pipeline": {
+    "capture_descriptor_exists": true,
+    "qa_report_exists": true,
+    "pipeline_handoff_exists": true,
+    "pubsub_handoff_succeeded": true,
+    "pipeline_processed_capture": true
+  },
+  "meta_glasses": {
+    "physical_device_smoke_passed": true,
+    "video_first_positioning_confirmed": true,
+    "native_geometry_not_marketed": true
+  },
+  "open_capture": {
+    "review_gated": true,
+    "payout_cents": 0,
+    "paid_anywhere_claim_disabled": true
+  },
+  "payouts": {
+    "backend_configured": true,
+    "stripe_state_checked": true,
+    "marketing_claims_require_stripe_ready": true
+  },
+  "ops": {
+    "launch_owner": "example-owner",
+    "failed_upload_monitor": true,
+    "submission_registration_monitor": true,
+    "push_device_sync_monitor": true,
+    "bridge_pipeline_monitor": true,
+    "payout_exception_monitor": true,
+    "session_events_queryable": true,
+    "cloud_logging_handoff_alert": true
+  }
+}
