@@ -139,8 +139,8 @@ final class NearbyTargetsViewModel: ObservableObject {
 
     deinit {
         // Ensure observer cleanup even when deinit runs off-main
-        Task { @MainActor in
-            clearTargetStateObservers()
+        Task { [weak self] @MainActor in
+            self?.clearTargetStateObservers()
         }
     }
 

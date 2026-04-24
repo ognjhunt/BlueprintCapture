@@ -47,12 +47,39 @@ jobs:
       - name: List available simulators
         run: xcrun simctl list devices available
 
+      - name: Resolve simulator destination
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pick a concrete iPhone 17 Pro simulator UDID so xcodebuild does not
+          # fail when macOS runners expose multiple matching devices.
+          SIMULATOR_UDID="$(
+            xcrun simctl list devices available | awk -v name="iPhone 17 Pro" '
+              index($0, name " (") {
+                split($0, parts, "(")
+                if (length(parts) >= 2) {
+                  udid = parts[2]
+                  sub(/\).*/, "", udid)
+                  print udid
+                  exit
+                }
+              }
+            '
+          )"
+
+          if [[ -z "$SIMULATOR_UDID" ]]; then
+            echo "Unable to find an available iPhone 17 Pro simulator." >&2
+            exit 1
+          fi
+
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
+
       - name: Build for testing
         run: |
           xcodebuild build-for-testing \
             -project BlueprintCapture.xcodeproj \
             -scheme BlueprintCapture \
-            -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" \
+            -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
             -configuration Debug \
             -skipPackageUpdates \
             -allowProvisioningUpdates \
@@ -63,7 +90,7 @@ jobs:
           xcodebuild test-without-building \
             -project BlueprintCapture.xcodeproj \
             -scheme BlueprintCapture \
-            -destination "platform=iOS Simulator,name=iPhone 17 Pro,OS=latest" \
+            -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
             -configuration Debug \
             -skipPackageUpdates
 
