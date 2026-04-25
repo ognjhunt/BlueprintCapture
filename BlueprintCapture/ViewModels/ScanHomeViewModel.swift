@@ -242,6 +242,7 @@ final class ScanHomeViewModel: ObservableObject {
     private let nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol
     private let nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol
     private let cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol
+    private let cityLaunchTargetsService: CityLaunchTargetsServiceProtocol
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
     private let inferredNearbyLimit: Int = 8
@@ -262,7 +263,8 @@ final class ScanHomeViewModel: ObservableObject {
         demandIntelligenceService: DemandIntelligenceServiceProtocol = APIService.shared,
         nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
         nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol = NearbyCandidateReviewSubmissionService(),
-        cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol = APIService.shared
+        cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol = APIService.shared,
+        cityLaunchTargetsService: CityLaunchTargetsServiceProtocol = APIService.shared
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService
@@ -273,6 +275,7 @@ final class ScanHomeViewModel: ObservableObject {
         self.nearbyDiscoveryService = nearbyDiscoveryService
         self.nearbyCandidateReviewSubmissionService = nearbyCandidateReviewSubmissionService
         self.cityLaunchCandidateSignalService = cityLaunchCandidateSignalService
+        self.cityLaunchTargetsService = cityLaunchTargetsService
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -563,35 +566,57 @@ final class ScanHomeViewModel: ObservableObject {
 
     private func fetchRankedJobs(userLocation: CLLocation) async throws -> [ScanJob] {
         _ = await loadNearbyCandidatePlaces(userLocation: userLocation)
+        let approvedLaunchJobs = await loadApprovedLaunchJobs(near: userLocation)
 
-        guard AppConfig.hasDemandBackendBaseURL() else {
-            return try await jobsRepository.fetchActiveJobs(limit: 200)
+        let baseJobs: [ScanJob]
+        if AppConfig.hasDemandBackendBaseURL() {
+            let request = DemandOpportunityFeedRequest(
+                lat: userLocation.coordinate.latitude,
+                lng: userLocation.coordinate.longitude,
+                radiusMeters: Int(feedRadiusMeters.rounded()),
+                limit: 200,
+                candidatePlaces: []
+            )
+
+            do {
+                let response = try await demandIntelligenceService.fetchDemandOpportunityFeed(request)
+                if !response.captureJobs.isEmpty {
+                    baseJobs = response.captureJobs
+                } else {
+                    baseJobs = try await jobsRepository.fetchActiveJobs(limit: 200)
+                }
+            } catch {
+                SessionEventManager.shared.logError(
+                    errorCode: "demand_ranking_failed",
+                    metadata: [
+                        "message": error.localizedDescription
+                    ]
+                )
+                print("⚠️ [ScanHome] Demand opportunity feed failed, falling back to Firestore jobs: \(error.localizedDescription)")
+                baseJobs = try await jobsRepository.fetchActiveJobs(limit: 200)
+            }
+        } else {
+            baseJobs = try await jobsRepository.fetchActiveJobs(limit: 200)
         }
 
-        let request = DemandOpportunityFeedRequest(
-            lat: userLocation.coordinate.latitude,
-            lng: userLocation.coordinate.longitude,
-            radiusMeters: Int(feedRadiusMeters.rounded()),
-            limit: 200,
-            candidatePlaces: []
-        )
+        return Self.mergeCuratedAndInferredJobs(baseJobs, inferred: approvedLaunchJobs)
+    }
+
+    private func loadApprovedLaunchJobs(near userLocation: CLLocation) async -> [ScanJob] {
+        guard AppConfig.hasBackendBaseURL() else { return [] }
 
         do {
-            let response = try await demandIntelligenceService.fetchDemandOpportunityFeed(request)
-            if !response.captureJobs.isEmpty {
-                return response.captureJobs
-            }
-        } catch {
-            SessionEventManager.shared.logError(
-                errorCode: "demand_ranking_failed",
-                metadata: [
-                    "message": error.localizedDescription
-                ]
+            let response = try await cityLaunchTargetsService.fetchCityLaunchTargets(
+                lat: userLocation.coordinate.latitude,
+                lng: userLocation.coordinate.longitude,
+                radiusMeters: 80_467,
+                limit: 25
             )
-            print("⚠️ [ScanHome] Demand opportunity feed failed, falling back to Firestore jobs: \(error.localizedDescription)")
+            return response.targets.map { Self.makeApprovedLaunchJob(from: $0) }
+        } catch {
+            print("⚠️ [ScanHome] Approved launch targets failed: \(error.localizedDescription)")
+            return []
         }
-
-        return try await jobsRepository.fetchActiveJobs(limit: 200)
     }
 
     private func loadNearbyCandidatePlaces(userLocation: CLLocation) async -> [PlaceDetailsLite] {
@@ -815,6 +840,85 @@ extension ScanHomeViewModel {
             demandSummary: "Inferred nearby candidate sourced from live place search.",
             rankingExplanation: "Nearby place candidate that still requires Blueprint review before it becomes an approved capture job.",
             suggestedWorkflows: []
+        )
+    }
+
+    static func makeApprovedLaunchJob(from target: Target) -> ScanJob {
+        let context = target.launchContext
+        let title = target.displayName
+        let address = target.address ?? title
+        let workflowFit = context?.workflowFit?.replacingOccurrences(of: "_", with: " ") ?? "public-facing capture"
+        let priorityNote = context?.priorityNote?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workflowSteps = [
+            "Start at the public-facing approach or entry.",
+            "Walk the accessible common circulation path in one continuous pass.",
+            "Pause briefly at thresholds, corners, and major transitions.",
+            "Stop immediately if staff, signage, or site conditions indicate capture is not allowed."
+        ]
+
+        return ScanJob(
+            id: "city-launch-\(target.id)",
+            title: title,
+            address: address,
+            lat: target.lat,
+            lng: target.lng,
+            payoutCents: 4_500,
+            estMinutes: 30,
+            active: true,
+            updatedAt: Date(),
+            thumbnailURL: nil,
+            heroImageURL: nil,
+            category: "LAUNCH \(context?.prospectStatus.uppercased() ?? "APPROVED")",
+            instructions: workflowSteps,
+            allowedAreas: ["Public-facing common-access zones"],
+            restrictedAreas: ["Private rooms", "Staff-only areas", "Security-sensitive areas", "Faces, screens, and paperwork"],
+            permissionDocURL: URL(string: "https://tryblueprint.io/capture-policy"),
+            checkinRadiusM: 150,
+            alertRadiusM: 200,
+            priority: 10,
+            priorityWeight: 1.0,
+            regionId: context?.citySlug,
+            jobType: .curatedNearby,
+            buyerRequestId: nil,
+            siteSubmissionId: target.id,
+            quotedPayoutCents: 4_500,
+            dueWindow: "city_launch",
+            approvalRequirements: ["city_launch_approved_scope"],
+            recaptureReason: nil,
+            rightsChecklist: [
+                "Capture only the approved public-facing/common-access scope.",
+                "Stop immediately if staff, signage, or conditions object.",
+                "Downstream use still depends on privacy, provenance, and rights review."
+            ],
+            rightsProfile: "approved_launch_target",
+            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            workflowName: "Approved launch target",
+            workflowSteps: workflowSteps,
+            targetKPI: priorityNote,
+            zone: workflowFit,
+            shift: nil,
+            owner: "city-launch",
+            facilityTemplate: context?.sourceBucket,
+            benchmarkStations: [],
+            lightingWindows: [],
+            movableObstacles: [],
+            floorConditionNotes: [],
+            reflectiveSurfaceNotes: [],
+            accessRules: ["Public-facing/common-access capture only"],
+            adjacentSystems: [],
+            privacyRestrictions: ["Avoid faces, screens, paperwork, and private activity."],
+            securityRestrictions: ["Avoid staff-only, restricted, and security-sensitive areas."],
+            knownBlockers: [],
+            nonRoutineModes: [],
+            peopleTrafficNotes: [],
+            captureRestrictions: ["Do not imply site/operator permission beyond Blueprint launch approval."],
+            siteType: target.category ?? context?.sourceBucket,
+            demandScore: target.demandScore ?? 0.85,
+            opportunityScore: 0.95,
+            demandSummary: "Approved city-launch target promoted from Blueprint public-space review.",
+            rankingExplanation: "Promoted launch target: \(workflowFit).",
+            demandSourceKinds: ["city_launch_approved"],
+            suggestedWorkflows: [context?.workflowFit].compactMap { $0 }
         )
     }
 

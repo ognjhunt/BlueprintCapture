@@ -1071,17 +1071,8 @@ private struct CaptureCardArtwork: View {
     var body: some View {
         CapturePreviewView(
             coordinate: item.job.coordinate,
-            remoteImageURL: nil,
-            preferredAssetName: preferredAssetName
+            remoteImageURL: item.previewURL
         )
-    }
-
-    private var preferredAssetName: String {
-        let category = (item.job.category ?? "").lowercased()
-        if category.contains("industrial") || category.contains("warehouse") || category.contains("logistics") {
-            return "CaptureWarehouseHero"
-        }
-        return "CaptureRetailHero"
     }
 }
 

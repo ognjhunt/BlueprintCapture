@@ -319,6 +319,42 @@ struct ScanHomeAndUploadTests {
         #expect(job.workflowName == "Inferred nearby candidate review")
     }
 
+    @Test @MainActor func scanHome_buildsApprovedLaunchTargetsFromCityLaunchFeed() async throws {
+        let target = Target(
+            id: "durham-nc-ccb-plaza",
+            displayName: "CCB Plaza",
+            sku: .B,
+            lat: 35.9968,
+            lng: -78.9014,
+            address: "201 Corcoran St, Durham, NC 27701",
+            demandScore: 0.91,
+            sizeSqFt: nil,
+            category: "public_commercial",
+            launchContext: LaunchTargetContext(
+                city: "Durham, NC",
+                citySlug: "durham-nc",
+                activationStatus: "active",
+                prospectStatus: "approved",
+                sourceBucket: "public_commercial",
+                workflowFit: "public_plaza_common_access",
+                priorityNote: "Strong downtown public-facing target",
+                researchBacked: true
+            ),
+            computedDistanceMeters: nil
+        )
+
+        let job = ScanHomeViewModel.makeApprovedLaunchJob(from: target)
+
+        #expect(job.id == "city-launch-durham-nc-ccb-plaza")
+        #expect(job.title == "CCB Plaza")
+        #expect(job.address == "201 Corcoran St, Durham, NC 27701")
+        #expect(job.permissionDocURL?.absoluteString == "https://tryblueprint.io/capture-policy")
+        #expect(job.rightsProfile == "approved_launch_target")
+        #expect(job.requestedOutputs == ["qualification", "preview_simulation", "deeper_evaluation"])
+        #expect(job.demandSourceKinds == ["city_launch_approved"])
+        #expect(ScanHomeViewModel.permissionTier(for: job) == .approved)
+    }
+
     @Test @MainActor func scanHome_placesReviewSubmissionAfterLiveSections() async throws {
         let sections = ScanHomeViewModel.homeSectionKinds(
             hasReadyNearby: true,
