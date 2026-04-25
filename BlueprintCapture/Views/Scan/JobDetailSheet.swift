@@ -233,8 +233,7 @@ struct JobDetailSheet: View {
         ZStack(alignment: .bottomLeading) {
             CapturePreviewView(
                 coordinate: item.job.coordinate,
-                remoteImageURL: nil,
-                preferredAssetName: preferredAssetName
+                remoteImageURL: item.previewURL
             )
             .frame(height: 320)
             .clipped()
@@ -387,14 +386,23 @@ struct JobDetailSheet: View {
 
     @ViewBuilder
     private var actionButton: some View {
-        Button(actionTitle, action: primaryAction)
-            .font(.headline)
-            .foregroundStyle(actionTextColor)
-            .padding(.vertical, 16)
-            .frame(maxWidth: .infinity)
-            .background(actionBackgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .disabled(item.permissionTier == .blocked)
+        Button(action: primaryAction) {
+            Label(actionTitle, systemImage: actionSystemImage)
+                .font(.headline)
+                .foregroundStyle(actionTextColor)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(actionBackgroundColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(actionBorderColor, lineWidth: 1)
+                )
+        }
+            .buttonStyle(.plain)
+            .opacity(isActionDisabled ? 0.58 : 1)
+            .disabled(isActionDisabled)
             .accessibilityIdentifier("job-detail-primary-action")
+            .accessibilityHint(actionAccessibilityHint)
     }
 
     private var actionTitle: String {
@@ -407,9 +415,19 @@ struct JobDetailSheet: View {
         }
     }
 
+    private var actionSystemImage: String {
+        if !isOnSite { return "location.north.fill" }
+        switch item.permissionTier {
+        case .approved: return "camera.viewfinder"
+        case .reviewRequired: return "tray.and.arrow.up.fill"
+        case .permissionRequired: return "exclamationmark.shield.fill"
+        case .blocked: return "nosign"
+        }
+    }
+
     private var actionBackgroundColor: Color {
         if item.permissionTier == .blocked { return Color(white: 0.12) }
-        if !isOnSite { return Color(white: 0.14) }
+        if !isOnSite { return BlueprintTheme.primary }
         switch item.permissionTier {
         case .approved: return BlueprintTheme.successGreen
         case .reviewRequired: return BlueprintTheme.brandTeal.opacity(0.85)
@@ -419,7 +437,30 @@ struct JobDetailSheet: View {
     }
 
     private var actionTextColor: Color {
-        item.permissionTier == .blocked ? BlueprintTheme.textTertiary : .black
+        if item.permissionTier == .blocked { return BlueprintTheme.textTertiary }
+        if !isOnSite { return .black }
+        return item.permissionTier == .permissionRequired ? BlueprintTheme.textPrimary : .black
+    }
+
+    private var actionBorderColor: Color {
+        if item.permissionTier == .blocked { return BlueprintTheme.hairline }
+        if !isOnSite { return Color.white.opacity(0.18) }
+        return item.permissionTier == .permissionRequired ? BlueprintTheme.hairline : Color.white.opacity(0.10)
+    }
+
+    private var isActionDisabled: Bool {
+        item.permissionTier == .blocked
+    }
+
+    private var actionAccessibilityHint: String {
+        if item.permissionTier == .blocked { return "Capture is not allowed at this location." }
+        if !isOnSite { return "Opens Apple Maps directions to the capture address." }
+        switch item.permissionTier {
+        case .approved: return "Starts an approved capture after choosing a capture device."
+        case .reviewRequired: return "Opens the review submission flow for this location."
+        case .permissionRequired: return "Review the access requirements before capturing."
+        case .blocked: return "Capture is not allowed at this location."
+        }
     }
 
     private func primaryAction() {
@@ -480,11 +521,4 @@ struct JobDetailSheet: View {
         .font(BlueprintTheme.body(11, weight: .semibold))
     }
 
-    private var preferredAssetName: String {
-        let category = (item.job.category ?? "").lowercased()
-        if category.contains("industrial") || category.contains("warehouse") || category.contains("logistics") {
-            return "CaptureWarehouseHero"
-        }
-        return "CaptureRetailHero"
-    }
 }
