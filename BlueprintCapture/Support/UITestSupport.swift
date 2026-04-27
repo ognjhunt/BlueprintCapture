@@ -268,15 +268,16 @@ enum UITestFixtures {
         )
     ]
 
-    @MainActor
     static func makeScanHomeViewModel(alertsManager: NearbyAlertsManager) -> ScanHomeViewModel {
-        ScanHomeViewModel(
-            jobsRepository: UITestJobsRepository(),
-            targetStateService: UITestTargetStateService(),
-            locationService: UITestLocationService(location: location),
-            alertsManager: alertsManager,
-            captureHistoryService: UITestCaptureHistoryService()
-        )
+        return MainActor.run {
+            ScanHomeViewModel(
+                jobsRepository: UITestJobsRepository(),
+                targetStateService: UITestTargetStateService(),
+                locationService: UITestLocationService(location: location),
+                alertsManager: alertsManager,
+                captureHistoryService: UITestCaptureHistoryService()
+            )
+        }
     }
 
     @MainActor
@@ -290,21 +291,22 @@ enum UITestFixtures {
         )
     }
 
-    @MainActor
     static func makeWalletViewModel() -> WalletViewModel {
-        let model = WalletViewModel()
-        model.isAuthenticated = true
-        model.totalEarnings = Decimal(125)
-        model.pendingPayout = Decimal(30)
-        model.scansCompleted = 4
-        model.captureHistory = captureHistory
-        model.payoutLedger = []
-        model.qcStatus = nil
-        model.billingInfo = nil
-        model.stripeAccountState = nil
-        model.isLoading = false
-        model.errorMessage = nil
-        return model
+        return MainActor.run {
+            let model = WalletViewModel()
+            model.isAuthenticated = true
+            model.totalEarnings = Decimal(125)
+            model.pendingPayout = Decimal(30)
+            model.scansCompleted = 4
+            model.captureHistory = captureHistory
+            model.payoutLedger = []
+            model.qcStatus = nil
+            model.billingInfo = nil
+            model.stripeAccountState = nil
+            model.isLoading = false
+            model.errorMessage = nil
+            return model
+        }
     }
 }
 
