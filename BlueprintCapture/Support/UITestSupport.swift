@@ -280,15 +280,16 @@ enum UITestFixtures {
         }
     }
 
-    @MainActor
     static func makeUploadQueueViewModel() -> UploadQueueViewModel {
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
-        try? FileManager.default.removeItem(at: tempURL)
-        return UploadQueueViewModel(
-            uploadService: UITestCaptureUploadService(),
-            targetStateService: UITestTargetStateService(),
-            store: UploadQueueStore(fileURL: tempURL)
-        )
+        return MainActor.run {
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
+            try? FileManager.default.removeItem(at: tempURL)
+            return UploadQueueViewModel(
+                uploadService: UITestCaptureUploadService(),
+                targetStateService: UITestTargetStateService(),
+                store: UploadQueueStore(fileURL: tempURL)
+            )
+        }
     }
 
     static func makeWalletViewModel() -> WalletViewModel {
