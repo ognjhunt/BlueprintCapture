@@ -35,6 +35,8 @@ struct CaptureTutorialView: View {
     ]
 
     var body: some View {
+        let indexedSteps = Array(steps.enumerated())
+
         ZStack {
             // ── Background video ──────────────────────────────────────────
             TutorialVideoBackground(variant: videoVariant)
@@ -53,8 +55,8 @@ struct CaptureTutorialView: View {
 
                 // Swipeable step cards
                 TabView(selection: $currentStep) {
-                    ForEach(steps.indices, id: \.self) { index in
-                        TutorialStepCard(step: steps[index])
+                    ForEach(indexedSteps, id: \.offset) { index, step in
+                        TutorialStepCard(step: step)
                             .tag(index)
                     }
                 }
@@ -65,7 +67,7 @@ struct CaptureTutorialView: View {
 
                 // Dot indicators (tappable to jump)
                 HStack(spacing: 10) {
-                    ForEach(steps.indices, id: \.self) { index in
+                    ForEach(indexedSteps, id: \.offset) { index, _ in
                         Capsule()
                             .fill(index == currentStep ? Color.white : Color.white.opacity(0.3))
                             .frame(width: index == currentStep ? 20 : 8, height: 8)

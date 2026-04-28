@@ -1635,7 +1635,7 @@ extension VideoCaptureManager {
     }
 }
 
-extension VideoCaptureManager: AVCaptureFileOutputRecordingDelegate {
+extension VideoCaptureManager: @preconcurrency AVCaptureFileOutputRecordingDelegate {
     func fileOutput(_ output: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
         startARSessionIfAvailable()
     }
@@ -1715,7 +1715,7 @@ private struct ARFrameData {
     }
 }
 
-extension VideoCaptureManager: ARSessionDelegate {
+extension VideoCaptureManager: @preconcurrency ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         if usingCustomARSessionRecorder {
             if awaitingFirstARVideoFrame {

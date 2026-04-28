@@ -4,6 +4,7 @@ import Combine
 import CoreGraphics
 import SwiftUI
 
+@MainActor
 final class UITestLocationService: LocationServiceProtocol {
     var authorizationStatus: CLAuthorizationStatus = .authorizedWhenInUse
     var latestLocation: CLLocation?
@@ -34,12 +35,14 @@ final class UITestLocationService: LocationServiceProtocol {
     }
 }
 
+@MainActor
 final class UITestJobsRepository: JobsRepositoryProtocol {
     func fetchActiveJobs(limit: Int) async throws -> [ScanJob] {
         Array(UITestFixtures.jobs.prefix(limit))
     }
 }
 
+@MainActor
 final class UITestTargetStateService: TargetStateServiceProtocol {
     private var states: [String: TargetState]
 
@@ -116,12 +119,14 @@ final class UITestTargetStateService: TargetStateServiceProtocol {
     }
 }
 
+@MainActor
 final class UITestCaptureHistoryService: CaptureHistoryServiceProtocol {
     func fetchCaptureHistory() async throws -> [CaptureHistoryEntry] {
         UITestFixtures.captureHistory
     }
 }
 
+@MainActor
 final class UITestCaptureUploadService: CaptureUploadServiceProtocol {
     private let subject = PassthroughSubject<CaptureUploadService.Event, Never>()
 
@@ -137,6 +142,7 @@ final class UITestCaptureUploadService: CaptureUploadServiceProtocol {
     func cancelUpload(id: UUID) {}
 }
 
+@MainActor
 enum UITestFixtures {
     static let location = CLLocation(latitude: 37.7765, longitude: -122.3940)
 

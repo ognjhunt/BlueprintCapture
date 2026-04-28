@@ -159,9 +159,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var currentAddress: String?
     @Published var locationStatus: CLAuthorizationStatus = .notDetermined
     @Published var locationError: String?
-    @Published var cameraAuthorized = false
-    @Published var microphoneAuthorized = false
-    @Published var motionAuthorized = false
+    @Published var cameraAuthorized: Bool = false
+    @Published var microphoneAuthorized: Bool = false
+    @Published var motionAuthorized: Bool = false
     @Published var addressSearchResults: [AddressResult] = []
     @Published var isSearchingAddress = false
     @Published private(set) var uploadStatuses: [UploadStatus] = []
@@ -1323,15 +1323,13 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         // Don't overwrite an address the user explicitly searched for
-        if hasSeedAddress { return }
+        guard !hasSeedAddress else { return }
         Task {
             let placemarks = try? await geocoder.reverseGeocodeLocation(location)
-            await MainActor.run {
-                currentAddress = placemarks?.first.flatMap { placemark in
-                    [placemark.name, placemark.locality, placemark.administrativeArea]
-                        .compactMap { $0 }
-                        .joined(separator: ", ")
-                }
+            currentAddress = placemarks?.first.flatMap { placemark in
+                [placemark.name, placemark.locality, placemark.administrativeArea]
+                    .compactMap { $0 }
+                    .joined(separator: ", ")
             }
         }
     }
