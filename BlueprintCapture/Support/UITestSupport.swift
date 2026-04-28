@@ -274,46 +274,43 @@ enum UITestFixtures {
         )
     ]
 
+    @MainActor
     static func makeScanHomeViewModel(alertsManager: NearbyAlertsManager) -> ScanHomeViewModel {
-        return MainActor.run {
-            ScanHomeViewModel(
-                jobsRepository: UITestJobsRepository(),
-                targetStateService: UITestTargetStateService(),
-                locationService: UITestLocationService(location: location),
-                alertsManager: alertsManager,
-                captureHistoryService: UITestCaptureHistoryService()
-            )
-        }
+        return ScanHomeViewModel(
+            jobsRepository: UITestJobsRepository(),
+            targetStateService: UITestTargetStateService(),
+            locationService: UITestLocationService(location: location),
+            alertsManager: alertsManager,
+            captureHistoryService: UITestCaptureHistoryService()
+        )
     }
 
+    @MainActor
     static func makeUploadQueueViewModel() -> UploadQueueViewModel {
-        return MainActor.run {
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
-            try? FileManager.default.removeItem(at: tempURL)
-            return UploadQueueViewModel(
-                uploadService: UITestCaptureUploadService(),
-                targetStateService: UITestTargetStateService(),
-                store: UploadQueueStore(fileURL: tempURL)
-            )
-        }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("blueprint-ui-test-upload-queue.json")
+        try? FileManager.default.removeItem(at: tempURL)
+        return UploadQueueViewModel(
+            uploadService: UITestCaptureUploadService(),
+            targetStateService: UITestTargetStateService(),
+            store: UploadQueueStore(fileURL: tempURL)
+        )
     }
 
+    @MainActor
     static func makeWalletViewModel() -> WalletViewModel {
-        return MainActor.run {
-            let model = WalletViewModel()
-            model.isAuthenticated = true
-            model.totalEarnings = Decimal(125)
-            model.pendingPayout = Decimal(30)
-            model.scansCompleted = 4
-            model.captureHistory = captureHistory
-            model.payoutLedger = []
-            model.qcStatus = nil
-            model.billingInfo = nil
-            model.stripeAccountState = nil
-            model.isLoading = false
-            model.errorMessage = nil
-            return model
-        }
+        let model = WalletViewModel()
+        model.isAuthenticated = true
+        model.totalEarnings = Decimal(125)
+        model.pendingPayout = Decimal(30)
+        model.scansCompleted = 4
+        model.captureHistory = captureHistory
+        model.payoutLedger = []
+        model.qcStatus = nil
+        model.billingInfo = nil
+        model.stripeAccountState = nil
+        model.isLoading = false
+        model.errorMessage = nil
+        return model
     }
 }
 

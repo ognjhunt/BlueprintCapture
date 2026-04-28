@@ -34,6 +34,11 @@ struct StripeAccountState: Codable {
     let instantPayoutEligible: Bool
     let nextPayout: NextPayout?
     let requirementsDue: [String]?
+    let requirementsPastDue: [String]?
+    let requirementsEventuallyDue: [String]?
+    let requirementsPendingVerification: [String]?
+    let disabledReason: String?
+    let currentDeadline: Date?
 
     enum CodingKeys: String, CodingKey {
         case onboardingComplete = "onboarding_complete"
@@ -42,9 +47,24 @@ struct StripeAccountState: Codable {
         case instantPayoutEligible = "instant_payout_eligible"
         case nextPayout = "next_payout"
         case requirementsDue = "requirements_due"
+        case requirementsPastDue = "requirements_past_due"
+        case requirementsEventuallyDue = "requirements_eventually_due"
+        case requirementsPendingVerification = "requirements_pending_verification"
+        case disabledReason = "disabled_reason"
+        case currentDeadline = "requirements_current_deadline"
     }
 
-    var isReadyForTransfers: Bool { onboardingComplete && payoutsEnabled }
+    var currentlyDueRequirements: [String] {
+        (requirementsDue ?? []) + (requirementsPastDue ?? [])
+    }
+
+    var hasBlockingRequirements: Bool {
+        !currentlyDueRequirements.isEmpty || disabledReason != nil
+    }
+
+    var isReadyForTransfers: Bool {
+        onboardingComplete && payoutsEnabled && !hasBlockingRequirements
+    }
 }
 
 final class StripeConnectService {

@@ -33,6 +33,8 @@
     </array>
     <key>NSCameraUsageDescription</key>
     <string>Camera access is required to capture the walkthrough video.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Face ID is used to unlock payout setup and cashout actions.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Microphone access is required to capture spatial audio for AI analysis.</string>
     <key>NSLocationWhenInUseUsageDescription</key>

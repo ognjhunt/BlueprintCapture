@@ -35,6 +35,15 @@ final class WalletViewModel: ObservableObject {
             + Decimal(referralBonusCents) / 100
     }
 
+    var payoutVerificationSummary: PayoutVerificationSummary {
+        PayoutVerificationSummary(
+            isAuthenticated: isAuthenticated,
+            accountState: stripeAccountState,
+            billingInfo: billingInfo,
+            payoutAvailability: RuntimeConfig.current.availability(for: .payouts)
+        )
+    }
+
     private let apiService = APIService.shared
     private let stripeService = StripeConnectService.shared
     private var referralListener: ListenerRegistration?

@@ -1335,7 +1335,7 @@ extension CaptureFlowViewModel: CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        locationError = CaptureLocationErrorPresenter.message(for: error)
+        locationError = error.localizedDescription
     }
 }
 

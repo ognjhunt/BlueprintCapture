@@ -3,12 +3,24 @@ import SwiftUI
 struct StripeOnboardingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     @State private var isLoading = false
     @State private var instantAmount: String = ""
     @State private var showConfirmation = false
     @State private var errorMessage: String?
     @State private var accountState: StripeAccountState?
+    @State private var billingInfo: BillingInfo?
+    @State private var didOpenOnboarding = false
     private let payoutAvailability = RuntimeConfig.current.availability(for: .payouts)
+
+    private var verificationSummary: PayoutVerificationSummary {
+        PayoutVerificationSummary(
+            isAuthenticated: UserDeviceService.hasRegisteredAccount(),
+            accountState: accountState,
+            billingInfo: billingInfo,
+            payoutAvailability: payoutAvailability
+        )
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -35,7 +47,7 @@ struct StripeOnboardingView: View {
                         Text("Payouts")
                             .font(BlueprintTheme.display(34, weight: .semibold))
                             .foregroundStyle(BlueprintTheme.textPrimary)
-                        Text("Set up identity verification and payouts")
+                        Text("Verify identity and connect payouts")
                             .font(BlueprintTheme.body(14, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textSecondary)
                     }
@@ -52,63 +64,32 @@ struct StripeOnboardingView: View {
                         )
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
-                    } else if let state = accountState {
-                        if !state.isReadyForTransfers {
-                            statusBanner(
-                                icon: "exclamationmark.triangle.fill",
-                                title: "Setup incomplete",
-                                subtitle: "Complete verification to receive payouts.",
-                                tone: Color(red: 0.9, green: 0.55, blue: 0.1)
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 20)
-                        } else if let next = state.nextPayout {
-                            statusBanner(
-                                icon: "calendar.badge.clock",
-                                title: "Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day()))",
-                                subtitle: next.amount.formatted(.currency(code: "USD")),
-                                tone: BlueprintTheme.brandTeal
-                            )
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 20)
-                        }
+                    } else if verificationSummary.overallStatus != .verified {
+                        statusBanner(
+                            icon: verificationSummary.overallStatus == .pendingReview ? "clock.badge.checkmark" : "exclamationmark.triangle.fill",
+                            title: verificationSummary.headline,
+                            subtitle: verificationSummary.detail,
+                            tone: verificationSummary.overallStatus == .pendingReview ? BlueprintTheme.brandTeal : Color(red: 0.9, green: 0.55, blue: 0.1)
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+                    } else if let next = accountState?.nextPayout {
+                        statusBanner(
+                            icon: "calendar.badge.clock",
+                            title: "Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day()))",
+                            subtitle: next.amount.formatted(.currency(code: "USD")),
+                            tone: BlueprintTheme.brandTeal
+                        )
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
                     }
 
-                    // MARK: Identity Verification
-                    sectionLabel("Identity")
+                    // MARK: Verification
+                    sectionLabel("Verification")
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
 
-                    kycStepCard(
-                        icon: "person.badge.shield.checkmark",
-                        title: "ID Verification",
-                        bullets: ["Government-issued photo ID", "Passport, driver's license, or national ID"],
-                        isVerified: accountState?.isReadyForTransfers == true,
-                        actionTitle: "Start Verification",
-                        action: openStripeOnboarding
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
-
-                    kycStepCard(
-                        icon: "faceid",
-                        title: "Liveness & Face Match",
-                        bullets: ["Quick selfie for face match", "Completed automatically with Step 1"],
-                        isVerified: accountState?.isReadyForTransfers == true,
-                        actionTitle: nil,
-                        action: {}
-                    )
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 10)
-
-                    kycStepCard(
-                        icon: "doc.plaintext",
-                        title: "Tax Information",
-                        bullets: ["Required for payments over $600/year", "US citizens: W-9 · International: W-8BEN"],
-                        isVerified: accountState?.isReadyForTransfers == true,
-                        actionTitle: "Submit Tax Info",
-                        action: openStripeOnboarding
-                    )
+                    verificationChecklistCard
                     .padding(.horizontal, 20)
                     .padding(.bottom, 28)
 
@@ -166,75 +147,32 @@ struct StripeOnboardingView: View {
             await loadAccountState()
             isLoading = false
         }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, didOpenOnboarding else { return }
+            didOpenOnboarding = false
+            Task { await loadAccountState() }
+        }
     }
 
-    // MARK: - KYC Step Card (Kled-style separate cards with UNVERIFIED badge)
+    // MARK: - Verification Card
 
-    private func kycStepCard(
-        icon: String,
-        title: String,
-        bullets: [String],
-        isVerified: Bool,
-        actionTitle: String?,
-        action: @escaping () -> Void
-    ) -> some View {
+    private var verificationChecklistCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Title row
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color(white: 0.7))
-                    .frame(width: 32, height: 32)
-                    .background(Color(white: 0.14), in: Circle())
-
-                Text(title)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
-
-                Spacer()
-
-                Text(isVerified ? "VERIFIED" : "UNVERIFIED")
-                    .font(.caption2.weight(.bold))
-                    .tracking(0.5)
-                    .foregroundStyle(isVerified ? BlueprintTheme.successGreen : Color(red: 0.9, green: 0.55, blue: 0.1))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        (isVerified ? BlueprintTheme.successGreen : Color(red: 0.9, green: 0.55, blue: 0.1)).opacity(0.15),
-                        in: Capsule()
-                    )
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-
-            // Bullets
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(bullets, id: \.self) { bullet in
-                    HStack(alignment: .top, spacing: 8) {
-                        Circle()
-                            .fill(Color(white: 0.35))
-                            .frame(width: 4, height: 4)
-                            .padding(.top, 6)
-                        Text(bullet)
-                            .font(.caption)
-                            .foregroundStyle(Color(white: 0.5))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            ForEach(verificationSummary.steps) { step in
+                verificationStepRow(step)
+                if step.kind != verificationSummary.steps.last?.kind {
+                    rowDivider
                 }
             }
-            .padding(.horizontal, 60)
-            .padding(.bottom, actionTitle != nil ? 12 : 16)
 
-            // Action button (inside card, Kled style)
-            if let actionTitle, !isVerified {
-                Button(action: action) {
+            if verificationSummary.primaryAction == .continueOnboarding {
+                Button(action: openStripeOnboarding) {
                     HStack {
-                        Text(actionTitle)
+                        Text("Continue in Stripe")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
                         Spacer()
-                        Image(systemName: "arrow.right")
+                        Image(systemName: "arrow.up.right")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(Color(white: 0.5))
                     }
@@ -256,6 +194,30 @@ struct StripeOnboardingView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(white: 0.12), lineWidth: 1)
         )
+    }
+
+    private func verificationStepRow(_ step: PayoutVerificationStep) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: statusIcon(step.status))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor(step.status))
+                .frame(width: 30, height: 30)
+                .background(Color(white: 0.14), in: Circle())
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(step.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                Text(step.detail)
+                    .font(.caption)
+                    .foregroundStyle(Color(white: 0.46))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
     }
 
     // MARK: - Status Banner
@@ -300,22 +262,22 @@ struct StripeOnboardingView: View {
             scheduleRow(
                 icon: "calendar",
                 iconColor: Color(red: 0.2, green: 0.6, blue: 1.0),
-                title: "Weekly Default",
-                subtitle: "Mon–Sun earnings paid Wed–Thu"
+                title: accountState?.payoutSchedule.displayName ?? "Manual",
+                subtitle: "Schedule comes from your connected Stripe account"
             )
             rowDivider
             scheduleRow(
-                icon: "creditcard.fill",
+                icon: "building.columns.fill",
                 iconColor: BlueprintTheme.brandTeal,
-                title: "Blueprint Card",
-                subtitle: "Auto-deposit after each capture (no fee)"
+                title: "Standard payouts",
+                subtitle: "Available after approved captures and Stripe payout enablement"
             )
             rowDivider
             scheduleRow(
                 icon: "bolt.fill",
                 iconColor: Color(red: 0.9, green: 0.55, blue: 0.1),
-                title: "Instant Pay",
-                subtitle: "Same-day to debit card (fee applies)"
+                title: "Instant payout",
+                subtitle: accountState?.instantPayoutEligible == true ? "Available for eligible balance" : "Unlocks only when Stripe marks the account eligible"
             )
         }
         .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -399,7 +361,7 @@ struct StripeOnboardingView: View {
     }
 
     private var canCashOut: Bool {
-        payoutAvailability.isEnabled && accountState?.instantPayoutEligible == true && Int(instantAmount) != nil && !isLoading
+        verificationSummary.allowsCashout && Int(instantAmount) != nil && !isLoading
     }
 
     // MARK: - Helpers
@@ -423,14 +385,23 @@ struct StripeOnboardingView: View {
     private func loadAccountState() async {
         guard payoutAvailability.isEnabled else { return }
         do {
-            let state = try await StripeConnectService.shared.fetchAccountState()
-            await MainActor.run { self.accountState = state }
+            async let stateTask = StripeConnectService.shared.fetchAccountState()
+            async let billingTask = APIService.shared.fetchBillingInfo()
+            let (state, billing) = try await (stateTask, billingTask)
+            await MainActor.run {
+                self.accountState = state
+                self.billingInfo = billing
+            }
         } catch {
             print("[PayoutsUI] ✗ \(error)")
         }
     }
 
     private func openStripeOnboarding() {
+        guard UserDeviceService.hasRegisteredAccount() else {
+            errorMessage = "Sign in before managing payout verification."
+            return
+        }
         guard payoutAvailability.isEnabled else {
             errorMessage = payoutAvailability.message
             return
@@ -438,10 +409,20 @@ struct StripeOnboardingView: View {
         isLoading = true
         Task {
             do {
+                try await PayoutDeviceAuthenticationService.shared.authenticate(
+                    reason: "Unlock to open Stripe payout verification."
+                )
                 let url = try await StripeConnectService.shared.createOnboardingLink()
-                await MainActor.run { isLoading = false; _ = openURL(url) }
+                await MainActor.run {
+                    didOpenOnboarding = true
+                    isLoading = false
+                    openURL(url)
+                }
             } catch {
-                await MainActor.run { isLoading = false; errorMessage = "Failed to open verification." }
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = (error as? LocalizedError)?.errorDescription ?? "Failed to open verification."
+                }
             }
         }
     }
@@ -455,12 +436,48 @@ struct StripeOnboardingView: View {
         isLoading = true
         Task {
             do {
+                try await PayoutDeviceAuthenticationService.shared.authenticate(
+                    reason: "Unlock to request an instant payout."
+                )
                 try await StripeConnectService.shared.triggerInstantPayout(amountCents: dollars * 100)
                 await loadAccountState()
                 await MainActor.run { isLoading = false; showConfirmation = true; instantAmount = "" }
             } catch {
-                await MainActor.run { isLoading = false; errorMessage = "Instant payout failed." }
+                await MainActor.run {
+                    isLoading = false
+                    errorMessage = (error as? LocalizedError)?.errorDescription ?? "Instant payout failed."
+                }
             }
+        }
+    }
+
+    private func statusIcon(_ status: PayoutVerificationStatus) -> String {
+        switch status {
+        case .verified:
+            return "checkmark.circle.fill"
+        case .pendingReview:
+            return "clock.fill"
+        case .actionRequired:
+            return "exclamationmark.circle.fill"
+        case .notStarted:
+            return "circle"
+        case .unavailable:
+            return "lock.circle.fill"
+        }
+    }
+
+    private func statusColor(_ status: PayoutVerificationStatus) -> Color {
+        switch status {
+        case .verified:
+            return BlueprintTheme.successGreen
+        case .pendingReview:
+            return BlueprintTheme.brandTeal
+        case .actionRequired:
+            return Color(red: 0.9, green: 0.55, blue: 0.1)
+        case .notStarted:
+            return Color(white: 0.44)
+        case .unavailable:
+            return Color(white: 0.5)
         }
     }
 }

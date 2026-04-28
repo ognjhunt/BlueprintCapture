@@ -69,6 +69,10 @@ struct WalletView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 16)
 
+                    payoutVerificationCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 20)
+
                     // AI Earnings Insight
                     if isLoadingInsight || earningsInsight != nil {
                         aiEarningsInsightCard
@@ -268,17 +272,38 @@ struct WalletView: View {
                 action: {}
             )
         }
-        if viewModel.stripeAccountState == nil || viewModel.stripeAccountState?.isReadyForTransfers == false {
+        let summary = viewModel.payoutVerificationSummary
+        switch summary.overallStatus {
+        case .unavailable:
+            return BannerInfo(
+                icon: "lock.shield.fill",
+                title: summary.headline,
+                subtitle: summary.detail,
+                tone: .info,
+                actionTitle: nil,
+                action: {}
+            )
+        case .actionRequired:
             return BannerInfo(
                 icon: "exclamationmark.circle.fill",
-                title: "No payout method connected",
-                subtitle: "Connect a payout method to receive earnings.",
+                title: summary.headline,
+                subtitle: summary.detail,
                 tone: .warning,
-                actionTitle: "Connect",
-                action: { showingStripeOnboarding = true }
+                actionTitle: payoutPrimaryActionTitle(summary.primaryAction),
+                action: { handlePayoutPrimaryAction(summary.primaryAction) }
             )
+        case .pendingReview:
+            return BannerInfo(
+                icon: "clock.badge.checkmark",
+                title: summary.headline,
+                subtitle: summary.detail,
+                tone: .info,
+                actionTitle: payoutPrimaryActionTitle(summary.primaryAction),
+                action: { handlePayoutPrimaryAction(summary.primaryAction) }
+            )
+        case .verified, .notStarted:
+            return nil
         }
-        return nil
     }
 
     private func kledBanner(_ info: BannerInfo) -> some View {
@@ -429,12 +454,12 @@ struct WalletView: View {
             Spacer()
 
             Button {
-                showingStripeOnboarding = true
+                handlePayoutPrimaryAction(viewModel.payoutVerificationSummary.primaryAction ?? .continueOnboarding)
             } label: {
                 HStack(spacing: 5) {
-                    Image(systemName: "dollarsign.circle.fill")
+                    Image(systemName: viewModel.payoutVerificationSummary.overallStatus == .verified ? "dollarsign.circle.fill" : "person.badge.shield.checkmark")
                         .font(.caption.weight(.semibold))
-                    Text("Cashout")
+                    Text(viewModel.payoutVerificationSummary.overallStatus == .verified ? "Cashout" : "Verify")
                         .font(.caption.weight(.semibold))
                 }
                 .foregroundStyle(Color(white: 0.7))
@@ -444,6 +469,94 @@ struct WalletView: View {
                 .overlay(Capsule().stroke(Color(white: 0.2), lineWidth: 1))
             }
         }
+    }
+
+    // MARK: - Payout Verification
+
+    private var payoutVerificationCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.badge.shield.checkmark")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(payoutStatusColor(viewModel.payoutVerificationSummary.overallStatus))
+                    .frame(width: 28, height: 28)
+                    .background(Color(white: 0.13), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(viewModel.payoutVerificationSummary.headline)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(viewModel.payoutVerificationSummary.detail)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.48))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
+            VStack(spacing: 0) {
+                ForEach(viewModel.payoutVerificationSummary.steps) { step in
+                    payoutStepRow(step)
+                    if step.kind != viewModel.payoutVerificationSummary.steps.last?.kind {
+                        Rectangle()
+                            .fill(Color(white: 0.12))
+                            .frame(height: 1)
+                            .padding(.leading, 34)
+                    }
+                }
+            }
+
+            if let actionTitle = payoutPrimaryActionTitle(viewModel.payoutVerificationSummary.primaryAction) {
+                Button {
+                    handlePayoutPrimaryAction(viewModel.payoutVerificationSummary.primaryAction)
+                } label: {
+                    HStack {
+                        Text(actionTitle)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(Color(white: 0.13), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color(white: 0.2), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    private func payoutStepRow(_ step: PayoutVerificationStep) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: payoutStatusIcon(step.status))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(payoutStatusColor(step.status))
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(step.title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.82))
+                Text(step.detail)
+                    .font(.caption2)
+                    .foregroundStyle(Color(white: 0.42))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 10)
     }
 
     // MARK: - Segmented Picker (Kled-style)
@@ -609,6 +722,62 @@ struct WalletView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
+    }
+
+    private func payoutPrimaryActionTitle(_ action: PayoutVerificationPrimaryAction?) -> String? {
+        switch action {
+        case .signIn:
+            return "Sign in"
+        case .continueOnboarding:
+            return "Continue"
+        case .refresh:
+            return "Refresh"
+        case nil:
+            return nil
+        }
+    }
+
+    private func handlePayoutPrimaryAction(_ action: PayoutVerificationPrimaryAction?) {
+        switch action {
+        case .signIn:
+            showingAuth = true
+        case .continueOnboarding:
+            showingStripeOnboarding = true
+        case .refresh:
+            Task { await viewModel.load() }
+        case nil:
+            break
+        }
+    }
+
+    private func payoutStatusIcon(_ status: PayoutVerificationStatus) -> String {
+        switch status {
+        case .verified:
+            return "checkmark.circle.fill"
+        case .pendingReview:
+            return "clock.fill"
+        case .actionRequired:
+            return "exclamationmark.circle.fill"
+        case .notStarted:
+            return "circle"
+        case .unavailable:
+            return "lock.circle.fill"
+        }
+    }
+
+    private func payoutStatusColor(_ status: PayoutVerificationStatus) -> Color {
+        switch status {
+        case .verified:
+            return BlueprintTheme.successGreen
+        case .pendingReview:
+            return BlueprintTheme.brandTeal
+        case .actionRequired:
+            return Color(red: 0.9, green: 0.55, blue: 0.1)
+        case .notStarted:
+            return Color(white: 0.42)
+        case .unavailable:
+            return Color(white: 0.5)
+        }
     }
 }
 
