@@ -97,6 +97,8 @@ These are the primary agents with direct responsibility for this repo:
 - `field-ops-agent` — capture scheduling, assignment, reminders, and operator coordination on top of product systems
 - `capturer-success-agent` — capturer activation, retention, recapture guidance, and operational feedback loops
 
+Capture work is issue-driven in Paperclip: `capture-codex` should receive assigned issues, and ops or growth work that touches this repo should enter through Paperclip issues rather than only GitHub-originated events.
+
 These agents regularly read this repo or create work against it:
 
 - `blueprint-cto`
@@ -111,6 +113,7 @@ The live Paperclip package currently runs from the shared trusted host and inclu
 
 - a continuous chief-of-staff managerial loop
 - active repo autonomy loops for Capture, Pipeline, and WebApp
+- issue-assignment-driven engineering loops for `capture-codex`, `pipeline-codex`, and `webapp-codex`
 - active executive reporting routines
 - active weekly or daily routines across growth and commercial lanes
 - explicit paused routines for lanes that are intentionally not running continuously yet
