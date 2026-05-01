@@ -8,6 +8,7 @@ struct ProfileTabView: View {
 
     @State private var profileDigest: String? = nil
     @State private var isLoadingDigest = false
+    @State private var activationSnapshot = ActivationFunnelStore.shared.snapshot()
 
     var body: some View {
         NavigationStack {
@@ -52,6 +53,14 @@ struct ProfileTabView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, 28)
 
+                        sectionLabel("Activation Funnel")
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 12)
+
+                        activationFunnelCard
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 28)
+
                         // Device
                         sectionLabel("Device")
                             .padding(.horizontal, 20)
@@ -67,6 +76,9 @@ struct ProfileTabView: View {
         }
         .blueprintAppBackground()
         .task { await vm.load() }
+        .onReceive(NotificationCenter.default.publisher(for: ActivationFunnelStore.changedNotification)) { _ in
+            activationSnapshot = ActivationFunnelStore.shared.snapshot()
+        }
         .onChange(of: vm.totalCaptures) { _, count in
             guard count > 0, profileDigest == nil else { return }
             Task { await generateDigest() }
@@ -332,6 +344,59 @@ struct ProfileTabView: View {
             .fill(Color(white: 0.12))
             .frame(height: 1)
             .padding(.leading, 66)
+    }
+
+    // MARK: - Activation Funnel
+
+    private var activationFunnelCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(activationSnapshot.activationCompleted ? "First capture activated" : "First capture not complete")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(activationSnapshot.dropOffStep.map { "Current drop-off: \($0.rawValue)" } ?? "All tracked steps have at least one event.")
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.48))
+                }
+                Spacer()
+                Text("\(activationSnapshot.totalEvents)")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .accessibilityIdentifier("activation-funnel-total")
+            }
+
+            VStack(spacing: 8) {
+                ForEach(activationSnapshot.summaries) { summary in
+                    HStack(spacing: 10) {
+                        Image(systemName: summary.count > 0 ? "checkmark.circle.fill" : "circle")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(summary.count > 0 ? BlueprintTheme.successGreen : Color(white: 0.32))
+                            .frame(width: 18)
+
+                        Text(summary.step.rawValue)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(Color(white: 0.72))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+
+                        Spacer()
+
+                        Text("\(summary.count)")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(minWidth: 22, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+        .accessibilityIdentifier("activation-funnel-card")
     }
 
     // MARK: - Device Card

@@ -589,6 +589,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         step = .readyToCapture
         captureManager.configureSession()
         captureManager.startSession()
+        ActivationFunnelStore.shared.record(.captureStarted, metadata: ["capture_source": "iphone_video"])
     }
 
     func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
@@ -766,6 +767,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
         finishedCaptureActionState = .idle
         currentTargetInfo = nil
+        ActivationFunnelStore.shared.record(
+            .captureCompletedLocally,
+            captureId: CaptureBundleContext.captureIdentifier(for: request),
+            metadata: ["capture_source": request.metadata.captureSource.rawValue]
+        )
         print("📦 [CaptureFlowViewModel] Pending capture ready jobId=\(jobId) id=\(metadata.id)")
     }
 
@@ -1204,6 +1210,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 do {
                     let bundle = try await exportService.exportCapture(request: resolvedRequest)
                     await MainActor.run {
+                        ActivationFunnelStore.shared.record(
+                            .bundleFinalized,
+                            captureId: CaptureBundleContext.captureIdentifier(for: resolvedRequest),
+                            metadata: ["capture_source": resolvedRequest.metadata.captureSource.rawValue]
+                        )
                         let shareURL = bundle.shareURL ?? bundle.captureRootURL
                         self.shareSheetItem = ShareSheetItem(url: shareURL)
                         self.pendingCaptureRequest = resolvedRequest
@@ -1227,6 +1238,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         refreshUploadStatuses()
 
         // Now enqueue the actual upload
+        ActivationFunnelStore.shared.record(
+            .uploadStarted,
+            captureId: CaptureBundleContext.captureIdentifier(for: request),
+            metadata: ["capture_source": request.metadata.captureSource.rawValue]
+        )
         uploadService.enqueue(request)
     }
 
@@ -1267,6 +1283,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             status.metadata = request.metadata
             status.state = .completed
             uploadStatusMap[request.metadata.id] = status
+            ActivationFunnelStore.shared.record(
+                .uploadCompleted,
+                captureId: CaptureBundleContext.captureIdentifier(for: request),
+                metadata: ["capture_source": request.metadata.captureSource.rawValue]
+            )
             Task { [weak self] in
                 guard let self else { return }
                 try? await self.creatorAPIService.registerCaptureSubmission(
@@ -1295,6 +1316,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             status.metadata = request.metadata
             status.state = .failed(message: error.localizedDescription)
             uploadStatusMap[request.metadata.id] = status
+            ActivationFunnelStore.shared.record(
+                .uploadFailed,
+                captureId: CaptureBundleContext.captureIdentifier(for: request),
+                metadata: [
+                    "capture_source": request.metadata.captureSource.rawValue,
+                    "upload_error": error.localizedDescription
+                ]
+            )
         }
 
         refreshUploadStatuses()

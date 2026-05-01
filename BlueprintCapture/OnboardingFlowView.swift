@@ -6,12 +6,12 @@ import UIKit
 import FirebaseAuth
 
 /// Onboarding flow:
-/// Welcome → Auth → Invite Code → Permissions → Device → Tutorial → Connect Glasses → Done
+/// Welcome → Auth → Invite Code → Capture Goal → Permissions → Device → Tutorial → Connect Glasses → Done
 /// Auth comes before invite code so the code lookup can require authentication,
 /// and the referral can be attributed immediately with the real user ID.
 struct OnboardingFlowView: View {
     enum Step: Int, CaseIterable {
-        case welcome, auth, inviteCode, permissions, deviceCapability, tutorial, connectGlasses, complete
+        case welcome, auth, inviteCode, captureGoal, permissions, deviceCapability, tutorial, connectGlasses, complete
     }
 
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
@@ -42,6 +42,9 @@ struct OnboardingFlowView: View {
             case .inviteCode:
                 InviteCodeStepView(onContinue: advance)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
+            case .captureGoal:
+                FirstCaptureGoalStepView(onContinue: advance)
+                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
             case .permissions:
                 OnboardingPermissionsView(alertsManager: alertsManager, onContinue: advance)
                     .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .move(edge: .leading)))
@@ -66,6 +69,9 @@ struct OnboardingFlowView: View {
         .blueprintOnboardingBackground()
         .preferredColorScheme(.dark)
         .animation(.spring(response: 0.45, dampingFraction: 0.88), value: step)
+        .onAppear {
+            ActivationFunnelStore.shared.record(.onboardingStarted, metadata: ["reason": "app_first_launch"])
+        }
     }
 
     private var isGlassesConnected: Bool {
@@ -108,9 +114,9 @@ private struct OnboardingWelcomeView: View {
                     .padding(.bottom, 20)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    featureRow(icon: "location.viewfinder", text: "Nearby spaces and approved opportunities")
-                    featureRow(icon: "hand.raised.fill", text: "Rights and policy checks before reuse")
-                    featureRow(icon: "cube.transparent", text: "Truthful capture feeds downstream world models")
+                    featureRow(icon: "location.viewfinder", text: "Pick one nearby or current-place capture")
+                    featureRow(icon: "camera.fill", text: "Record raw video, poses, motion, and device context")
+                    featureRow(icon: "arrow.up.doc.fill", text: "Finish when the raw bundle uploads completely")
                 }
                 .padding(.horizontal, 28)
 
@@ -148,7 +154,7 @@ private struct OnboardingWelcomeView: View {
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Get paid\nto scan spaces")
+                    Text("Finish your\nfirst capture")
                         .font(BlueprintTheme.display(28, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
 
@@ -156,7 +162,7 @@ private struct OnboardingWelcomeView: View {
                         .fill(BlueprintTheme.hairline)
                         .frame(width: 58, height: 1)
 
-                    Text("Capture real places.\nProvide truthful data.\nPower world models.")
+                    Text("Sign in.\nChoose one space.\nUpload the raw bundle.")
                         .font(BlueprintTheme.body(16, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -379,23 +385,15 @@ private struct AuthStepView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    // Top bar
-                    HStack {
-                        Spacer()
-                        Button("Skip for now") { onContinue() }
-                            .font(BlueprintTheme.body(14, weight: .semibold))
-                            .foregroundStyle(BlueprintTheme.textSecondary)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 60)
-                    .padding(.bottom, 28)
+                    Color.clear
+                        .frame(height: 60)
 
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Create your account")
                             .font(BlueprintTheme.display(34, weight: .semibold))
                             .foregroundStyle(BlueprintTheme.textPrimary)
-                        Text("Sign up to track earnings and get paid.")
+                        Text("Sign in so your first raw bundle can be attributed and uploaded.")
                             .font(BlueprintTheme.body(15, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textSecondary)
                     }
@@ -649,7 +647,122 @@ private struct AuthSecureFieldView: View {
     }
 }
 
-// MARK: - Step 4: Permissions
+// MARK: - Step 4: First Capture Goal
+
+private struct FirstCaptureGoalStepView: View {
+    let onContinue: () -> Void
+
+    @AppStorage("com.blueprint.firstCaptureGoal") private var selectedGoal: String = FirstCaptureGoal.currentPlace.rawValue
+
+    private enum FirstCaptureGoal: String, CaseIterable, Identifiable {
+        case currentPlace = "current_place_raw_capture"
+        case nearbyOpportunity = "nearby_approved_opportunity"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .currentPlace:
+                return "Capture a place I can access now"
+            case .nearbyOpportunity:
+                return "Find an approved nearby opportunity"
+            }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .currentPlace:
+                return "Start with a lawful, visible area and upload one truthful raw bundle for review."
+            case .nearbyOpportunity:
+                return "Use the feed to pick a scoped capture job before recording."
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .currentPlace:
+                return "camera.metering.matrix"
+            case .nearbyOpportunity:
+                return "location.viewfinder"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 12) {
+                Image(systemName: "record.circle")
+                    .font(.system(size: 54, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
+
+                Text("Choose Your First Capture")
+                    .font(BlueprintTheme.display(30, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
+                    .multilineTextAlignment(.center)
+
+                Text("The goal is one real raw bundle: recorded, finalized, and uploaded. No readiness, payout, or rights status is inferred here.")
+                    .font(BlueprintTheme.body(15, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+            .padding(.bottom, 30)
+
+            VStack(spacing: 12) {
+                ForEach(FirstCaptureGoal.allCases) { goal in
+                    Button {
+                        selectedGoal = goal.rawValue
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: goal.icon)
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                                .frame(width: 38, height: 38)
+                                .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(goal.title)
+                                    .font(BlueprintTheme.body(15, weight: .semibold))
+                                    .foregroundStyle(BlueprintTheme.textPrimary)
+                                Text(goal.subtitle)
+                                    .font(BlueprintTheme.body(13, weight: .medium))
+                                    .foregroundStyle(BlueprintTheme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: selectedGoal == goal.rawValue ? "checkmark.circle.fill" : "circle")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(selectedGoal == goal.rawValue ? BlueprintTheme.successGreen : Color(white: 0.35))
+                        }
+                        .padding(16)
+                        .background(BlueprintTheme.panelMuted, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(selectedGoal == goal.rawValue ? Color.white.opacity(0.35) : BlueprintTheme.hairline, lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 24)
+
+            Spacer()
+
+            kledPrimaryButton("Continue") {
+                ActivationFunnelStore.shared.record(.captureGoalSelected, metadata: ["goal": selectedGoal])
+                onContinue()
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
+        }
+    }
+}
+
+// MARK: - Step 5: Permissions
 
 private struct OnboardingPermissionsView: View {
     @ObservedObject var alertsManager: NearbyAlertsManager
@@ -711,6 +824,9 @@ private struct OnboardingPermissionsView: View {
             }
         }
         .task { refreshStatuses() }
+        .onAppear {
+            ActivationFunnelStore.shared.record(.permissionsStepViewed, metadata: permissionMetadata())
+        }
         .onChange(of: alertsManager.authorizationStatus) { _, _ in refreshStatuses() }
         .alert("Permissions Required", isPresented: $showAlert) {
             Button("Open Settings") {
@@ -783,10 +899,20 @@ private struct OnboardingPermissionsView: View {
             await MainActor.run {
                 refreshStatuses()
                 UserDeviceService.setPermission("notifications", granted: notificationsGranted)
+                ActivationFunnelStore.shared.record(.permissionsGrantedOrBlocked, metadata: permissionMetadata())
                 isRequesting = false
                 if requiredGranted { onContinue() } else { showAlert = true }
             }
         }
+    }
+
+    private func permissionMetadata() -> [String: String] {
+        [
+            "camera": cameraGranted ? "granted" : "blocked_or_not_determined",
+            "location": locationGranted ? "granted" : "blocked_or_not_determined",
+            "motion": motionGranted ? "granted" : "blocked_or_not_determined",
+            "notifications": notificationsGranted ? "granted" : "blocked_or_not_determined"
+        ]
     }
 }
 

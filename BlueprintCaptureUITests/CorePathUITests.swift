@@ -72,7 +72,7 @@ final class CorePathUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Wallet"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Payout setup unavailable"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Set up identity and payouts"].waitForExistence(timeout: 10))
     }
 
     private func configuredApp(scenario: String) -> XCUIApplication {

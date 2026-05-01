@@ -350,7 +350,7 @@ struct CaptureRawContractV3ValidatorTests {
             #"{"frame_id":"000001","t_capture_sec":0.0}"#,
         ], to: root.appendingPathComponent("sync_map.jsonl"))
         try writeLines([
-            #"{"timestamp":1.0,"t_capture_sec":0.0}"#,
+            #"{"timestamp":1.0,"t_capture_sec":0.0,"t_monotonic_ns":1000000,"wall_time":"2026-03-20T14:00:29.857Z","motion_provenance":"iphone_device_imu","attitude":{"roll":0.0,"pitch":0.0,"yaw":0.0,"quaternion":{"x":0.0,"y":0.0,"z":0.0,"w":1.0}},"rotation_rate":{"x":0.0,"y":0.0,"z":0.0},"gravity":{"x":0.0,"y":0.0,"z":-1.0},"user_acceleration":{"x":0.0,"y":0.0,"z":0.0}}"#,
         ], to: root.appendingPathComponent("motion.jsonl"))
         try writeLines([], to: root.appendingPathComponent("semantic_anchor_observations.jsonl"))
         try writeLines([

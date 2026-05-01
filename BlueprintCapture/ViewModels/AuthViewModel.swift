@@ -40,9 +40,17 @@ final class AuthViewModel: ObservableObject {
             switch mode {
             case .signIn:
                 try await signIn(email: email, password: password)
+                ActivationFunnelStore.shared.record(
+                    .accountCreatedOrSignedIn,
+                    metadata: ["auth_mode": "sign_in", "auth_provider": "email"]
+                )
                 NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
             case .signUp:
                 try await signUp(name: name, email: email, password: password)
+                ActivationFunnelStore.shared.record(
+                    .accountCreatedOrSignedIn,
+                    metadata: ["auth_mode": "sign_up", "auth_provider": "email"]
+                )
                 NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
             }
         } catch {
@@ -63,6 +71,13 @@ final class AuthViewModel: ObservableObject {
                     await handleReferralAttribution(newUserId: user.uid, newUserName: user.displayName ?? user.email ?? "Capturer")
                 }
             }
+            ActivationFunnelStore.shared.record(
+                .accountCreatedOrSignedIn,
+                metadata: [
+                    "auth_mode": result.additionalUserInfo?.isNewUser == true ? "sign_up" : "sign_in",
+                    "auth_provider": "google"
+                ]
+            )
             NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
         } catch {
             errorMessage = (error as NSError).localizedDescription
@@ -160,4 +175,3 @@ final class AuthViewModel: ObservableObject {
         try? await ReferralService.shared.ensureReferralCode(userId: user.uid)
     }
 }
-

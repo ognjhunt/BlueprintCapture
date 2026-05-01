@@ -804,7 +804,7 @@ private extension CaptureHistoryEntry {
 private extension PayoutLedgerEntry {
     var statusLabel: String {
         switch status {
-        case .pending: return "Pending"
+        case .pending: return "Payout pending"
         case .inTransit: return "In transit"
         case .paid: return "Paid"
         case .failed: return "Failed"

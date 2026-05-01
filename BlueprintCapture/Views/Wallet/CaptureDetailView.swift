@@ -340,9 +340,9 @@ struct CaptureDetailView: View {
         case .readyToSubmit:
             return "Everything is prepared and waiting for upload."
         case .submitted, .underReview, .processing, .qc:
-            return "Blueprint is checking quality, rights, and deployment readiness."
+            return "Blueprint is checking quality, rights metadata, and review state."
         case .approved:
-            return "This submission passed review and is queued for payout or buyer delivery."
+            return "This submission passed review. Payout and any downstream use still follow backend ledger state."
         case .needsRecapture, .needsFix:
             return "A clearer or more complete capture is required."
         case .rejected:
@@ -370,7 +370,7 @@ struct CaptureDetailView: View {
         case .submitted, .underReview, .processing, .qc:
             return "No action needed right now. We will update this timeline as review moves forward."
         case .approved:
-            return "Approved captures stay visible here until payout or downstream buyer delivery finishes."
+            return "Approved captures stay visible here until payout or the next backend step finishes."
         case .needsRecapture, .needsFix:
             return "Use the review note below to guide the next pass before resubmitting."
         case .rejected:

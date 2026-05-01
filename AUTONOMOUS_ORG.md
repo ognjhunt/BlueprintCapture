@@ -51,9 +51,9 @@ Current high-level split:
 
 ### Engineering
 
-- `webapp-codex`, `webapp-claude`
-- `pipeline-codex`, `pipeline-claude`
-- `capture-codex`, `capture-claude`
+- `webapp-codex`, `webapp-review`
+- `pipeline-codex`, `pipeline-review`
+- `capture-codex`, `capture-review`
 - `beta-launch-commander`
 - `docs-agent`
 
@@ -93,11 +93,13 @@ Current high-level split:
 These are the primary agents with direct responsibility for this repo:
 
 - `capture-codex` — implementation specialist for `BlueprintCapture`
-- `capture-claude` — review and planning specialist for `BlueprintCapture`
+- `capture-review` — review and planning specialist for `BlueprintCapture`
 - `field-ops-agent` — capture scheduling, assignment, reminders, and operator coordination on top of product systems
 - `capturer-success-agent` — capturer activation, retention, recapture guidance, and operational feedback loops
 
 Capture work is issue-driven in Paperclip: `capture-codex` should receive assigned issues, and ops or growth work that touches this repo should enter through Paperclip issues rather than only GitHub-originated events.
+
+Mobile capture lifecycle closure is owned by WebApp/Paperclip, not by in-app agent logic. `BlueprintCapture` writes truthful lifecycle rows, including upload failures, into `capture_submissions`; WebApp's `mobile-ops-lifecycle-scan` and `ops-firestore` webhook normalize those rows into deduped Paperclip issues for `capture-codex`, `capture-qa-agent`, `capturer-success-agent`, `field-ops-agent`, or `finance-support-agent`.
 
 These agents regularly read this repo or create work against it:
 

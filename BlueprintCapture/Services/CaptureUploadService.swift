@@ -552,6 +552,51 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Raw capture bundle is invalid and cannot be uploaded: \(reasons.joined(separator: ", ")). Please re-record the site walkthrough."
             }
         }
+
+        var lifecycleFailureCode: String {
+            switch self {
+            case .fileMissing:
+                return "file_missing"
+            case .cancelled:
+                return "cancelled"
+            case .uploadFailed:
+                return "upload_failed"
+            case .authenticationRequired:
+                return "authentication_required"
+            case .missingStructuredIntake:
+                return "missing_structured_intake"
+            case .rawContractValidationFailed:
+                return "raw_contract_v3_validation_failed"
+            case .captureLifecycleRegistrationFailed:
+                return "capture_lifecycle_registration_failed"
+            case .submissionRegistrationFailed:
+                return "submission_registration_failed"
+            case .invalidBundle:
+                return "invalid_bundle"
+            }
+        }
+
+        var shouldRecordLifecycleFailure: Bool {
+            self != .cancelled
+        }
+
+        var lifecycleStatus: String {
+            switch self {
+            case .rawContractValidationFailed, .invalidBundle:
+                return "raw_validation_failed"
+            default:
+                return "upload_failed"
+            }
+        }
+
+        var lifecycleQaState: String {
+            switch self {
+            case .rawContractValidationFailed, .invalidBundle:
+                return "blocked_raw_validation"
+            default:
+                return "not_started"
+            }
+        }
     }
 
     var events: AnyPublisher<Event, Never> {
@@ -794,6 +839,11 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     remoteRawPrefix: remoteBasePath,
                     videoURI: storageBucketURL + "/" + remoteBasePath + "walkthrough.mov"
                 )
+            )
+            ActivationFunnelStore.shared.record(
+                .bundleFinalized,
+                captureId: CaptureBundleContext.captureIdentifier(for: request),
+                metadata: ["capture_source": request.metadata.captureSource.rawValue]
             )
         } catch let error as CaptureBundleFinalizer.FinalizationError {
             let uploadError: UploadError
@@ -1311,6 +1361,134 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         markUploadCompleted(id: id, attempt: attempt)
     }
 
+    private func captureAssignmentState(for request: CaptureUploadRequest) -> String {
+        request.metadata.captureJobId == nil
+            ? "unassigned_or_open_capture"
+            : "assigned_capture_job"
+    }
+
+    private func uploadFailurePayload(
+        for request: CaptureUploadRequest,
+        error: UploadError,
+        recordedAt: Date
+    ) -> [String: Any] {
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        var payload: [String: Any] = [
+            "capture_id": captureId,
+            "scene_id": sceneId,
+            "creator_id": request.metadata.creatorId,
+            "job_id": request.metadata.jobId,
+            "capture_source": request.metadata.captureSource.rawValue,
+            "status": error.lifecycleStatus,
+            "operational_state": [
+                "assignment_state": captureAssignmentState(for: request),
+                "upload_state": "failed",
+                "qa_state": error.lifecycleQaState,
+                "qa_outcome": NSNull(),
+                "repeat_ready": true
+            ],
+            "lifecycle": [
+                "capture_started_at": Timestamp(date: request.metadata.capturedAt),
+                "upload_failed_at": Timestamp(date: recordedAt)
+            ],
+            "upload_error": [
+                "code": error.lifecycleFailureCode,
+                "message": error.errorDescription ?? "Upload failed.",
+                "recorded_at": Timestamp(date: recordedAt)
+            ]
+        ]
+
+        if let captureJobId = request.metadata.captureJobId {
+            payload["capture_job_id"] = captureJobId
+        }
+        if let buyerRequestId = resolvedBuyerRequestId(for: request) {
+            payload["buyer_request_id"] = buyerRequestId
+        }
+        if let siteSubmissionId = request.metadata.siteSubmissionId {
+            payload["site_submission_id"] = siteSubmissionId
+        }
+        if let regionId = request.metadata.regionId {
+            payload["region_id"] = regionId
+        }
+        if let quotedPayoutCents = request.metadata.quotedPayoutCents {
+            payload["estimated_payout_cents"] = quotedPayoutCents
+        }
+        if let rightsProfile = request.metadata.rightsProfile {
+            payload["rights_profile"] = rightsProfile
+        }
+        if let addressFull = request.metadata.siteIdentity?.addressFull {
+            payload["target_address"] = addressFull
+        }
+        if let siteIdentityPayload = siteIdentityPayload(for: request) {
+            payload["site_identity"] = siteIdentityPayload
+        }
+        if let cityContext = parseCityContext(
+            addressFull: request.metadata.siteIdentity?.addressFull,
+            regionId: request.metadata.regionId
+        ) {
+            payload["city_context"] = cityContext
+        }
+        if let targetContext = targetContextPayload(for: request) {
+            payload["target_context"] = targetContext
+        }
+        if request.packageURL.hasDirectoryPath {
+            payload["raw_prefix"] = "\(makeBaseDirectoryPath(for: request))raw/"
+        }
+        return payload
+    }
+
+    private func recordUploadFailure(for request: CaptureUploadRequest, error uploadError: UploadError) async {
+        guard uploadError.shouldRecordLifecycleFailure else { return }
+        #if canImport(FirebaseFirestore)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        do {
+            _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "capture_lifecycle_failure_write_failed",
+                metadata: [
+                    "capture_id": captureId,
+                    "failure_code": uploadError.lifecycleFailureCode,
+                    "reason": "guest_session_unavailable",
+                    "message": error.localizedDescription
+                ]
+            )
+            return
+        }
+
+        let db = Firestore.firestore()
+        let payload = uploadFailurePayload(for: request, error: uploadError, recordedAt: Date())
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            db.collection("capture_submissions").document(captureId).setData(payload, merge: true) { writeError in
+                if let writeError {
+                    SessionEventManager.shared.logError(
+                        errorCode: "capture_lifecycle_failure_write_failed",
+                        metadata: [
+                            "capture_id": captureId,
+                            "failure_code": uploadError.lifecycleFailureCode,
+                            "reason": "firestore_write_failed",
+                            "message": writeError.localizedDescription
+                        ]
+                    )
+                    print("⚠️ [UploadService] Failed to record upload failure for capture_submissions/\(captureId): \(writeError.localizedDescription)")
+                } else {
+                    SessionEventManager.shared.logOperationalEvent(
+                        operation: "capture_lifecycle_failure",
+                        status: "recorded",
+                        metadata: [
+                            "capture_id": captureId,
+                            "failure_code": uploadError.lifecycleFailureCode
+                        ]
+                    )
+                    print("✅ [UploadService] capture_submissions/\(captureId) marked \(uploadError.lifecycleStatus)")
+                }
+                continuation.resume()
+            }
+        }
+        #endif
+    }
+
     private func contentType(for url: URL) -> String {
         switch url.pathExtension.lowercased() {
         case "zip": return "application/zip"
@@ -1432,6 +1610,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             failingRecord.cancelActiveTransfer = nil
             self.uploads[id] = failingRecord
             self.subject.send(.failed(failingRecord.request, error))
+            Task {
+                await self.recordUploadFailure(for: failingRecord.request, error: error)
+            }
         }
     }
 }

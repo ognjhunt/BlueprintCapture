@@ -40,6 +40,11 @@ final class UploadQueueViewModel: ObservableObject {
         )
         persist()
         refreshUploadStatuses()
+        ActivationFunnelStore.shared.record(
+            .uploadStarted,
+            captureId: CaptureBundleContext.captureIdentifier(for: request),
+            metadata: ["capture_source": request.metadata.captureSource.rawValue]
+        )
         uploadService.enqueue(request)
     }
 
@@ -91,6 +96,11 @@ final class UploadQueueViewModel: ObservableObject {
             captureMode: nil
         )
         let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
+        ActivationFunnelStore.shared.record(
+            .captureCompletedLocally,
+            captureId: CaptureBundleContext.captureIdentifier(for: request),
+            metadata: ["capture_source": request.metadata.captureSource.rawValue]
+        )
         let payoutUsd = job.payoutDollars
         enqueue(request, targetName: job.title, estimatedPayoutRange: payoutUsd...payoutUsd)
     }
@@ -158,6 +168,21 @@ final class UploadQueueViewModel: ObservableObject {
             estimatedPayoutRange: job.payoutDollars...job.payoutDollars
         )
         uploadStatusMap[metadata.id] = status
+        ActivationFunnelStore.shared.record(
+            .captureStarted,
+            captureId: CaptureBundleContext.captureIdentifier(for: CaptureUploadRequest(packageURL: status.packageURL, metadata: metadata)),
+            metadata: ["capture_source": metadata.captureSource.rawValue]
+        )
+        ActivationFunnelStore.shared.record(
+            .captureCompletedLocally,
+            captureId: CaptureBundleContext.captureIdentifier(for: CaptureUploadRequest(packageURL: status.packageURL, metadata: metadata)),
+            metadata: ["capture_source": metadata.captureSource.rawValue]
+        )
+        ActivationFunnelStore.shared.record(
+            .uploadStarted,
+            captureId: CaptureBundleContext.captureIdentifier(for: CaptureUploadRequest(packageURL: status.packageURL, metadata: metadata)),
+            metadata: ["capture_source": metadata.captureSource.rawValue]
+        )
         refreshUploadStatuses()
 
         Task { @MainActor [weak self] in
@@ -165,6 +190,11 @@ final class UploadQueueViewModel: ObservableObject {
             guard let self, var updated = self.uploadStatusMap[metadata.id] else { return }
             updated.state = .completed
             self.uploadStatusMap[metadata.id] = updated
+            ActivationFunnelStore.shared.record(
+                .uploadCompleted,
+                captureId: CaptureBundleContext.captureIdentifier(for: CaptureUploadRequest(packageURL: updated.packageURL, metadata: updated.metadata)),
+                metadata: ["capture_source": updated.metadata.captureSource.rawValue]
+            )
             self.refreshUploadStatuses()
         }
     }
@@ -258,6 +288,11 @@ final class UploadQueueViewModel: ObservableObject {
             status.metadata = request.metadata
             status.state = .completed
             uploadStatusMap[id] = status
+            ActivationFunnelStore.shared.record(
+                .uploadCompleted,
+                captureId: CaptureBundleContext.captureIdentifier(for: request),
+                metadata: ["capture_source": request.metadata.captureSource.rawValue]
+            )
 
             // Mark target as completed so it disappears from future job feeds.
             if let targetId = request.metadata.targetId, !targetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -277,6 +312,14 @@ final class UploadQueueViewModel: ObservableObject {
             status.metadata = request.metadata
             status.state = .failed(message: error.errorDescription ?? "Upload failed")
             uploadStatusMap[id] = status
+            ActivationFunnelStore.shared.record(
+                .uploadFailed,
+                captureId: CaptureBundleContext.captureIdentifier(for: request),
+                metadata: [
+                    "capture_source": request.metadata.captureSource.rawValue,
+                    "upload_error": error.errorDescription ?? "upload_failed"
+                ]
+            )
 
             // If the file is missing, don't keep retrying across launches.
             if error == .fileMissing {
