@@ -212,6 +212,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let targetStateService: TargetStateServiceProtocol
     private let intakeResolutionService: IntakeResolutionServiceProtocol
     private let exportService: CaptureExportServiceProtocol
+    private let abandonedRecoveryStore: AbandonedCaptureRecoveryStore
     private let creatorAPIService: APIService
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
@@ -225,12 +226,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
          targetStateService: TargetStateServiceProtocol = TargetStateService(),
          intakeResolutionService: IntakeResolutionServiceProtocol = IntakeResolutionService(),
          exportService: CaptureExportServiceProtocol = CaptureExportService(),
+         abandonedRecoveryStore: AbandonedCaptureRecoveryStore = .shared,
          creatorAPIService: APIService = .shared) {
         self.flowMode = flowMode
         self.uploadService = uploadService
         self.targetStateService = targetStateService
         self.intakeResolutionService = intakeResolutionService
         self.exportService = exportService
+        self.abandonedRecoveryStore = abandonedRecoveryStore
         self.creatorAPIService = creatorAPIService
         self.captureManager = VideoCaptureManager()
         super.init()
@@ -1172,6 +1175,47 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         guard var request = pendingCaptureRequest else { return }
         request.metadata = request.metadata.applyingCaptureNotes(notes)
         pendingCaptureRequest = request
+    }
+
+    func preservePendingCaptureForRecovery(reason: AbandonedCaptureReason) {
+        guard let request = pendingCaptureRequest else { return }
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        abandonedRecoveryStore.save(
+            AbandonedCaptureRecoveryRecord(
+                id: captureId,
+                state: .localBundleReady,
+                reason: reason,
+                recordedAt: Date(),
+                startedAt: captureManager.latestRecordingStartedAt,
+                packageURL: request.packageURL,
+                videoURL: nil,
+                workingDirectoryURL: nil,
+                request: request,
+                targetName: pendingCaptureTargetName,
+                address: currentAddress,
+                captureSource: request.metadata.captureSource.rawValue
+            )
+        )
+    }
+
+    func preserveInterruptedRecordingForRecovery(reason: AbandonedCaptureReason) {
+        guard case .recording(let artifacts) = captureManager.captureState else { return }
+        abandonedRecoveryStore.save(
+            AbandonedCaptureRecoveryRecord(
+                id: artifacts.baseFilename,
+                state: .recordingInterrupted,
+                reason: reason,
+                recordedAt: Date(),
+                startedAt: artifacts.startedAt,
+                packageURL: artifacts.packageURL,
+                videoURL: artifacts.videoURL,
+                workingDirectoryURL: artifacts.directoryURL,
+                request: nil,
+                targetName: currentTargetInfo?.name,
+                address: currentAddress,
+                captureSource: VideoCaptureManager.captureSource
+            )
+        )
     }
 
     private func resolvePendingCaptureAndContinue(

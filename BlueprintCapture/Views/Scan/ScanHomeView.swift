@@ -20,6 +20,7 @@ struct ScanHomeView: View {
     @State private var showingStripeOnboarding = false
     @State private var selectedDemo: DemoCapture?
     @State private var showingSearch = false
+    @State private var activationSnapshot = ActivationFunnelStore.shared.snapshot()
 
     private var isUITesting: Bool {
         RuntimeConfig.current.isUITesting
@@ -51,6 +52,18 @@ struct ScanHomeView: View {
 
                         statusBanners
                             .padding(.bottom, statusBannerCount > 0 ? 24 : 0)
+
+                        abandonedCaptureRecoverySection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, viewModel.abandonedCaptureRecovery == nil ? 0 : 24)
+
+                        capturerTaskListSection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, viewModel.capturerTasks.isEmpty ? 0 : 24)
+
+                        repeatCaptureSection
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, activationSnapshot.activationCompleted ? 24 : 0)
 
                         capturePolicySection
                             .padding(.horizontal, 20)
@@ -151,7 +164,11 @@ struct ScanHomeView: View {
             guard let jobId = note.userInfo?["jobId"] as? String else { return }
             Task { await openJobDetail(jobId: jobId) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: ActivationFunnelStore.changedNotification)) { _ in
+            activationSnapshot = ActivationFunnelStore.shared.snapshot()
+        }
         .task {
+            activationSnapshot = ActivationFunnelStore.shared.snapshot()
             viewModel.onAppear()
             await refreshPayoutsReady()
         }
@@ -229,6 +246,188 @@ struct ScanHomeView: View {
                 .padding(.horizontal, 20)
             }
         }
+    }
+
+    // MARK: - Abandoned Capture Recovery
+
+    @ViewBuilder
+    private var abandonedCaptureRecoverySection: some View {
+        if let recovery = viewModel.abandonedCaptureRecovery {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: recovery.hasRecoverableBundle ? "externaldrive.badge.checkmark" : "exclamationmark.arrow.triangle.2.circlepath")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(BlueprintTheme.panelStrong, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(recovery.reason.displayTitle)
+                            .font(BlueprintTheme.body(16, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                        Text(recovery.title)
+                            .font(BlueprintTheme.body(13, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
+                        Text(recovery.subtitle)
+                            .font(BlueprintTheme.body(12, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textTertiary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+                }
+
+                HStack(spacing: 10) {
+                    if recovery.hasRecoverableBundle {
+                        Button {
+                            viewModel.recoverAbandonedCapture()
+                        } label: {
+                            Label("Upload saved bundle", systemImage: "arrow.up.circle.fill")
+                                .font(BlueprintTheme.body(13, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(BlueprintTheme.panelStrong, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        viewModel.dismissAbandonedCaptureRecovery()
+                    } label: {
+                        Label("Dismiss", systemImage: "xmark.circle")
+                            .font(BlueprintTheme.body(13, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(BlueprintTheme.panelStrong, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(16)
+            .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
+            .accessibilityIdentifier("abandoned-capture-recovery-card")
+        }
+    }
+
+    // MARK: - Capturer Tasks
+
+    @ViewBuilder
+    private var capturerTaskListSection: some View {
+        if !viewModel.capturerTasks.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Task List")
+                        .font(BlueprintTheme.display(22, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+                    Text("\(viewModel.capturerTasks.count)")
+                        .font(BlueprintTheme.body(11, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(BlueprintTheme.panelStrong, in: Capsule())
+                    Spacer()
+                }
+
+                Text("Actions from available opportunities. Review and access checks still apply.")
+                    .font(BlueprintTheme.body(13, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
+
+                LazyVStack(spacing: 10) {
+                    ForEach(viewModel.capturerTasks) { task in
+                        Button {
+                            handleTaskSelection(task)
+                        } label: {
+                            CapturerTaskRow(task: task)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("capturer-task-\(task.item.id)")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Repeat Capture
+
+    @ViewBuilder
+    private var repeatCaptureSection: some View {
+        if activationSnapshot.activationCompleted {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: activationSnapshot.uploadedCaptureCount >= 3 ? "checkmark.seal.fill" : "repeat.circle.fill")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.textPrimary)
+                        .frame(width: 36, height: 36)
+                        .background(BlueprintTheme.panelStrong, in: Circle())
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(activationSnapshot.repeatCaptureProgressTitle)
+                            .font(BlueprintTheme.body(16, weight: .semibold))
+                            .foregroundStyle(BlueprintTheme.textPrimary)
+                        Text(activationSnapshot.repeatCaptureProgressSubtitle)
+                            .font(BlueprintTheme.body(12, weight: .medium))
+                            .foregroundStyle(BlueprintTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+                }
+
+                HStack(spacing: 8) {
+                    repeatProgressPill("Started", activationSnapshot.repeatCaptureStartedCount)
+                    repeatProgressPill("Finished", activationSnapshot.repeatCaptureCompletedCount)
+                    repeatProgressPill("Uploaded", activationSnapshot.repeatCaptureUploadedCount)
+                }
+
+                if activationSnapshot.uploadedCaptureCount < 3 {
+                    HStack(spacing: 10) {
+                        Button {
+                            showingSearch = true
+                        } label: {
+                            Label("Find next space", systemImage: "magnifyingglass")
+                                .font(BlueprintTheme.body(13, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(BlueprintTheme.panelStrong, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            reviewSubmissionSeed = SpaceReviewSeed(title: "Open capture review")
+                        } label: {
+                            Label("Capture here", systemImage: "camera.fill")
+                                .font(BlueprintTheme.body(13, weight: .semibold))
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(BlueprintTheme.panelStrong, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(16)
+            .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
+            .accessibilityIdentifier("repeat-capture-card")
+        }
+    }
+
+    private func repeatProgressPill(_ label: String, _ count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(count)")
+                .font(BlueprintTheme.body(17, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
+            Text(label)
+                .font(BlueprintTheme.body(10, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textTertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .blueprintPanelBackground(radius: 12, fill: BlueprintTheme.panelMuted)
     }
 
     // MARK: - Featured Section
@@ -669,6 +868,17 @@ struct ScanHomeView: View {
         selectedItem = item
     }
 
+    private func handleTaskSelection(_ task: ScanHomeViewModel.CapturerTaskItem) {
+        switch task.action {
+        case .startApprovedCapture:
+            handleItemSelection(task.item)
+        case .getDirections:
+            openDirections(to: task.item.job)
+        case .submitForReview, .checkAccess:
+            selectedItem = task.item
+        }
+    }
+
     private func refreshPayoutsReady() async {
         guard RuntimeConfig.current.availability(for: .payouts).isEnabled else {
             payoutsReady = false
@@ -892,6 +1102,41 @@ private struct FeaturedCaptureCard: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(BlueprintTheme.hairline, lineWidth: 1)
         )
+    }
+}
+
+private struct CapturerTaskRow: View {
+    let task: ScanHomeViewModel.CapturerTaskItem
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: task.systemImage)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
+                .frame(width: 34, height: 34)
+                .background(BlueprintTheme.panelStrong, in: Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(task.title)
+                    .font(BlueprintTheme.body(15, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
+                Text(task.subtitle)
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(task.actionTitle)
+                .font(BlueprintTheme.body(12, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(BlueprintTheme.panelStrong, in: Capsule())
+        }
+        .padding(14)
+        .blueprintEditorialCard(radius: 16, fill: BlueprintTheme.panel)
     }
 }
 

@@ -352,10 +352,10 @@ struct ProfileTabView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(activationSnapshot.activationCompleted ? "First capture activated" : "First capture not complete")
+                    Text(activationSnapshot.activationCompleted ? activationSnapshot.repeatCaptureProgressTitle : "First capture not complete")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text(activationSnapshot.dropOffStep.map { "Current drop-off: \($0.rawValue)" } ?? "All tracked steps have at least one event.")
+                    Text(activationDropOffText)
                         .font(.caption)
                         .foregroundStyle(Color(white: 0.48))
                 }
@@ -397,6 +397,16 @@ struct ProfileTabView: View {
                 .stroke(Color(white: 0.12), lineWidth: 1)
         )
         .accessibilityIdentifier("activation-funnel-card")
+    }
+
+    private var activationDropOffText: String {
+        if activationSnapshot.activationCompleted {
+            if let repeatDropOff = activationSnapshot.repeatCaptureDropOffStep {
+                return "Repeat drop-off: \(repeatDropOff.rawValue)"
+            }
+            return "Second and third uploaded captures complete."
+        }
+        return activationSnapshot.dropOffStep.map { "Current drop-off: \($0.rawValue)" } ?? "All tracked steps have at least one event."
     }
 
     // MARK: - Device Card

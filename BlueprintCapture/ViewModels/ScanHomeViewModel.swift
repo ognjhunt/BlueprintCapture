@@ -133,6 +133,13 @@ final class ScanHomeViewModel: ObservableObject {
         case reviewSubmission
     }
 
+    enum CapturerTaskAction: String, Equatable {
+        case startApprovedCapture
+        case getDirections
+        case submitForReview
+        case checkAccess
+    }
+
     struct PreviewSelection: Equatable {
         let url: URL?
         let source: PreviewSource
@@ -215,6 +222,17 @@ final class ScanHomeViewModel: ObservableObject {
         var id: String { stage.rawValue }
     }
 
+    struct CapturerTaskItem: Identifiable, Equatable {
+        let item: JobItem
+        let title: String
+        let subtitle: String
+        let actionTitle: String
+        let systemImage: String
+        let action: CapturerTaskAction
+
+        var id: String { "\(action.rawValue)-\(item.id)" }
+    }
+
     struct RankedJob: Equatable {
         let job: ScanJob
         let distanceMeters: Double
@@ -225,10 +243,12 @@ final class ScanHomeViewModel: ObservableObject {
     @Published private(set) var nearbyItems: [JobItem] = []
     @Published private(set) var specialItems: [JobItem] = []
     @Published private(set) var readyNow: JobItem?
+    @Published private(set) var capturerTasks: [CapturerTaskItem] = []
     @Published private(set) var submissionSummary: [SubmissionSummaryItem] = []
     @Published private(set) var currentLocation: CLLocation?
     @Published private(set) var lastUpdatedAt: Date?
     @Published private(set) var reviewCandidates: [ReviewCandidateItem] = []
+    @Published private(set) var abandonedCaptureRecovery: AbandonedCaptureRecoveryRecord?
 
     @Published var showErrorAlert: Bool = false
     @Published var errorMessage: String?
@@ -243,6 +263,9 @@ final class ScanHomeViewModel: ObservableObject {
     private let nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol
     private let cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol
     private let cityLaunchTargetsService: CityLaunchTargetsServiceProtocol
+    private let uploadService: CaptureUploadServiceProtocol
+    private let abandonedRecoveryStore: AbandonedCaptureRecoveryStore
+    private var cancellables: Set<AnyCancellable> = []
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
     private let inferredNearbyLimit: Int = 8
@@ -264,7 +287,9 @@ final class ScanHomeViewModel: ObservableObject {
         nearbyDiscoveryService: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
         nearbyCandidateReviewSubmissionService: NearbyCandidateReviewSubmissionServiceProtocol = NearbyCandidateReviewSubmissionService(),
         cityLaunchCandidateSignalService: CityLaunchCandidateSignalServiceProtocol = APIService.shared,
-        cityLaunchTargetsService: CityLaunchTargetsServiceProtocol = APIService.shared
+        cityLaunchTargetsService: CityLaunchTargetsServiceProtocol = APIService.shared,
+        uploadService: CaptureUploadServiceProtocol = CaptureUploadService.shared,
+        abandonedRecoveryStore: AbandonedCaptureRecoveryStore = .shared
     ) {
         self.jobsRepository = jobsRepository
         self.targetStateService = targetStateService
@@ -276,6 +301,8 @@ final class ScanHomeViewModel: ObservableObject {
         self.nearbyCandidateReviewSubmissionService = nearbyCandidateReviewSubmissionService
         self.cityLaunchCandidateSignalService = cityLaunchCandidateSignalService
         self.cityLaunchTargetsService = cityLaunchTargetsService
+        self.uploadService = uploadService
+        self.abandonedRecoveryStore = abandonedRecoveryStore
 
         self.locationService.setListener { [weak self] loc in
             Task { @MainActor in
@@ -283,9 +310,17 @@ final class ScanHomeViewModel: ObservableObject {
                 await self?.refresh()
             }
         }
+        NotificationCenter.default.publisher(for: AbandonedCaptureRecoveryStore.changedNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshAbandonedCaptureRecovery()
+            }
+            .store(in: &cancellables)
+        refreshAbandonedCaptureRecovery()
     }
 
     func onAppear() {
+        refreshAbandonedCaptureRecovery()
         alertsManager.refreshNotificationStatus()
         locationService.requestWhenInUseAuthorization()
         locationService.startUpdatingLocation()
@@ -296,6 +331,24 @@ final class ScanHomeViewModel: ObservableObject {
 
     func onDisappear() {
         locationService.stopUpdatingLocation()
+    }
+
+    func recoverAbandonedCapture() {
+        guard let record = abandonedCaptureRecovery,
+              let request = record.request else { return }
+        uploadService.enqueue(request)
+        abandonedRecoveryStore.remove(id: record.id)
+        refreshAbandonedCaptureRecovery()
+    }
+
+    func dismissAbandonedCaptureRecovery() {
+        guard let id = abandonedCaptureRecovery?.id else { return }
+        abandonedRecoveryStore.remove(id: id)
+        refreshAbandonedCaptureRecovery()
+    }
+
+    private func refreshAbandonedCaptureRecovery() {
+        abandonedCaptureRecovery = abandonedRecoveryStore.latest()
     }
 
     func refresh() async {
@@ -345,6 +398,7 @@ final class ScanHomeViewModel: ObservableObject {
             self.nearbyItems = nearbyDynamic
             self.specialItems = hydrated.filter { $0.opportunityKind == .special }
             self.readyNow = self.nearbyItems.first(where: { $0.isReadyNow && $0.permissionTier == .approved })
+            self.capturerTasks = Self.capturerTaskItems(from: hydrated)
             self.submissionSummary = await loadSubmissionSummary()
             self.reviewCandidates = await loadReviewCandidates(near: loc)
             self.lastUpdatedAt = Date()
@@ -785,6 +839,84 @@ extension ScanHomeViewModel {
             return PreviewSelection(url: explicit, source: .jobImage)
         }
         return PreviewSelection(url: nil, source: .mapSnapshot)
+    }
+
+    static func capturerTaskItems(from items: [JobItem], limit: Int = 4) -> [CapturerTaskItem] {
+        let ranked = items
+            .filter { $0.permissionTier != .blocked }
+            .sorted { lhs, rhs in
+                let lhsRank = capturerTaskRank(for: lhs)
+                let rhsRank = capturerTaskRank(for: rhs)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                if lhs.distanceMeters != rhs.distanceMeters { return lhs.distanceMeters < rhs.distanceMeters }
+                return lhs.job.id < rhs.job.id
+            }
+
+        return Array(ranked.prefix(limit).map(capturerTaskItem(for:)))
+    }
+
+    private static func capturerTaskRank(for item: JobItem) -> Int {
+        switch item.permissionTier {
+        case .approved:
+            return item.isReadyNow ? 0 : 1
+        case .reviewRequired:
+            return 2
+        case .permissionRequired:
+            return 3
+        case .blocked:
+            return 4
+        }
+    }
+
+    private static func capturerTaskItem(for item: JobItem) -> CapturerTaskItem {
+        switch item.permissionTier {
+        case .approved:
+            if item.isReadyNow {
+                return CapturerTaskItem(
+                    item: item,
+                    title: "Start approved capture",
+                    subtitle: "\(item.job.title) · approved scope only",
+                    actionTitle: "Start",
+                    systemImage: "camera.viewfinder",
+                    action: .startApprovedCapture
+                )
+            }
+            return CapturerTaskItem(
+                item: item,
+                title: "Go to capture site",
+                subtitle: "\(item.job.title) · \(item.distanceLabel)",
+                actionTitle: "Directions",
+                systemImage: "location.north.fill",
+                action: .getDirections
+            )
+        case .reviewRequired:
+            return CapturerTaskItem(
+                item: item,
+                title: "Submit for review",
+                subtitle: "\(item.job.title) · no approval implied",
+                actionTitle: "Submit",
+                systemImage: "tray.and.arrow.up.fill",
+                action: .submitForReview
+            )
+        case .permissionRequired:
+            return CapturerTaskItem(
+                item: item,
+                title: "Check access first",
+                subtitle: "\(item.job.title) · confirm allowed areas on site",
+                actionTitle: "Review",
+                systemImage: "exclamationmark.shield.fill",
+                action: .checkAccess
+            )
+        case .blocked:
+            return CapturerTaskItem(
+                item: item,
+                title: "Do not capture",
+                subtitle: "\(item.job.title) · restricted location",
+                actionTitle: "Blocked",
+                systemImage: "nosign",
+                action: .checkAccess
+            )
+        }
     }
 
     static func submissionStage(for status: CaptureStatus) -> CaptureSubmissionStage {

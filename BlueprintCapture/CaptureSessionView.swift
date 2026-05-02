@@ -207,8 +207,13 @@ struct CaptureSessionView: View {
             UIApplication.shared.isIdleTimerDisabled = true
             prepareSessionIfNeeded()
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            viewModel.preserveInterruptedRecordingForRecovery(reason: .appBackgrounded)
+            viewModel.preservePendingCaptureForRecovery(reason: .appBackgrounded)
+        }
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
+            viewModel.preserveInterruptedRecordingForRecovery(reason: .viewDismissed)
         }
         .fullScreenCover(isPresented: $isShowingPostCaptureSummary) {
             let monitor = captureManager.qualityMonitor
@@ -232,6 +237,7 @@ struct CaptureSessionView: View {
                 },
                 onUploadLater: {
                     viewModel.updatePendingCaptureNotes(captureNotes)
+                    viewModel.preservePendingCaptureForRecovery(reason: .uploadLater)
                     isShowingPostCaptureSummary = false
                     completeAndDismiss()
                 },

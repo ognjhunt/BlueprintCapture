@@ -282,6 +282,10 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         latestRecordingSession?.coordinateFrameSessionId
     }
 
+    var latestRecordingStartedAt: Date? {
+        latestRecordingSession?.startedAt
+    }
+
     private let movieOutput = AVCaptureMovieFileOutput()
     private let motionManager = CMMotionManager()
     private let motionQueue: OperationQueue = {

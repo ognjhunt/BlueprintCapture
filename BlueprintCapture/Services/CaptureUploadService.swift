@@ -496,7 +496,7 @@ struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     }
 }
 
-struct CaptureUploadRequest: Equatable {
+struct CaptureUploadRequest: Equatable, Codable {
     let packageURL: URL
     var metadata: CaptureUploadMetadata
 }

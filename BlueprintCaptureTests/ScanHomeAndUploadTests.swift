@@ -319,6 +319,143 @@ struct ScanHomeAndUploadTests {
         #expect(job.workflowName == "Inferred nearby candidate review")
     }
 
+    @Test @MainActor func scanHome_buildsCapturerTasksWithoutInventingPayoutOrAccessTruth() async throws {
+        let user = CLLocation(latitude: 0, longitude: 0)
+        let now = Date()
+        let ready = makeJob(id: "ready", title: "Ready Site", address: "A", lat: 0, lng: 0, updatedAt: now)
+        let far = makeJob(id: "far", title: "Far Site", address: "B", lat: 0.01, lng: 0, updatedAt: now)
+        let review = makeJob(
+            id: "review",
+            title: "Review Candidate",
+            address: "C",
+            lat: 0.002,
+            lng: 0,
+            updatedAt: now,
+            permissionDocURL: nil,
+            jobType: .operatorApprovedOnDemand,
+            rightsProfile: "review_required",
+            rightsChecklist: []
+        )
+        let permission = makeJob(
+            id: "permission",
+            title: "Access Check",
+            address: "D",
+            lat: 0.003,
+            lng: 0,
+            updatedAt: now,
+            allowedAreas: ["Lobby"],
+            permissionDocURL: nil,
+            jobType: .curatedNearby,
+            rightsProfile: "policy_only",
+            rightsChecklist: ["Ask staff before capture."]
+        )
+        let blocked = makeJob(
+            id: "blocked",
+            title: "Blocked Site",
+            address: "E",
+            lat: 0.004,
+            lng: 0,
+            updatedAt: now,
+            permissionDocURL: nil,
+            jobType: .curatedNearby,
+            approvalRequirements: ["strictly prohibited"],
+            rightsProfile: "blocked",
+            rightsChecklist: []
+        )
+
+        let ranked = ScanHomeViewModel.rankJobsForFeed(
+            jobs: [permission, blocked, far, review, ready],
+            userLocation: user,
+            feedRadiusMeters: 10 * 1609.34
+        )
+        let items = ScanHomeViewModel.filterVisibleItems(
+            rankedJobs: ranked,
+            statesByJobId: [:],
+            currentUserId: "user_current"
+        )
+        let tasks = ScanHomeViewModel.capturerTaskItems(from: items, limit: 10)
+
+        #expect(tasks.map(\.item.id) == ["ready", "far", "review", "permission"])
+        #expect(tasks.map(\.action) == [.startApprovedCapture, .getDirections, .submitForReview, .checkAccess])
+        #expect(tasks.first(where: { $0.item.id == "review" })?.subtitle.contains("no approval implied") == true)
+        #expect(tasks.first(where: { $0.item.id == "permission" })?.subtitle.contains("confirm allowed areas") == true)
+
+        let combinedCopy = tasks.flatMap { [$0.title, $0.subtitle, $0.actionTitle] }.joined(separator: " ").lowercased()
+        #expect(!combinedCopy.contains("$"))
+        #expect(!combinedCopy.contains("paid"))
+        #expect(!combinedCopy.contains("payout"))
+        #expect(!tasks.map(\.item.id).contains("blocked"))
+    }
+
+    @Test @MainActor func scanHome_recoversSavedLocalBundleByEnqueueingTruthfulRequest() async throws {
+        let suiteName = "abandoned-capture-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let recoveryStore = AbandonedCaptureRecoveryStore(defaults: defaults)
+        let uploadService = MockCaptureUploadService()
+        let request = makeUploadRequest(id: UUID(), packageURL: URL(fileURLWithPath: "/tmp/recoverable.zip"))
+        let record = AbandonedCaptureRecoveryRecord(
+            id: CaptureBundleContext.captureIdentifier(for: request),
+            state: .localBundleReady,
+            reason: .uploadLater,
+            recordedAt: Date(),
+            startedAt: Date().addingTimeInterval(-60),
+            packageURL: request.packageURL,
+            videoURL: nil,
+            workingDirectoryURL: nil,
+            request: request,
+            targetName: "Saved Site",
+            address: "1 Test Way",
+            captureSource: request.metadata.captureSource.rawValue
+        )
+        recoveryStore.save(record)
+
+        let viewModel = ScanHomeViewModel(
+            alertsManager: NearbyAlertsManager(),
+            uploadService: uploadService,
+            abandonedRecoveryStore: recoveryStore
+        )
+
+        #expect(viewModel.abandonedCaptureRecovery?.id == record.id)
+        viewModel.recoverAbandonedCapture()
+
+        #expect(uploadService.enqueued.count == 1)
+        #expect(uploadService.enqueued.first?.metadata.id == request.metadata.id)
+        #expect(uploadService.enqueued.first?.packageURL == request.packageURL)
+        #expect(viewModel.abandonedCaptureRecovery == nil)
+        #expect(recoveryStore.latest() == nil)
+    }
+
+    @Test func abandonedCaptureRecoveryStorePreservesInterruptedRecordingWithoutClaimingBundle() {
+        let suiteName = "abandoned-capture-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let recoveryStore = AbandonedCaptureRecoveryStore(defaults: defaults)
+        let record = AbandonedCaptureRecoveryRecord(
+            id: "walkthrough-partial",
+            state: .recordingInterrupted,
+            reason: .appBackgrounded,
+            recordedAt: Date(),
+            startedAt: Date().addingTimeInterval(-10),
+            packageURL: URL(fileURLWithPath: "/tmp/partial.zip"),
+            videoURL: URL(fileURLWithPath: "/tmp/partial.mov"),
+            workingDirectoryURL: URL(fileURLWithPath: "/tmp/partial", isDirectory: true),
+            request: nil,
+            targetName: "Partial Site",
+            address: "2 Test Way",
+            captureSource: "iphone"
+        )
+
+        recoveryStore.save(record)
+        let recovered = recoveryStore.latest()
+
+        #expect(recovered?.state == .recordingInterrupted)
+        #expect(recovered?.reason == .appBackgrounded)
+        #expect(recovered?.hasRecoverableBundle == false)
+        #expect(recovered?.videoURL == record.videoURL)
+        #expect(recovered?.workingDirectoryURL == record.workingDirectoryURL)
+    }
+
     @Test @MainActor func scanHome_buildsApprovedLaunchTargetsFromCityLaunchFeed() async throws {
         let target = Target(
             id: "durham-nc-ccb-plaza",
@@ -502,7 +639,14 @@ private func makeJob(
     lng: Double,
     payoutCents: Int = 1000,
     priority: Int = 0,
-    updatedAt: Date
+    updatedAt: Date,
+    allowedAreas: [String] = ["Sales floor"],
+    restrictedAreas: [String] = ["Back office"],
+    permissionDocURL: URL? = URL(string: "https://example.com/permit.pdf"),
+    jobType: ScanJob.JobType = .buyerRequestedSpecialTask,
+    approvalRequirements: [String] = ["ops_review"],
+    rightsProfile: String? = "documented_permission",
+    rightsChecklist: [String] = ["permission doc"]
 ) -> ScanJob {
     ScanJob(
         id: id,
@@ -518,23 +662,23 @@ private func makeJob(
         heroImageURL: URL(string: "https://example.com/hero.png"),
         category: nil,
         instructions: [],
-        allowedAreas: ["Sales floor"],
-        restrictedAreas: ["Back office"],
-        permissionDocURL: URL(string: "https://example.com/permit.pdf"),
+        allowedAreas: allowedAreas,
+        restrictedAreas: restrictedAreas,
+        permissionDocURL: permissionDocURL,
         checkinRadiusM: 150,
         alertRadiusM: 200,
         priority: priority,
         priorityWeight: 1.0,
         regionId: "bay-area",
-        jobType: .buyerRequestedSpecialTask,
+        jobType: jobType,
         buyerRequestId: "req-\(id)",
         siteSubmissionId: id,
         quotedPayoutCents: payoutCents,
         dueWindow: "managed",
-        approvalRequirements: ["ops_review"],
+        approvalRequirements: approvalRequirements,
         recaptureReason: nil,
-        rightsChecklist: ["permission doc"],
-        rightsProfile: "documented_permission",
+        rightsChecklist: rightsChecklist,
+        rightsProfile: rightsProfile,
         requestedOutputs: ["qualification", "preview_simulation"],
         workflowName: nil,
         workflowSteps: [],
@@ -556,6 +700,44 @@ private func makeJob(
         nonRoutineModes: [],
         peopleTrafficNotes: [],
         captureRestrictions: []
+    )
+}
+
+private func makeUploadRequest(id: UUID, packageURL: URL) -> CaptureUploadRequest {
+    CaptureUploadRequest(
+        packageURL: packageURL,
+        metadata: CaptureUploadMetadata(
+            id: id,
+            targetId: nil,
+            reservationId: nil,
+            jobId: "job-\(id.uuidString)",
+            captureJobId: nil,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            regionId: nil,
+            creatorId: "creator",
+            capturedAt: Date(),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .openCapture,
+            priorityWeight: nil,
+            quotedPayoutCents: nil,
+            rightsProfile: "review_required",
+            requestedOutputs: ["qualification", "preview_simulation"],
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: "test recovery",
+            sceneMemory: nil,
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil,
+            semanticAnchors: []
+        )
     )
 }
 

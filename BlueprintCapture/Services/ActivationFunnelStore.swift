@@ -13,6 +13,18 @@ enum ActivationFunnelStep: String, CaseIterable, Codable, Identifiable {
     case uploadCompleted = "upload_completed"
     case uploadFailed = "upload_failed"
     case firstCaptureActivationCompleted = "first_capture_activation_completed"
+    case repeatCaptureStarted = "repeat_capture_started"
+    case repeatCaptureCompleted = "repeat_capture_completed"
+    case repeatCaptureUploaded = "repeat_capture_uploaded"
+
+    var id: String { rawValue }
+}
+
+enum RepeatCaptureDropOffStep: String, Codable, Equatable, Identifiable {
+    case returnToStartCapture = "return_to_start_capture"
+    case completeRepeatCapture = "complete_repeat_capture"
+    case uploadRepeatCapture = "upload_repeat_capture"
+    case completeThirdUpload = "complete_third_upload"
 
     var id: String { rawValue }
 }
@@ -38,8 +50,48 @@ struct ActivationFunnelSnapshot: Equatable {
     let totalEvents: Int
     let firstIncompleteStep: ActivationFunnelStep?
     let activationCompleted: Bool
+    let repeatCaptureStartedCount: Int
+    let repeatCaptureCompletedCount: Int
+    let repeatCaptureUploadedCount: Int
+    let repeatCaptureDropOffStep: RepeatCaptureDropOffStep?
 
     var dropOffStep: ActivationFunnelStep? { firstIncompleteStep }
+
+    var uploadedCaptureCount: Int {
+        summaries.first(where: { $0.step == .uploadCompleted })?.count ?? 0
+    }
+
+    var repeatCaptureProgressTitle: String {
+        guard activationCompleted else { return "First capture not complete" }
+        switch uploadedCaptureCount {
+        case 0:
+            return "First capture not complete"
+        case 1:
+            return "Second capture ready"
+        case 2:
+            return "Third capture ready"
+        default:
+            return "Repeat capture habit active"
+        }
+    }
+
+    var repeatCaptureProgressSubtitle: String {
+        guard activationCompleted else {
+            return "Upload the first valid bundle before the repeat loop starts."
+        }
+        switch repeatCaptureDropOffStep {
+        case .returnToStartCapture:
+            return "Activated capturer has not started another capture yet."
+        case .completeRepeatCapture:
+            return "Repeat capture started but no local completion is recorded."
+        case .uploadRepeatCapture:
+            return "Repeat capture completed locally but has not uploaded."
+        case .completeThirdUpload:
+            return "Second upload landed. One more valid upload completes the third-capture goal."
+        case nil:
+            return "Second and third valid uploads are complete."
+        }
+    }
 }
 
 protocol ActivationFunnelRecording {
@@ -68,8 +120,14 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
 
     func record(_ step: ActivationFunnelStep, captureId: String? = nil, metadata: [String: String] = [:]) {
         let safeMetadata = Self.privacySafe(metadata)
+        var loggedRepeatStep: ActivationFunnelStep?
+        var loggedRepeatMetadata: [String: String] = [:]
         queue.sync {
             var events = loadEventsLocked()
+            let repeatStep = Self.repeatStep(for: step, captureId: captureId, existingEvents: events)
+            let repeatMetadata = Self.repeatMetadata(for: step, captureId: captureId, existingEvents: events, metadata: safeMetadata)
+            loggedRepeatStep = repeatStep
+            loggedRepeatMetadata = repeatMetadata
             events.append(
                 ActivationFunnelEventRecord(
                     id: UUID(),
@@ -79,6 +137,17 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
                     metadata: safeMetadata
                 )
             )
+            if let repeatStep {
+                events.append(
+                    ActivationFunnelEventRecord(
+                        id: UUID(),
+                        step: repeatStep,
+                        occurredAt: Date(),
+                        captureId: captureId?.nilIfEmpty,
+                        metadata: repeatMetadata
+                    )
+                )
+            }
 
             if shouldRecordActivationCompletion(afterAppending: events) {
                 let completedCaptureId = captureId ?? latestCaptureId(in: events)
@@ -101,6 +170,13 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
             status: "recorded",
             metadata: safeMetadata.merging(["capture_id": captureId ?? ""], uniquingKeysWith: { current, _ in current })
         )
+        if let loggedRepeatStep {
+            SessionEventManager.shared.logOperationalEvent(
+                operation: loggedRepeatStep.rawValue,
+                status: "recorded",
+                metadata: loggedRepeatMetadata.merging(["capture_id": captureId ?? ""], uniquingKeysWith: { current, _ in current })
+            )
+        }
     }
 
     func snapshot() -> ActivationFunnelSnapshot {
@@ -131,11 +207,26 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
             )
         }
         let firstIncomplete = summaries.first(where: { $0.count == 0 })?.step
+        let repeatStarted = summaries.first(where: { $0.step == .repeatCaptureStarted })?.count ?? 0
+        let repeatCompleted = summaries.first(where: { $0.step == .repeatCaptureCompleted })?.count ?? 0
+        let repeatUploaded = summaries.first(where: { $0.step == .repeatCaptureUploaded })?.count ?? 0
+        let uploadCompleted = summaries.first(where: { $0.step == .uploadCompleted })?.count ?? 0
+        let activationCompleted = summaries.first(where: { $0.step == .firstCaptureActivationCompleted })?.count ?? 0 > 0
         return ActivationFunnelSnapshot(
             summaries: summaries,
             totalEvents: events.count,
             firstIncompleteStep: firstIncomplete,
-            activationCompleted: summaries.first(where: { $0.step == .firstCaptureActivationCompleted })?.count ?? 0 > 0
+            activationCompleted: activationCompleted,
+            repeatCaptureStartedCount: repeatStarted,
+            repeatCaptureCompletedCount: repeatCompleted,
+            repeatCaptureUploadedCount: repeatUploaded,
+            repeatCaptureDropOffStep: Self.repeatDropOffStep(
+                activationCompleted: activationCompleted,
+                repeatStarted: repeatStarted,
+                repeatCompleted: repeatCompleted,
+                repeatUploaded: repeatUploaded,
+                uploadCompleted: uploadCompleted
+            )
         )
     }
 
@@ -147,6 +238,58 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
 
     private func latestCaptureId(in events: [ActivationFunnelEventRecord]) -> String? {
         events.reversed().first(where: { $0.captureId?.isEmpty == false })?.captureId
+    }
+
+    private static func repeatStep(
+        for step: ActivationFunnelStep,
+        captureId: String?,
+        existingEvents: [ActivationFunnelEventRecord]
+    ) -> ActivationFunnelStep? {
+        guard existingEvents.contains(where: { $0.step == .firstCaptureActivationCompleted }) else { return nil }
+        switch step {
+        case .captureStarted:
+            return .repeatCaptureStarted
+        case .captureCompletedLocally:
+            return .repeatCaptureCompleted
+        case .uploadCompleted:
+            if let captureId = captureId?.nilIfEmpty,
+               existingEvents.contains(where: { $0.step == .uploadCompleted && $0.captureId == captureId }) {
+                return nil
+            }
+            return .repeatCaptureUploaded
+        default:
+            return nil
+        }
+    }
+
+    private static func repeatMetadata(
+        for step: ActivationFunnelStep,
+        captureId: String?,
+        existingEvents: [ActivationFunnelEventRecord],
+        metadata: [String: String]
+    ) -> [String: String] {
+        guard step == .uploadCompleted else { return metadata }
+        var uploadedCaptureIds = Set(existingEvents.filter { $0.step == .uploadCompleted }.compactMap(\.captureId))
+        if let captureId = captureId?.nilIfEmpty {
+            uploadedCaptureIds.insert(captureId)
+        }
+        let nextUploadNumber = max(uploadedCaptureIds.count, existingEvents.filter { $0.step == .uploadCompleted }.count + 1)
+        return metadata.merging(["capture_number": "\(nextUploadNumber)"], uniquingKeysWith: { current, _ in current })
+    }
+
+    private static func repeatDropOffStep(
+        activationCompleted: Bool,
+        repeatStarted: Int,
+        repeatCompleted: Int,
+        repeatUploaded: Int,
+        uploadCompleted: Int
+    ) -> RepeatCaptureDropOffStep? {
+        guard activationCompleted else { return nil }
+        if uploadCompleted >= 3 { return nil }
+        if repeatStarted == 0 { return .returnToStartCapture }
+        if repeatCompleted < repeatStarted { return .completeRepeatCapture }
+        if repeatUploaded < repeatCompleted { return .uploadRepeatCapture }
+        return .completeThirdUpload
     }
 
     private func loadEventsLocked() -> [ActivationFunnelEventRecord] {
@@ -164,6 +307,7 @@ final class ActivationFunnelStore: ActivationFunnelRecording {
             "auth_mode",
             "auth_provider",
             "camera",
+            "capture_number",
             "capture_source",
             "goal",
             "location",
