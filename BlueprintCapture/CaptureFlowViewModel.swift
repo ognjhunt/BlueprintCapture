@@ -17,6 +17,9 @@ struct SpaceReviewSeed: Identifiable, Equatable {
     let rightsProfile: String?
     let requestedOutputs: [String]
     let suggestedContext: String?
+    let intakePacket: QualificationIntakePacket?
+    let captureRights: CaptureRightsMetadata?
+    let requestedCaptureMode: String?
 
     init(
         id: String = UUID().uuidString,
@@ -29,7 +32,10 @@ struct SpaceReviewSeed: Identifiable, Equatable {
         regionId: String? = nil,
         rightsProfile: String? = nil,
         requestedOutputs: [String] = ["qualification", "review_intake"],
-        suggestedContext: String? = nil
+        suggestedContext: String? = nil,
+        intakePacket: QualificationIntakePacket? = nil,
+        captureRights: CaptureRightsMetadata? = nil,
+        requestedCaptureMode: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -42,6 +48,9 @@ struct SpaceReviewSeed: Identifiable, Equatable {
         self.rightsProfile = rightsProfile
         self.requestedOutputs = requestedOutputs
         self.suggestedContext = suggestedContext
+        self.intakePacket = intakePacket
+        self.captureRights = captureRights
+        self.requestedCaptureMode = requestedCaptureMode
     }
 }
 
@@ -605,11 +614,28 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         let requestedOutputs = normalizeRequestedOutputs(
             reviewSeed?.requestedOutputs
                 ?? (isSpaceReviewMode
-                    ? ["qualification", "review_intake", "preview_simulation", "deeper_evaluation"]
+                    ? ["qualification", "review_intake"]
                     : ["qualification", "preview_simulation", "deeper_evaluation"])
         )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
+        let seedIntakePacket = (reviewSeed?.intakePacket?.isComplete == true) ? reviewSeed?.intakePacket : nil
+        let seedIntakeMetadata = seedIntakePacket.map { _ in CaptureIntakeMetadata(source: .authoritative) }
+        let seedTaskHypothesis = seedIntakePacket.flatMap { packet in
+            seedIntakeMetadata.map { metadata in
+                CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
+            }
+        }
+        let defaultCaptureRights = CaptureRightsMetadata(
+            derivedSceneGenerationAllowed: !isSpaceReviewMode,
+            dataLicensingAllowed: !isSpaceReviewMode,
+            payoutEligible: !isSpaceReviewMode,
+            consentStatus: isSpaceReviewMode ? .policyOnly : .unknown,
+            permissionDocumentURI: nil,
+            consentScope: [],
+            consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
+        )
+        let captureRights = reviewSeed?.captureRights ?? defaultCaptureRights
 
         // Derive stable site identity. Priority: buyer target > reservation > session-stable UUID.
         let siteId: String
@@ -698,11 +724,24 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             arkitSessionId: coordinateFrameSessionId
         )
 
-        // iPhone captures default to requesting site_world_candidate mode.
-        // Resolved mode is determined at finalization time from actual evidence.
+        let canRequestSiteWorldCandidate = reviewSeed?.requestedCaptureMode == "site_world_candidate"
+            && seedIntakePacket?.isComplete == true
+            && captureRights.derivedSceneGenerationAllowed
+        let requestedCaptureMode = canRequestSiteWorldCandidate ? "site_world_candidate" : "qualification_only"
+        let specialTaskType: CaptureUploadMetadata.SpecialTaskType = {
+            if rightsProfile == "approved_launch_target" {
+                return .curatedNearby
+            }
+            if isSpaceReviewMode {
+                return .openCapture
+            }
+            return targetId == nil ? .operatorApproved : .curatedNearby
+        }()
+
+        // Resolved mode is recomputed at finalization time from actual evidence and rights gates.
         let captureMode = CaptureModeMetadata(
-            requestedMode: "site_world_candidate",
-            resolvedMode: "site_world_candidate",
+            requestedMode: requestedCaptureMode,
+            resolvedMode: requestedCaptureMode,
             downgradeReason: nil
         )
 
@@ -719,14 +758,15 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             capturedAt: Date(),
             uploadedAt: nil,
             captureSource: .iphoneVideo,
-            specialTaskType: isSpaceReviewMode ? .openCapture : (targetId == nil ? .operatorApproved : .curatedNearby),
+            specialTaskType: specialTaskType,
             priorityWeight: 1.0,
-            quotedPayoutCents: currentTargetInfo.map { $0.estimatedPayoutRange.upperBound * 100 },
+            quotedPayoutCents: currentTargetInfo.map { $0.estimatedPayoutRange.upperBound * 100 }
+                ?? reviewSeed?.payoutRange.map { $0.upperBound * 100 },
             rightsProfile: rightsProfile,
             requestedOutputs: requestedOutputs,
-            intakePacket: nil,
-            intakeMetadata: nil,
-            taskHypothesis: nil,
+            intakePacket: seedIntakePacket,
+            intakeMetadata: seedIntakeMetadata,
+            taskHypothesis: seedTaskHypothesis,
             scaffoldingPacket: CaptureScaffoldingPacket(
                 scaffoldingUsed: siteWorldScaffoldingUsed(for: passRole),
                 coveragePlan: siteWorldCoveragePlan(for: passRole),
@@ -748,15 +788,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 relocalizationCount: captureManager.qualityMonitor.relocalizationCount,
                 overlapCheckpointCount: captureManager.semanticAnchorEvents.count
             ),
-            captureRights: CaptureRightsMetadata(
-                derivedSceneGenerationAllowed: !isSpaceReviewMode,
-                dataLicensingAllowed: !isSpaceReviewMode,
-                payoutEligible: !isSpaceReviewMode,
-                consentStatus: isSpaceReviewMode ? .policyOnly : .unknown,
-                permissionDocumentURI: nil,
-                consentScope: [],
-                consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
-            ),
+            captureRights: captureRights,
             siteIdentity: siteIdentity,
             captureTopology: captureTopology,
             captureMode: captureMode,
@@ -1140,13 +1172,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     func startPendingCaptureUpload() {
         guard let request = pendingCaptureRequest else { return }
         pendingPostCaptureAction = .upload
-        Task { await resolvePendingCaptureAndContinue(request: request, action: .upload, skipResolution: true) }
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .upload) }
     }
 
     func startPendingCaptureExport() {
         guard let request = pendingCaptureRequest else { return }
         pendingPostCaptureAction = .export
-        Task { await resolvePendingCaptureAndContinue(request: request, action: .export, skipResolution: true) }
+        Task { await resolvePendingCaptureAndContinue(request: request, action: .export) }
     }
 
     func submitManualIntake(_ draft: CaptureManualIntakeDraft) {
@@ -1269,9 +1301,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                     }
                 }
             }
-        case .needsManualEntry(let unresolvedRequest, _):
-            // Alpha: AI intake is disabled — skip the manual form and proceed directly
-            await resolvePendingCaptureAndContinue(request: unresolvedRequest, action: action, skipResolution: true)
+        case .needsManualEntry(let unresolvedRequest, let draft):
+            await MainActor.run {
+                self.pendingCaptureRequest = unresolvedRequest
+                self.pendingPostCaptureAction = action
+                self.manualIntakeDraft = draft
+                self.finishedCaptureActionState = .idle
+            }
         }
     }
 

@@ -589,6 +589,161 @@ struct CaptureBundleAndInferenceTests {
     }
 
     @Test
+    func captureFlowPromptsForManualIntakeInsteadOfSkippingResolution() async throws {
+        let upload = MockCaptureUploadService()
+        let viewModel = await MainActor.run {
+            CaptureFlowViewModel(
+                uploadService: upload,
+                targetStateService: MockTargetStateService(),
+                intakeResolutionService: ManualEntryResolutionService(),
+                exportService: StubCaptureExportService()
+            )
+        }
+
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("iphone-manual-intake-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+        let artifacts = VideoCaptureManager.RecordingArtifacts(
+            baseFilename: "test",
+            directoryURL: baseDir,
+            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
+            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
+            manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            arKit: nil,
+            packageURL: baseDir,
+            startedAt: Date()
+        )
+
+        await MainActor.run {
+            viewModel.handleRecordingFinished(artifacts: artifacts, targetId: "target-123", reservationId: nil)
+            viewModel.startPendingCaptureUpload()
+        }
+
+        for _ in 0..<20 {
+            let draft = await MainActor.run { viewModel.manualIntakeDraft }
+            if draft != nil { break }
+            try await Task.sleep(nanoseconds: 25_000_000)
+        }
+
+        let draft = await MainActor.run { viewModel.manualIntakeDraft }
+        #expect(draft?.reviewTitle == "Complete Intake")
+        #expect(upload.enqueued.isEmpty)
+    }
+
+    @Test
+    func captureFlowUsesSeedIntakeForApprovedPhoneCapture() async throws {
+        let intake = QualificationIntakePacket(
+            workflowName: "Approved launch target",
+            taskSteps: ["Start at public entry", "Capture common circulation"],
+            zone: "public common area",
+            owner: "city-launch"
+        )
+        let rights = CaptureRightsMetadata(
+            derivedSceneGenerationAllowed: true,
+            dataLicensingAllowed: true,
+            payoutEligible: true,
+            consentStatus: .policyOnly,
+            consentScope: ["public common area"],
+            consentNotes: ["Backend-approved launch target scope."]
+        )
+        let seed = SpaceReviewSeed(
+            title: "CCB Plaza",
+            address: "201 Corcoran St, Durham, NC",
+            payoutRange: 35...45,
+            captureJobId: "city-launch-durham-nc-ccb-plaza",
+            buyerRequestId: nil,
+            siteSubmissionId: "durham-nc-ccb-plaza",
+            regionId: "durham-nc",
+            rightsProfile: "approved_launch_target",
+            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            suggestedContext: "public plaza common access",
+            intakePacket: intake,
+            captureRights: rights,
+            requestedCaptureMode: "site_world_candidate"
+        )
+        let viewModel = await MainActor.run {
+            CaptureFlowViewModel(
+                flowMode: .spaceReview(seed: seed),
+                uploadService: MockCaptureUploadService(),
+                targetStateService: MockTargetStateService(),
+                intakeResolutionService: StubIntakeResolutionService(outcome: nil),
+                exportService: StubCaptureExportService()
+            )
+        }
+
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("iphone-approved-intake-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+        let artifacts = VideoCaptureManager.RecordingArtifacts(
+            baseFilename: "test",
+            directoryURL: baseDir,
+            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
+            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
+            manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            arKit: nil,
+            packageURL: baseDir,
+            startedAt: Date()
+        )
+
+        await MainActor.run {
+            viewModel.handleRecordingFinished(artifacts: artifacts, targetId: nil, reservationId: nil)
+        }
+
+        let maybePending = await MainActor.run { viewModel.pendingCaptureRequest }
+        let pending = try #require(maybePending)
+        #expect(pending.metadata.intakePacket == intake)
+        #expect(pending.metadata.intakeMetadata?.source == .authoritative)
+        #expect(pending.metadata.taskHypothesis?.workflowName == "Approved launch target")
+        #expect(pending.metadata.taskHypothesis?.status == .accepted)
+        #expect(pending.metadata.captureRights == rights)
+        #expect(pending.metadata.captureMode?.requestedMode == "site_world_candidate")
+        #expect(pending.metadata.rightsProfile == "approved_launch_target")
+        #expect(pending.metadata.specialTaskType == .curatedNearby)
+    }
+
+    @Test
+    func openCaptureSeedStaysReviewGatedZeroPayoutAndQualificationOnly() async throws {
+        let seed = SpaceReviewSeed(title: "Open capture review")
+        let viewModel = await MainActor.run {
+            CaptureFlowViewModel(
+                flowMode: .spaceReview(seed: seed),
+                uploadService: MockCaptureUploadService(),
+                targetStateService: MockTargetStateService(),
+                intakeResolutionService: StubIntakeResolutionService(outcome: nil),
+                exportService: StubCaptureExportService()
+            )
+        }
+
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("iphone-open-capture-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+
+        let artifacts = VideoCaptureManager.RecordingArtifacts(
+            baseFilename: "test",
+            directoryURL: baseDir,
+            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
+            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
+            manifestURL: baseDir.appendingPathComponent("manifest.json"),
+            arKit: nil,
+            packageURL: baseDir,
+            startedAt: Date()
+        )
+
+        await MainActor.run {
+            viewModel.handleRecordingFinished(artifacts: artifacts, targetId: nil, reservationId: nil)
+        }
+
+        let maybePending = await MainActor.run { viewModel.pendingCaptureRequest }
+        let pending = try #require(maybePending)
+        #expect(pending.metadata.quotedPayoutCents == nil)
+        #expect(pending.metadata.requestedOutputs == ["qualification", "review_intake"])
+        #expect(pending.metadata.captureRights?.payoutEligible == false)
+        #expect(pending.metadata.captureRights?.derivedSceneGenerationAllowed == false)
+        #expect(pending.metadata.captureMode?.requestedMode == "qualification_only")
+        #expect(pending.metadata.rightsProfile == "review_required")
+        #expect(pending.metadata.specialTaskType == .openCapture)
+    }
+
+    @Test
     func captureFlowRecordingFinishDoesNotAutoUpload() async throws {
         let upload = MockCaptureUploadService()
         let viewModel = await MainActor.run {
@@ -666,6 +821,91 @@ struct CaptureBundleAndInferenceTests {
         #expect(review?.nextActionLabel == "Retake primary route")
         #expect(review?.missingItems.contains(where: { $0.contains("Entrance localization hold") }) == true)
         #expect(pendingRequest?.metadata.sceneMemory?.continuityScore == review.map { Double($0.score) / 100.0 })
+    }
+
+    @Test
+    func finalizerDowngradesSiteWorldCandidateWithSpecificMissingIntakeReason() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("site-world-missing-intake-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        let arkit = raw.appendingPathComponent("arkit", isDirectory: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("depth", isDirectory: true), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: arkit.appendingPathComponent("confidence", isDirectory: true), withIntermediateDirectories: true)
+
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
+        try makeRawManifestData(
+            sceneId: "site-world",
+            captureId: "capture-missing-intake",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_lidar",
+            captureCapabilities: [
+                "camera_pose": true,
+                "depth": true,
+                "motion": true
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("{\"fx\":1200,\"fy\":1195,\"cx\":640,\"cy\":360,\"width\":1280,\"height\":720}".utf8)
+            .write(to: arkit.appendingPathComponent("intrinsics.json"))
+        try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
+            .write(to: arkit.appendingPathComponent("poses.jsonl"))
+        try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"trackingState\":\"normal\"}\n".utf8)
+            .write(to: arkit.appendingPathComponent("frames.jsonl"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
+        try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
+        try Data("{\"timestamp\":1.0,\"t_capture_sec\":0.1,\"motion_provenance\":\"iphone_device_imu\"}\n".utf8)
+            .write(to: raw.appendingPathComponent("motion.jsonl"))
+
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: "site-world",
+            reservationId: nil,
+            jobId: "site-world",
+            captureJobId: "site-world",
+            buyerRequestId: nil,
+            siteSubmissionId: "site-world",
+            regionId: nil,
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .curatedNearby,
+            priorityWeight: 1.0,
+            quotedPayoutCents: nil,
+            rightsProfile: "approved_launch_target",
+            requestedOutputs: ["qualification", "preview_simulation"],
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: nil,
+            captureRights: CaptureRightsMetadata(derivedSceneGenerationAllowed: true),
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: CaptureModeMetadata(
+                requestedMode: "site_world_candidate",
+                resolvedMode: "site_world_candidate",
+                downgradeReason: nil
+            )
+        )
+
+        let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
+        let finalizer = CaptureBundleFinalizer()
+        _ = try finalizer.finalize(request: request, mode: .localExport())
+
+        let modeObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_mode.json")))
+        let captureMode = try #require(modeObject as? [String: Any])
+        #expect(captureMode["requested_mode"] as? String == "site_world_candidate")
+        #expect(captureMode["resolved_mode"] as? String == "qualification_only")
+        #expect(captureMode["downgrade_reason"] as? String == "missing_complete_intake")
+
+        let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
+        let hypothesis = try #require(hypothesisObject as? [String: Any])
+        #expect(hypothesis["source"] as? String == "ai_inferred")
+        #expect(hypothesis["status"] as? String == "needs_confirmation")
+        #expect((hypothesis["warnings"] as? [String])?.contains("missing_complete_intake") == true)
     }
 
     @Test
@@ -964,6 +1204,17 @@ private struct StubIntakeResolutionService: IntakeResolutionServiceProtocol {
 
     func resolve(request: CaptureUploadRequest) async -> IntakeResolutionOutcome {
         outcome ?? .resolved(request)
+    }
+}
+
+private struct ManualEntryResolutionService: IntakeResolutionServiceProtocol {
+    func resolve(request: CaptureUploadRequest) async -> IntakeResolutionOutcome {
+        .needsManualEntry(
+            request: request,
+            draft: CaptureManualIntakeDraft(
+                helperText: "No complete authoritative intake was available for this capture."
+            )
+        )
     }
 }
 

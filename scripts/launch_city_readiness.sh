@@ -7,6 +7,9 @@ PROOF_PATH="${BLUEPRINT_LAUNCH_PROOF_PATH:-$ROOT/ops/launch-readiness/austin-tx.
 
 cd "$ROOT"
 
+echo "==> Testing launch readiness validator"
+PYTHONDONTWRITEBYTECODE=1 python3 ./scripts/validate_launch_readiness_tests.py
+
 echo "==> Validating release config"
 BLUEPRINT_RELEASE_XCCONFIG="$RELEASE_XCCONFIG" ./scripts/archive_external_alpha.sh --validate-config-only
 

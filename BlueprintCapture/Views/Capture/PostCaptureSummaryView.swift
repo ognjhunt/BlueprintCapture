@@ -300,7 +300,7 @@ struct PostCaptureSummaryView: View {
         case .idle:
             return nil
         case .generatingIntake:
-            return "Preparing your upload and returning you to the queue…"
+            return "Checking intake and finalization requirements…"
         case .exporting:
             return "Finalizing the export bundle…"
         case .failed(let message):

@@ -92,6 +92,7 @@ Release rule:
 
 - Do not launch if the app only works with mock jobs, internal test space, or direct client provider keys.
 - Run `./scripts/archive_external_alpha.sh --validate-config-only` before any city proof signoff.
+- Run `./scripts/launch_city_readiness.sh` for city proof signoff; it self-tests its validator before checking release config or proof artifacts.
 
 ## 4. Capture Flow Gate
 
@@ -224,6 +225,8 @@ Go only when all of these are true:
 
 - `./scripts/alpha_readiness.sh` passes
 - `./scripts/launch_city_readiness.sh` passes with a real city proof artifact, not `ops/launch-readiness/example.launch-proof.json`
+- real city proof contains no placeholder/example values copied from the contract artifact
+- real city proof includes concrete `evidence.*` references for release config, live backend/feed checks, uploaded capture, pipeline, Meta-glasses smoke, Stripe state, and monitoring
 - cross-repo external alpha gate passes
 - release bundle contains no secrets or provider keys
 - live auth + live discovery + real approved-job capture flow works

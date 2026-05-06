@@ -36,7 +36,8 @@
   - `cloud/extract-frames`
   - `cloud/referral-earnings`
 - Use `./scripts/archive_external_alpha.sh` with an untracked release xcconfig copied from `ConfigTemplates/BlueprintCapture.release.xcconfig.example` before any external archive/export.
-- Run `./scripts/launch_city_readiness.sh` with a real `BLUEPRINT_LAUNCH_PROOF_PATH`, authenticated `BLUEPRINT_LAUNCH_AUTH_TOKEN`, `BLUEPRINT_LAUNCH_CITY_SLUG`, `BLUEPRINT_LAUNCH_LAT`, and `BLUEPRINT_LAUNCH_LNG` before marketing a city. The example proof under `ops/launch-readiness/` is only for contract validation.
+- Run `./scripts/launch_city_readiness.sh` with a real `BLUEPRINT_LAUNCH_PROOF_PATH`, authenticated `BLUEPRINT_LAUNCH_AUTH_TOKEN`, `BLUEPRINT_LAUNCH_CITY_SLUG`, `BLUEPRINT_LAUNCH_LAT`, and `BLUEPRINT_LAUNCH_LNG` before marketing a city. The script self-tests its validator first; the example proof under `ops/launch-readiness/` is only for contract validation.
+- The real launch proof must include non-placeholder `evidence.*` references for release config, launch status, demand feed, capture submission, raw upload completion, pipeline descriptor/QA/handoff, Meta-glasses smoke, Stripe state, and monitoring runbook.
 - `alpha_readiness.sh` preboots a simulator, runs the cloud tests, runs the focused iOS unit/UI suite, builds the release app bundle, and fails if the bundle contains `Secrets*.plist`, provider keys, mock-job fallback, internal test space, missing remote notifications, missing backend URLs, or missing support/legal config.
 - Use `./scripts/android_alpha_readiness.sh` for Android internal release validation. It validates release-safe config, runs `testDebugUnitTest`, and builds `assembleRelease`.
 

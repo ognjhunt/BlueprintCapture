@@ -251,6 +251,11 @@ struct CaptureSessionView: View {
             .sheet(item: $viewModel.shareSheetItem) { shareItem in
                 ShareSheet(items: [shareItem.url])
             }
+            .sheet(item: $viewModel.manualIntakeDraft) { draft in
+                ManualIntakeSheetView(title: draft.reviewTitle, draft: draft) { completedDraft in
+                    viewModel.submitManualIntake(completedDraft)
+                }
+            }
         }
     }
 
@@ -358,7 +363,7 @@ struct CaptureSessionView: View {
             case .generatingIntake:
                 HStack(spacing: 10) {
                     ProgressView()
-                    Text("Generating intake from the video…")
+                    Text("Checking intake before finalization…")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }

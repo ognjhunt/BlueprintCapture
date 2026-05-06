@@ -618,6 +618,46 @@ enum CaptureBundleContext {
         return gates
     }
 
+    static func worldModelCandidateMissingReasons(
+        for request: CaptureUploadRequest,
+        evidence: CaptureEvidenceSummary
+    ) -> [String] {
+        var reasons: [String] = []
+        if evidence.arkitPoseRows <= 0 {
+            reasons.append("missing_arkit_poses")
+        }
+        if !evidence.arkitIntrinsicsValid {
+            reasons.append("missing_arkit_intrinsics")
+        }
+        if evidence.arkitDepthFrames <= 0 {
+            reasons.append("missing_lidar_depth")
+        }
+        if !evidence.poseAlignmentOK {
+            reasons.append("pose_alignment_not_verified")
+        }
+        if request.metadata.intakePacket?.isComplete != true {
+            reasons.append("missing_complete_intake")
+        }
+        if request.metadata.captureRights?.derivedSceneGenerationAllowed != true {
+            reasons.append("derived_scene_generation_not_allowed")
+        }
+        return reasons
+    }
+
+    static func worldModelCandidateDowngradeReason(
+        for request: CaptureUploadRequest,
+        evidence: CaptureEvidenceSummary
+    ) -> String? {
+        guard request.metadata.captureMode?.requestedMode == "site_world_candidate" else {
+            return nil
+        }
+        guard !worldModelCandidate(for: request, evidence: evidence) else {
+            return nil
+        }
+        return worldModelCandidateMissingReasons(for: request, evidence: evidence).first
+            ?? "site_world_candidate_gates_not_met"
+    }
+
     static func rawDirectoryURL(for request: CaptureUploadRequest) -> URL {
         request.packageURL
     }
@@ -1355,13 +1395,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
                 ? "site_world_candidate"
                 : "qualification_only"
-            let downgradeReason: String? = (captureMode.requestedMode == "site_world_candidate" && resolvedMode == "qualification_only")
-                ? "insufficient_arkit_evidence"
-                : nil
             let resolvedCaptureMode = CaptureModeMetadata(
                 requestedMode: captureMode.requestedMode,
                 resolvedMode: resolvedMode,
-                downgradeReason: downgradeReason
+                downgradeReason: CaptureBundleContext.worldModelCandidateDowngradeReason(for: request, evidence: evidence)
             )
             json["capture_mode"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(resolvedCaptureMode))
         }
@@ -1418,13 +1455,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
                 ? "site_world_candidate"
                 : "qualification_only"
-            let downgradeReason: String? = (captureMode.requestedMode == "site_world_candidate" && resolvedMode == "qualification_only")
-                ? "insufficient_arkit_evidence"
-                : nil
             return CaptureModeMetadata(
                 requestedMode: captureMode.requestedMode,
                 resolvedMode: resolvedMode,
-                downgradeReason: downgradeReason
+                downgradeReason: CaptureBundleContext.worldModelCandidateDowngradeReason(for: request, evidence: evidence)
             )
         }
         let context = CaptureContextFile(
@@ -1632,8 +1666,15 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
 
     private func synthesizedTaskHypothesis(for request: CaptureUploadRequest) -> CaptureTaskHypothesis {
         let packet = request.metadata.intakePacket ?? QualificationIntakePacket()
-        let metadata = request.metadata.intakeMetadata ?? CaptureIntakeMetadata(source: .authoritative)
-        return CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
+        let metadata = request.metadata.intakeMetadata ?? CaptureIntakeMetadata(
+            source: packet.isComplete ? .authoritative : .aiInferred,
+            warnings: packet.isComplete ? [] : ["missing_complete_intake"]
+        )
+        return CaptureTaskHypothesis(
+            packet: packet,
+            metadata: metadata,
+            status: packet.isComplete ? .accepted : .needsConfirmation
+        )
     }
 
     private func effectiveCaptureTopology(for request: CaptureUploadRequest, directory: URL) -> CaptureTopologyMetadata {
@@ -2402,11 +2443,14 @@ final class IntakeResolutionService: IntakeResolutionServiceProtocol {
 extension CaptureUploadRequest {
     func withManualIntake(_ packet: QualificationIntakePacket) -> CaptureUploadRequest {
         var request = self
+        let metadata = CaptureIntakeMetadata(source: .humanManual)
         request.metadata.intakePacket = packet
-        request.metadata.intakeMetadata = CaptureIntakeMetadata(source: .humanManual)
-        if let taskHypothesis = request.metadata.taskHypothesis {
-            request.metadata.taskHypothesis = taskHypothesis.with(status: .accepted)
-        }
+        request.metadata.intakeMetadata = metadata
+        request.metadata.taskHypothesis = CaptureTaskHypothesis(
+            packet: packet,
+            metadata: metadata,
+            status: packet.isComplete ? .accepted : .needsConfirmation
+        )
         return request
     }
 }

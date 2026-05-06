@@ -6,15 +6,25 @@ protocol TargetsAPIProtocol {
 }
 
 final class TargetsAPI: TargetsAPIProtocol {
-    private let baseURL: URL
+    private let baseURLProvider: () -> URL?
     private let session: URLSession
 
-    init(baseURL: URL = URL(string: "https://api.example.com")!, session: URLSession = .shared) {
-        self.baseURL = baseURL
+    init(
+        baseURLProvider: @escaping () -> URL? = { AppConfig.backendBaseURL() },
+        session: URLSession = .shared
+    ) {
+        self.baseURLProvider = baseURLProvider
         self.session = session
     }
 
+    convenience init(baseURL: URL?, session: URLSession = .shared) {
+        self.init(baseURLProvider: { baseURL }, session: session)
+    }
+
     func fetchTargets(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> [Target] {
+        guard let baseURL = baseURLProvider() else {
+            throw APIService.APIError.missingBaseURL
+        }
         var components = URLComponents(url: baseURL.appendingPathComponent("/v1/targets"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
             URLQueryItem(name: "lat", value: String(lat)),
@@ -74,6 +84,7 @@ final class GooglePlacesNearby: PlacesNearbyProtocol {
     }
 }
 
+#if DEBUG
 final class MockTargetsAPI: TargetsAPIProtocol {
     private let sampleAddresses = [
         "1123 Market St, Suite 100",
@@ -141,3 +152,4 @@ final class MockTargetsAPI: TargetsAPIProtocol {
         return results
     }
 }
+#endif

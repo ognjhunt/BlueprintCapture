@@ -101,7 +101,19 @@ write_release_build_settings() {
   xcodebuild "${settings_args[@]}" > "$BUILD_SETTINGS_PATH"
 }
 
+guard_release_source_truth() {
+  local matches
+  matches="$(rg -n 'https://api\.example\.com|targetsAPI: TargetsAPIProtocol = MockTargetsAPI\(\)|pricingAPI: PricingAPIProtocol = MockPricingAPI\(\)' "$ROOT/BlueprintCapture" || true)"
+  if [[ -n "$matches" ]]; then
+    echo "Release source still contains release-reachable mock target/pricing defaults or example endpoints:" >&2
+    echo "$matches" >&2
+    exit 1
+  fi
+}
+
 lint_release_inputs() {
+  guard_release_source_truth
+
   require_xcconfig_value "BLUEPRINT_BACKEND_BASE_URL"
   require_xcconfig_value "BLUEPRINT_DEMAND_BACKEND_BASE_URL"
   require_xcconfig_value "BLUEPRINT_MAIN_WEBSITE_URL"

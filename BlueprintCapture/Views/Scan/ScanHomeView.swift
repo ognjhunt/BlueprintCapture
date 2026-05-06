@@ -828,6 +828,19 @@ struct ScanHomeView: View {
         let suggestedContext = [item.job.workflowName, item.job.targetKPI, item.job.zone]
             .compactMap { $0 }
             .joined(separator: " • ")
+        let isApprovedLaunchScope = item.permissionTier == .approved
+        let intakePacket = item.job.qualificationIntakePacket
+        let approvedIntakePacket = (isApprovedLaunchScope && intakePacket.isComplete) ? intakePacket : nil
+        let captureRights: CaptureRightsMetadata? = isApprovedLaunchScope ? CaptureRightsMetadata(
+            derivedSceneGenerationAllowed: true,
+            dataLicensingAllowed: true,
+            payoutEligible: item.job.quotedPayoutCents != nil,
+            consentStatus: item.job.captureConsentStatus,
+            permissionDocumentURI: item.job.permissionDocURL?.absoluteString,
+            consentScope: item.job.allowedAreas,
+            consentNotes: item.job.rightsChecklist + item.job.approvalRequirements + item.job.captureRestrictions
+        ) : nil
+        let requestedCaptureMode = approvedIntakePacket == nil ? nil : "site_world_candidate"
         return SpaceReviewSeed(
             id: item.job.id,
             title: item.job.title,
@@ -839,7 +852,10 @@ struct ScanHomeView: View {
             regionId: item.job.regionId,
             rightsProfile: item.job.rightsProfile,
             requestedOutputs: item.job.requestedOutputs.isEmpty ? ["qualification", "review_intake"] : item.job.requestedOutputs,
-            suggestedContext: suggestedContext.nilIfEmpty
+            suggestedContext: suggestedContext.nilIfEmpty,
+            intakePacket: approvedIntakePacket,
+            captureRights: captureRights,
+            requestedCaptureMode: requestedCaptureMode
         )
     }
 

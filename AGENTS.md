@@ -40,6 +40,7 @@ This repo must stay aligned with:
 - Keep contracts compatible with `BlueprintCapturePipeline`.
 - Avoid UI or backend behavior that implies unsupported provider or payout readiness.
 - Treat capture bundle correctness as a first-order requirement.
+- For Paperclip/autonomous-loop closeouts, use `/Users/nijelhunt_1/workspace/Blueprint-WebApp/docs/autonomous-loop-evidence-checklist-2026-05-03.md` before claiming `done`, `blocked`, or `awaiting_human_decision`.
 
 ## Commands
 

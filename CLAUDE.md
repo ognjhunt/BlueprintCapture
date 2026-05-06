@@ -12,6 +12,7 @@ Key rules:
 - Do not fabricate provider readiness, payout readiness, or qualification decisions.
 - Keep downstream contracts stable for the pipeline and webapp.
 - Treat advisory UX as advisory, not authoritative.
+- Before claiming Paperclip/autonomous-loop `done`, `blocked`, or `awaiting_human_decision`, apply `/Users/nijelhunt_1/workspace/Blueprint-WebApp/docs/autonomous-loop-evidence-checklist-2026-05-03.md`.
 
 Key commands:
 

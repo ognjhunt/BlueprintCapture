@@ -88,8 +88,8 @@ final class NearbyTargetsViewModel: ObservableObject {
     private var currentSearchQuery: String = ""
 
     init(locationService: LocationServiceProtocol = LocationService(),
-         targetsAPI: TargetsAPIProtocol = MockTargetsAPI(),
-         pricingAPI: PricingAPIProtocol = MockPricingAPI(),
+         targetsAPI: TargetsAPIProtocol = TargetsAPI(),
+         pricingAPI: PricingAPIProtocol = PricingAPI(),
          geocoding: GeocodingServiceProtocol = GeocodingService(),
          reservationService: ReservationServiceProtocol = ReservationService(),
          targetStateService: TargetStateServiceProtocol = TargetStateService(),

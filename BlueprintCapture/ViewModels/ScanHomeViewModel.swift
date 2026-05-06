@@ -177,6 +177,9 @@ final class ScanHomeViewModel: ObservableObject {
 
         var payoutLabel: String {
             let cents = job.quotedPayoutCents ?? job.payoutCents
+            if cents <= 0 {
+                return "Review gated"
+            }
             let dollars = NSDecimalNumber(decimal: Decimal(cents) / Decimal(100))
             return NumberFormatter.captureCurrency.string(from: dollars) ?? "$\(job.payoutDollars)"
         }
@@ -579,7 +582,7 @@ final class ScanHomeViewModel: ObservableObject {
                 "I understand qualification, privacy, and rights checks can block downstream use.",
             ],
             rightsProfile: nil,
-            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            requestedOutputs: ["qualification", "review_intake"],
             workflowName: "Open Capture Here",
             workflowSteps: [
                 "Confirm rights and consent for this capture.",
@@ -810,7 +813,10 @@ extension ScanHomeViewModel {
             return .blocked
         }
 
-        if job.permissionDocURL != nil || rightsProfile == "documented_permission" || job.captureConsentStatus == .documented {
+        if job.permissionDocURL != nil
+            || rightsProfile == "documented_permission"
+            || rightsProfile == "approved_launch_target"
+            || job.captureConsentStatus == .documented {
             return .approved
         }
 
@@ -994,7 +1000,7 @@ extension ScanHomeViewModel {
             address: address,
             lat: target.lat,
             lng: target.lng,
-            payoutCents: 4_500,
+            payoutCents: 0,
             estMinutes: 30,
             active: true,
             updatedAt: Date(),
@@ -1004,7 +1010,7 @@ extension ScanHomeViewModel {
             instructions: workflowSteps,
             allowedAreas: ["Public-facing common-access zones"],
             restrictedAreas: ["Private rooms", "Staff-only areas", "Security-sensitive areas", "Faces, screens, and paperwork"],
-            permissionDocURL: URL(string: "https://tryblueprint.io/capture-policy"),
+            permissionDocURL: nil,
             checkinRadiusM: 150,
             alertRadiusM: 200,
             priority: 10,
@@ -1013,7 +1019,7 @@ extension ScanHomeViewModel {
             jobType: .curatedNearby,
             buyerRequestId: nil,
             siteSubmissionId: target.id,
-            quotedPayoutCents: 4_500,
+            quotedPayoutCents: nil,
             dueWindow: "city_launch",
             approvalRequirements: ["city_launch_approved_scope"],
             recaptureReason: nil,

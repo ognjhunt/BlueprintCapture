@@ -5,15 +5,25 @@ protocol PricingAPIProtocol {
 }
 
 final class PricingAPI: PricingAPIProtocol {
-    private let baseURL: URL
+    private let baseURLProvider: () -> URL?
     private let session: URLSession
 
-    init(baseURL: URL = URL(string: "https://api.example.com")!, session: URLSession = .shared) {
-        self.baseURL = baseURL
+    init(
+        baseURLProvider: @escaping () -> URL? = { AppConfig.backendBaseURL() },
+        session: URLSession = .shared
+    ) {
+        self.baseURLProvider = baseURLProvider
         self.session = session
     }
 
+    convenience init(baseURL: URL?, session: URLSession = .shared) {
+        self.init(baseURLProvider: { baseURL }, session: session)
+    }
+
     func fetchPricing() async throws -> [SKU: SkuPricing] {
+        guard let baseURL = baseURLProvider() else {
+            throw APIService.APIError.missingBaseURL
+        }
         let url = baseURL.appendingPathComponent("/v1/pricing/skus")
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -28,8 +38,9 @@ final class PricingAPI: PricingAPIProtocol {
     }
 }
 
+#if DEBUG
 final class MockPricingAPI: PricingAPIProtocol {
     func fetchPricing() async throws -> [SKU: SkuPricing] { defaultPricing }
 }
-
+#endif
 
