@@ -114,7 +114,7 @@ Subject: a documentary-feeling contributor onboarding flow that explains capture
 Style/medium: monochrome editorial iOS design, black/white/grayscale only, sparse typography, calm premium product language, subtle route and evidence cues.
 Composition/framing: one board with multiple iPhone screens arranged cleanly; first screen is a strong welcome hero, middle screens show auth and permissions, final screen shows a launch-city gate with supported cities list and one decisive CTA.
 Lighting/mood: rigorous, premium, calm, operational.
-Text (verbatim): "Blueprint" "Get paid to scan spaces" "Create your account" "Enable Permissions" "Connect Smart Glasses" "Blueprint city launch" "Request launch access" "Continue"
+Text (verbatim): "Blueprint" "Capture spaces for review" "Create your account" "Enable Permissions" "Connect Smart Glasses" "Blueprint city launch" "Request launch access" "Continue"
 Constraints: make the flow feel serious, simple, and trustworthy; no fintech celebration energy; permissions and city gating must feel clear and credible.
 Avoid: bright onboarding gradients, playful illustration characters, generic creator-economy tropes, colorful permission icons.
 
@@ -254,7 +254,7 @@ Subject: a contributor control center that feels premium and disciplined, with a
 Style/medium: monochrome editorial iOS design, restrained, clean, minimal, quietly luxurious.
 Composition/framing: a board of multiple device screens; one should show the profile overview, one should show settings with grouped controls, one should show an edit profile form, and one should show a refined referral dashboard.
 Lighting/mood: calm, sharp, utility-first, premium.
-Text (verbatim): "Profile" "My Account" "Settings" "Edit Profile" "Affiliate Center" "Share & Earn 10%" "Manage your account and preferences"
+Text (verbatim): "Profile" "My Account" "Settings" "Edit Profile" "Contributor Invites" "Invite alpha contributors" "Manage your account and preferences"
 Constraints: settings should look clear and modern rather than default-iOS-generic; referral should feel like a secondary utility, not the product story.
 Avoid: gamified badges everywhere, colorful growth hacks, creator-influencer aesthetics, cluttered form styling.
 

@@ -7,15 +7,15 @@ struct OnboardingCaptureUXCopyTests {
 
     @Test
     func completionCopyReflectsWhetherGlassesWereConnected() {
-        #expect(OnboardingCaptureUXCopy.completionTitle(glassesConnected: true) == "You're Ready to Capture")
-        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: true) == "We'll notify you when approved capture opportunities are nearby.")
+        #expect(OnboardingCaptureUXCopy.completionTitle(glassesConnected: true) == "Capture Setup Complete")
+        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: true) == "We'll show approved opportunities and review-gated submissions separately. Payout and downstream use depend on backend review.")
         #expect(OnboardingCaptureUXCopy.completionTitle(glassesConnected: false) == "Start with iPhone Capture")
-        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: false) == "You can submit spaces and capture with your iPhone now. Connect glasses later for hands-free capture.")
+        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: false) == "You can submit review-gated spaces and capture with your iPhone now. Connect glasses later for supported hands-free capture.")
     }
 
     @Test
     func disconnectedGlassesSubtitleMatchesIPhoneFallback() {
-        #expect(OnboardingCaptureUXCopy.disconnectedGlassesSubtitle == "Optional for hands-free capture. Approved jobs also work with iPhone.")
+        #expect(OnboardingCaptureUXCopy.disconnectedGlassesSubtitle == "Optional for supported hands-free capture. Approved jobs and review submissions can still start with iPhone.")
     }
 
     @Test

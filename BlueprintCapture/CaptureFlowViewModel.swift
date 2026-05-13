@@ -189,7 +189,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published private(set) var completedWorkflowPassCount: Int = 0
 
     /// Stores current target info for the active capture session (set before starting capture)
-    var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>)?
+    var currentTargetInfo: (name: String, estimatedPayoutRange: ClosedRange<Int>?)?
     let flowMode: FlowMode
 
     let locationManager = CLLocationManager()
@@ -618,6 +618,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                     : ["qualification", "preview_simulation", "deeper_evaluation"])
         )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
+        let explicitPayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
+        let metadataCaptureJobId = reviewSeed?.captureJobId ?? (isSpaceReviewMode ? nil : jobId)
+        let metadataSiteSubmissionId = reviewSeed?.siteSubmissionId ?? (isSpaceReviewMode ? nil : jobId)
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
         let seedIntakePacket = (reviewSeed?.intakePacket?.isComplete == true) ? reviewSeed?.intakePacket : nil
         let seedIntakeMetadata = seedIntakePacket.map { _ in CaptureIntakeMetadata(source: .authoritative) }
@@ -629,7 +632,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         let defaultCaptureRights = CaptureRightsMetadata(
             derivedSceneGenerationAllowed: !isSpaceReviewMode,
             dataLicensingAllowed: !isSpaceReviewMode,
-            payoutEligible: !isSpaceReviewMode,
+            payoutEligible: explicitPayoutRange != nil,
             consentStatus: isSpaceReviewMode ? .policyOnly : .unknown,
             permissionDocumentURI: nil,
             consentScope: [],
@@ -750,9 +753,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             targetId: targetId,
             reservationId: reservationId,
             jobId: jobId,
-            captureJobId: reviewSeed?.captureJobId ?? jobId,
+            captureJobId: metadataCaptureJobId,
             buyerRequestId: reviewSeed?.buyerRequestId,
-            siteSubmissionId: reviewSeed?.siteSubmissionId ?? jobId,
+            siteSubmissionId: metadataSiteSubmissionId,
             regionId: reviewSeed?.regionId,
             creatorId: profile.id.uuidString,
             capturedAt: Date(),
@@ -760,8 +763,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             captureSource: .iphoneVideo,
             specialTaskType: specialTaskType,
             priorityWeight: 1.0,
-            quotedPayoutCents: currentTargetInfo.map { $0.estimatedPayoutRange.upperBound * 100 }
-                ?? reviewSeed?.payoutRange.map { $0.upperBound * 100 },
+            quotedPayoutCents: explicitPayoutRange.map { $0.upperBound * 100 },
             rightsProfile: rightsProfile,
             requestedOutputs: requestedOutputs,
             intakePacket: seedIntakePacket,
@@ -799,7 +801,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         pendingCaptureRequest = request
         pendingSiteWorldPassReview = pendingReview
         pendingCaptureTargetName = currentTargetInfo?.name ?? reviewSeed?.title
-        pendingCapturePayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
+        pendingCapturePayoutRange = explicitPayoutRange
         finishedCaptureActionState = .idle
         currentTargetInfo = nil
         ActivationFunnelStore.shared.record(

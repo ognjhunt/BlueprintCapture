@@ -137,7 +137,7 @@ class GeofenceBroadcastReceiver : BroadcastReceiver() {
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_map)
             .setContentTitle("You're near a scan job")
-            .setContentText("Open Blueprint Capture to start scanning and earn.")
+            .setContentText("Open Blueprint Capture to start the reviewed capture flow.")
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .build()

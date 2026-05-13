@@ -9,24 +9,30 @@ final class DeviceCapabilityService {
     let supportsARKit: Bool
     let deviceModel: String
 
-    /// Earnings multiplier based on device sensor capabilities.
-    /// LiDAR devices earn 4x, non-LiDAR iPhones earn 2x, glasses earn 1x.
+    /// Internal capture-quality weighting based on device sensor capabilities.
+    /// This is not payout readiness or a public earnings multiplier.
     var captureMultiplier: Double {
         if hasLiDAR { return 4.0 }
         if supportsARKit { return 2.0 }
         return 1.0
     }
 
+    var captureSignalLabel: String {
+        if hasLiDAR { return "High-fidelity depth" }
+        if supportsARKit { return "Spatial tracking" }
+        return "Standard capture"
+    }
+
     var capabilityDescription: String {
         var parts: [String] = []
         parts.append(hasLiDAR ? "LiDAR \u{2713}" : "LiDAR \u{2717}")
         parts.append(supportsARKit ? "ARKit \u{2713}" : "ARKit \u{2717}")
-        parts.append("\(Int(captureMultiplier))x multiplier")
+        parts.append(captureSignalLabel)
         return parts.joined(separator: " | ")
     }
 
     var multiplierLabel: String {
-        "\(Int(captureMultiplier))x"
+        captureSignalLabel
     }
 
     private init() {

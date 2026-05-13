@@ -65,12 +65,12 @@ struct ScanHomeView: View {
                             .padding(.horizontal, 20)
                             .padding(.bottom, activationSnapshot.activationCompleted ? 24 : 0)
 
+                        featuredSection
+                            .padding(.bottom, 28)
+
                         capturePolicySection
                             .padding(.horizontal, 20)
                             .padding(.bottom, 24)
-
-                        featuredSection
-                            .padding(.bottom, 28)
 
                         underReviewSection
                             .padding(.horizontal, 20)
@@ -495,14 +495,23 @@ struct ScanHomeView: View {
                 } else {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 14) {
-                            ForEach(Array(featuredItems.enumerated()), id: \.element.id) { index, item in
-                                Button { handleItemSelection(item) } label: {
+                            ForEach(featuredItems) { item in
+                                ZStack {
                                     FeaturedCaptureCard(item: item)
-                                        .frame(width: 280)
+
+                                    Button {
+                                        handleItemSelection(item)
+                                    } label: {
+                                        Rectangle()
+                                            .fill(Color.white.opacity(0.001))
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(item.job.title)
+                                    .accessibilityHint(item.permissionTier == .approved ? "Starts approved capture" : "Opens review details")
+                                    .accessibilityIdentifier("scan-home-featured-\(item.id)")
                                 }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("scan-home-featured-\(index)")
-                                .accessibilityIdentifier("scan-home-featured-\(item.id)")
+                                .frame(width: 280, height: 230)
                             }
                             ForEach(fallbackDemoItems) { demo in
                                 Button { selectedDemo = demo } label: {
@@ -829,6 +838,7 @@ struct ScanHomeView: View {
             .compactMap { $0 }
             .joined(separator: " • ")
         let isApprovedLaunchScope = item.permissionTier == .approved
+        let hasUpstreamBootstrap = item.job.siteSubmissionId != nil || item.job.buyerRequestId != nil || isApprovedLaunchScope
         let intakePacket = item.job.qualificationIntakePacket
         let approvedIntakePacket = (isApprovedLaunchScope && intakePacket.isComplete) ? intakePacket : nil
         let captureRights: CaptureRightsMetadata? = isApprovedLaunchScope ? CaptureRightsMetadata(
@@ -846,7 +856,7 @@ struct ScanHomeView: View {
             title: item.job.title,
             address: item.job.address,
             payoutRange: item.job.quotedPayoutCents.map { max(5, $0 / 100 - 10)...($0 / 100) },
-            captureJobId: item.job.id,
+            captureJobId: hasUpstreamBootstrap ? item.job.id : nil,
             buyerRequestId: item.job.buyerRequestId,
             siteSubmissionId: item.job.siteSubmissionId,
             regionId: item.job.regionId,
@@ -934,7 +944,7 @@ private struct DemoCapture: Identifiable {
             title: "Downtown Retail Space",
             address: "123 Main St · Commercial District",
             category: "RETAIL",
-            payout: "$45",
+            payout: "Review gated",
             distance: "0.3 mi",
             estMinutes: 25,
             coordinate: CLLocationCoordinate2D(latitude: 37.7937, longitude: -122.3965),
@@ -947,7 +957,7 @@ private struct DemoCapture: Identifiable {
             title: "Office Building Lobby",
             address: "456 Business Ave · Midtown",
             category: "COMMERCIAL",
-            payout: "$60",
+            payout: "Review gated",
             distance: "0.8 mi",
             estMinutes: 35,
             coordinate: CLLocationCoordinate2D(latitude: 37.7899, longitude: -122.4014),
@@ -960,7 +970,7 @@ private struct DemoCapture: Identifiable {
             title: "Warehouse Floor — Special",
             address: "789 Industrial Blvd · East Side",
             category: "INDUSTRIAL",
-            payout: "$120",
+            payout: "Review gated",
             distance: "2.1 mi",
             estMinutes: 60,
             coordinate: CLLocationCoordinate2D(latitude: 37.7749, longitude: -122.3886),
@@ -1453,10 +1463,10 @@ private struct DemoDetailSheet: View {
                                 .foregroundStyle(BlueprintTheme.successGreen)
                                 .frame(width: 22)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text("Completing this capture earns \(demo.payout)")
+                                Text("Demo capture - review only")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.white)
-                                Text("Paid after approval review · Usually 3–5 days")
+                                Text("No payout is quoted for demo or review-only captures.")
                                     .font(.caption)
                                     .foregroundStyle(Color(white: 0.45))
                             }

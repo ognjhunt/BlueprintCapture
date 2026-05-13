@@ -493,7 +493,7 @@ private fun AccountLinksCard(
             icon = Icons.Rounded.Groups,
             iconBackground = BlueprintTealSurface,
             title = "Referrals",
-            subtitle = "Earn 10% of friends' captures",
+            subtitle = "Invite alpha contributors",
             onClick = onOpenReferrals,
         )
         RowDivider()
@@ -727,15 +727,15 @@ private fun ProfileSheet(
                         }
                     }
                     Text(
-                        text = "Friends who use your code get 10% extra on their first payout — and so do you.",
+                        text = "Invites stay review-gated until payout provider readiness is verified by the backend.",
                         color = BlueprintTextMuted,
                         fontSize = 13.sp,
                         lineHeight = 18.sp,
                     )
                 }
 
-                SheetMetricRow("Referral earnings", formatCurrency((stats?.referralEarningsCents ?: 0) / 100.0))
-                SheetMetricRow("Referral bonuses", formatCurrency((stats?.referralBonusCents ?: 0) / 100.0))
+                SheetMetricRow("Referral credits", formatCurrency((stats?.referralEarningsCents ?: 0) / 100.0))
+                SheetMetricRow("Review-gated credits", formatCurrency((stats?.referralBonusCents ?: 0) / 100.0))
             }
         }
     }

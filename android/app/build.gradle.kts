@@ -34,6 +34,8 @@ android {
         val allowMockJobsFallback = providers.gradleProperty("BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK").orNull ?: "false"
         val enableOpenCaptureHere = providers.gradleProperty("BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE").orNull ?: "true"
         val stripePublishableKey = providers.gradleProperty("BLUEPRINT_STRIPE_PUBLISHABLE_KEY").orNull ?: ""
+        val payoutProvider = providers.gradleProperty("BLUEPRINT_PAYOUT_PROVIDER").orNull ?: "stripe"
+        val payoutProviderReady = providers.gradleProperty("BLUEPRINT_PAYOUT_PROVIDER_READY").orNull ?: "false"
         val nearbyDiscoveryProvider = providers.gradleProperty("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER").orNull ?: "places_nearby"
         val enableGeminiMapsGroundingFallback =
             providers.gradleProperty("BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK").orNull ?: "false"
@@ -60,6 +62,8 @@ android {
         buildConfigField("boolean", "ALLOW_MOCK_JOBS_FALLBACK", allowMockJobsFallback)
         buildConfigField("boolean", "ENABLE_OPEN_CAPTURE_HERE", enableOpenCaptureHere)
         buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
+        buildConfigField("String", "PAYOUT_PROVIDER", "\"$payoutProvider\"")
+        buildConfigField("boolean", "PAYOUT_PROVIDER_READY", payoutProviderReady)
         buildConfigField("String", "NEARBY_DISCOVERY_PROVIDER", "\"$nearbyDiscoveryProvider\"")
         buildConfigField("boolean", "ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK", enableGeminiMapsGroundingFallback)
         buildConfigField("String", "MAIN_WEBSITE_URL", "\"$mainWebsiteUrl\"")
@@ -157,6 +161,12 @@ tasks.register("validateExternalAlphaReleaseConfig") {
         if (gradleProperty("BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK").ifBlank { "false" }.toBoolean()) {
             throw org.gradle.api.GradleException(
                 "BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK must stay false for Android external alpha builds.",
+            )
+        }
+
+        if (gradleProperty("BLUEPRINT_PAYOUT_PROVIDER_READY").ifBlank { "false" }.toBoolean()) {
+            throw org.gradle.api.GradleException(
+                "BLUEPRINT_PAYOUT_PROVIDER_READY must stay false for Android external alpha until live backend provider proof is wired.",
             )
         }
 

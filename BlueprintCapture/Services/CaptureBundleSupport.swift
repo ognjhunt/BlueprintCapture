@@ -291,6 +291,7 @@ struct CaptureEvidenceSummary: Equatable, Encodable {
     let motionSamples: Int
     let motionProvenance: String?
     let motionTimestampsCaptureRelative: Bool
+    let declaredDepthSupported: Bool
 
     enum CodingKeys: String, CodingKey {
         case arkitFrameRows
@@ -324,6 +325,7 @@ struct CaptureEvidenceSummary: Equatable, Encodable {
         case motionSamples
         case motionProvenance
         case motionTimestampsCaptureRelative
+        case declaredDepthSupported
         case poseAuthority
         case intrinsicsAuthority
         case depthAuthority
@@ -365,6 +367,7 @@ struct CaptureEvidenceSummary: Equatable, Encodable {
         try container.encode(motionSamples, forKey: .motionSamples)
         try container.encodeIfPresent(motionProvenance, forKey: .motionProvenance)
         try container.encode(motionTimestampsCaptureRelative, forKey: .motionTimestampsCaptureRelative)
+        try container.encode(declaredDepthSupported, forKey: .declaredDepthSupported)
 
         let capabilities = captureCapabilities
         try container.encode(capabilities.poseAuthority, forKey: .poseAuthority)
@@ -397,6 +400,11 @@ struct CaptureEvidenceSummary: Equatable, Encodable {
         let hasIntrinsics = hasARKitIntrinsics || hasARCoreIntrinsics
         let hasDepth = arkitDepthFrames > 0 || arcoreDepthFrames > 0
         let hasDepthConfidence = arkitConfidenceFrames > 0 || arcoreConfidenceFrames > 0
+        let missingDepthReason = hasDepth
+            ? nil
+            : declaredDepthSupported
+            ? "not_enabled"
+            : "not_supported"
         let hasPointCloud = arcorePointCloudSamples > 0 || arkitFeaturePointRows > 0
         let hasPlanes = arkitPlaneRows > 0 || arcorePlaneRows > 0
         let hasLightEstimate = arkitLightEstimateRows > 0 || arcoreLightEstimateRows > 0
@@ -429,6 +437,7 @@ struct CaptureEvidenceSummary: Equatable, Encodable {
             cameraIntrinsics: hasIntrinsics,
             depth: hasDepth,
             depthConfidence: hasDepthConfidence,
+            missingDepthReason: missingDepthReason,
             mesh: arkitMeshFiles > 0,
             pointCloud: hasPointCloud,
             planes: hasPlanes,
@@ -689,9 +698,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let schemaVersion: String
         let sceneId: String
         let captureId: String
-        let siteSubmissionId: String
+        let siteSubmissionId: String?
         let buyerRequestId: String?
         let captureJobId: String?
+        let upstreamHandoff: UpstreamHandoffMetadata
         let regionId: String?
         let captureSource: String
         let specialTaskType: String?
@@ -741,6 +751,17 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let captureMode: CaptureModeMetadata?
         let semanticAnchors: [CaptureSemanticAnchorEvent]
         let capturedAt: String
+    }
+
+    private struct UpstreamHandoffMetadata: Encodable, Equatable {
+        let siteSubmissionId: String?
+        let buyerRequestId: String?
+        let captureJobId: String?
+        let siteSubmissionIdPresent: Bool
+        let buyerRequestIdPresent: Bool
+        let captureJobIdPresent: Bool
+        let hostedReviewTruthState: String
+        let blockers: [String]
     }
 
     private struct UploadCompletionFile: Codable {
@@ -1208,6 +1229,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let arcoreDirectory = directory.appendingPathComponent("arcore", isDirectory: true)
         let glassesDirectory = directory.appendingPathComponent("glasses", isDirectory: true)
         let companionPhoneDirectory = directory.appendingPathComponent("companion_phone", isDirectory: true)
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        let manifestObject = (try? JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))) as? [String: Any]
         let posesURL = arkitDirectory.appendingPathComponent("poses.jsonl")
         let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
         let intrinsicsURL = arkitDirectory.appendingPathComponent("intrinsics.json")
@@ -1264,7 +1287,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             p95PoseDeltaSec: poseAlignment.p95PoseDeltaSec,
             motionSamples: motion.samples,
             motionProvenance: motion.provenance,
-            motionTimestampsCaptureRelative: motion.captureRelative
+            motionTimestampsCaptureRelative: motion.captureRelative,
+            declaredDepthSupported: manifestObject?["depth_supported"] as? Bool ?? false
         )
     }
 
@@ -1305,6 +1329,32 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "consent_scope": rights.consentScope,
             "consent_notes": rights.consentNotes,
         ]
+    }
+
+    private func upstreamHandoff(for request: CaptureUploadRequest) -> UpstreamHandoffMetadata {
+        let siteSubmissionId = request.metadata.siteSubmissionId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let buyerRequestId = request.metadata.buyerRequestId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let captureJobId = request.metadata.captureJobId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        var blockers: [String] = []
+        if siteSubmissionId == nil {
+            blockers.append("missing_site_submission_id")
+        }
+        if buyerRequestId == nil {
+            blockers.append("missing_buyer_request_id")
+        }
+        if captureJobId == nil {
+            blockers.append("missing_capture_job_id")
+        }
+        return UpstreamHandoffMetadata(
+            siteSubmissionId: siteSubmissionId,
+            buyerRequestId: buyerRequestId,
+            captureJobId: captureJobId,
+            siteSubmissionIdPresent: siteSubmissionId != nil,
+            buyerRequestIdPresent: buyerRequestId != nil,
+            captureJobIdPresent: captureJobId != nil,
+            hostedReviewTruthState: blockers.isEmpty ? "upstream_ids_present" : "blocked_missing_upstream_ids",
+            blockers: blockers
+        )
     }
 
     private func recordingWorldFrame(for evidence: CaptureEvidenceSummary) -> RecordingWorldFrame {
@@ -1350,12 +1400,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let evidence = inspectEvidence(in: directory, request: request)
         let capabilities = evidence.captureCapabilities
         let topology = effectiveCaptureTopology(for: request, directory: directory)
+        let upstreamHandoff = upstreamHandoff(for: request)
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
-        json["site_submission_id"] = request.metadata.siteSubmissionId ?? request.metadata.jobId
-        json["buyer_request_id"] = request.metadata.buyerRequestId as Any
-        json["capture_job_id"] = request.metadata.captureJobId as Any
+        json["site_submission_id"] = request.metadata.siteSubmissionId ?? NSNull()
+        json["buyer_request_id"] = request.metadata.buyerRequestId ?? NSNull()
+        json["capture_job_id"] = request.metadata.captureJobId ?? NSNull()
+        json["upstream_handoff"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(upstreamHandoff))
         json["region_id"] = request.metadata.regionId as Any
         json["special_task_type"] = request.metadata.specialTaskType?.rawValue as Any
         json["priority_weight"] = request.metadata.priorityWeight as Any
@@ -1451,6 +1503,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let normalizedRights = normalizedCaptureRights(for: request)
         let capabilities = evidence.captureCapabilities
         let taskHypothesis = request.metadata.taskHypothesis ?? synthesizedTaskHypothesis(for: request)
+        let upstreamHandoff = upstreamHandoff(for: request)
         let resolvedCaptureMode: CaptureModeMetadata? = request.metadata.captureMode.map { captureMode in
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
                 ? "site_world_candidate"
@@ -1465,9 +1518,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
             captureId: CaptureBundleContext.captureIdentifier(for: request),
-            siteSubmissionId: request.metadata.siteSubmissionId ?? request.metadata.jobId,
+            siteSubmissionId: request.metadata.siteSubmissionId,
             buyerRequestId: request.metadata.buyerRequestId,
             captureJobId: request.metadata.captureJobId,
+            upstreamHandoff: upstreamHandoff,
             regionId: request.metadata.regionId,
             captureSource: request.metadata.captureSource.rawValue,
             specialTaskType: request.metadata.specialTaskType?.rawValue,

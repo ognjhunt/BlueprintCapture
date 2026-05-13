@@ -19,8 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.CropFree
 import androidx.compose.material.icons.rounded.Face
-import androidx.compose.material.icons.rounded.MonetizationOn
 import androidx.compose.material.icons.rounded.PanTool
+import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -81,7 +81,7 @@ fun OnboardingScreen(
             Spacer(modifier = Modifier.height(36.dp))
 
             Text(
-                text = "Get paid to\nscan spaces",
+                text = "Capture spaces\nfor review",
                 color = BlueprintTextPrimary,
                 fontSize = 42.sp,
                 lineHeight = 46.sp,
@@ -116,8 +116,8 @@ fun OnboardingScreen(
                     text = "Rights and policy checks before reuse",
                 )
                 OnboardingFeatureRow(
-                    icon = Icons.Rounded.MonetizationOn,
-                    text = "Payout only after review approval",
+                    icon = Icons.Rounded.Verified,
+                    text = "Payout status stays review-gated",
                 )
             }
 

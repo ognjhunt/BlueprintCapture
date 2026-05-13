@@ -183,7 +183,7 @@ final class StripeConnectService {
             request.httpBody = payload
             print("[Stripe] Request URL: \(request.url?.absoluteString ?? "N/A")")
             _ = try await perform(request: request)
-            print("[Stripe] ✓ Instant payout triggered successfully")
+            print("[Stripe] Cashout request submitted successfully")
         } catch {
             print("[Stripe] ✗ Error triggering instant payout: \(error)")
             throw error

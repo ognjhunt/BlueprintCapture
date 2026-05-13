@@ -40,6 +40,7 @@ import app.blueprint.capture.ui.components.UploadQueueOverlay
 import app.blueprint.capture.ui.screens.AuthScreen
 import app.blueprint.capture.ui.screens.CaptureSessionScreen
 import app.blueprint.capture.ui.screens.InviteCodeScreen
+import app.blueprint.capture.ui.screens.LaunchCityGateContainer
 import app.blueprint.capture.ui.screens.OnboardingGlassesScreen
 import app.blueprint.capture.ui.screens.OnboardingScreen
 import app.blueprint.capture.ui.screens.OnboardingWalkthroughScreen
@@ -105,46 +106,48 @@ fun BlueprintCaptureRoot(
                             onClose = rootViewModel::dismissCaptureSession,
                         )
                     } else {
-                        Scaffold(
-                            modifier = Modifier.fillMaxSize(),
-                            containerColor = BlueprintBlack,
-                            bottomBar = {
-                                BlueprintBottomBar(
-                                    selectedTab = rootState.selectedTab,
-                                    onSelect = rootViewModel::selectTab,
-                                )
-                            },
-                        ) { padding ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(padding)
-                                    .background(BlueprintBlack),
-                            ) {
-                                AnimatedContent(targetState = rootState.selectedTab, label = "tab-content") { tab ->
-                                    when (tab) {
-                                        MainTab.Scan -> ScanScreen(
-                                            onStartCapture = rootViewModel::startCaptureSession,
-                                        )
-
-                                        MainTab.Wallet -> WalletScreen()
-                                        MainTab.Profile -> ProfileScreen()
-                                    }
-                                }
-
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                                    verticalArrangement = Arrangement.Bottom,
-                                ) {
-                                    UploadQueueOverlay(
-                                        items = rootState.uploads,
-                                        onStartUpload = rootViewModel::startUpload,
-                                        onRetry = rootViewModel::retryUpload,
-                                        onDismiss = rootViewModel::dismissUpload,
-                                        onCancel = rootViewModel::cancelUpload,
+                        LaunchCityGateContainer {
+                            Scaffold(
+                                modifier = Modifier.fillMaxSize(),
+                                containerColor = BlueprintBlack,
+                                bottomBar = {
+                                    BlueprintBottomBar(
+                                        selectedTab = rootState.selectedTab,
+                                        onSelect = rootViewModel::selectTab,
                                     )
+                                },
+                            ) { padding ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(padding)
+                                        .background(BlueprintBlack),
+                                ) {
+                                    AnimatedContent(targetState = rootState.selectedTab, label = "tab-content") { tab ->
+                                        when (tab) {
+                                            MainTab.Scan -> ScanScreen(
+                                                onStartCapture = rootViewModel::startCaptureSession,
+                                            )
+
+                                            MainTab.Wallet -> WalletScreen()
+                                            MainTab.Profile -> ProfileScreen()
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 16.dp),
+                                        verticalArrangement = Arrangement.Bottom,
+                                    ) {
+                                        UploadQueueOverlay(
+                                            items = rootState.uploads,
+                                            onStartUpload = rootViewModel::startUpload,
+                                            onRetry = rootViewModel::retryUpload,
+                                            onDismiss = rootViewModel::dismissUpload,
+                                            onCancel = rootViewModel::cancelUpload,
+                                        )
+                                    }
                                 }
                             }
                         }

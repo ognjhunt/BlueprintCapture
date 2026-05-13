@@ -108,7 +108,7 @@ fun InviteCodeScreen(
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "Enter your friend's invite code below.\nYou'll both get 10% extra on your first payout.",
+                text = "Enter your friend's invite code below.\nInvites help us connect your alpha onboarding and review status.",
                 color = BlueprintTextMuted,
                 fontSize = 16.sp,
                 lineHeight = 22.sp,

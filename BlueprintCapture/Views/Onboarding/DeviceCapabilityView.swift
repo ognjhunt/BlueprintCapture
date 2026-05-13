@@ -38,17 +38,17 @@ struct DeviceCapabilityView: View {
                     detail: device.hasLiDAR ? "High-quality depth capture" : "Standard capture mode"
                 )
 
-                // Multiplier highlight
+                // Evidence signal
                 HStack(spacing: 14) {
-                    Image(systemName: "dollarsign.circle.fill")
+                    Image(systemName: "checkmark.seal.fill")
                         .font(.body)
                         .foregroundStyle(BlueprintTheme.successGreen)
                         .frame(width: 24)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Earnings Multiplier")
+                        Text("Evidence Signals")
                             .font(.body.weight(.medium))
-                        Text("\(device.multiplierLabel) on every capture")
+                        Text("\(device.multiplierLabel) capture evidence")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -56,7 +56,7 @@ struct DeviceCapabilityView: View {
                     Spacer()
 
                     Text(device.multiplierLabel)
-                        .font(.title2.weight(.bold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(BlueprintTheme.successGreen)
                 }
                 .padding(.horizontal, 16)

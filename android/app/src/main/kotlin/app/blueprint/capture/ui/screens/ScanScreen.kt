@@ -117,15 +117,6 @@ private enum class SearchParityScreen {
     Submit,
 }
 
-private data class SearchLocationSuggestion(
-    val id: String,
-    val title: String,
-    val resultAddress: String,
-    val recentSubtitle: String,
-    val reviewAddress: String,
-    val isRecent: Boolean = false,
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScanScreen(
@@ -134,7 +125,7 @@ fun ScanScreen(
     glassesViewModel: GlassesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
-    val locationSuggestions = remember { searchLocationSuggestions() }
+    val placeSearchState by viewModel.placeSearchState.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.onFeedVisible()
@@ -155,16 +146,14 @@ fun ScanScreen(
     var selectedLocationId by rememberSaveable { mutableStateOf<String?>(null) }
     var submissionContext by rememberSaveable { mutableStateOf("") }
     var captureRulesAccepted by rememberSaveable { mutableStateOf(false) }
+    var isResolvingSubmission by rememberSaveable { mutableStateOf(false) }
+    var submissionError by rememberSaveable { mutableStateOf<String?>(null) }
 
-    val selectedLocation = remember(selectedLocationId) {
-        locationSuggestions.firstOrNull { it.id == selectedLocationId }
+    val selectedLocation = remember(selectedLocationId, placeSearchState.suggestions) {
+        placeSearchState.suggestions.firstOrNull { it.id == selectedLocationId }
     }
-    val recentLocations = remember(locationSuggestions) {
-        locationSuggestions.filter(SearchLocationSuggestion::isRecent)
-    }
-    val suggestedLocations = remember(searchQuery, locationSuggestions) {
-        searchSuggestionsFor(query = searchQuery, suggestions = locationSuggestions)
-    }
+    val recentLocations = remember { emptyList<PlaceSearchSuggestion>() }
+    val suggestedLocations = placeSearchState.suggestions
 
     fun openSearchFlow() {
         parityScreen = SearchParityScreen.Search
@@ -174,34 +163,32 @@ fun ScanScreen(
         parityScreen = null
     }
 
-    fun startSubmissionFor(location: SearchLocationSuggestion) {
+    fun startSubmissionFor(location: PlaceSearchSuggestion) {
         selectedLocationId = location.id
         parityScreen = SearchParityScreen.Submit
     }
 
     fun launchCaptureFromSubmission() {
         val location = selectedLocation ?: return
-        onStartCapture(
-            CaptureLaunch(
-                label = location.title,
-                categoryLabel = "SPACE REVIEW",
-                addressText = location.reviewAddress,
-                permissionTone = CapturePermissionTone.Review,
-                workflowName = "Space review",
-                workflowSteps = listOf(
-                    submissionContext.trim().ifBlank {
-                        "Capture the public-facing approach, main circulation path, and any repeated high-value zones."
-                    },
-                ),
-                detailChecklist = defaultSubmissionChecklist,
-                requestedOutputs = listOf("qualification", "review_intake"),
-            ),
+        isResolvingSubmission = true
+        submissionError = null
+        viewModel.resolveSearchLaunch(
+            suggestion = location,
+            context = submissionContext,
+            onResult = { launch ->
+                isResolvingSubmission = false
+                onStartCapture(launch)
+                parityScreen = null
+                selectedLocationId = null
+                searchQuery = ""
+                submissionContext = ""
+                captureRulesAccepted = false
+            },
+            onError = { message ->
+                isResolvingSubmission = false
+                submissionError = message
+            },
         )
-        parityScreen = null
-        selectedLocationId = null
-        searchQuery = ""
-        submissionContext = ""
-        captureRulesAccepted = false
     }
 
     fun requestLaunch(target: ScanTarget, autoStartRecorder: Boolean = false) {
@@ -453,9 +440,11 @@ fun ScanScreen(
                         selectedLocation = selectedLocation,
                         recentLocations = recentLocations,
                         suggestedLocations = suggestedLocations,
+                        isSearching = placeSearchState.isSearching,
                         onQueryChange = { updated ->
                             searchQuery = updated
                             selectedLocationId = null
+                            viewModel.searchPlaceSuggestions(updated)
                         },
                         onCancel = ::closeSearchFlow,
                         onClearQuery = {
@@ -476,6 +465,8 @@ fun ScanScreen(
                                 location = location,
                                 contextValue = submissionContext,
                                 captureRulesAccepted = captureRulesAccepted,
+                                isResolving = isResolvingSubmission,
+                                errorMessage = submissionError,
                                 onClose = ::closeSearchFlow,
                                 onChangeLocation = {
                                     selectedLocationId = null
@@ -656,6 +647,7 @@ private fun JobDetailDialog(
     val description = target.workflowSteps.firstOrNull()
         ?: target.subtitle
         ?: "Capture the primary zone, access routes, and key reference points."
+    val payoutDisplay = target.payoutDisplay
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -753,8 +745,8 @@ private fun JobDetailDialog(
                         ) {
                             MetricChip(
                                 icon = Icons.Rounded.MonetizationOn,
-                                iconTint = BlueprintSuccess,
-                                text = target.payoutText,
+                                iconTint = if (payoutDisplay.hasQuotedPayout) BlueprintSuccess else BlueprintTextSecondary,
+                                text = payoutDisplay.metricText,
                             )
                             MetricChip(
                                 icon = Icons.Rounded.NearMe,
@@ -772,9 +764,9 @@ private fun JobDetailDialog(
                     }
 
                     AccentInfoCard(
-                        accent = BlueprintSuccess,
-                        icon = Icons.Rounded.MonetizationOn,
-                        text = "Completing this capture earns ${target.payoutText}.",
+                        accent = if (payoutDisplay.hasQuotedPayout) BlueprintSuccess else BlueprintTeal,
+                        icon = if (payoutDisplay.hasQuotedPayout) Icons.Rounded.MonetizationOn else Icons.Rounded.Visibility,
+                        text = "${payoutDisplay.bannerTitle}. ${payoutDisplay.bannerBody}",
                     )
 
                     AccentInfoCard(
@@ -1262,6 +1254,7 @@ private fun NearbySpaceCard(
     target: ScanTarget,
     onClick: () -> Unit,
 ) {
+    val payoutDisplay = target.payoutDisplay
     Box(
         modifier = Modifier
             .width(318.dp)
@@ -1340,8 +1333,8 @@ private fun NearbySpaceCard(
                 ) {
                     MetricChip(
                         icon = Icons.Rounded.MonetizationOn,
-                        iconTint = BlueprintSuccess,
-                        text = target.payoutText,
+                        iconTint = if (payoutDisplay.hasQuotedPayout) BlueprintSuccess else BlueprintTextSecondary,
+                        text = payoutDisplay.metricText,
                     )
                     MetricChip(
                         icon = Icons.Rounded.NearMe,
@@ -1630,13 +1623,14 @@ private fun SubmitSpaceCard(
 @Composable
 private fun SearchParityScreenScreen(
     query: String,
-    selectedLocation: SearchLocationSuggestion?,
-    recentLocations: List<SearchLocationSuggestion>,
-    suggestedLocations: List<SearchLocationSuggestion>,
+    selectedLocation: PlaceSearchSuggestion?,
+    recentLocations: List<PlaceSearchSuggestion>,
+    suggestedLocations: List<PlaceSearchSuggestion>,
+    isSearching: Boolean,
     onQueryChange: (String) -> Unit,
     onCancel: () -> Unit,
     onClearQuery: () -> Unit,
-    onSelectLocation: (SearchLocationSuggestion) -> Unit,
+    onSelectLocation: (PlaceSearchSuggestion) -> Unit,
     onSubmitSpace: () -> Unit,
 ) {
     val showIdleState = query.isBlank() && selectedLocation == null
@@ -1687,6 +1681,7 @@ private fun SearchParityScreenScreen(
             )
             else -> SearchResultsState(
                 results = suggestedLocations,
+                isSearching = isSearching,
                 modifier = Modifier.weight(1f),
                 onSelectLocation = onSelectLocation,
             )
@@ -1696,7 +1691,7 @@ private fun SearchParityScreenScreen(
 
 @Composable
 private fun SearchIdleState(
-    recentLocations: List<SearchLocationSuggestion>,
+    recentLocations: List<PlaceSearchSuggestion>,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -1769,9 +1764,10 @@ private fun SearchIdleState(
 
 @Composable
 private fun SearchResultsState(
-    results: List<SearchLocationSuggestion>,
+    results: List<PlaceSearchSuggestion>,
+    isSearching: Boolean,
     modifier: Modifier = Modifier,
-    onSelectLocation: (SearchLocationSuggestion) -> Unit,
+    onSelectLocation: (PlaceSearchSuggestion) -> Unit,
 ) {
     Column(
         modifier = modifier
@@ -1790,7 +1786,19 @@ private fun SearchResultsState(
             ),
         )
 
-        if (results.isEmpty()) {
+        if (isSearching) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color(0xFF171717))
+                    .border(1.dp, BlueprintBorder, RoundedCornerShape(24.dp))
+                    .padding(horizontal = 22.dp, vertical = 28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = BlueprintTeal, modifier = Modifier.size(28.dp))
+            }
+        } else if (results.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1839,7 +1847,7 @@ private fun SearchResultsState(
 
 @Composable
 private fun SearchNoCapturesState(
-    location: SearchLocationSuggestion?,
+    location: PlaceSearchSuggestion?,
     modifier: Modifier = Modifier,
     onSubmitSpace: () -> Unit,
 ) {
@@ -1985,7 +1993,7 @@ private fun SearchParityField(
 
 @Composable
 private fun RecentLocationRow(
-    location: SearchLocationSuggestion,
+    location: PlaceSearchSuggestion,
 ) {
     Row(
         modifier = Modifier
@@ -2021,7 +2029,7 @@ private fun RecentLocationRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = location.recentSubtitle,
+                text = location.resultAddress,
                 style = TextStyle(
                     color = BlueprintTextMuted.copy(alpha = 0.70f),
                     fontSize = 19.sp,
@@ -2043,7 +2051,7 @@ private fun RecentLocationRow(
 
 @Composable
 private fun SearchLocationResultRow(
-    location: SearchLocationSuggestion,
+    location: PlaceSearchSuggestion,
     onClick: () -> Unit,
 ) {
     Row(
@@ -2200,9 +2208,11 @@ private fun SubmitSpaceReviewCard(
 
 @Composable
 private fun SubmitSpaceParityScreen(
-    location: SearchLocationSuggestion,
+    location: PlaceSearchSuggestion,
     contextValue: String,
     captureRulesAccepted: Boolean,
+    isResolving: Boolean,
+    errorMessage: String?,
     onClose: () -> Unit,
     onChangeLocation: () -> Unit,
     onContextChange: (String) -> Unit,
@@ -2301,6 +2311,15 @@ private fun SubmitSpaceParityScreen(
                     captureRulesAccepted = captureRulesAccepted,
                     onCaptureRulesAccepted = onCaptureRulesAccepted,
                 )
+                errorMessage?.let {
+                    Text(
+                        text = it,
+                        color = BlueprintError,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
 
@@ -2320,7 +2339,7 @@ private fun SubmitSpaceParityScreen(
                 .navigationBarsPadding()
                 .padding(horizontal = 22.dp, vertical = 18.dp),
         ) {
-            val continueEnabled = captureRulesAccepted && contextValue.isNotBlank()
+            val continueEnabled = captureRulesAccepted && contextValue.isNotBlank() && !isResolving
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2336,7 +2355,7 @@ private fun SubmitSpaceParityScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Continue to Capture",
+                    text = if (isResolving) "Checking Place..." else "Continue to Capture",
                     style = TextStyle(
                         color = if (continueEnabled) BlueprintBlack else BlueprintTextMuted.copy(alpha = 0.42f),
                         fontSize = 23.sp,
@@ -2411,7 +2430,7 @@ private fun SectionLabel(text: String) {
 
 @Composable
 private fun SelectedLocationCard(
-    location: SearchLocationSuggestion,
+    location: PlaceSearchSuggestion,
 ) {
     Row(
         modifier = Modifier
@@ -2739,6 +2758,9 @@ private fun ScanTarget.toLaunch(autoStartRecorder: Boolean = false): CaptureLaun
         targetId = id,
         jobId = id,
         siteSubmissionId = siteSubmissionId,
+        siteIdSource = if (!siteSubmissionId.isNullOrBlank()) "site_submission" else "buyer_request",
+        latitude = lat,
+        longitude = lng,
         workflowName = workflowName,
         workflowSteps = workflowSteps,
         zone = zone,
@@ -2750,107 +2772,12 @@ private fun ScanTarget.toLaunch(autoStartRecorder: Boolean = false): CaptureLaun
     )
 }
 
-private val defaultSubmissionChecklist = listOf(
+internal val defaultSubmissionChecklist = listOf(
     "Capture only common areas you can visibly access.",
     "Avoid faces, screens, paperwork, and posted private information.",
     "Respect restricted zones and any on-site staff direction.",
 )
 
-private fun autoFillContextFor(location: SearchLocationSuggestion): String {
+private fun autoFillContextFor(location: PlaceSearchSuggestion): String {
     return "${location.title} looks like a strong review candidate because it appears to be a public-facing, repeatable location with meaningful circulation paths and likely coverage value around the main entry and service areas."
 }
-
-private fun searchSuggestionsFor(
-    query: String,
-    suggestions: List<SearchLocationSuggestion>,
-): List<SearchLocationSuggestion> {
-    val trimmedQuery = query.trim()
-    if (trimmedQuery.isBlank()) return emptyList()
-
-    return suggestions
-        .filter { suggestion ->
-            suggestion.title.contains(trimmedQuery, ignoreCase = true) ||
-                suggestion.resultAddress.contains(trimmedQuery, ignoreCase = true) ||
-                suggestion.reviewAddress.contains(trimmedQuery, ignoreCase = true)
-        }
-        .sortedBy { suggestion ->
-            val titleIndex = suggestion.title.indexOf(trimmedQuery, ignoreCase = true)
-            if (titleIndex >= 0) titleIndex else Int.MAX_VALUE
-        }
-}
-
-private fun searchLocationSuggestions(): List<SearchLocationSuggestion> = listOf(
-    SearchLocationSuggestion(
-        id = "whole-foods",
-        title = "Whole Foods Market",
-        resultAddress = "621 Broad St, Durham, NC 27705, Unit...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Whole Foods Market, Broad St, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "wheels-durham",
-        title = "Wheels Durham",
-        resultAddress = "715 N Hoover Rd, Durham, NC 27703,...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Wheels Durham, Hoover Rd, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "whetstone",
-        title = "Whetstone Apartments",
-        resultAddress = "501 Willard St, Durham, NC 27701, Unit...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Whetstone Apartments, Willard St, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "wheat",
-        title = "Wheat 麦茶 _ Durham",
-        resultAddress = "810 Ninth St, Ste 130, Durham, NC 277...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Wheat 麦茶 _ Durham, Ninth St, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "jerk",
-        title = "Where’s the Jerk",
-        resultAddress = "5400 S Miami Blvd, Ste 136, Durham, N...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Where’s the Jerk, Miami Blvd, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "whippoorwill",
-        title = "Whippoorwill Park",
-        resultAddress = "1632 Rowemont Dr, Durham, NC 27705...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Whippoorwill Park, Rowemont Dr, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "whitted",
-        title = "Whitted School",
-        resultAddress = "1210 Sawyer St, Durham, NC 27707, Un...",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Whitted School, Sawyer St, Durham, NC",
-    ),
-    SearchLocationSuggestion(
-        id = "mad-kicks",
-        title = "Mad Kicks",
-        resultAddress = "Durham, NC",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Mad Kicks, Durham, NC",
-        isRecent = true,
-    ),
-    SearchLocationSuggestion(
-        id = "harris-teeter",
-        title = "Harris Teeter",
-        resultAddress = "Durham, NC",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Harris Teeter, Durham, NC",
-        isRecent = true,
-    ),
-    SearchLocationSuggestion(
-        id = "gym-tacos",
-        title = "Gym Tacos",
-        resultAddress = "Durham, NC",
-        recentSubtitle = "Durham, NC",
-        reviewAddress = "Gym Tacos, Durham, NC",
-        isRecent = true,
-    ),
-)

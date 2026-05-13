@@ -140,7 +140,7 @@ private extension NearbyWalkthroughOverlay {
                         calloutCard(
                             icon: "map.fill",
                             title: "Explore highlighted targets",
-                            message: "These cards show nearby spaces we recommend scanning. Each cell lists the full address, how long the walkthrough should take, and what you’re estimated to earn."
+                            message: "These cards show nearby spaces we recommend scanning. Each cell lists the full address, review scope, and any explicit quoted amount."
                         )
                         .padding(.horizontal, 24)
 
@@ -186,9 +186,9 @@ private extension NearbyWalkthroughOverlay {
                     Spacer().frame(height: max(geo.safeAreaInsets.top + 20, (filterBarFrame.maxY - globalFrame.minY) + 16))
 
                     calloutCard(
-                        icon: "slider.horizontal.3",
-                        title: "Dial in your filters",
-                        message: "Use distance, payout, and demand filters to surface the perfect target list for your day."
+                            icon: "slider.horizontal.3",
+                            title: "Dial in your filters",
+                            message: "Use distance, quoted amount, and demand filters to surface the target list for your day."
                     )
                     .padding(.horizontal, 24)
 
@@ -238,7 +238,7 @@ private extension NearbyWalkthroughOverlay {
                         calloutCard(
                             icon: "magnifyingglass",
                             title: "Search any city",
-                            message: "Heading somewhere new? Update the address to see earning opportunities wherever you’re traveling next."
+                            message: "Heading somewhere new? Update the address to see reviewed capture opportunities nearby."
                         )
                         .padding(.horizontal, 24)
 
@@ -326,9 +326,9 @@ private extension NearbyWalkthroughOverlay {
                         Spacer()
 
                         calloutCard(
-                            icon: "dollarsign.circle.fill",
-                            title: "Get paid for quality",
-                            message: "Expect payouts within 2–3 days. Final earnings depend on video quality, demand for the space, and the size of your scan. Repeated low-quality uploads can pause your access—so take your time and do it right."
+                            icon: "checkmark.seal.fill",
+                            title: "Quality is reviewed",
+                            message: "Move carefully and keep the whole space visible. Blueprint reviews quality, access posture, and scope before any downstream use or payout decision."
                         )
                         .padding(.horizontal, 24)
 
@@ -340,10 +340,10 @@ private extension NearbyWalkthroughOverlay {
                                         .font(.title3)
                                         .foregroundStyle(BlueprintTheme.brandTeal)
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Text("Track status later in Settings")
+                                        Text("Track review status later")
                                             .font(.subheadline.weight(.semibold))
                                             .foregroundStyle(.white)
-                                        Text("We’ll notify you as soon as a payout is ready.")
+                                        Text("We’ll notify you when backend review needs action.")
                                             .font(.caption)
                                             .foregroundStyle(.white.opacity(0.8))
                                     }

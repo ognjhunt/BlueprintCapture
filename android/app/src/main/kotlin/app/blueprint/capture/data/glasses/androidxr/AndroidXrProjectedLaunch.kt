@@ -13,6 +13,10 @@ object AndroidXrProjectedLaunch {
     private const val EXTRA_TARGET_ID = "xr_capture_target_id"
     private const val EXTRA_JOB_ID = "xr_capture_job_id"
     private const val EXTRA_SITE_SUBMISSION_ID = "xr_capture_site_submission_id"
+    private const val EXTRA_PLACE_ID = "xr_capture_place_id"
+    private const val EXTRA_SITE_ID_SOURCE = "xr_capture_site_id_source"
+    private const val EXTRA_LATITUDE = "xr_capture_latitude"
+    private const val EXTRA_LONGITUDE = "xr_capture_longitude"
     private const val EXTRA_ZONE = "xr_capture_zone"
     private const val EXTRA_OWNER = "xr_capture_owner"
     private const val EXTRA_RIGHTS_PROFILE = "xr_capture_rights_profile"
@@ -31,6 +35,10 @@ object AndroidXrProjectedLaunch {
             putExtra(EXTRA_TARGET_ID, captureLaunch.targetId)
             putExtra(EXTRA_JOB_ID, captureLaunch.jobId)
             putExtra(EXTRA_SITE_SUBMISSION_ID, captureLaunch.siteSubmissionId)
+            putExtra(EXTRA_PLACE_ID, captureLaunch.placeId)
+            putExtra(EXTRA_SITE_ID_SOURCE, captureLaunch.siteIdSource)
+            putExtra(EXTRA_LATITUDE, captureLaunch.latitude ?: Double.NaN)
+            putExtra(EXTRA_LONGITUDE, captureLaunch.longitude ?: Double.NaN)
             putExtra(EXTRA_ZONE, captureLaunch.zone)
             putExtra(EXTRA_OWNER, captureLaunch.owner)
             putExtra(EXTRA_RIGHTS_PROFILE, captureLaunch.rightsProfile)
@@ -49,6 +57,10 @@ object AndroidXrProjectedLaunch {
             targetId = intent.getStringExtra(EXTRA_TARGET_ID),
             jobId = intent.getStringExtra(EXTRA_JOB_ID),
             siteSubmissionId = intent.getStringExtra(EXTRA_SITE_SUBMISSION_ID),
+            placeId = intent.getStringExtra(EXTRA_PLACE_ID),
+            siteIdSource = intent.getStringExtra(EXTRA_SITE_ID_SOURCE),
+            latitude = intent.getDoubleExtra(EXTRA_LATITUDE, Double.NaN).takeIf { !it.isNaN() },
+            longitude = intent.getDoubleExtra(EXTRA_LONGITUDE, Double.NaN).takeIf { !it.isNaN() },
             workflowName = intent.getStringExtra(EXTRA_WORKFLOW),
             workflowSteps = intent.getStringArrayListExtra(EXTRA_WORKFLOW_STEPS).orEmpty(),
             zone = intent.getStringExtra(EXTRA_ZONE),

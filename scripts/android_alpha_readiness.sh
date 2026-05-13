@@ -27,15 +27,47 @@ require_java() {
   require_command java "Java is missing from PATH. Install a JDK and set JAVA_HOME before running Android alpha readiness."
 }
 
+fail_android_gate() {
+  local stage="$1"
+  local next_input="$2"
+  shift 2
+  echo "Android alpha readiness gate failed:" >&2
+  echo "Stage: $stage" >&2
+  echo "Next input needed: $next_input" >&2
+  for line in "$@"; do
+    echo "- $line" >&2
+  done
+  echo "Android remains internal-only until config validation, unit tests, release build, and device/App Distribution smoke are all explicitly satisfied." >&2
+  exit 1
+}
+
+run_android_config_validation() {
+  local output
+  local status
+  set +e
+  output="$(./gradlew validateExternalAlphaReleaseConfig 2>&1)"
+  status=$?
+  set -e
+  if [[ -n "$output" ]]; then
+    printf '%s\n' "$output"
+  fi
+  if [[ "$status" != "0" ]]; then
+    fail_android_gate \
+      "android_release_config_blocked" \
+      "Set the missing Android release properties in android/gradle.properties or pass them with -P; do not use placeholders or real secrets in tracked files." \
+      "Gradle validateExternalAlphaReleaseConfig exited with status $status."
+  fi
+}
+
 cd "$ANDROID_DIR"
 
 require_java
 
 echo "==> Validating Android external alpha release config"
-./gradlew validateExternalAlphaReleaseConfig
+run_android_config_validation
 
 if [[ "$VALIDATE_ONLY" == "--validate-config-only" ]]; then
-  echo "Android external alpha config validation passed."
+  echo "Android external alpha config validation passed. Android still requires unit tests, release build, and device/App Distribution smoke before it can leave internal-only status."
   exit 0
 fi
 
@@ -45,4 +77,4 @@ echo "==> Running Android unit tests"
 echo "==> Building Android release artifact"
 ./gradlew assembleRelease
 
-echo "Android alpha readiness checks passed."
+echo "Android repo readiness checks passed. Android still requires device/App Distribution smoke signoff before it can leave internal-only status."

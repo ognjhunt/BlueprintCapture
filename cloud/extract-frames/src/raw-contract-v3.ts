@@ -10,9 +10,17 @@ export type RawCaptureBundleV3Input = {
   sessionIntrinsics: Record<string, unknown> | null;
   depthManifest: Record<string, unknown> | null;
   confidenceManifest: Record<string, unknown> | null;
+  arcoreSessionIntrinsics?: Record<string, unknown> | null;
+  arcoreDepthManifest?: Record<string, unknown> | null;
+  arcoreConfidenceManifest?: Record<string, unknown> | null;
   poses: Record<string, unknown>[];
   frames: Record<string, unknown>[];
   frameQuality: Record<string, unknown>[];
+  arcorePoses?: Record<string, unknown>[];
+  arcoreFrames?: Record<string, unknown>[];
+  arcoreTracking?: Record<string, unknown>[];
+  companionPhoneIntrinsics?: Record<string, unknown> | null;
+  companionPhonePoses?: Record<string, unknown>[];
   syncMap: Record<string, unknown>[];
   motion: Record<string, unknown>[];
   semanticAnchorObservations: Record<string, unknown>[];
@@ -104,6 +112,41 @@ function validateRequiredKeys(
   }
 }
 
+function hasCapability(capabilities: Record<string, unknown>, key: string): boolean {
+  return capabilities[key] === true;
+}
+
+function hasExplicitMissingDepthReason(capabilities: Record<string, unknown>): boolean {
+  const allowedReasons = new Set([
+    "not_supported",
+    "not_enabled",
+    "temporarily_unavailable",
+    "dropped_at_write",
+    "invalid_for_frame",
+  ]);
+  const reason = asString(capabilities.missing_depth_reason);
+  return reason !== undefined && allowedReasons.has(reason);
+}
+
+function requireFiles(filesPresent: Set<string>, files: string[], blockers: string[]): void {
+  for (const file of files) {
+    if (!filesPresent.has(file)) {
+      blockers.push(`missing_required_file:${file}`);
+    }
+  }
+}
+
+function hasWalkthroughFile(filesPresent: Set<string>, videoURI: string | undefined): boolean {
+  if (videoURI) {
+    const normalized = videoURI.startsWith("raw/") ? videoURI.slice("raw/".length) : videoURI;
+    const fileName = normalized.split("/").filter(Boolean).pop();
+    if (filesPresent.has(videoURI) || filesPresent.has(normalized) || (fileName && filesPresent.has(fileName))) {
+      return true;
+    }
+  }
+  return filesPresent.has("walkthrough.mov") || filesPresent.has("walkthrough.mp4");
+}
+
 function validateMotionSamples(
   rows: Record<string, unknown>[],
   blockers: string[]
@@ -181,7 +224,7 @@ export function validateRawCaptureBundleV3(
   const blockers: string[] = [];
   const warnings: string[] = [];
 
-  const requiredFiles = [
+  const requiredBaseFiles = [
     "manifest.json",
     "provenance.json",
     "rights_consent.json",
@@ -195,32 +238,118 @@ export function validateRawCaptureBundleV3(
     "relocalization_events.json",
     "overlap_graph.json",
     "video_track.json",
-    "walkthrough.mov",
     "motion.jsonl",
     "semantic_anchor_observations.jsonl",
     "capture_upload_complete.json",
     "hashes.json",
     "sync_map.jsonl",
-    "arkit/poses.jsonl",
-    "arkit/frames.jsonl",
-    "arkit/frame_quality.jsonl",
-    "arkit/per_frame_camera_state.jsonl",
-    "arkit/session_intrinsics.json",
-    "arkit/depth_manifest.json",
-    "arkit/confidence_manifest.json",
   ];
 
-  for (const file of requiredFiles) {
-    if (!input.filesPresent.has(file)) {
-      blockers.push(`missing_required_file:${file}`);
-    }
+  const manifest = input.manifest ?? {};
+  const captureSource = asString(manifest.capture_source) ?? "unknown";
+  const profileId = asString(manifest.capture_profile_id) ?? "";
+  const capabilities = asRecord(manifest.capture_capabilities) ?? {};
+
+  requireFiles(input.filesPresent, requiredBaseFiles, blockers);
+
+  if (!hasWalkthroughFile(input.filesPresent, asString(manifest.video_uri))) {
+    blockers.push("missing_required_file:walkthrough");
   }
 
   if (!isCanonicalV3Manifest(input.manifest)) {
     blockers.push("manifest_not_v3");
   }
 
-  const manifest = input.manifest ?? {};
+  const arkitRequired =
+    captureSource === "iphone" ||
+    profileId.startsWith("iphone_arkit") ||
+    input.filesPresent.has("arkit/poses.jsonl");
+  const arcoreRequired =
+    captureSource === "android" &&
+    (profileId.startsWith("android_arcore") ||
+      hasCapability(capabilities, "camera_pose") ||
+      input.filesPresent.has("arcore/poses.jsonl"));
+  const glassesRequired = captureSource === "glasses" || profileId.startsWith("glasses_");
+  const companionPhoneRequired =
+    hasCapability(capabilities, "companion_phone_pose") ||
+    hasCapability(capabilities, "companion_phone_intrinsics") ||
+    hasCapability(capabilities, "companion_phone_calibration") ||
+    input.filesPresent.has("companion_phone/poses.jsonl");
+
+  if (arkitRequired) {
+    requireFiles(
+      input.filesPresent,
+      [
+        "arkit/poses.jsonl",
+        "arkit/frames.jsonl",
+        "arkit/frame_quality.jsonl",
+        "arkit/per_frame_camera_state.jsonl",
+        "arkit/session_intrinsics.json",
+      ],
+      blockers
+    );
+    if (hasCapability(capabilities, "depth") || manifest.depth_supported === true) {
+      requireFiles(input.filesPresent, ["arkit/depth_manifest.json"], blockers);
+    }
+    if (hasCapability(capabilities, "depth_confidence") || manifest.depth_supported === true) {
+      requireFiles(input.filesPresent, ["arkit/confidence_manifest.json"], blockers);
+    }
+  }
+
+  if (arcoreRequired) {
+    requireFiles(
+      input.filesPresent,
+      ["arcore/poses.jsonl", "arcore/frames.jsonl", "arcore/session_intrinsics.json", "arcore/tracking_state.jsonl"],
+      blockers
+    );
+    if (hasCapability(capabilities, "point_cloud")) {
+      requireFiles(input.filesPresent, ["arcore/point_cloud.jsonl"], blockers);
+    }
+    if (hasCapability(capabilities, "planes")) {
+      requireFiles(input.filesPresent, ["arcore/planes.jsonl"], blockers);
+    }
+    if (hasCapability(capabilities, "light_estimate")) {
+      requireFiles(input.filesPresent, ["arcore/light_estimates.jsonl"], blockers);
+    }
+    if (hasCapability(capabilities, "depth")) {
+      requireFiles(input.filesPresent, ["arcore/depth_manifest.json"], blockers);
+    }
+    if (hasCapability(capabilities, "depth_confidence")) {
+      requireFiles(input.filesPresent, ["arcore/confidence_manifest.json"], blockers);
+    }
+  }
+
+  if (glassesRequired) {
+    requireFiles(
+      input.filesPresent,
+      [
+        "glasses/stream_metadata.json",
+        "glasses/frame_timestamps.jsonl",
+        "glasses/device_state.jsonl",
+        "glasses/health_events.jsonl",
+      ],
+      blockers
+    );
+  }
+
+  if (companionPhoneRequired) {
+    if (hasCapability(capabilities, "companion_phone_pose") || input.filesPresent.has("companion_phone/poses.jsonl")) {
+      requireFiles(input.filesPresent, ["companion_phone/poses.jsonl"], blockers);
+    }
+    if (
+      hasCapability(capabilities, "companion_phone_intrinsics") ||
+      input.filesPresent.has("companion_phone/session_intrinsics.json")
+    ) {
+      requireFiles(input.filesPresent, ["companion_phone/session_intrinsics.json"], blockers);
+    }
+    if (
+      hasCapability(capabilities, "companion_phone_calibration") ||
+      input.filesPresent.has("companion_phone/calibration.json")
+    ) {
+      requireFiles(input.filesPresent, ["companion_phone/calibration.json"], blockers);
+    }
+  }
+
   const requiredManifestStrings = [
     "scene_id",
     "capture_id",
@@ -230,12 +359,13 @@ export function validateRawCaptureBundleV3(
     "video_uri",
     "app_version",
     "app_build",
-    "ios_version",
-    "ios_build",
     "hardware_model_identifier",
     "device_model_marketing",
     "capture_profile_id",
   ];
+  if (captureSource === "iphone") {
+    requiredManifestStrings.push("ios_version", "ios_build");
+  }
   const requiredManifestNumbers = ["capture_start_epoch_ms", "fps_source", "width", "height"];
   const requiredManifestBooleans = ["has_lidar", "depth_supported"];
 
@@ -251,10 +381,17 @@ export function validateRawCaptureBundleV3(
   if (!asRecord(manifest.capture_capabilities)) {
     blockers.push("manifest_missing_object:capture_capabilities");
   }
+  if (!hasCapability(capabilities, "depth") && !hasExplicitMissingDepthReason(capabilities)) {
+    blockers.push("missing_depth_reason_required");
+  }
 
   const sceneId = asString(manifest.scene_id);
   const captureId = asString(manifest.capture_id);
   const cfs = asString(manifest.coordinate_frame_session_id);
+  const arcorePoses = input.arcorePoses ?? [];
+  const arcoreFrames = input.arcoreFrames ?? [];
+  const arcoreTracking = input.arcoreTracking ?? [];
+  const companionPhonePoses = input.companionPhonePoses ?? [];
 
   for (const [label, object] of [
     ["provenance", input.provenance],
@@ -278,6 +415,8 @@ export function validateRawCaptureBundleV3(
     ["recording_session", asString(input.recordingSession?.coordinate_frame_session_id)],
     ["capture_topology", asString(input.captureTopology?.coordinate_frame_session_id)],
     ["session_intrinsics", asString(input.sessionIntrinsics?.coordinate_frame_session_id)],
+    ["arcore_session_intrinsics", asString(input.arcoreSessionIntrinsics?.coordinate_frame_session_id)],
+    ["companion_phone_intrinsics", asString(input.companionPhoneIntrinsics?.coordinate_frame_session_id)],
   ] as const) {
     if (cfs && value && value !== cfs) {
       blockers.push(`coordinate_frame_session_mismatch:${label}`);
@@ -287,16 +426,20 @@ export function validateRawCaptureBundleV3(
   validateFrameSeries("poses", input.poses, blockers);
   validateFrameSeries("frames", input.frames, blockers);
   validateFrameSeries("frame_quality", input.frameQuality, blockers);
+  validateFrameSeries("arcore_poses", arcorePoses, blockers);
+  validateFrameSeries("arcore_frames", arcoreFrames, blockers);
+  validateFrameSeries("arcore_tracking_state", arcoreTracking, blockers);
+  validateFrameSeries("companion_phone_poses", companionPhonePoses, blockers);
   validateFrameSeries("sync_map", input.syncMap, blockers);
 
   validateMotionSamples(input.motion, blockers);
   validateSemanticAnchorObservations(input.semanticAnchorObservations, blockers);
 
-  if (input.poses.length > 0 && input.syncMap.length === 0) {
+  if ((input.poses.length > 0 || arcorePoses.length > 0 || companionPhonePoses.length > 0) && input.syncMap.length === 0) {
     blockers.push("sync_map_missing_rows");
   }
 
-  for (const pose of input.poses) {
+  for (const pose of [...input.poses, ...arcorePoses, ...companionPhonePoses]) {
     const frameId = asString(pose.frame_id) ?? "unknown";
     if (!isMatrix4x4(pose.T_world_camera)) {
       blockers.push(`invalid_transform_matrix:${frameId}`);
@@ -310,6 +453,8 @@ export function validateRawCaptureBundleV3(
   for (const [label, manifestObject, pathKeys] of [
     ["depth", input.depthManifest, ["depth_path", "paired_confidence_path"]],
     ["confidence", input.confidenceManifest, ["confidence_path", "paired_depth_path"]],
+    ["arcore_depth", input.arcoreDepthManifest, ["depth_path", "paired_confidence_path"]],
+    ["arcore_confidence", input.arcoreConfidenceManifest, ["confidence_path", "paired_depth_path"]],
   ] as const) {
     const frames = Array.isArray(manifestObject?.frames) ? manifestObject?.frames : [];
     for (const frame of frames) {
@@ -332,6 +477,11 @@ export function validateRawCaptureBundleV3(
     for (const relativePath of Object.keys(hashArtifacts)) {
       if (!input.filesPresent.has(relativePath)) {
         blockers.push(`hash_target_missing:${relativePath}`);
+      }
+    }
+    for (const relativePath of [...input.filesPresent].sort()) {
+      if (relativePath !== "hashes.json" && !(relativePath in hashArtifacts)) {
+        blockers.push(`hash_coverage_missing:${relativePath}`);
       }
     }
   }

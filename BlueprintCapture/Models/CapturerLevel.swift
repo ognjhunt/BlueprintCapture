@@ -42,11 +42,11 @@ enum CapturerLevel: String, Codable, CaseIterable {
         case .novice:
             return ["Access to all public capture tasks"]
         case .verified:
-            return ["Priority access to high-payout tasks", "+5% base rate bonus"]
+            return ["Priority review for well-scoped capture tasks", "Early access to structured capture assignments"]
         case .expert:
-            return ["Priority access to high-payout tasks", "+15% base rate bonus", "Exclusive enterprise captures"]
+            return ["Priority review for well-scoped capture tasks", "Advanced capture assignments when available", "Enterprise capture eligibility review"]
         case .master:
-            return ["Top-tier payout rates", "+25% base rate bonus", "Exclusive enterprise captures", "Featured on leaderboard"]
+            return ["Advanced capture assignments when available", "Enterprise capture eligibility review", "Featured on leaderboard"]
         }
     }
 

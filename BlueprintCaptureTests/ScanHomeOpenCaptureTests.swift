@@ -94,4 +94,24 @@ struct ScanHomeOpenCaptureTests {
 
         #expect(items.map(\.id) == ["job-1", "job-2"])
     }
+
+    @Test @MainActor
+    func inferredNearbyCandidatesStayReviewGatedWithoutQuotedPayout() {
+        let candidate = PlaceDetailsLite(
+            placeId: "place-1",
+            displayName: "Westside Warehouse",
+            formattedAddress: "100 Logistics Way, Durham, NC",
+            lat: 35.99,
+            lng: -78.90,
+            types: ["warehouse_store", "store"]
+        )
+
+        let job = ScanHomeViewModel.makeInferredNearbyJob(from: candidate)
+
+        #expect(job.payoutCents == 0)
+        #expect(job.quotedPayoutCents == nil)
+        #expect(job.explicitPayoutCents == nil)
+        #expect(job.rightsProfile == "review_required")
+        #expect(job.requestedOutputs == ["qualification", "review_intake"])
+    }
 }

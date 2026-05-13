@@ -58,6 +58,11 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val motionAuthority: CaptureAuthority,
     )
 
+    private data class MaterializedMotionFiles(
+        val motionFile: File,
+        val diagnosticImuFile: File?,
+    )
+
     fun writeBundle(
         outputRoot: File,
         request: AndroidCaptureBundleRequest,
@@ -75,11 +80,8 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         arcoreEvidenceDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("arcore")) }
         glassesEvidenceDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("glasses")) }
         companionPhoneDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("companion_phone")) }
-        val motionSamplesFile = imuSamplesSource?.takeIf { it.exists() && it.length() > 0 }?.let {
-            val dest = rawDirectory.resolve("motion.jsonl")
-            it.copyTo(dest, overwrite = true)
-            dest
-        } ?: rawDirectory.resolve("motion.jsonl").also { it.writeText("") }
+        val motionFiles = materializeMotionFiles(rawDirectory, imuSamplesSource)
+        val motionSamplesFile = motionFiles.motionFile
         val arcoreRoot = rawDirectory.resolve("arcore")
         val relocalizationEvents = deriveRelocalizationEvents(arcoreRoot.resolve("tracking_state.jsonl"))
         materializeSyncMap(
@@ -101,6 +103,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val captureSource = if (request.captureSource == AndroidCaptureSource.AndroidPhone) "android" else "glasses"
         val captureTierHint = if (request.captureSource == AndroidCaptureSource.AndroidPhone) "tier2_android" else "tier2_glasses"
         val coordinateFrameSessionId = request.captureTopology?.captureSessionId ?: request.captureId
+        val upstreamHandoff = upstreamHandoffFor(request)
         val captureTopology = request.captureTopology ?: CaptureTopologyMetadata(
             captureSessionId = request.captureId,
             routeId = "route_unknown",
@@ -132,6 +135,10 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             evidenceTier = evidenceTier,
             rightsProfile = request.rightsProfile ?: "unknown",
             requestedOutputs = request.requestedOutputs,
+            siteSubmissionId = request.siteSubmissionId,
+            buyerRequestId = request.buyerRequestId,
+            captureJobId = request.captureJobId,
+            upstreamHandoff = upstreamHandoff,
             siteIdentity = request.siteIdentity,
             captureTopology = captureTopology,
             captureMode = request.captureMode,
@@ -139,11 +146,13 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
                 ?: request.workflowName
                 ?: request.captureContextHint,
             taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
+            targetKPI = request.intakePacket?.targetKPI,
             zone = request.intakePacket?.zone ?: request.zone,
             owner = request.intakePacket?.owner ?: request.owner,
             sceneMemoryCapture = SceneMemoryCapture(
                 sensorAvailability = bundleEvidence.sensorAvailability,
                 operatorNotes = request.operatorNotes,
+                inaccessibleAreas = request.inaccessibleAreas,
                 motionProvenance = bundleEvidence.motionProvenance,
                 motionTimestampsCaptureRelative = bundleEvidence.captureEvidence.motionTimestampsCaptureRelative,
                 geometrySource = bundleEvidence.geometrySource,
@@ -164,11 +173,19 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         // capture_context.json
         // -----------------------------------------------------------------
         val context = CaptureContext(
-            siteSubmissionId = request.siteSubmissionId ?: request.sceneId,
+            sceneId = request.sceneId,
+            captureId = request.captureId,
+            siteSubmissionId = request.siteSubmissionId,
+            buyerRequestId = request.buyerRequestId,
+            captureJobId = request.captureJobId,
+            upstreamHandoff = upstreamHandoff,
+            captureSource = captureSource,
+            requestedOutputs = request.requestedOutputs,
             taskTextHint = request.intakePacket?.workflowName
                 ?: request.workflowName
                 ?: request.captureContextHint,
             taskSteps = request.intakePacket?.taskSteps ?: request.taskSteps,
+            targetKPI = request.intakePacket?.targetKPI,
             zone = request.intakePacket?.zone ?: request.zone,
             owner = request.intakePacket?.owner ?: request.owner,
             operatorNotes = request.operatorNotes,
@@ -177,6 +194,15 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureCapabilities = bundleEvidence.captureCapabilities,
             captureRights = CaptureRights(
                 payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
+            ),
+            sceneMemory = SceneMemoryCapture(
+                sensorAvailability = bundleEvidence.sensorAvailability,
+                operatorNotes = request.operatorNotes,
+                inaccessibleAreas = request.inaccessibleAreas,
+                motionProvenance = bundleEvidence.motionProvenance,
+                motionTimestampsCaptureRelative = bundleEvidence.captureEvidence.motionTimestampsCaptureRelative,
+                geometrySource = bundleEvidence.geometrySource,
+                geometryExpectedDownstream = bundleEvidence.geometryExpectedDownstream,
             ),
             siteIdentity = request.siteIdentity,
             captureTopology = captureTopology,
@@ -284,7 +310,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         }
 
         // IMU samples — copy pre-written file from sampler if present
-        val imuSamplesFile = motionSamplesFile
+        val imuSamplesFile = motionFiles.diagnosticImuFile ?: motionSamplesFile
 
         val provisionalProvenance = ProvenanceFile(
             sceneId = request.sceneId,
@@ -303,8 +329,8 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val hashesFile = rawDirectory.resolve("hashes.json")
         val artifactHashes = buildArtifactHashes(rawDirectory, exclude = setOf("hashes.json"))
         val computedBundleHash = bundleHash(artifactHashes)
-        val finalArtifactHashes = buildArtifactHashes(rawDirectory, exclude = setOf("hashes.json"))
         provenanceFile.writeText(json.encodeToString(provisionalProvenance.copy(bundleSha256 = computedBundleHash)))
+        val finalArtifactHashes = buildArtifactHashes(rawDirectory, exclude = setOf("hashes.json"))
         hashesFile.writeText(json.encodeToString(HashesFile(bundleSha256 = bundleHash(finalArtifactHashes), artifacts = finalArtifactHashes)))
 
         return AndroidCaptureBundleResult(
@@ -337,6 +363,27 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             AndroidCaptureSource.AndroidPhone ->
                 if (hasScaffolding) "android_plus_scaffolding" else "android_video_only"
         }
+    }
+
+    private fun upstreamHandoffFor(request: AndroidCaptureBundleRequest): UpstreamHandoff {
+        val siteSubmissionId = request.siteSubmissionId?.trim()?.takeIf { it.isNotEmpty() }
+        val buyerRequestId = request.buyerRequestId?.trim()?.takeIf { it.isNotEmpty() }
+        val captureJobId = request.captureJobId?.trim()?.takeIf { it.isNotEmpty() }
+        val blockers = buildList {
+            if (siteSubmissionId == null) add("missing_site_submission_id")
+            if (buyerRequestId == null) add("missing_buyer_request_id")
+            if (captureJobId == null) add("missing_capture_job_id")
+        }
+        return UpstreamHandoff(
+            siteSubmissionId = siteSubmissionId,
+            buyerRequestId = buyerRequestId,
+            captureJobId = captureJobId,
+            siteSubmissionIdPresent = siteSubmissionId != null,
+            buyerRequestIdPresent = buyerRequestId != null,
+            captureJobIdPresent = captureJobId != null,
+            hostedReviewTruthState = if (blockers.isEmpty()) "upstream_ids_present" else "blocked_missing_upstream_ids",
+            blockers = blockers,
+        )
     }
 
     private fun evidenceTierFor(request: AndroidCaptureBundleRequest, captureModality: String): String {
@@ -396,6 +443,10 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             if (request.captureSource == AndroidCaptureSource.MetaGlasses && motionSamples > 0) CaptureAuthority.DiagnosticOnly
             else if (motionSamples > 0) CaptureAuthority.AuthoritativeRaw
             else CaptureAuthority.NotAvailable
+        val missingDepthReason =
+            if (arcoreDepthFrames > 0) null
+            else if (arcorePoseRows > 0 || arcoreIntrinsicsValid) "not_enabled"
+            else "not_supported"
         val captureProfileId = when {
             request.captureSource == AndroidCaptureSource.MetaGlasses &&
                 (companionPhonePoseRows > 0 || companionPhoneIntrinsicsValid) -> "glasses_pov_companion_phone"
@@ -449,6 +500,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             cameraIntrinsics = arcoreIntrinsicsValid,
             depth = arcoreDepthFrames > 0,
             depthConfidence = arcoreConfidenceFrames > 0,
+            missingDepthReason = missingDepthReason,
             mesh = false,
             pointCloud = arcorePointCloudSamples > 0,
             planes = arcorePlaneRows > 0,
@@ -495,6 +547,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             cameraIntrinsics = sensorAvailability.cameraIntrinsics,
             depth = sensorAvailability.depth,
             depthConfidence = sensorAvailability.depthConfidence,
+            missingDepthReason = missingDepthReason,
             mesh = sensorAvailability.mesh,
             pointCloud = sensorAvailability.pointCloud,
             planes = sensorAvailability.planes,
@@ -551,6 +604,63 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
                 child.copyTo(target, overwrite = true)
             }
         }
+    }
+
+    private fun materializeMotionFiles(rawDirectory: File, imuSamplesSource: File?): MaterializedMotionFiles {
+        val motionFile = rawDirectory.resolve("motion.jsonl")
+        val source = imuSamplesSource?.takeIf { it.exists() && it.length() > 0 }
+        if (source == null) {
+            motionFile.writeText("")
+            return MaterializedMotionFiles(motionFile = motionFile, diagnosticImuFile = null)
+        }
+
+        if (isCanonicalMotionFile(source)) {
+            source.copyTo(motionFile, overwrite = true)
+            return MaterializedMotionFiles(motionFile = motionFile, diagnosticImuFile = null)
+        }
+
+        val diagnosticFile = rawDirectory.resolve("android_imu_samples.jsonl")
+        source.copyTo(diagnosticFile, overwrite = true)
+        motionFile.writeText("")
+        return MaterializedMotionFiles(motionFile = motionFile, diagnosticImuFile = diagnosticFile)
+    }
+
+    private fun isCanonicalMotionFile(file: File): Boolean {
+        val lines = file.readLines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) return false
+        return lines.all { line ->
+            val payload = parseJsonObject(line) ?: return@all false
+            val required = listOf(
+                "timestamp",
+                "t_capture_sec",
+                "t_monotonic_ns",
+                "wall_time",
+                "motion_provenance",
+                "attitude",
+                "rotation_rate",
+                "gravity",
+                "user_acceleration",
+            )
+            required.all { hasJsonValue(payload, it) } &&
+                hasObjectKeys(payload, "attitude", listOf("roll", "pitch", "yaw", "quaternion")) &&
+                hasObjectKeys(payload, "rotation_rate", listOf("x", "y", "z")) &&
+                hasObjectKeys(payload, "gravity", listOf("x", "y", "z")) &&
+                hasObjectKeys(payload, "user_acceleration", listOf("x", "y", "z")) &&
+                runCatching {
+                    val quaternion = payload["attitude"]!!.jsonObject["quaternion"]!!.jsonObject
+                    listOf("x", "y", "z", "w").all { hasJsonValue(quaternion, it) }
+                }.getOrDefault(false)
+        }
+    }
+
+    private fun hasObjectKeys(payload: JsonObject, key: String, requiredKeys: List<String>): Boolean {
+        val nested = runCatching { payload[key]?.jsonObject }.getOrNull() ?: return false
+        return requiredKeys.all { hasJsonValue(nested, it) }
+    }
+
+    private fun hasJsonValue(payload: JsonObject, key: String): Boolean {
+        val value = payload[key] ?: return false
+        return value.toString() != "null"
     }
 
     private fun countJsonlRows(file: File?): Int {

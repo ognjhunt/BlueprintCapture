@@ -226,6 +226,19 @@ struct ScanJob: Identifiable, Codable, Equatable {
         max(0, payoutCents / 100)
     }
 
+    var explicitPayoutCents: Int? {
+        if let quotedPayoutCents, quotedPayoutCents > 0 {
+            return quotedPayoutCents
+        }
+        return payoutCents > 0 ? payoutCents : nil
+    }
+
+    var explicitPayoutDollarRange: ClosedRange<Int>? {
+        guard let explicitPayoutCents else { return nil }
+        let dollars = max(1, explicitPayoutCents / 100)
+        return dollars...dollars
+    }
+
     var isDiscoverableInMarketplace: Bool {
         marketplaceState?.isDiscoverable ?? true
     }

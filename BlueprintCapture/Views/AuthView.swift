@@ -23,7 +23,7 @@ struct AuthView: View {
                             Text("Welcome to Blueprint")
                                 .font(BlueprintTheme.display(34, weight: .semibold))
                                 .foregroundStyle(BlueprintTheme.textPrimary)
-                            Text("Capture spaces for review. Get paid after approval.")
+                            Text("Capture spaces for review. Payout status stays backend-gated.")
                                 .font(BlueprintTheme.body(14, weight: .medium))
                                 .foregroundStyle(BlueprintTheme.textSecondary)
                         }

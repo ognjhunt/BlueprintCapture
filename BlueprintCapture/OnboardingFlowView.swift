@@ -228,7 +228,7 @@ private struct InviteCodeStepView: View {
                         .font(BlueprintTheme.display(28, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("Enter your friend's invite code below.\nYou'll both get 10% extra on your first payout.")
+                    Text("Enter your friend's invite code below.\nInvites help us connect your alpha onboarding and review status.")
                         .font(BlueprintTheme.body(15, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -940,7 +940,7 @@ private struct OnboardingGlassesView: View {
                         .font(BlueprintTheme.display(30, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("Pair Meta smart glasses for hands-free capture, or skip and start with your iPhone.")
+                    Text("Pair Meta smart glasses for supported hands-free capture, or skip and start review-gated iPhone capture.")
                         .font(BlueprintTheme.body(15, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -960,7 +960,7 @@ private struct OnboardingGlassesView: View {
                             Text("Connect once")
                                 .font(BlueprintTheme.body(15, weight: .semibold))
                                 .foregroundStyle(BlueprintTheme.textPrimary)
-                            Text("Then move straight into hands-free capture whenever a site opens.")
+                            Text("Then use hands-free capture only where the job or review flow supports it.")
                                 .font(BlueprintTheme.body(13, weight: .medium))
                                 .foregroundStyle(BlueprintTheme.textSecondary)
                         }
@@ -1042,7 +1042,7 @@ private struct OnboardingCompleteView: View {
 
                 Spacer()
 
-                kledPrimaryButton("Start Capturing", action: onFinish)
+                kledPrimaryButton("Open Capture Feed", action: onFinish)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 32)
             }

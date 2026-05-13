@@ -16,6 +16,22 @@ struct CaptureRawContractV3ValidatorTests {
     }
 
     @Test
+    func validatorRejectsHashManifestMissingRequiredFileCoverage() throws {
+        let root = try makeValidBundle()
+        let hashesURL = root.appendingPathComponent("hashes.json")
+        let hashes = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: hashesURL)) as? [String: Any])
+        var updated = hashes
+        var artifacts = try #require(hashes["artifacts"] as? [String: String])
+        artifacts.removeValue(forKey: "rights_consent.json")
+        updated["artifacts"] = artifacts
+        try writeJSON(updated, to: hashesURL)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("hash_coverage_missing:rights_consent.json"))
+    }
+
+    @Test
     func validatorRejectsCoordinateFrameMismatchAndMissingArtifacts() throws {
         let root = try makeValidBundle()
         let recordingSessionURL = root.appendingPathComponent("recording_session.json")
@@ -59,6 +75,7 @@ struct CaptureRawContractV3ValidatorTests {
             "camera_intrinsics": true,
             "depth": false,
             "depth_confidence": false,
+            "missing_depth_reason": "not_supported",
             "planes": false,
             "feature_points": false,
             "tracking_state": true,
@@ -102,6 +119,62 @@ struct CaptureRawContractV3ValidatorTests {
 
         let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
         #expect(result.isValid == true)
+    }
+
+    @Test
+    func validatorRejectsUnavailableDepthWithoutReason() throws {
+        let root = try makeValidBundle()
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        let manifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+        var updated = manifest
+        updated["has_lidar"] = false
+        updated["depth_supported"] = false
+        updated["capture_profile_id"] = "iphone_arkit_non_lidar"
+        updated["capture_capabilities"] = [
+            "camera_pose": true,
+            "camera_intrinsics": true,
+            "depth": false,
+            "depth_confidence": false,
+            "tracking_state": true,
+            "motion": true,
+            "motion_authoritative": true,
+            "pose_rows": 1,
+            "intrinsics_valid": true,
+            "depth_frames": 0,
+            "confidence_frames": 0,
+            "tracking_state_rows": 1,
+            "motion_samples": 1,
+            "pose_authority": "authoritative_raw",
+            "intrinsics_authority": "authoritative_raw",
+            "depth_authority": "not_available",
+            "motion_authority": "authoritative_raw",
+            "motion_provenance": "iphone_device_imu",
+            "geometry_source": "arkit",
+            "geometry_expected_downstream": true,
+        ]
+        updated["capture_evidence"] = [
+            "pose_rows": 1,
+            "intrinsics_valid": true,
+            "depth_frames": 0,
+            "confidence_frames": 0,
+            "tracking_state_rows": 1,
+            "motion_samples": 1,
+            "pose_authority": "authoritative_raw",
+            "intrinsics_authority": "authoritative_raw",
+            "depth_authority": "not_available",
+            "motion_authority": "authoritative_raw",
+            "motion_provenance": "iphone_device_imu",
+        ]
+        try writeJSON(updated, to: manifestURL)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("arkit/depth_manifest.json"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("arkit/confidence_manifest.json"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("arkit/depth"))
+        try FileManager.default.removeItem(at: root.appendingPathComponent("arkit/confidence"))
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("missing_depth_reason_required"))
     }
 
     @Test
@@ -551,6 +624,7 @@ struct CaptureRawContractV3ValidatorTests {
                 "camera_intrinsics": false,
                 "depth": false,
                 "depth_confidence": false,
+                "missing_depth_reason": "not_supported",
                 "motion": true,
                 "motion_authoritative": false,
                 "companion_phone_pose": includeCompanionPhone,

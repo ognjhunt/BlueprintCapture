@@ -33,9 +33,9 @@ final class CorePathUITests: XCTestCase {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let approvedFeatured = app.buttons["scan-home-featured-ui_test_job_approved"]
-        XCTAssertTrue(approvedFeatured.waitForExistence(timeout: 10))
-        approvedFeatured.tap()
+        let approvedTask = app.buttons["capturer-task-ui_test_job_approved"]
+        XCTAssertTrue(approvedTask.waitForExistence(timeout: 10))
+        approvedTask.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
         XCTAssertTrue(stopButton.waitForExistence(timeout: 10))
@@ -50,9 +50,9 @@ final class CorePathUITests: XCTestCase {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let approvedFeatured = app.buttons["scan-home-featured-ui_test_job_approved"]
-        XCTAssertTrue(approvedFeatured.waitForExistence(timeout: 10))
-        approvedFeatured.tap()
+        let approvedTask = app.buttons["capturer-task-ui_test_job_approved"]
+        XCTAssertTrue(approvedTask.waitForExistence(timeout: 10))
+        approvedTask.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
         XCTAssertTrue(stopButton.waitForExistence(timeout: 10))
@@ -72,7 +72,8 @@ final class CorePathUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Wallet"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Set up identity and payouts"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Payout setup unavailable"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Payout setup requires backend-verified Stripe readiness. This build only shows wallet and review status."].waitForExistence(timeout: 10))
     }
 
     private func configuredApp(scenario: String) -> XCUIApplication {

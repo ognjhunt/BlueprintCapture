@@ -25,4 +25,8 @@ BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK = NO
 BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK = NO
 BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE = NO
 BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS = YES
+BLUEPRINT_PAYOUT_PROVIDER = stripe
+// Keep NO until backend-verified live Stripe account state, webhook reconciliation,
+// payout exception monitoring, and human finance ownership are recorded.
+BLUEPRINT_PAYOUT_PROVIDER_READY = NO
 APS_ENVIRONMENT = production

@@ -387,7 +387,7 @@ struct CaptureDetailView: View {
         case .needsRecapture, .needsFix:
             return "Focus on stronger coverage, cleaner framing, and restricted-zone boundaries."
         case .paid:
-            return "See Wallet for payout timing and ledger details."
+            return "See Wallet for the recorded ledger details."
         default:
             return nil
         }

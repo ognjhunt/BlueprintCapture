@@ -320,7 +320,7 @@ struct JobDetailSheet: View {
                             .font(.subheadline)
 
                         let dollars = NSDecimalNumber(decimal: Decimal(cents) / Decimal(100))
-                        Text("Completing this capture earns \(NumberFormatter.captureCurrency.string(from: dollars) ?? "$0").")
+                        Text("Quoted payout: \(NumberFormatter.captureCurrency.string(from: dollars) ?? "$0"). Review checks quality and rights before payout eligibility is finalized.")
                             .font(BlueprintTheme.body(14, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textPrimary)
                     }

@@ -75,7 +75,9 @@ class WalletViewModel @Inject constructor(
             } else {
                 "Payout setup unavailable"
             },
-            payoutBannerBody = if (config.hasBackend) {
+            payoutBannerBody = if (config.hasPayoutProviderReady) {
+                "Backend provider proof is present, but Android alpha still keeps payout onboarding off-device until the real native proof path is wired."
+            } else if (config.hasBackend) {
                 "Android alpha syncs wallet balances and payout history only. Provider onboarding is intentionally not live in-app yet."
             } else {
                 "Payout setup is not enabled for this alpha build."

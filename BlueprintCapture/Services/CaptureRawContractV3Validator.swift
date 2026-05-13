@@ -435,6 +435,44 @@ final class CaptureRawContractV3Validator {
                 errors.append("hash_mismatch:\(relativePath)")
             }
         }
+
+        for relativePath in regularFileRelativePaths(in: rawDirectoryURL, excluding: ["hashes.json"])
+            where artifacts[relativePath] == nil {
+            errors.append("hash_coverage_missing:\(relativePath)")
+        }
+    }
+
+    private func regularFileRelativePaths(in directory: URL, excluding excludedNames: Set<String>) -> [String] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        var relativePaths: [String] = []
+        for case let fileURL as URL in enumerator {
+            guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
+                  values.isRegularFile == true,
+                  !excludedNames.contains(fileURL.lastPathComponent) else {
+                continue
+            }
+            let relativePath = relativePathInBundle(for: fileURL, relativeTo: directory)
+            relativePaths.append(relativePath)
+        }
+        return relativePaths.sorted()
+    }
+
+    private func relativePathInBundle(for url: URL, relativeTo directory: URL) -> String {
+        let path = url.standardizedFileURL.path
+        let basePath = directory.standardizedFileURL.path
+        guard path.hasPrefix(basePath) else { return url.lastPathComponent }
+        var relative = String(path.dropFirst(basePath.count))
+        while relative.hasPrefix("/") {
+            relative.removeFirst()
+        }
+        return relative.isEmpty ? url.lastPathComponent : relative
     }
 
     private func validateTruthfulness(manifest: [String: Any], errors: inout [String]) {
@@ -460,6 +498,19 @@ final class CaptureRawContractV3Validator {
         if capability(capabilities, key: "depth"),
            ((evidence["depth_frames"] as? NSNumber)?.intValue ?? 0) <= 0 {
             errors.append("false_claim:depth_without_frames")
+        }
+        if !capability(capabilities, key: "depth") {
+            let reason = (capabilities["missing_depth_reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let allowedReasons: Set<String> = [
+                "not_supported",
+                "not_enabled",
+                "temporarily_unavailable",
+                "dropped_at_write",
+                "invalid_for_frame",
+            ]
+            if reason == nil || !allowedReasons.contains(reason!) {
+                errors.append("missing_depth_reason_required")
+            }
         }
         if (evidence["pose_authority"] as? String) == "authoritative_raw",
            (manifest["capture_source"] as? String) == "glasses" {

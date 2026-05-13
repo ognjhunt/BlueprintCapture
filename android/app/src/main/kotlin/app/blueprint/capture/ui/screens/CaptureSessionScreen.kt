@@ -450,7 +450,7 @@ private fun CaptureDetailsSurface(
             "Complete all floors before submitting.",
         )
     }
-    val payoutText = capture.payoutText ?: capture.quotedPayoutCents?.let(::formatCompactPayout) ?: "$30"
+    val payoutDisplay = capture.payoutDisplay
     val actionEnabled = capture.permissionTone != CapturePermissionTone.Blocked
     val actionLabel = capture.detailActionLabel
     val actionTint = if (actionEnabled) BlueprintTextPrimary.copy(alpha = 0.94f) else BlueprintTextMuted.copy(alpha = 0.72f)
@@ -585,8 +585,8 @@ private fun CaptureDetailsSurface(
                     ) {
                         DetailMetric(
                             icon = Icons.Rounded.MonetizationOn,
-                            iconTint = BlueprintSuccess,
-                            text = payoutText,
+                            iconTint = if (payoutDisplay.hasQuotedPayout) BlueprintSuccess else BlueprintTextSecondary,
+                            text = payoutDisplay.metricText,
                         )
                         capture.distanceText?.let { distance ->
                             DetailMetric(
@@ -605,7 +605,7 @@ private fun CaptureDetailsSurface(
                     }
                 }
 
-                PayoutBanner(payoutText = payoutText)
+                PayoutBanner(display = payoutDisplay)
 
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text(
@@ -763,20 +763,21 @@ private fun DetailMetric(
 
 @Composable
 private fun PayoutBanner(
-    payoutText: String,
+    display: CapturePayoutDisplay,
 ) {
+    val accent = if (display.hasQuotedPayout) BlueprintSuccess else BlueprintTeal
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Color(0xFF171717))
-            .border(1.dp, BlueprintSuccess.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
     ) {
         Box(
             modifier = Modifier
                 .padding(vertical = 14.dp)
                 .size(width = 4.dp, height = 58.dp)
-                .background(BlueprintSuccess, RoundedCornerShape(3.dp)),
+                .background(accent, RoundedCornerShape(3.dp)),
         )
 
         Row(
@@ -790,13 +791,13 @@ private fun PayoutBanner(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(BlueprintSuccess.copy(alpha = 0.18f)),
+                    .background(accent.copy(alpha = 0.18f)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.MonetizationOn,
+                    imageVector = if (display.hasQuotedPayout) Icons.Rounded.MonetizationOn else Icons.Rounded.Visibility,
                     contentDescription = null,
-                    tint = BlueprintSuccess,
+                    tint = accent,
                     modifier = Modifier.size(22.dp),
                 )
             }
@@ -805,7 +806,7 @@ private fun PayoutBanner(
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 Text(
-                    text = "Completing this capture earns $payoutText",
+                    text = display.bannerTitle,
                     style = TextStyle(
                         color = BlueprintTextPrimary,
                         fontSize = 18.sp,
@@ -815,7 +816,7 @@ private fun PayoutBanner(
                     ),
                 )
                 Text(
-                    text = "Paid after approval review · Usually 3–5 days",
+                    text = display.bannerBody,
                     style = TextStyle(
                         color = BlueprintTextMuted,
                         fontSize = 14.sp,
@@ -1883,22 +1884,6 @@ private fun formatElapsed(seconds: Long): String {
 
 private fun formatDurationMs(durationMs: Long): String {
     return formatElapsed(durationMs / 1_000L)
-}
-
-private fun formatPayout(cents: Int): String {
-    val dollars = cents / 100
-    val remainder = cents % 100
-    return "$$dollars.${remainder.toString().padStart(2, '0')}"
-}
-
-private fun formatCompactPayout(cents: Int): String {
-    val dollars = cents / 100
-    val remainder = cents % 100
-    return if (remainder == 0) {
-        "$$dollars"
-    } else {
-        "$$dollars.${remainder.toString().padStart(2, '0')}"
-    }
 }
 
 private fun statusLabel(uiState: CaptureSessionUiState): String {

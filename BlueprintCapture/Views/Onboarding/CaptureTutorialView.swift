@@ -25,12 +25,12 @@ struct CaptureTutorialView: View {
         TutorialStep(
             icon: "lightbulb.fill",
             title: "Good lighting helps",
-            detail: "Well-lit spaces produce higher quality captures and bigger payouts."
+            detail: "Well-lit spaces produce higher quality captures and cleaner review evidence."
         ),
         TutorialStep(
             icon: "clock.fill",
             title: "15–30 minutes",
-            detail: "A complete capture takes 15–30 minutes. Longer, thorough captures earn more."
+            detail: "A complete capture usually takes 15–30 minutes. Thorough coverage improves review quality."
         ),
     ]
 

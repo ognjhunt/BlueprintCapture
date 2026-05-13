@@ -323,8 +323,7 @@ struct UploadProgressOverlayView: View {
                     .multilineTextAlignment(.center)
             }
 
-            // Estimated earnings card
-            estimatedEarningsCard(for: upload)
+            completionReviewCard(for: upload)
         }
         .padding(16)
         .background(
@@ -334,38 +333,34 @@ struct UploadProgressOverlayView: View {
     }
 
     @ViewBuilder
-    private func estimatedEarningsCard(for upload: UploadQueueViewModel.UploadStatus) -> some View {
-        let payoutRange = upload.estimatedPayoutRange ?? 50...150
+    private func completionReviewCard(for upload: UploadQueueViewModel.UploadStatus) -> some View {
+        let display = UploadCompletionReviewDisplay.make(estimatedPayoutRange: upload.estimatedPayoutRange)
 
         VStack(spacing: 12) {
             HStack {
-                Image(systemName: "dollarsign.circle.fill")
+                Image(systemName: display.systemImage)
                     .font(.system(size: 20))
-                    .foregroundStyle(BlueprintTheme.brandTeal)
+                    .foregroundStyle(display.isQuotedPayout ? BlueprintTheme.brandTeal : .white.opacity(0.7))
 
-                Text("Estimated Payout")
+                Text(display.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.white.opacity(0.8))
 
                 Spacer()
             }
 
-            HStack(alignment: .firstTextBaseline) {
-                Text("$\(payoutRange.lowerBound) - $\(payoutRange.upperBound)")
+            if let primaryText = display.primaryText {
+                Text(primaryText)
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
-
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Based on quality")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
-                    Text("Paid within 48 hours")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.5))
-                }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            Text(display.detailText)
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.58))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
         .background(

@@ -49,7 +49,8 @@ final class UploadQueueViewModel: ObservableObject {
     }
 
     func enqueueGlassesCapture(artifacts: GlassesCaptureManager.CaptureArtifacts, job: ScanJob) {
-        let payoutEligible = job.payoutCents > 0
+        let quotedPayoutCents = job.explicitPayoutCents
+        let payoutEligible = quotedPayoutCents != nil
         let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: job.id,
@@ -65,7 +66,7 @@ final class UploadQueueViewModel: ObservableObject {
             captureSource: .metaGlasses,
             specialTaskType: job.captureSpecialTaskType,
             priorityWeight: job.priorityWeight,
-            quotedPayoutCents: job.quotedPayoutCents ?? job.payoutCents,
+            quotedPayoutCents: quotedPayoutCents,
             rightsProfile: job.rightsProfile,
             requestedOutputs: job.requestedOutputs,
             intakePacket: job.qualificationIntakePacket,
@@ -101,8 +102,7 @@ final class UploadQueueViewModel: ObservableObject {
             captureId: CaptureBundleContext.captureIdentifier(for: request),
             metadata: ["capture_source": request.metadata.captureSource.rawValue]
         )
-        let payoutUsd = job.payoutDollars
-        enqueue(request, targetName: job.title, estimatedPayoutRange: payoutUsd...payoutUsd)
+        enqueue(request, targetName: job.title, estimatedPayoutRange: job.explicitPayoutDollarRange)
     }
 
     func retryUpload(id: UUID) {
@@ -134,7 +134,7 @@ final class UploadQueueViewModel: ObservableObject {
             captureSource: .metaGlasses,
             specialTaskType: job.captureSpecialTaskType,
             priorityWeight: job.priorityWeight,
-            quotedPayoutCents: job.quotedPayoutCents ?? job.payoutCents,
+            quotedPayoutCents: job.explicitPayoutCents,
             rightsProfile: job.rightsProfile,
             requestedOutputs: job.requestedOutputs,
             intakePacket: job.qualificationIntakePacket,
@@ -148,7 +148,7 @@ final class UploadQueueViewModel: ObservableObject {
             captureRights: CaptureRightsMetadata(
                 derivedSceneGenerationAllowed: false,
                 dataLicensingAllowed: false,
-                payoutEligible: true,
+                payoutEligible: job.explicitPayoutCents != nil,
                 consentStatus: .policyOnly,
                 permissionDocumentURI: job.permissionDocURL?.absoluteString,
                 consentScope: job.allowedAreas,
@@ -165,7 +165,7 @@ final class UploadQueueViewModel: ObservableObject {
             state: .uploading(progress: 0.42),
             uploadStartedAt: now.addingTimeInterval(-32),
             targetName: job.title,
-            estimatedPayoutRange: job.payoutDollars...job.payoutDollars
+            estimatedPayoutRange: job.explicitPayoutDollarRange
         )
         uploadStatusMap[metadata.id] = status
         ActivationFunnelStore.shared.record(
@@ -360,5 +360,36 @@ extension UploadQueueViewModel {
             case completed
             case failed(message: String)
         }
+    }
+}
+
+struct UploadCompletionReviewDisplay: Equatable {
+    let title: String
+    let primaryText: String?
+    let detailText: String
+    let systemImage: String
+    let isQuotedPayout: Bool
+
+    static func make(estimatedPayoutRange: ClosedRange<Int>?) -> UploadCompletionReviewDisplay {
+        guard let range = estimatedPayoutRange, range.lowerBound > 0, range.upperBound > 0 else {
+            return UploadCompletionReviewDisplay(
+                title: "Review pending",
+                primaryText: nil,
+                detailText: "No payout was quoted for this upload. Blueprint will review quality, rights, and capture scope before any downstream use or payout decision.",
+                systemImage: "doc.text.magnifyingglass",
+                isQuotedPayout: false
+            )
+        }
+
+        let primaryText = range.lowerBound == range.upperBound
+            ? "$\(range.lowerBound)"
+            : "$\(range.lowerBound) - $\(range.upperBound)"
+        return UploadCompletionReviewDisplay(
+            title: "Quoted payout",
+            primaryText: primaryText,
+            detailText: "Shown because this capture has an explicit quoted payout. Review still checks quality, rights, and scope before payout eligibility is finalized.",
+            systemImage: "dollarsign.circle.fill",
+            isQuotedPayout: true
+        )
     }
 }

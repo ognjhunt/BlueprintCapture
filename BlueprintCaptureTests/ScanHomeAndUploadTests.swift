@@ -313,6 +313,9 @@ struct ScanHomeAndUploadTests {
 
         #expect(job.id == "poi-place-1")
         #expect(job.category == "Warehouse Candidate")
+        #expect(job.payoutCents == 0)
+        #expect(job.quotedPayoutCents == nil)
+        #expect(job.payoutDollars == 0)
         #expect(job.rightsProfile == "review_required")
         #expect(job.requestedOutputs == ["qualification", "review_intake"])
         #expect(job.demandSourceKinds == ["inferred_signal"])

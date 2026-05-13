@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.capture.CaptureUploadRepository
 import app.blueprint.capture.data.model.CaptureLaunch
-import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.MainTab
 import app.blueprint.capture.data.model.RootStage
 import app.blueprint.capture.data.model.UploadQueueItem
@@ -23,7 +22,7 @@ data class BlueprintCaptureRootUiState(
     val stage: RootStage = RootStage.Onboarding,
     val selectedTab: MainTab = MainTab.Scan,
     val activeCapture: CaptureLaunch? = null,
-    val uploads: List<UploadQueueItem> = DemoData.uploadQueue,
+    val uploads: List<UploadQueueItem> = emptyList(),
 )
 
 private data class IntroFlags(

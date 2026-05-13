@@ -22,6 +22,9 @@ require_command() {
 require_command xcrun "Xcode command line tools are missing (xcrun not found). Install Xcode before running alpha readiness."
 require_command xcodebuild "Xcode is missing (xcodebuild not found). Install Xcode before running alpha readiness."
 
+echo "==> Validating release config"
+BLUEPRINT_RELEASE_XCCONFIG="$RELEASE_XCCONFIG" ./scripts/archive_external_alpha.sh --validate-config-only
+
 ensure_extract_frames_dependencies() {
   ensure_node_dependencies "${ROOT}/cloud/extract-frames"
 }

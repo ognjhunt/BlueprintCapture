@@ -202,8 +202,14 @@ Required fields:
 - normalized evidence counters such as `pose_rows`, `intrinsics_valid`, `depth_frames`, `confidence_frames`, `mesh_files`, `point_cloud_samples`, `plane_rows`, `feature_point_rows`, `tracking_state_rows`, `relocalization_event_rows`, `light_estimate_rows`, `motion_samples`
 - authority labels such as `pose_authority`, `intrinsics_authority`, `depth_authority`, `motion_authority`
 - `motion_provenance`
+- `missing_depth_reason` when `depth=false`; allowed values are `not_supported`, `not_enabled`, `temporarily_unavailable`, `dropped_at_write`, or `invalid_for_frame`
 - `geometry_source`
 - `geometry_expected_downstream`
+
+`upstream_handoff` carries launch/hosted-review linkage truth. Missing `site_submission_id`,
+`buyer_request_id`, or `capture_job_id` must remain listed in `upstream_handoff.blockers`; raw
+evidence can still be valid, but hosted-review, buyer-access, payout, and launch-ready claims
+remain blocked until real upstream WebApp/request/job records exist.
 
 Example:
 
@@ -323,14 +329,20 @@ Required fields:
 - `schema_version`
 - `scene_id`
 - `capture_id`
-- `site_submission_id`
-- `buyer_request_id`
-- `capture_job_id`
+- `upstream_handoff`
 - `capture_source`
 - `requested_outputs`
 - `scene_memory_capture`
 - `capture_evidence`
 - `capture_rights`
+
+Linkage fields:
+- `site_submission_id`, `buyer_request_id`, and `capture_job_id` are included only when they come from real upstream records.
+- When any are unavailable, `upstream_handoff.blockers` is the required truth surface.
+
+Launch handoff rule:
+- `site_submission_id`, `buyer_request_id`, and `capture_job_id` must come from real upstream WebApp/request/job bootstrap records. They must not be replaced with `capture_id`, sample ids, generated ids, or placeholder strings to make Pipeline or WebApp sync pass.
+- Missing upstream ids are explicit blockers. The raw capture may still be valid evidence, but it cannot be projected as hosted-review, buyer-access, payout, or launch-ready WebApp truth until those records exist.
 
 Example:
 

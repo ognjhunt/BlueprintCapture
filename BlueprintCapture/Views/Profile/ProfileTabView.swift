@@ -286,7 +286,7 @@ struct ProfileTabView: View {
 
             rowDivider
 
-            accountNavRow(icon: "person.2.fill", iconBg: BlueprintTheme.brandTeal, title: "Referrals", subtitle: "Earn 10% of friends' captures") {
+            accountNavRow(icon: "person.2.fill", iconBg: BlueprintTheme.brandTeal, title: "Referrals", subtitle: "Invite alpha contributors") {
                 ReferralDashboardView()
             }
 
@@ -431,8 +431,9 @@ struct ProfileTabView: View {
             Spacer()
 
             Text(device.multiplierLabel)
-                .font(.headline.weight(.bold))
+                .font(.caption.weight(.bold))
                 .foregroundStyle(BlueprintTheme.successGreen)
+                .lineLimit(1)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

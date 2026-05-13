@@ -325,7 +325,7 @@ private fun StatusPanel(
             }
         }
         if (payout != null) {
-            Text("Estimated payout ${formatPayout(payout)}", color = Color.White)
+            Text("Quoted amount ${formatPayout(payout)}", color = Color.White)
         }
     }
 }

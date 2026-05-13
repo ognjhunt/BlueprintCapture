@@ -37,7 +37,7 @@ struct ManagePayoutsView: View {
                     Text("Manage Payouts")
                         .font(BlueprintTheme.display(34, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
-                    Text("View and manage your payout settings")
+                    Text("View payout provider status")
                         .font(BlueprintTheme.body(14, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                 }
@@ -100,7 +100,7 @@ struct ManagePayoutsView: View {
                     Text(label)
                         .font(BlueprintTheme.body(14, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
-                    Text(connected ? "Connected" : "Not Connected")
+                    Text(connected ? "Provider confirmed" : "Provider readiness required")
                         .font(BlueprintTheme.body(12, weight: .medium))
                         .foregroundStyle(connected ? BlueprintTheme.textPrimary : BlueprintTheme.textSecondary)
                 }

@@ -28,6 +28,8 @@ data class LocalConfig(
     val allowMockJobsFallback: Boolean,
     val enableOpenCaptureHere: Boolean,
     val stripePublishableKey: String,
+    val payoutProvider: String,
+    val payoutProviderReady: Boolean,
     val nearbyDiscoveryProvider: NearbyDiscoveryProvider,
     val enableGeminiMapsGroundingFallback: Boolean,
 ) {
@@ -35,6 +37,7 @@ data class LocalConfig(
     val hasDemandBackend: Boolean = demandBackendBaseUrl.isNotBlank() || hasBackend
     val hasNearbyDiscovery: Boolean = hasDemandBackend
     val hasStripe: Boolean = stripePublishableKey.isNotBlank()
+    val hasPayoutProviderReady: Boolean = hasBackend && payoutProviderReady
 }
 
 @Singleton
@@ -45,6 +48,8 @@ class LocalConfigProvider @Inject constructor() {
         allowMockJobsFallback = BuildConfig.ALLOW_MOCK_JOBS_FALLBACK,
         enableOpenCaptureHere = BuildConfig.ENABLE_OPEN_CAPTURE_HERE,
         stripePublishableKey = BuildConfig.STRIPE_PUBLISHABLE_KEY,
+        payoutProvider = BuildConfig.PAYOUT_PROVIDER,
+        payoutProviderReady = BuildConfig.PAYOUT_PROVIDER_READY,
         nearbyDiscoveryProvider = NearbyDiscoveryProvider.fromRaw(BuildConfig.NEARBY_DISCOVERY_PROVIDER),
         enableGeminiMapsGroundingFallback = BuildConfig.ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK,
     )

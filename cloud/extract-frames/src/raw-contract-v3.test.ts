@@ -34,6 +34,9 @@ function makeValidInput(): RawCaptureBundleV3Input {
     "arkit/depth/000001.png",
     "arkit/confidence/000001.png",
   ]);
+  const artifacts = Object.fromEntries(
+    [...filesPresent].filter((file) => file !== "hashes.json").map((file) => [file, "hash"])
+  );
 
   return {
     filesPresent,
@@ -67,7 +70,7 @@ function makeValidInput(): RawCaptureBundleV3Input {
     recordingSession: { coordinate_frame_session_id: "cfs-1" },
     captureTopology: { coordinate_frame_session_id: "cfs-1" },
     completionMarker: { scene_id: "scene-1", capture_id: "capture-1" },
-    hashes: { artifacts: { "arkit/depth/000001.png": "hash" } },
+    hashes: { artifacts },
     sessionIntrinsics: { coordinate_frame_session_id: "cfs-1" },
     depthManifest: {
       frames: [
@@ -112,6 +115,179 @@ test("validateRawCaptureBundleV3 accepts a coherent canonical bundle", () => {
   const result = validateRawCaptureBundleV3(makeValidInput());
   assert.equal(result.valid, true);
   assert.deepEqual(result.blockers, []);
+});
+
+test("validateRawCaptureBundleV3 rejects unavailable depth without an explicit reason", () => {
+  const input = makeValidInput();
+  input.filesPresent.delete("arkit/depth_manifest.json");
+  input.filesPresent.delete("arkit/confidence_manifest.json");
+  input.filesPresent.delete("arkit/depth/000001.png");
+  input.filesPresent.delete("arkit/confidence/000001.png");
+  input.depthManifest = null;
+  input.confidenceManifest = null;
+  input.manifest = {
+    ...input.manifest,
+    has_lidar: false,
+    depth_supported: false,
+    capture_profile_id: "iphone_arkit_non_lidar",
+    capture_capabilities: {
+      camera_pose: true,
+      camera_intrinsics: true,
+      depth: false,
+      depth_confidence: false,
+      pose_rows: 1,
+      intrinsics_valid: true,
+      depth_frames: 0,
+      confidence_frames: 0,
+    },
+  };
+  input.hashes = {
+    artifacts: Object.fromEntries(
+      [...input.filesPresent].filter((file) => file !== "hashes.json").map((file) => [file, "hash"])
+    ),
+  };
+
+  const result = validateRawCaptureBundleV3(input);
+  assert.equal(result.valid, false);
+  assert.ok(result.blockers.includes("missing_depth_reason_required"));
+});
+
+test("validateRawCaptureBundleV3 accepts Android ARCore V3.1 bundle without ARKit sidecars", () => {
+  const filesPresent = new Set<string>([
+    "manifest.json",
+    "provenance.json",
+    "rights_consent.json",
+    "capture_context.json",
+    "intake_packet.json",
+    "task_hypothesis.json",
+    "recording_session.json",
+    "capture_topology.json",
+    "route_anchors.json",
+    "checkpoint_events.json",
+    "relocalization_events.json",
+    "overlap_graph.json",
+    "video_track.json",
+    "walkthrough.mp4",
+    "motion.jsonl",
+    "semantic_anchor_observations.jsonl",
+    "capture_upload_complete.json",
+    "hashes.json",
+    "sync_map.jsonl",
+    "arcore/poses.jsonl",
+    "arcore/frames.jsonl",
+    "arcore/session_intrinsics.json",
+    "arcore/tracking_state.jsonl",
+    "arcore/depth_manifest.json",
+    "arcore/confidence_manifest.json",
+    "arcore/depth/000001.png",
+    "arcore/confidence/000001.png",
+  ]);
+  const artifacts = Object.fromEntries(
+    [...filesPresent].filter((file) => file !== "hashes.json").map((file) => [file, "hash"])
+  );
+  const input: RawCaptureBundleV3Input = {
+    filesPresent,
+    manifest: {
+      schema_version: "v3",
+      capture_schema_version: "3.1.0",
+      scene_id: "scene-1",
+      capture_id: "capture-1",
+      capture_source: "android",
+      capture_tier_hint: "tier2_android",
+      coordinate_frame_session_id: "cfs-1",
+      video_uri: "raw/walkthrough.mp4",
+      capture_start_epoch_ms: 1700000000000,
+      app_version: "1.0.0",
+      app_build: "100",
+      os_version: "Android 16",
+      hardware_model_identifier: "Pixel 9 Pro",
+      device_model_marketing: "Pixel 9 Pro",
+      capture_profile_id: "android_arcore_depth",
+      capture_capabilities: {
+        camera_pose: true,
+        camera_intrinsics: true,
+        depth: true,
+        depth_confidence: true,
+        tracking_state: true,
+      },
+      has_lidar: false,
+      depth_supported: true,
+      fps_source: 30,
+      width: 1920,
+      height: 1080,
+    },
+    provenance: { scene_id: "scene-1", capture_id: "capture-1" },
+    rightsConsent: { scene_id: "scene-1", capture_id: "capture-1", redaction_required: true },
+    captureContext: { scene_id: "scene-1", capture_id: "capture-1" },
+    recordingSession: {
+      coordinate_frame_session_id: "cfs-1",
+      world_frame_definition: "arcore_world_origin_at_session_start",
+      units: "meters",
+      handedness: "right_handed",
+      gravity_aligned: true,
+      session_reset_count: 0,
+    },
+    captureTopology: { coordinate_frame_session_id: "cfs-1" },
+    completionMarker: { scene_id: "scene-1", capture_id: "capture-1" },
+    hashes: { artifacts },
+    sessionIntrinsics: null,
+    depthManifest: null,
+    confidenceManifest: null,
+    poses: [],
+    frames: [],
+    frameQuality: [],
+    arcoreSessionIntrinsics: { coordinate_frame_session_id: "cfs-1" },
+    arcoreDepthManifest: {
+      frames: [
+        {
+          frame_id: "000001",
+          depth_path: "arcore/depth/000001.png",
+          paired_confidence_path: "arcore/confidence/000001.png",
+        },
+      ],
+    },
+    arcoreConfidenceManifest: {
+      frames: [
+        {
+          frame_id: "000001",
+          confidence_path: "arcore/confidence/000001.png",
+          paired_depth_path: "arcore/depth/000001.png",
+        },
+      ],
+    },
+    arcorePoses: [
+      {
+        frame_id: "000001",
+        t_capture_sec: 0.0,
+        coordinate_frame_session_id: "cfs-1",
+        T_world_camera: [
+          [1, 0, 0, 0],
+          [0, 1, 0, 0],
+          [0, 0, 1, 0],
+          [0, 0, 0, 1],
+        ],
+      },
+    ],
+    arcoreFrames: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    arcoreTracking: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    syncMap: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    motion: [],
+    semanticAnchorObservations: [],
+  };
+
+  const result = validateRawCaptureBundleV3(input);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.blockers, []);
+});
+
+test("validateRawCaptureBundleV3 rejects missing hash coverage for required files", () => {
+  const input = makeValidInput();
+  const artifacts = input.hashes?.artifacts as Record<string, string>;
+  delete artifacts["rights_consent.json"];
+
+  const result = validateRawCaptureBundleV3(input);
+  assert.equal(result.valid, false);
+  assert.ok(result.blockers.includes("hash_coverage_missing:rights_consent.json"));
 });
 
 test("validateRawCaptureBundleV3 rejects coordinate frame mismatches and missing references", () => {

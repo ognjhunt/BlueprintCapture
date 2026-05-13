@@ -29,7 +29,7 @@ struct FilterBar: View {
 
                 // Sort selector
                 Picker("Sort", selection: $sort) {
-                    Text("Highest Payout").tag(NearbyTargetsViewModel.SortOption.highestPayout)
+                    Text("Quoted Amount").tag(NearbyTargetsViewModel.SortOption.highestPayout)
                     Text("Nearest").tag(NearbyTargetsViewModel.SortOption.nearest)
                     Text("Highest Demand").tag(NearbyTargetsViewModel.SortOption.highestDemand)
                 }
@@ -90,4 +90,3 @@ struct FilterBar: View {
         .buttonStyle(.plain)
     }
 }
-

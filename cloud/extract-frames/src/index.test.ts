@@ -8,9 +8,11 @@ const {
   buildTaskSiteContext,
   buildWorldlabsPreviewFields,
   canonicalWorldModelCandidate,
+  captureObjectKind,
   deriveRequestedRouting,
   mergeManifestWithSidecars,
   parseCapturePath,
+  resolveWalkthroughObjectName,
   validateManifest,
 } = await import("./index.js");
 
@@ -27,6 +29,13 @@ test("parseCapturePath supports canonical scenes capture layout", () => {
   assert.equal(parsed?.captureSourcePath, null);
   assert.equal(parsed?.rawPrefix, "scenes/scene-123/captures/capture-456/raw");
   assert.equal(parsed?.capturesPrefix, "scenes/scene-123/captures/capture-456");
+});
+
+test("captureObjectKind treats mp4 walkthrough uploads as bridge triggers", () => {
+  assert.equal(
+    captureObjectKind("scenes/scene-123/captures/capture-456/raw/walkthrough.mp4"),
+    "walkthrough"
+  );
 });
 
 test("parseCapturePath still supports legacy scenes source layout", () => {
@@ -221,6 +230,53 @@ test("validateManifest enforces v3.1 capture_profile_id and capture_capabilities
   assert.deepEqual(validationPresent.missingRequired, []);
 });
 
+test("validateManifest accepts Android V3.1 without iOS-only build fields", () => {
+  const validation = validateManifest({
+    schema_version: "v3",
+    capture_schema_version: "3.1.0",
+    scene_id: "scene-123",
+    capture_id: "capture-456",
+    coordinate_frame_session_id: "cfs-1",
+    video_uri: "raw/walkthrough.mp4",
+    device_model: "Pixel 9 Pro",
+    device_model_marketing: "Pixel 9 Pro",
+    os_version: "Android 16",
+    app_version: "1.0.0",
+    app_build: "100",
+    hardware_model_identifier: "Pixel 9 Pro",
+    fps_source: 30,
+    width: 1920,
+    height: 1080,
+    capture_start_epoch_ms: 1_700_000_000_000,
+    has_lidar: false,
+    depth_supported: true,
+    capture_source: "android",
+    capture_tier_hint: "tier2_android",
+    capture_profile_id: "android_arcore_depth",
+    capture_capabilities: { camera_pose: true, camera_intrinsics: true, depth: true },
+    scene_memory_capture: {
+      operator_notes: [],
+      inaccessible_areas: [],
+      sensor_availability: {
+        arkit_poses: false,
+        arkit_intrinsics: false,
+        arkit_depth: false,
+        arkit_confidence: false,
+        arkit_meshes: false,
+        motion: false,
+      },
+    },
+    capture_rights: {
+      consent_status: "unknown",
+      consent_scope: [],
+      consent_notes: [],
+    },
+  });
+
+  assert.equal(validation.valid, true);
+  assert.deepEqual(validation.missingRequired, []);
+});
+
 test("deriveRequestedRouting preserves outputs and expands preview simulation lane", () => {
   const routing = deriveRequestedRouting({
     requested_outputs: ["qualification", "preview_simulation"],
@@ -292,6 +348,25 @@ test("buildWorldlabsPreviewFields reserves worldlabs uris when preview is reques
   assert.equal(
     fields.worldlabs_input_video_uri,
     "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov"
+  );
+});
+
+test("buildWorldlabsPreviewFields can use resolved mp4 walkthrough uri", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "0"
+  );
+
+  assert.ok(pathInfo);
+  const videoObjectName = resolveWalkthroughObjectName(
+    { video_uri: "raw/walkthrough.mp4" },
+    pathInfo!
+  );
+  const fields = buildWorldlabsPreviewFields("test-bucket", pathInfo!, true, videoObjectName);
+
+  assert.equal(
+    fields.worldlabs_input_video_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mp4"
   );
 });
 

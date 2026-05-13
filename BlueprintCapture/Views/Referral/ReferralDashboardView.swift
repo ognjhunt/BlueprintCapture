@@ -22,8 +22,7 @@ struct ReferralDashboardView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 28)
 
-                    // Share & Earn grid
-                    sectionLabel("Share & Earn 10%")
+                    sectionLabel("Invites")
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
 
@@ -67,7 +66,7 @@ struct ReferralDashboardView: View {
             Text("Affiliate Center")
                 .font(BlueprintTheme.display(34, weight: .semibold))
                 .foregroundStyle(BlueprintTheme.textPrimary)
-            Text("Track your referral earnings")
+            Text("Track invite status")
                 .font(BlueprintTheme.body(14, weight: .medium))
                 .foregroundStyle(BlueprintTheme.textSecondary)
         }
@@ -89,10 +88,10 @@ struct ReferralDashboardView: View {
                     .frame(width: 22)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("10% kickback on referrals")
+                    Text("Invite-only alpha referrals")
                         .font(BlueprintTheme.body(14, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
-                    Text("Share your code. When friends complete their first payout, you get 10% and they get 10% extra.")
+                    Text("Share your code. Credits stay review-gated until payout provider readiness is verified by the backend.")
                         .font(BlueprintTheme.body(12, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -110,9 +109,8 @@ struct ReferralDashboardView: View {
 
     private var statsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-            // Total Commissions
             statCard(
-                title: "Total Commissions",
+                title: "Recorded Credits",
                 value: viewModel.stats.lifetimeEarnings.formatted(.currency(code: "USD")),
                 subtitle: "\(viewModel.stats.activeCapturers) active",
                 color: BlueprintTheme.successGreen,
@@ -203,7 +201,7 @@ struct ReferralDashboardView: View {
         ShareLink(
             item: viewModel.shareMessage,
             subject: Text("Join Blueprint Capture"),
-            message: Text("Scan spaces and earn money!")
+            message: Text("Join the Blueprint Capture alpha.")
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -251,10 +249,10 @@ struct ReferralDashboardView: View {
                 Image(systemName: "gift")
                     .font(.system(size: 36))
                     .foregroundStyle(Color(white: 0.2))
-                Text("No commissions yet")
+                Text("No invite activity yet")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Color(white: 0.4))
-                Text("Invite friends to earn referral commissions")
+                Text("Invite friends and track review-gated credits here")
                     .font(.caption)
                     .foregroundStyle(Color(white: 0.3))
                     .multilineTextAlignment(.center)

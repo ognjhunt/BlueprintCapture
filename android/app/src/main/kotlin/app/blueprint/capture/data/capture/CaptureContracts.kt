@@ -42,6 +42,8 @@ data class AndroidCaptureBundleRequest(
     @SerialName("job_id") val jobId: String? = null,
     @SerialName("reservation_id") val reservationId: String? = null,
     @SerialName("site_submission_id") val siteSubmissionId: String? = null,
+    @SerialName("buyer_request_id") val buyerRequestId: String? = null,
+    @SerialName("capture_job_id") val captureJobId: String? = null,
     @SerialName("device_model") val deviceModel: String,
     @SerialName("os_version") val osVersion: String,
     @SerialName("fps_source") val fpsSource: Double,
@@ -58,6 +60,7 @@ data class AndroidCaptureBundleRequest(
     val zone: String? = null,
     val owner: String? = null,
     @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
+    @SerialName("inaccessible_areas") val inaccessibleAreas: List<String> = emptyList(),
     @SerialName("intake_packet") val intakePacket: QualificationIntakePacket? = null,
     @SerialName("intake_metadata") val intakeMetadata: CaptureIntakeMetadata? = null,
     @SerialName("task_hypothesis") val taskHypothesis: TaskHypothesis? = null,
@@ -143,6 +146,22 @@ data class CaptureModeMetadata(
 )
 
 @Serializable
+data class UpstreamHandoff(
+    @SerialName("site_submission_id") val siteSubmissionId: String? = null,
+    @SerialName("buyer_request_id") val buyerRequestId: String? = null,
+    @SerialName("capture_job_id") val captureJobId: String? = null,
+    @SerialName("site_submission_id_present") val siteSubmissionIdPresent: Boolean = false,
+    @SerialName("buyer_request_id_present") val buyerRequestIdPresent: Boolean = false,
+    @SerialName("capture_job_id_present") val captureJobIdPresent: Boolean = false,
+    @SerialName("hosted_review_truth_state") val hostedReviewTruthState: String = "blocked_missing_upstream_ids",
+    val blockers: List<String> = listOf(
+        "missing_site_submission_id",
+        "missing_buyer_request_id",
+        "missing_capture_job_id",
+    ),
+)
+
+@Serializable
 data class CaptureScaffoldingPacket(
     @SerialName("schema_version") val schemaVersion: String = "v1",
     @SerialName("scaffolding_used") val scaffoldingUsed: List<String> = emptyList(),
@@ -200,11 +219,16 @@ data class CaptureManifest(
     @SerialName("evidence_tier") val evidenceTier: String = "pre_screen_video",
     @SerialName("rights_profile") val rightsProfile: String = "unknown",
     @SerialName("requested_outputs") val requestedOutputs: List<String>,
+    @SerialName("site_submission_id") val siteSubmissionId: String? = null,
+    @SerialName("buyer_request_id") val buyerRequestId: String? = null,
+    @SerialName("capture_job_id") val captureJobId: String? = null,
+    @SerialName("upstream_handoff") val upstreamHandoff: UpstreamHandoff = UpstreamHandoff(),
     @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
     @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
     @SerialName("capture_mode") val captureMode: CaptureModeMetadata? = null,
     @SerialName("task_text_hint") val taskTextHint: String? = null,
     @SerialName("task_steps") val taskSteps: List<String>,
+    @SerialName("target_kpi") val targetKPI: String? = null,
     val zone: String? = null,
     val owner: String? = null,
     @SerialName("scene_memory_capture") val sceneMemoryCapture: SceneMemoryCapture,
@@ -243,7 +267,7 @@ data class SceneMemoryCapture(
     @SerialName("motion_provenance") val motionProvenance: String? = null,
     @SerialName("motion_timestamps_capture_relative") val motionTimestampsCaptureRelative: Boolean = true,
     @SerialName("geometry_source") val geometrySource: String? = null,
-    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = false,
 )
 
 @Serializable
@@ -257,6 +281,7 @@ data class SensorAvailability(
     @SerialName("camera_intrinsics") val cameraIntrinsics: Boolean = false,
     val depth: Boolean = false,
     @SerialName("depth_confidence") val depthConfidence: Boolean = false,
+    @SerialName("missing_depth_reason") val missingDepthReason: String? = null,
     val mesh: Boolean = false,
     @SerialName("point_cloud") val pointCloud: Boolean = false,
     val planes: Boolean = false,
@@ -264,7 +289,7 @@ data class SensorAvailability(
     @SerialName("tracking_state") val trackingState: Boolean = false,
     @SerialName("relocalization_events") val relocalizationEvents: Boolean = false,
     @SerialName("light_estimate") val lightEstimate: Boolean = false,
-    val motion: Boolean = true,
+    val motion: Boolean = false,
     @SerialName("motion_authoritative") val motionAuthoritative: Boolean = false,
     @SerialName("companion_phone_pose") val companionPhonePose: Boolean = false,
     @SerialName("companion_phone_intrinsics") val companionPhoneIntrinsics: Boolean = false,
@@ -305,11 +330,11 @@ data class CaptureEvidence(
     @SerialName("pose_authority") val poseAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("intrinsics_authority") val intrinsicsAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("depth_authority") val depthAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
-    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.DiagnosticOnly,
+    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("motion_provenance") val motionProvenance: String? = null,
     @SerialName("motion_timestamps_capture_relative") val motionTimestampsCaptureRelative: Boolean = true,
     @SerialName("geometry_source") val geometrySource: String? = null,
-    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = false,
 )
 
 @Serializable
@@ -318,6 +343,7 @@ data class CaptureCapabilities(
     @SerialName("camera_intrinsics") val cameraIntrinsics: Boolean = false,
     val depth: Boolean = false,
     @SerialName("depth_confidence") val depthConfidence: Boolean = false,
+    @SerialName("missing_depth_reason") val missingDepthReason: String? = null,
     val mesh: Boolean = false,
     @SerialName("point_cloud") val pointCloud: Boolean = false,
     val planes: Boolean = false,
@@ -325,7 +351,7 @@ data class CaptureCapabilities(
     @SerialName("tracking_state") val trackingState: Boolean = false,
     @SerialName("relocalization_events") val relocalizationEvents: Boolean = false,
     @SerialName("light_estimate") val lightEstimate: Boolean = false,
-    val motion: Boolean = true,
+    val motion: Boolean = false,
     @SerialName("motion_authoritative") val motionAuthoritative: Boolean = false,
     @SerialName("companion_phone_pose") val companionPhonePose: Boolean = false,
     @SerialName("companion_phone_intrinsics") val companionPhoneIntrinsics: Boolean = false,
@@ -345,17 +371,26 @@ data class CaptureCapabilities(
     @SerialName("pose_authority") val poseAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("intrinsics_authority") val intrinsicsAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("depth_authority") val depthAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
-    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.DiagnosticOnly,
+    @SerialName("motion_authority") val motionAuthority: CaptureAuthority = CaptureAuthority.NotAvailable,
     @SerialName("motion_provenance") val motionProvenance: String? = null,
     @SerialName("geometry_source") val geometrySource: String? = null,
-    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = true,
+    @SerialName("geometry_expected_downstream") val geometryExpectedDownstream: Boolean = false,
 )
 
 @Serializable
 data class CaptureContext(
+    @SerialName("schema_version") val schemaVersion: String = "v1",
+    @SerialName("scene_id") val sceneId: String? = null,
+    @SerialName("capture_id") val captureId: String? = null,
     @SerialName("site_submission_id") val siteSubmissionId: String? = null,
+    @SerialName("buyer_request_id") val buyerRequestId: String? = null,
+    @SerialName("capture_job_id") val captureJobId: String? = null,
+    @SerialName("upstream_handoff") val upstreamHandoff: UpstreamHandoff = UpstreamHandoff(),
+    @SerialName("capture_source") val captureSource: String? = null,
+    @SerialName("requested_outputs") val requestedOutputs: List<String> = emptyList(),
     @SerialName("task_text_hint") val taskTextHint: String? = null,
     @SerialName("task_steps") val taskSteps: List<String>,
+    @SerialName("target_kpi") val targetKPI: String? = null,
     val zone: String? = null,
     val owner: String? = null,
     @SerialName("operator_notes") val operatorNotes: List<String> = emptyList(),
@@ -364,6 +399,7 @@ data class CaptureContext(
     @SerialName("capture_profile_id") val captureProfileId: String = "android_camera_only",
     @SerialName("capture_capabilities") val captureCapabilities: CaptureCapabilities = CaptureCapabilities(),
     @SerialName("capture_rights") val captureRights: CaptureRights = CaptureRights(),
+    @SerialName("scene_memory") val sceneMemory: SceneMemoryCapture = SceneMemoryCapture(),
     @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
     @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,
     @SerialName("capture_mode") val captureMode: CaptureModeMetadata? = null,

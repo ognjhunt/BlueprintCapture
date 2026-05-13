@@ -14,10 +14,24 @@ fi
 
 cd "$ROOT"
 
-if [[ ! -f "$RELEASE_XCCONFIG" ]]; then
-  echo "Release xcconfig not found at $RELEASE_XCCONFIG" >&2
-  echo "Copy ConfigTemplates/BlueprintCapture.release.xcconfig.example to an untracked local path first." >&2
+fail_archive_gate() {
+  local stage="$1"
+  local next_input="$2"
+  shift 2
+  echo "Archive external alpha gate failed:" >&2
+  echo "Stage: $stage" >&2
+  echo "Next input needed: $next_input" >&2
+  for line in "$@"; do
+    echo "- $line" >&2
+  done
   exit 1
+}
+
+if [[ ! -f "$RELEASE_XCCONFIG" ]]; then
+  fail_archive_gate \
+    "release_config_blocked" \
+    "Copy ConfigTemplates/BlueprintCapture.release.xcconfig.example to an untracked local path and fill in verified live release values." \
+    "Release xcconfig not found at $RELEASE_XCCONFIG."
 fi
 
 trim() {
@@ -44,13 +58,17 @@ require_xcconfig_value() {
   local value
   value="$(trim "$(xcconfig_value "$key")")"
   if [[ -z "$value" ]]; then
-    echo "$key must be set in $RELEASE_XCCONFIG." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set $key in the untracked release xcconfig before building external alpha artifacts." \
+      "$key must be set in $RELEASE_XCCONFIG."
   fi
   case "$value" in
     *your-backend.example.com*|*your-project.cloudfunctions.net*|*replace_me*|*example.com*)
-      echo "$key still uses a placeholder value in $RELEASE_XCCONFIG." >&2
-      exit 1
+      fail_archive_gate \
+        "release_config_blocked" \
+        "Replace placeholder release config values with verified live endpoints or support/legal settings." \
+        "$key still uses a placeholder value in $RELEASE_XCCONFIG."
       ;;
   esac
 }
@@ -65,8 +83,10 @@ require_xcconfig_bool() {
   local value
   value="$(normalize_bool "$(xcconfig_value "$key")")"
   if [[ "$value" != "$expected" ]]; then
-    echo "$key must be set to $expected in $RELEASE_XCCONFIG." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set $key to $expected in the untracked release xcconfig." \
+      "$key must be set to $expected in $RELEASE_XCCONFIG."
   fi
 }
 
@@ -105,9 +125,11 @@ guard_release_source_truth() {
   local matches
   matches="$(rg -n 'https://api\.example\.com|targetsAPI: TargetsAPIProtocol = MockTargetsAPI\(\)|pricingAPI: PricingAPIProtocol = MockPricingAPI\(\)' "$ROOT/BlueprintCapture" || true)"
   if [[ -n "$matches" ]]; then
-    echo "Release source still contains release-reachable mock target/pricing defaults or example endpoints:" >&2
-    echo "$matches" >&2
-    exit 1
+    fail_archive_gate \
+      "repo_bug_blocked" \
+      "Remove release-reachable mock target/pricing defaults or example endpoints from app source." \
+      "Release source still contains release-reachable mock target/pricing defaults or example endpoints:" \
+      "$matches"
   fi
 }
 
@@ -124,6 +146,8 @@ lint_release_inputs() {
   require_xcconfig_value "BLUEPRINT_CAPTURE_POLICY_URL"
   require_xcconfig_value "BLUEPRINT_ACCOUNT_DELETION_URL"
   require_xcconfig_value "BLUEPRINT_SUPPORT_EMAIL_ADDRESS"
+  require_xcconfig_value "BLUEPRINT_PAYOUT_PROVIDER"
+  require_xcconfig_value "BLUEPRINT_PAYOUT_PROVIDER_READY"
   require_xcconfig_bool "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK" "no"
   require_xcconfig_bool "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE" "no"
   require_xcconfig_bool "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS" "yes"
@@ -131,15 +155,37 @@ lint_release_inputs() {
   local nearby_provider
   nearby_provider="$(trim "$(xcconfig_value "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER")")"
   if [[ "$nearby_provider" != "places_nearby" ]]; then
-    echo "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in $RELEASE_XCCONFIG." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set BLUEPRINT_NEARBY_DISCOVERY_PROVIDER to places_nearby so provider requests stay behind the backend proxy." \
+      "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in $RELEASE_XCCONFIG."
+  fi
+
+  local payout_provider
+  payout_provider="$(trim "$(xcconfig_value "BLUEPRINT_PAYOUT_PROVIDER")")"
+  if [[ "$payout_provider" != "stripe" ]]; then
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set BLUEPRINT_PAYOUT_PROVIDER to stripe until a reviewed provider abstraction exists." \
+      "BLUEPRINT_PAYOUT_PROVIDER must be stripe in $RELEASE_XCCONFIG."
+  fi
+
+  local payout_provider_ready
+  payout_provider_ready="$(normalize_bool "$(xcconfig_value "BLUEPRINT_PAYOUT_PROVIDER_READY")")"
+  if [[ "$payout_provider_ready" != "yes" && "$payout_provider_ready" != "no" && "$payout_provider_ready" != "true" && "$payout_provider_ready" != "false" && "$payout_provider_ready" != "1" && "$payout_provider_ready" != "0" ]]; then
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set BLUEPRINT_PAYOUT_PROVIDER_READY to YES or NO; this config flag is not live provider proof by itself." \
+      "BLUEPRINT_PAYOUT_PROVIDER_READY must be an explicit boolean in $RELEASE_XCCONFIG."
   fi
 
   local aps_environment
   aps_environment="$(trim "$(xcconfig_value "APS_ENVIRONMENT")")"
   if [[ "$aps_environment" != "production" ]]; then
-    echo "APS_ENVIRONMENT must be production in $RELEASE_XCCONFIG for TestFlight/external alpha." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Set APS_ENVIRONMENT to production in the release xcconfig before TestFlight/external alpha." \
+      "APS_ENVIRONMENT must be production in $RELEASE_XCCONFIG for TestFlight/external alpha."
   fi
 
   mkdir -p "$(dirname "$BUILD_SETTINGS_PATH")"
@@ -151,18 +197,24 @@ lint_release_inputs() {
   resolved_demand_url="$(trim "$(build_setting_value BLUEPRINT_DEMAND_BACKEND_BASE_URL)")"
 
   if [[ -z "$resolved_backend_url" ]]; then
-    echo "Release build settings still resolve BLUEPRINT_BACKEND_BASE_URL to empty." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Fix BLUEPRINT_BACKEND_BASE_URL in the release xcconfig so xcodebuild resolves a live URL." \
+      "Release build settings still resolve BLUEPRINT_BACKEND_BASE_URL to empty."
   fi
 
   if [[ -z "$resolved_demand_url" ]]; then
-    echo "Release build settings still resolve BLUEPRINT_DEMAND_BACKEND_BASE_URL to empty." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Fix BLUEPRINT_DEMAND_BACKEND_BASE_URL in the release xcconfig so xcodebuild resolves a live URL." \
+      "Release build settings still resolve BLUEPRINT_DEMAND_BACKEND_BASE_URL to empty."
   fi
 
   if [[ "$resolved_backend_url" =~ ^https?:$ || "$resolved_demand_url" =~ ^https?:$ ]]; then
-    echo "Release xcconfig URLs are being truncated by xcconfig parsing. Use the slash-helper form from ConfigTemplates/BlueprintCapture.release.xcconfig.example." >&2
-    exit 1
+    fail_archive_gate \
+      "release_config_blocked" \
+      "Use the slash-helper form from ConfigTemplates/BlueprintCapture.release.xcconfig.example for URL values." \
+      "Release xcconfig URLs are being truncated by xcconfig parsing."
   fi
 }
 
@@ -186,8 +238,10 @@ xcodebuild archive \
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/BlueprintCapture.app"
 if [[ ! -d "$APP_PATH" ]]; then
-  echo "Archive completed but $APP_PATH was not found." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_build_blocked" \
+    "Inspect the xcodebuild archive output and fix the build/archive path before distribution." \
+    "Archive completed but $APP_PATH was not found."
 fi
 
 echo "==> Running release bundle lint"
@@ -198,44 +252,60 @@ plist_value() {
 
 for forbidden_key in PLACES_API_KEY GOOGLE_PLACES_API_KEY GEMINI_API_KEY GOOGLE_AI_API_KEY GEMINI_MAPS_API_KEY; do
   if [[ -n "$(plist_value "$forbidden_key")" ]]; then
-    echo "Provider key $forbidden_key is bundled in the archived app." >&2
-    exit 1
+    fail_archive_gate \
+      "archive_bundle_blocked" \
+      "Remove bundled provider keys; nearby/provider requests must go through backend proxy routes." \
+      "Provider key $forbidden_key is bundled in the archived app."
   fi
 done
 
 if [[ "$(normalize_bool "$(plist_value BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK)")" == "true" ]]; then
-  echo "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK must be disabled in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Disable mock jobs in the archived app before external alpha distribution." \
+    "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK must be disabled in the archive."
 fi
 
 if [[ "$(normalize_bool "$(plist_value BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE)")" == "true" ]]; then
-  echo "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE must be disabled in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Disable the internal test space in the archived app before external alpha distribution." \
+    "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE must be disabled in the archive."
 fi
 
 if [[ "$(normalize_bool "$(plist_value BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS)")" != "true" ]]; then
-  echo "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS must be enabled in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Enable remote notifications in the archived app before external alpha distribution." \
+    "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS must be enabled in the archive."
 fi
 
 if [[ "$(normalize_bool "$(plist_value MWDAT:MockDevice:Enabled)")" == "true" ]]; then
-  echo "MWDAT mock device must be disabled in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Disable MWDAT mock device mode in release archives." \
+    "MWDAT mock device must be disabled in the archive."
 fi
 
 if [[ -z "$(plist_value BLUEPRINT_BACKEND_BASE_URL)" ]]; then
-  echo "BLUEPRINT_BACKEND_BASE_URL must be set in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Set BLUEPRINT_BACKEND_BASE_URL in the release config and rebuild the archive." \
+    "BLUEPRINT_BACKEND_BASE_URL must be set in the archive."
 fi
 
 if [[ -z "$(plist_value BLUEPRINT_DEMAND_BACKEND_BASE_URL)" ]]; then
-  echo "BLUEPRINT_DEMAND_BACKEND_BASE_URL must be set in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Set BLUEPRINT_DEMAND_BACKEND_BASE_URL in the release config and rebuild the archive." \
+    "BLUEPRINT_DEMAND_BACKEND_BASE_URL must be set in the archive."
 fi
 
 if [[ "$(plist_value BLUEPRINT_NEARBY_DISCOVERY_PROVIDER)" != "places_nearby" ]]; then
-  echo "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Set BLUEPRINT_NEARBY_DISCOVERY_PROVIDER to places_nearby and rebuild the archive." \
+    "BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby in the archive."
 fi
 
 for required_url_key in \
@@ -248,14 +318,18 @@ for required_url_key in \
   BLUEPRINT_ACCOUNT_DELETION_URL
 do
   if [[ -z "$(plist_value "$required_url_key")" ]]; then
-    echo "$required_url_key must be configured in the archive." >&2
-    exit 1
+    fail_archive_gate \
+      "archive_bundle_blocked" \
+      "Set all support/legal URL keys in the release config and rebuild the archive." \
+      "$required_url_key must be configured in the archive."
   fi
 done
 
 if [[ -z "$(plist_value BLUEPRINT_SUPPORT_EMAIL_ADDRESS)" ]]; then
-  echo "BLUEPRINT_SUPPORT_EMAIL_ADDRESS must be configured in the archive." >&2
-  exit 1
+  fail_archive_gate \
+    "archive_bundle_blocked" \
+    "Set BLUEPRINT_SUPPORT_EMAIL_ADDRESS in the release config and rebuild the archive." \
+    "BLUEPRINT_SUPPORT_EMAIL_ADDRESS must be configured in the archive."
 fi
 
 echo "Archive ready at $ARCHIVE_PATH"

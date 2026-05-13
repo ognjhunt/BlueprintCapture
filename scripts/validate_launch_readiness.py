@@ -21,6 +21,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_LIVE_PROOF_PATH = ROOT / "ops/launch-readiness/austin-tx.launch-proof.json"
+DEFAULT_CONTRACT_PROOF_PATH = ROOT / "ops/launch-readiness/example.launch-proof.json"
 
 REQUIRED_LIVE_INPUTS = [
     "BLUEPRINT_LAUNCH_PROOF_PATH=/absolute/path/to/<city>.launch-proof.json",
@@ -41,6 +43,11 @@ REQUIRED_REAL_PROOF_REFERENCES = [
     "evidence.pipeline_handoff",
     "evidence.meta_glasses_smoke",
     "evidence.stripe_account_state",
+    "evidence.payout_provider_state",
+    "evidence.payout_exception_monitor",
+    "evidence.identity_kyc_decision",
+    "evidence.background_check_decision",
+    "evidence.human_finance_review_gate",
     "evidence.monitoring_runbook",
 ]
 
@@ -68,6 +75,11 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SystemExit(f"Launch proof file must contain a JSON object: {path}")
     return value
+
+
+def first_error_line(exc: SystemExit) -> str:
+    message = str(exc)
+    return next((line for line in message.splitlines() if line.strip()), message)
 
 
 def nested(value: dict[str, Any], dotted_path: str) -> Any:
@@ -226,6 +238,8 @@ def validate_release_xcconfig(path: Path, failures: list[str]) -> None:
         "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK",
         "BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE",
         "BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS",
+        "BLUEPRINT_PAYOUT_PROVIDER",
+        "BLUEPRINT_PAYOUT_PROVIDER_READY",
         "APS_ENVIRONMENT",
     ]
     for key in required_keys:
@@ -243,6 +257,10 @@ def validate_release_xcconfig(path: Path, failures: list[str]) -> None:
         failures.append("BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS must be YES")
     if values.get("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER") != "places_nearby":
         failures.append("BLUEPRINT_NEARBY_DISCOVERY_PROVIDER must be places_nearby")
+    if values.get("BLUEPRINT_PAYOUT_PROVIDER") != "stripe":
+        failures.append("BLUEPRINT_PAYOUT_PROVIDER must be stripe until a reviewed provider abstraction exists")
+    if normalized_bool(values.get("BLUEPRINT_PAYOUT_PROVIDER_READY")) is not True:
+        failures.append("BLUEPRINT_PAYOUT_PROVIDER_READY must be YES only after backend-verified live provider evidence exists")
     if values.get("APS_ENVIRONMENT") != "production":
         failures.append("APS_ENVIRONMENT must be production")
 
@@ -284,15 +302,24 @@ def validate_proof(
     if nested(proof, "open_capture.payout_cents") != 0:
         failures.append("open_capture.payout_cents must be 0")
     require_truthy(proof, failures, "open_capture.paid_anywhere_claim_disabled")
+    require_non_empty(proof, failures, "payouts.provider_name")
     require_truthy(proof, failures, "payouts.backend_configured")
     require_truthy(proof, failures, "payouts.stripe_state_checked")
+    require_truthy(proof, failures, "payouts.provider_state_checked")
+    require_truthy(proof, failures, "payouts.live_provider_ready")
+    require_truthy(proof, failures, "payouts.contract_readiness_not_live_readiness")
+    require_truthy(proof, failures, "payouts.live_payout_execution_human_gate")
+    require_truthy(proof, failures, "payouts.identity_kyc_state_documented")
+    require_truthy(proof, failures, "payouts.background_check_state_documented")
     require_truthy(proof, failures, "payouts.marketing_claims_require_stripe_ready")
     require_non_empty(proof, failures, "ops.launch_owner")
     require_truthy(proof, failures, "ops.failed_upload_monitor")
     require_truthy(proof, failures, "ops.submission_registration_monitor")
     require_truthy(proof, failures, "ops.push_device_sync_monitor")
     require_truthy(proof, failures, "ops.bridge_pipeline_monitor")
+    require_truthy(proof, failures, "ops.payout_exception_monitor_repo_contract")
     require_truthy(proof, failures, "ops.payout_exception_monitor")
+    require_truthy(proof, failures, "ops.human_finance_review_gate")
     require_truthy(proof, failures, "ops.session_events_queryable")
     require_truthy(proof, failures, "ops.cloud_logging_handoff_alert")
 
@@ -350,20 +377,35 @@ def validate_live_routes(args: argparse.Namespace, failures: list[str], skip_net
         if not isinstance(capture_jobs, list) or len(capture_jobs) == 0:
             failures.append("demand opportunity feed returned zero capture jobs for launch coordinates")
 
-    stripe_status, stripe_payload = http_json(f"{backend}/v1/stripe/accounts/current", token=args.auth_token)
+    stripe_status, stripe_payload = http_json(f"{backend}/v1/stripe/account", token=args.auth_token)
     if stripe_status != 200:
         failures.append(f"Stripe account state route must return 200 for paid launch proof; got HTTP {stripe_status}: {stripe_payload}")
+    else:
+        if stripe_payload.get("provider_state_checked") is not True:
+            failures.append("Stripe account state route must report provider_state_checked=true for paid launch proof")
+        if stripe_payload.get("provider_mode") != "live":
+            failures.append(f"Stripe account state route must report provider_mode=live for paid launch proof; got {stripe_payload.get('provider_mode') or 'missing'}")
+        if stripe_payload.get("live_provider_ready") is not True:
+            failures.append("Stripe account state route must report live_provider_ready=true for paid launch proof")
 
 
 def readiness_stage(failures: list[str]) -> str:
     if not failures:
         return "ready"
-    if any("must be set in" in failure or "still contains a placeholder" in failure for failure in failures):
+    if any(
+        "Release xcconfig not found" in failure
+        or "must be set in" in failure
+        or "still contains a placeholder" in failure
+        for failure in failures
+    ):
         return "release_config_blocked"
     if any(
         failure.startswith("contract_only proof")
         or failure.startswith("ops/launch-readiness/example.launch-proof.json")
         or failure.startswith("real launch proof")
+        or failure.startswith("Launch proof file not found")
+        or failure.startswith("Launch proof file is not valid JSON")
+        or failure.startswith("Launch proof file must contain")
         or "contains placeholder proof text" in failure
         or failure.startswith("evidence.")
         or failure.startswith("proof city_slug")
@@ -386,9 +428,33 @@ def readiness_stage(failures: list[str]) -> str:
     return "live_route_blocked"
 
 
+def next_input_hint_for_stage(stage: str) -> str:
+    if stage == "release_config_blocked":
+        return (
+            "Copy ConfigTemplates/BlueprintCapture.release.xcconfig.example to an untracked release xcconfig, "
+            "replace placeholders with verified live backend/support/legal/payout settings, and rerun the gate."
+        )
+    if stage == "proof_artifact_blocked":
+        return (
+            "Provide a real city launch proof artifact ending in .launch-proof.json with concrete evidence references; "
+            "use ops/launch-readiness/example.launch-proof.json only for --contract-only schema checks."
+        )
+    if stage == "live_inputs_blocked":
+        return (
+            "Set BLUEPRINT_LAUNCH_AUTH_TOKEN, BLUEPRINT_LAUNCH_CITY_SLUG, BLUEPRINT_LAUNCH_LAT, "
+            "and BLUEPRINT_LAUNCH_LNG for the live route check."
+        )
+    if stage == "live_route_blocked":
+        return (
+            "Fix the live backend, demand feed, or Stripe provider route response named by the failure output, "
+            "then rerun with the same proof and launch inputs."
+        )
+    return "No additional input is needed."
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate BlueprintCapture city launch readiness.")
-    parser.add_argument("--proof", default=str(ROOT / "ops/launch-readiness/austin-tx.launch-proof.json"))
+    parser.add_argument("--proof", default=os.environ.get("BLUEPRINT_LAUNCH_PROOF_PATH", str(DEFAULT_LIVE_PROOF_PATH)))
     parser.add_argument("--release-xcconfig", default=os.environ.get("BLUEPRINT_RELEASE_XCCONFIG", str(ROOT / "Config/BlueprintCapture.release.xcconfig")))
     parser.add_argument("--backend-base-url", default=os.environ.get("BLUEPRINT_BACKEND_BASE_URL", "https://tryblueprint.io"))
     parser.add_argument("--demand-backend-base-url", default=os.environ.get("BLUEPRINT_DEMAND_BACKEND_BASE_URL", "https://us-central1-blueprint-prod-f0f19.cloudfunctions.net/api"))
@@ -400,24 +466,36 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=int(os.environ.get("BLUEPRINT_LAUNCH_FEED_LIMIT", "20")))
     parser.add_argument("--contract-only", action="store_true", help="Validate schema using a contract-only proof artifact; not valid for launch signoff.")
     args = parser.parse_args()
+    if args.contract_only and "BLUEPRINT_LAUNCH_PROOF_PATH" not in os.environ and args.proof == str(DEFAULT_LIVE_PROOF_PATH):
+        args.proof = str(DEFAULT_CONTRACT_PROOF_PATH)
 
     failures: list[str] = []
-    validate_release_xcconfig(Path(args.release_xcconfig), failures)
+    try:
+        validate_release_xcconfig(Path(args.release_xcconfig), failures)
+    except SystemExit as exc:
+        failures.append(first_error_line(exc))
     proof_path = Path(args.proof)
-    proof = load_json(proof_path)
-    validate_proof(proof, failures, args.contract_only, args.city_slug, proof_path)
+    try:
+        proof = load_json(proof_path)
+    except SystemExit as exc:
+        failures.append(first_error_line(exc))
+        proof = None
+    if proof is not None:
+        validate_proof(proof, failures, args.contract_only, args.city_slug, proof_path)
     validate_live_routes(args, failures, skip_network=bool(failures))
 
     if failures:
+        stage = readiness_stage(failures)
         print("Launch readiness gate failed:", file=sys.stderr)
-        print(f"Stage: {readiness_stage(failures)}", file=sys.stderr)
+        print(f"Stage: {stage}", file=sys.stderr)
+        print(f"Next input needed: {next_input_hint_for_stage(stage)}", file=sys.stderr)
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
         if not args.contract_only:
             print(live_input_hint(), file=sys.stderr)
         return 1
 
-    mode = "contract-only schema check" if args.contract_only else "live launch readiness"
+    mode = "contract-only schema check; not live launch signoff" if args.contract_only else "live launch readiness"
     print(f"Launch readiness gate passed ({mode}): {args.proof}")
     return 0
 

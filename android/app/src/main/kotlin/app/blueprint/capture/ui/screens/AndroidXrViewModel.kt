@@ -17,6 +17,7 @@ import app.blueprint.capture.data.capture.CaptureScaffoldingPacket
 import app.blueprint.capture.data.capture.CaptureTopologyMetadata
 import app.blueprint.capture.data.capture.CaptureUploadRepository
 import app.blueprint.capture.data.capture.QualificationIntakePacket
+import app.blueprint.capture.data.capture.SiteGeoPoint
 import app.blueprint.capture.data.capture.SiteIdentity
 import app.blueprint.capture.data.glasses.AndroidXrCapabilityRepository
 import app.blueprint.capture.data.glasses.AndroidXrProjectedPlatform
@@ -211,7 +212,7 @@ private fun CaptureLaunch.toAndroidXrBundleRequest(
     frameRate: Double,
 ): AndroidCaptureBundleRequest {
     val sceneId = jobId ?: targetId ?: androidXrFallbackSceneId(label)
-    val siteId = siteSubmissionId ?: targetId ?: jobId ?: sceneId
+    val siteId = siteSubmissionId ?: placeId ?: targetId ?: jobId ?: sceneId
     val workflowStepsValue = workflowSteps.ifEmpty {
         listOf(
             "Record the outward-facing route from the glasses point of view with continuous motion.",
@@ -254,15 +255,21 @@ private fun CaptureLaunch.toAndroidXrBundleRequest(
         requestedOutputs = requestedOutputs.ifEmpty { listOf("qualification", "review_intake") },
         siteIdentity = SiteIdentity(
             siteId = siteId,
-            siteIdSource = if (!siteSubmissionId.isNullOrBlank()) {
+            siteIdSource = siteIdSource ?: if (!siteSubmissionId.isNullOrBlank()) {
                 "site_submission"
             } else if (!targetId.isNullOrBlank()) {
                 "buyer_request"
             } else {
                 "open_capture"
             },
+            placeId = placeId,
             siteName = label.takeIf(String::isNotBlank),
             addressFull = addressText?.takeIf(String::isNotBlank),
+            geo = if (latitude != null && longitude != null) {
+                SiteGeoPoint(latitude = latitude, longitude = longitude)
+            } else {
+                null
+            },
         ),
         captureTopology = CaptureTopologyMetadata(
             captureSessionId = captureId,

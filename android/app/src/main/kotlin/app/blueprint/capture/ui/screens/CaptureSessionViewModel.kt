@@ -21,6 +21,7 @@ import app.blueprint.capture.data.capture.CaptureUploadRepository
 import app.blueprint.capture.data.capture.IntakeResolutionOutcome
 import app.blueprint.capture.data.capture.IntakeResolutionService
 import app.blueprint.capture.data.capture.QualificationIntakePacket
+import app.blueprint.capture.data.capture.SiteGeoPoint
 import app.blueprint.capture.data.capture.SiteIdentity
 import app.blueprint.capture.data.capture.TaskHypothesis
 import app.blueprint.capture.data.capture.isComplete
@@ -227,9 +228,27 @@ data class CaptureReviewDraft(
             jobId = capture.jobId ?: capture.targetId,
             siteSubmissionId = capture.siteSubmissionId,
             siteIdentity = SiteIdentity(
-                siteId = capture.siteSubmissionId ?: capture.targetId ?: capture.jobId ?: captureFallbackSceneId(capture.label),
-                siteIdSource = if (!capture.siteSubmissionId.isNullOrBlank()) "site_submission" else if (!capture.targetId.isNullOrBlank()) "buyer_request" else "open_capture",
+                siteId = capture.siteSubmissionId
+                    ?: capture.placeId
+                    ?: capture.targetId
+                    ?: capture.jobId
+                    ?: captureFallbackSceneId(capture.label),
+                siteIdSource = capture.siteIdSource
+                    ?: if (!capture.siteSubmissionId.isNullOrBlank()) {
+                        "site_submission"
+                    } else if (!capture.targetId.isNullOrBlank()) {
+                        "buyer_request"
+                    } else {
+                        "open_capture"
+                    },
+                placeId = capture.placeId,
                 siteName = capture.label.takeIf(String::isNotBlank),
+                addressFull = capture.addressText?.takeIf(String::isNotBlank),
+                geo = if (capture.latitude != null && capture.longitude != null) {
+                    SiteGeoPoint(latitude = capture.latitude, longitude = capture.longitude)
+                } else {
+                    null
+                },
             ),
             captureTopology = CaptureTopologyMetadata(
                 captureSessionId = coordinateFrameSessionId ?: captureId,

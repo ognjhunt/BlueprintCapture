@@ -52,4 +52,32 @@ struct NearbyTargetsLaunchPriorityTests {
         #expect(merged.first?.demandScore == 0.92)
         #expect(merged.first?.launchContext?.citySlug == "austin-tx")
     }
+
+    @Test @MainActor
+    func nearbyItemAccessibilityDoesNotPresentEstimatedPayoutAsQuotedTruth() {
+        let target = Target(
+            id: "place-2",
+            displayName: "Dock Two",
+            sku: .B,
+            lat: 35.99,
+            lng: -78.90,
+            address: "200 Logistics Way",
+            demandScore: 0.7,
+            sizeSqFt: nil,
+            category: "warehouse",
+            computedDistanceMeters: nil
+        )
+
+        let item = NearbyTargetsViewModel.NearbyItem(
+            id: target.id,
+            target: target,
+            distanceMiles: 1.2,
+            estimatedPayoutUsd: 85,
+            recordingPolicy: .unknown
+        )
+
+        #expect(item.accessibilityLabel.contains("review gated"))
+        #expect(!item.accessibilityLabel.contains("$85"))
+        #expect(!item.accessibilityLabel.localizedCaseInsensitiveContains("payout"))
+    }
 }

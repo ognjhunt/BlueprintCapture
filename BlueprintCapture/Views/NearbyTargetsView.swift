@@ -58,7 +58,7 @@ struct NearbyTargetsView: View {
 
                 content
             }
-            .navigationTitle("Earn")
+            .navigationTitle("Capture")
             .navigationBarTitleDisplayMode(.large)
             .fullScreenCover(isPresented: $navigateToCapture) {
                 CaptureSessionView(viewModel: captureFlow, targetId: reservedItem?.id ?? selectedItem?.id, reservationId: nil)
@@ -505,11 +505,11 @@ private extension NearbyTargetsView {
                         .foregroundStyle(.secondary)
                 }
 
-                // Payout highlight
+                // Explicit quoted amount
                 HStack(spacing: 16) {
-                    Label("$\(item.estimatedPayoutUsd)", systemImage: "dollarsign.circle.fill")
+                    Label("Review gated", systemImage: "doc.text.magnifyingglass")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(BlueprintTheme.successGreen)
+                        .foregroundStyle(.secondary)
 
                     Label("\(String(format: "%.1f", item.distanceMiles)) mi", systemImage: "location")
                         .font(.subheadline)
@@ -531,14 +531,10 @@ private extension NearbyTargetsView {
                                 await MainActor.run {
                                     reservedItem = item
 
-                                    // Set target info for upload progress display
-                                    // Create a payout range: base estimate ±30% based on quality
-                                    let basePayout = item.estimatedPayoutUsd
-                                    let minPayout = max(50, Int(Double(basePayout) * 0.7))
-                                    let maxPayout = Int(Double(basePayout) * 1.3)
+                                    // This nearby surface is review-gated; do not synthesize payout ranges.
                                     captureFlow.currentTargetInfo = (
                                         name: item.target.displayName,
-                                        estimatedPayoutRange: minPayout...maxPayout
+                                        estimatedPayoutRange: nil
                                     )
 
                                     captureFlow.step = .readyToCapture

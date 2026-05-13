@@ -36,7 +36,7 @@ final class NearbyTargetsViewModel: ObservableObject {
         let recordingPolicy: RecordingPolicyResult
         var accessibilityLabel: String {
             let launchLabel = target.launchContext == nil ? "" : ", launch priority"
-            return "\(target.displayName)\(launchLabel), SKU \(target.sku.rawValue), payout $\(estimatedPayoutUsd), distance \(String(format: "%.1f", distanceMiles)) miles"
+            return "\(target.displayName)\(launchLabel), SKU \(target.sku.rawValue), review gated, distance \(String(format: "%.1f", distanceMiles)) miles"
         }
 
         static func == (lhs: NearbyItem, rhs: NearbyItem) -> Bool {

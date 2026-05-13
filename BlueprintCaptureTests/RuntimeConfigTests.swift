@@ -21,6 +21,8 @@ struct RuntimeConfigTests {
         #expect(config.allowMockJobsFallback == false)
         #expect(config.enableInternalTestSpace == false)
         #expect(config.enableOpenCaptureHere == true)
+        #expect(config.payoutProvider == "stripe")
+        #expect(config.payoutProviderReady == false)
         #expect(config.websiteURL == nil)
         #expect(config.termsOfServiceURL == nil)
         #expect(config.supportEmailAddress == nil)
@@ -37,6 +39,7 @@ struct RuntimeConfigTests {
                 "BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK": "true",
                 "BLUEPRINT_ENABLE_DIRECT_PROVIDER_FEATURES": "true",
                 "BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK": "true",
+                "BLUEPRINT_PAYOUT_PROVIDER": "stripe",
                 "BLUEPRINT_MAX_RESERVATION_DRIVE_MINUTES": "90",
                 "BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES": "50.5",
                 "BLUEPRINT_MAIN_WEBSITE_URL": "https://www.tryblueprint.io",
@@ -53,7 +56,10 @@ struct RuntimeConfigTests {
         #expect(config.demandBackendBaseURL?.absoluteString == "https://alpha.example.com")
         #expect(config.isUITesting == true)
         #expect(config.uiTestScenario == .wallet)
-        #expect(config.availability(for: .payouts).isEnabled == true)
+        #expect(config.payoutProvider == "stripe")
+        #expect(config.payoutProviderReady == false)
+        #expect(config.availability(for: .payouts).isEnabled == false)
+        #expect(config.availability(for: .payouts).message?.contains("backend-verified Stripe readiness") == true)
         #expect(config.availability(for: .nearbyDiscovery).isEnabled == false)
         #expect(config.nearbyDiscoveryProvider == .geminiMapsGrounding)
         #expect(config.enableGeminiMapsGroundingFallback == true)
@@ -67,5 +73,26 @@ struct RuntimeConfigTests {
         #expect(config.termsOfServiceURL?.absoluteString == "https://www.tryblueprint.io/terms")
         #expect(config.privacyPolicyURL?.absoluteString == "https://www.tryblueprint.io/privacy")
         #expect(config.supportEmailAddress == "support@blueprint.app")
+    }
+
+    @Test
+    func payoutAvailabilityRequiresProviderReadyProofBeyondBackendURL() {
+        let backendOnly = RuntimeConfig.load(
+            environment: [:],
+            infoDictionary: [
+                "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com"
+            ]
+        )
+        #expect(backendOnly.availability(for: .payouts).isEnabled == false)
+
+        let providerReady = RuntimeConfig.load(
+            environment: [
+                "BLUEPRINT_PAYOUT_PROVIDER_READY": "true"
+            ],
+            infoDictionary: [
+                "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com"
+            ]
+        )
+        #expect(providerReady.availability(for: .payouts).isEnabled == true)
     }
 }

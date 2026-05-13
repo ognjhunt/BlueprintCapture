@@ -5,6 +5,9 @@ BLUEPRINT_DEMAND_BACKEND_BASE_URL=https://your-backend.example.com
 BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK=false
 BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE=true
 BLUEPRINT_STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
+BLUEPRINT_PAYOUT_PROVIDER=stripe
+# Backend URL and publishable key are not payout readiness. Keep false for Android alpha.
+BLUEPRINT_PAYOUT_PROVIDER_READY=false
 # Nearby/provider requests are proxied through BLUEPRINT_DEMAND_BACKEND_BASE_URL.
 # Do not ship Places or Gemini client keys in the Android app.
 # Optional: keep default as places_nearby. Other supported value: gemini_maps_grounding

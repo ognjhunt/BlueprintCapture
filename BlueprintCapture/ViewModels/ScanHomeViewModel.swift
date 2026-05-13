@@ -556,12 +556,12 @@ final class ScanHomeViewModel: ObservableObject {
             heroImageURL: nil,
             category: "OPEN CAPTURE",
             instructions: [
-                "Confirm you have permission to capture and commercialize this space before you start.",
-                "Capture the full accessible area around you.",
+                "Confirm you have lawful access to record this space before you start.",
+                "Capture only non-private areas you can lawfully access.",
                 "Pause 2-3 seconds at each major transition point.",
                 "Capture from multiple heights where possible."
             ],
-            allowedAreas: ["All visible areas"],
+            allowedAreas: ["Lawfully accessible, non-private visible areas only"],
             restrictedAreas: ["Do not capture restricted, private, or unapproved areas."],
             permissionDocURL: nil,
             checkinRadiusM: 999_999,
@@ -577,7 +577,7 @@ final class ScanHomeViewModel: ObservableObject {
             approvalRequirements: [],
             recaptureReason: nil,
             rightsChecklist: [
-                "I have permission to capture this space.",
+                "I have lawful access to record this space.",
                 "I will avoid restricted or private areas.",
                 "I understand qualification, privacy, and rights checks can block downstream use.",
             ],
@@ -1108,8 +1108,7 @@ extension ScanHomeViewModel {
             }
             return ("Inferred Candidate", 3200, 20)
         }()
-        let multiplier: Double = demandScore >= 0.8 ? 1.2 : (demandScore >= 0.65 ? 1.1 : 1.0)
-        return (base.0, Int((Double(base.1) * multiplier).rounded()), base.2)
+        return (base.0, 0, base.2)
     }
 
     private static func makeInferredNearbyJob(
@@ -1160,7 +1159,7 @@ extension ScanHomeViewModel {
             jobType: .operatorApprovedOnDemand,
             buyerRequestId: nil,
             siteSubmissionId: nil,
-            quotedPayoutCents: profile.payoutCents,
+            quotedPayoutCents: nil,
             dueWindow: nil,
             approvalRequirements: ["blueprint_review"],
             recaptureReason: nil,

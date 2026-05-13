@@ -29,11 +29,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Lightbulb
-import androidx.compose.material.icons.rounded.MonetizationOn
 import androidx.compose.material.icons.rounded.Radar
 import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.StayCurrentPortrait
+import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -117,12 +117,12 @@ fun OnboardingWalkthroughScreen(
             WalkthroughPage(
                 icon = Icons.Rounded.Lightbulb,
                 title = "Good lighting helps",
-                body = "Well-lit spaces produce higher quality captures and bigger payouts.",
+                body = "Well-lit spaces produce higher quality captures and cleaner review evidence.",
             ),
             WalkthroughPage(
                 icon = Icons.Rounded.Schedule,
                 title = "15-30 minutes",
-                body = "A complete capture takes 15-30 minutes. Longer, thorough captures earn more.",
+                body = "A complete capture usually takes 15-30 minutes. Thorough coverage improves review quality.",
             ),
         )
     }
@@ -155,11 +155,11 @@ fun OnboardingWalkthroughScreen(
                 subtitle = "Standard capture mode",
             ),
             DeviceCapability(
-                icon = Icons.Rounded.MonetizationOn,
-                title = "Earnings Multiplier",
-                subtitle = "1x on every capture",
+                icon = Icons.Rounded.Verified,
+                title = "Capture Readiness",
+                subtitle = "Standard capture mode",
                 highlighted = true,
-                trailingText = "1x",
+                trailingText = "Standard",
             ),
         )
     }

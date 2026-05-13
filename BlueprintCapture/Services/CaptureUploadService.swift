@@ -354,6 +354,7 @@ struct CaptureCapabilitiesMetadata: Equatable, Codable {
     let cameraIntrinsics: Bool
     let depth: Bool
     let depthConfidence: Bool
+    let missingDepthReason: String?
     let mesh: Bool
     let pointCloud: Bool
     let planes: Bool

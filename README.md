@@ -62,7 +62,8 @@ capture automatically.
 - In scope: truthful capture selection, raw bundle packaging, upload queueing, wallet history sync, and explicit open-capture flow.
 - In scope on Android: phone capture and target-scoped Meta glasses capture that finalizes into the canonical bundle/upload pipeline.
 - Intentionally out of scope by default: direct-provider AI features, Street View previews, and Android payout onboarding UI that is not backed by a live provider contract.
-- External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
+- External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp, and only when real proof links the iPhone capture, upstream request/job records, bridge handoff, Pipeline package, and WebApp sync. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
+- Meta glasses and Android are internal-only launch paths unless physical-device proof and downstream Pipeline/WebApp proof exist for the same capture/job chain.
 - Current cross-modality runtime limits are documented in [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
 
 ## Main Areas

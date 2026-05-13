@@ -38,7 +38,7 @@ struct RecordingGuidance {
 @available(iOS 26.0, *)
 @Generable
 struct EarningsInsight {
-    @Guide(description: "1–2 sentences of earnings insight based on the contributor's capture stats. Be specific and motivating. Reference their numbers. E.g., 'Your 18 approved captures put you on track for Gold tier. Commercial jobs have historically paid out 1.8x faster than residential for contributors at your level.'")
+    @Guide(description: "1–2 sentences of review-status insight based on the contributor's capture stats. Reference their numbers, stay factual, and do not promise payouts, timing, bonuses, or faster earnings.")
     var insight: String
 }
 
@@ -177,7 +177,7 @@ final class SpaceDraftGenerator {
         }
     }
 
-    // MARK: - Earnings Insight
+    // MARK: - Review Insight
 
     func streamEarningsInsight(
         totalCaptures: Int,
@@ -190,10 +190,10 @@ final class SpaceDraftGenerator {
         guard case .available = SystemLanguageModel.default.availability else { return nil }
 
         let session = LanguageModelSession(
-            instructions: "You give brief earnings insights to contributors on a 3D spatial capture platform. Be factual, specific to their numbers, and motivating. No filler."
+            instructions: "You give brief review-status insights to contributors on a 3D spatial capture platform. Be factual and specific to their numbers. Do not promise payout timing, bonuses, instant cashout, or earning outcomes."
         )
         let approvalRate = totalCaptures > 0 ? Int(Double(approvedCaptures) / Double(totalCaptures) * 100) : 0
-        let prompt = "Contributor stats — total captures: \(totalCaptures), approved: \(approvedCaptures) (\(approvalRate)% rate), total earnings: \(totalEarnings), pending review: \(pendingCount). Write a 1–2 sentence earnings insight."
+        let prompt = "Contributor stats — total captures: \(totalCaptures), approved: \(approvedCaptures) (\(approvalRate)% rate), recorded ledger total: \(totalEarnings), pending review: \(pendingCount). Write a 1–2 sentence review-status insight without payout promises."
 
         do {
             let stream = session.streamResponse(to: prompt, generating: EarningsInsight.self)

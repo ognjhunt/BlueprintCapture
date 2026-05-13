@@ -57,13 +57,13 @@ struct TargetRow: View {
 
             Spacer()
 
-            // Payout
+            // Quoted amount
             VStack(alignment: .trailing, spacing: 4) {
                 Text("$\(item.estimatedPayoutUsd)")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(BlueprintTheme.successGreen)
 
-                Text("Est. payout")
+                Text("Quoted")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

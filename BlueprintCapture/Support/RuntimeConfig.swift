@@ -56,6 +56,8 @@ struct RuntimeConfig: Equatable {
     let enableInternalTestSpace: Bool
     let enableOpenCaptureHere: Bool
     let enableRemoteNotifications: Bool
+    let payoutProvider: String
+    let payoutProviderReady: Bool
     let websiteURL: URL?
     let helpCenterURL: URL?
     let bugReportURL: URL?
@@ -85,6 +87,8 @@ struct RuntimeConfig: Equatable {
         enableInternalTestSpace: Bool = false,
         enableOpenCaptureHere: Bool = true,
         enableRemoteNotifications: Bool = false,
+        payoutProvider: String = "stripe",
+        payoutProviderReady: Bool = false,
         websiteURL: URL? = nil,
         helpCenterURL: URL? = nil,
         bugReportURL: URL? = nil,
@@ -109,6 +113,8 @@ struct RuntimeConfig: Equatable {
         self.enableInternalTestSpace = enableInternalTestSpace
         self.enableOpenCaptureHere = enableOpenCaptureHere
         self.enableRemoteNotifications = enableRemoteNotifications
+        self.payoutProvider = payoutProvider
+        self.payoutProviderReady = payoutProviderReady
         self.websiteURL = websiteURL
         self.helpCenterURL = helpCenterURL
         self.bugReportURL = bugReportURL
@@ -179,6 +185,15 @@ struct RuntimeConfig: Equatable {
                 infoDictionary["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"],
                 defaultValue: false
             ),
+            payoutProvider: stringValue(
+                environment["BLUEPRINT_PAYOUT_PROVIDER"] ??
+                (infoDictionary["BLUEPRINT_PAYOUT_PROVIDER"] as? String)
+            ) ?? "stripe",
+            payoutProviderReady: boolValue(
+                environment["BLUEPRINT_PAYOUT_PROVIDER_READY"] ??
+                infoDictionary["BLUEPRINT_PAYOUT_PROVIDER_READY"],
+                defaultValue: false
+            ),
             websiteURL: urlValue(
                 environment["BLUEPRINT_MAIN_WEBSITE_URL"] ??
                 (infoDictionary["BLUEPRINT_MAIN_WEBSITE_URL"] as? String)
@@ -219,6 +234,9 @@ struct RuntimeConfig: Equatable {
         case .payouts:
             guard backendBaseURL != nil else {
                 return .unavailable("Payout setup is not enabled for this alpha build.")
+            }
+            guard payoutProviderReady else {
+                return .unavailable("Payout setup requires backend-verified Stripe readiness. This build only shows wallet and review status.")
             }
             return .enabled
 

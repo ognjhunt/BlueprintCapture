@@ -150,7 +150,11 @@ struct CaptureBundleAndInferenceTests {
         let captureCapabilities = try #require(manifest["capture_capabilities"] as? [String: Any])
         #expect(captureCapabilities["camera_pose"] as? Bool == false)
         #expect(captureCapabilities["depth"] as? Bool == false)
+        #expect(captureCapabilities["missing_depth_reason"] as? String == "not_enabled")
         #expect(captureCapabilities["geometry_expected_downstream"] as? Bool == false)
+        let upstreamHandoff = try #require(manifest["upstream_handoff"] as? [String: Any])
+        #expect(upstreamHandoff["hosted_review_truth_state"] as? String == "upstream_ids_present")
+        #expect((upstreamHandoff["blockers"] as? [String]) == [])
         let captureRights = try #require(manifest["capture_rights"] as? [String: Any])
         #expect(captureRights["data_licensing_allowed"] as? Bool == true)
         #expect(captureRights["derived_scene_generation_allowed"] as? Bool == false)
@@ -183,6 +187,9 @@ struct CaptureBundleAndInferenceTests {
         #expect(context["capture_profile_id"] as? String == "iphone_arkit_non_lidar")
         let contextCapabilities = try #require(context["capture_capabilities"] as? [String: Any])
         #expect(contextCapabilities["camera_intrinsics"] as? Bool == false)
+        #expect(contextCapabilities["missing_depth_reason"] as? String == "not_enabled")
+        let contextUpstreamHandoff = try #require(context["upstream_handoff"] as? [String: Any])
+        #expect(contextUpstreamHandoff["hosted_review_truth_state"] as? String == "upstream_ids_present")
 
         let hypothesisObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("task_hypothesis.json")))
         let hypothesis = try #require(hypothesisObject as? [String: Any])
@@ -200,6 +207,84 @@ struct CaptureBundleAndInferenceTests {
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("provenance.json").path))
         #expect(fileManager.fileExists(atPath: bundle.rawDirectoryURL.appendingPathComponent("sync_map.jsonl").path))
         #expect(fileManager.fileExists(atPath: (bundle.shareURL ?? bundle.captureRootURL).path))
+    }
+
+    @Test
+    func finalizerDoesNotInventUpstreamIdsForHostedReviewTruth() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-upstream-blockers-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        try fileManager.createDirectory(at: raw, withIntermediateDirectories: true)
+
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
+        try makeRawManifestData(
+            sceneId: "open-scene",
+            captureId: "open-capture",
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_non_lidar",
+            captureCapabilities: [
+                "camera_pose": false,
+                "depth": false,
+                "motion": false
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("".utf8).write(to: raw.appendingPathComponent("motion.jsonl"))
+
+        let metadata = CaptureUploadMetadata(
+            id: UUID(),
+            targetId: nil,
+            reservationId: nil,
+            jobId: "local-job-only",
+            captureJobId: nil,
+            buyerRequestId: nil,
+            siteSubmissionId: nil,
+            regionId: nil,
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .openCapture,
+            priorityWeight: nil,
+            quotedPayoutCents: nil,
+            rightsProfile: "review_required",
+            requestedOutputs: ["qualification", "review_intake"],
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: nil,
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
+        )
+
+        let finalizer = CaptureBundleFinalizer()
+        let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
+        _ = try finalizer.finalize(request: request, mode: .localExport())
+        #expect(finalizer.validateRawBundle(in: raw).isEmpty)
+
+        let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
+        let manifest = try #require(manifestObject as? [String: Any])
+        #expect(manifest["site_submission_id"] is NSNull)
+        #expect(manifest["buyer_request_id"] is NSNull)
+        #expect(manifest["capture_job_id"] is NSNull)
+        let upstreamHandoff = try #require(manifest["upstream_handoff"] as? [String: Any])
+        #expect(upstreamHandoff["hosted_review_truth_state"] as? String == "blocked_missing_upstream_ids")
+        #expect((upstreamHandoff["blockers"] as? [String]) == [
+            "missing_site_submission_id",
+            "missing_buyer_request_id",
+            "missing_capture_job_id"
+        ])
+
+        let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
+        let context = try #require(contextObject as? [String: Any])
+        #expect(context["site_submission_id"] == nil)
+        let contextUpstreamHandoff = try #require(context["upstream_handoff"] as? [String: Any])
+        #expect(contextUpstreamHandoff["hosted_review_truth_state"] as? String == "blocked_missing_upstream_ids")
     }
 
     @Test
@@ -735,12 +820,51 @@ struct CaptureBundleAndInferenceTests {
         let maybePending = await MainActor.run { viewModel.pendingCaptureRequest }
         let pending = try #require(maybePending)
         #expect(pending.metadata.quotedPayoutCents == nil)
+        #expect(pending.metadata.captureJobId == nil)
+        #expect(pending.metadata.buyerRequestId == nil)
+        #expect(pending.metadata.siteSubmissionId == nil)
         #expect(pending.metadata.requestedOutputs == ["qualification", "review_intake"])
         #expect(pending.metadata.captureRights?.payoutEligible == false)
         #expect(pending.metadata.captureRights?.derivedSceneGenerationAllowed == false)
         #expect(pending.metadata.captureMode?.requestedMode == "qualification_only")
         #expect(pending.metadata.rightsProfile == "review_required")
         #expect(pending.metadata.specialTaskType == .openCapture)
+    }
+
+    @Test
+    func uploadCompletionCopyDoesNotInventPayoutForNilRange() {
+        let display = UploadCompletionReviewDisplay.make(estimatedPayoutRange: nil)
+        let combinedCopy = [display.title, display.primaryText ?? "", display.detailText].joined(separator: " ")
+
+        #expect(display.isQuotedPayout == false)
+        #expect(display.primaryText == nil)
+        #expect(!combinedCopy.contains("$"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("paid within"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("hours"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("earn"))
+    }
+
+    @Test
+    func uploadCompletionCopyKeepsQuotedPayoutWithoutTimingClaim() {
+        let display = UploadCompletionReviewDisplay.make(estimatedPayoutRange: 35...45)
+        let combinedCopy = [display.title, display.primaryText ?? "", display.detailText].joined(separator: " ")
+
+        #expect(display.isQuotedPayout == true)
+        #expect(display.primaryText == "$35 - $45")
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("paid within"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("usually"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("48"))
+    }
+
+    @Test
+    func uploadCompletionCopyTreatsZeroRangeAsReviewOnly() {
+        let display = UploadCompletionReviewDisplay.make(estimatedPayoutRange: 0...0)
+        let combinedCopy = [display.title, display.primaryText ?? "", display.detailText].joined(separator: " ")
+
+        #expect(display.isQuotedPayout == false)
+        #expect(display.primaryText == nil)
+        #expect(!combinedCopy.contains("$"))
+        #expect(!combinedCopy.localizedCaseInsensitiveContains("earn"))
     }
 
     @Test

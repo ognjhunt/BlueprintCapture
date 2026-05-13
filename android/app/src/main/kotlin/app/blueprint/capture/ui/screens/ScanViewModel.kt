@@ -12,6 +12,7 @@ import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.capture.CaptureHistoryRepository
 import app.blueprint.capture.data.capture.SubmissionSummary
 import app.blueprint.capture.data.config.LocalConfigProvider
+import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
 import app.blueprint.capture.data.model.DemandOpportunityFeedRequest
 import app.blueprint.capture.data.model.OpportunityCandidatePlace
@@ -33,6 +34,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +55,13 @@ data class ScanUiState(
     val payoutBannerTitle: String = "Payout onboarding stays off-device",
     val payoutBannerBody: String = "Android alpha keeps payout onboarding out of app until the live provider contract is wired.",
     val submissionSummary: SubmissionSummary = SubmissionSummary(),
+)
+
+data class PlaceSearchUiState(
+    val query: String = "",
+    val suggestions: List<PlaceSearchSuggestion> = emptyList(),
+    val isSearching: Boolean = false,
+    val errorMessage: String? = null,
 )
 
 @HiltViewModel
@@ -76,6 +86,9 @@ class ScanViewModel @Inject constructor(
     private val _submissionSummary = MutableStateFlow(SubmissionSummary())
     private val _nearbyTargets = MutableStateFlow<List<ScanTarget>>(emptyList())
     private val _isRefreshing = MutableStateFlow(false)
+    private val _placeSearchState = MutableStateFlow(PlaceSearchUiState())
+    val placeSearchState: StateFlow<PlaceSearchUiState> = _placeSearchState
+    private var placeSearchJob: Job? = null
 
     // Reverse-geocoded street address for the alpha current-location card.
     // Defaults to "Your current location" until geocoding resolves.
@@ -119,7 +132,9 @@ class ScanViewModel @Inject constructor(
             } else {
                 "Payout setup unavailable"
             },
-            payoutBannerBody = if (config.hasBackend) {
+            payoutBannerBody = if (config.hasPayoutProviderReady) {
+                "Backend provider proof is present, but Android alpha still keeps payout onboarding off-device until the real native proof path is wired."
+            } else if (config.hasBackend) {
                 "Wallet history can sync here, but payout-provider onboarding is intentionally not live on Android alpha."
             } else {
                 "Payout setup is not enabled for this alpha build."
@@ -158,6 +173,52 @@ class ScanViewModel @Inject constructor(
         viewModelScope.launch {
             kotlinx.coroutines.delay(900)
             _isRefreshing.value = false
+        }
+    }
+
+    fun searchPlaceSuggestions(query: String) {
+        placeSearchJob?.cancel()
+        val cleaned = query.trim()
+        if (cleaned.isBlank()) {
+            _placeSearchState.value = PlaceSearchUiState(query = query)
+            return
+        }
+
+        _placeSearchState.value = PlaceSearchUiState(query = query, isSearching = true)
+        placeSearchJob = viewModelScope.launch {
+            delay(250)
+            val manualSuggestion = manualSearchLocationSuggestion(cleaned)
+            val backendSuggestions = runCatching {
+                placesRepository.autocomplete(cleaned).map { it.toSearchLocationSuggestion() }
+            }.getOrElse {
+                emptyList()
+            }
+            _placeSearchState.value = PlaceSearchUiState(
+                query = query,
+                suggestions = (backendSuggestions + listOfNotNull(manualSuggestion)).distinctBy(PlaceSearchSuggestion::id),
+                isSearching = false,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun resolveSearchLaunch(
+        suggestion: PlaceSearchSuggestion,
+        context: String,
+        onResult: (CaptureLaunch) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val details = if (suggestion.isManualEntry) {
+                null
+            } else {
+                placesRepository.fetchDetails(suggestion.id)
+            }
+            if (!suggestion.isManualEntry && details == null) {
+                onError("Blueprint could not verify that place right now. Try again or use a typed address.")
+                return@launch
+            }
+            onResult(suggestion.toOpenCaptureLaunch(context = context, details = details))
         }
     }
 
@@ -312,7 +373,7 @@ class ScanViewModel @Inject constructor(
             title = "Open Capture Here",
             subtitle = address,
             addressText = address,
-            payoutText = "$45",
+            payoutText = "Review gated",
             distanceText = "Here now",
             readyNow = true,
             categoryLabel = "OPEN CAPTURE",
@@ -322,8 +383,8 @@ class ScanViewModel @Inject constructor(
             lng = location.longitude,
             checkinRadiusM = 999_999,
             priorityWeight = 100.0,
-            quotedPayoutCents = 4500,
-            requestedOutputs = listOf("qualification", "preview_simulation", "deeper_evaluation"),
+            quotedPayoutCents = null,
+            requestedOutputs = listOf("qualification", "review_intake"),
             rightsProfile = "open_capture_review",
             workflowName = "Open Capture Here",
             workflowSteps = listOf(
@@ -333,7 +394,7 @@ class ScanViewModel @Inject constructor(
                 "Capture from multiple heights where possible.",
             ),
             detailChecklist = listOf(
-                "Confirm you have permission to capture and commercialize this space.",
+                "Confirm you have permission to capture this space before recording starts.",
                 "Avoid restricted, private, or clearly unapproved areas.",
                 "Qualification, privacy, and rights checks can still block downstream use.",
                 "Pause 2-3 seconds at each major transition point.",
@@ -472,7 +533,7 @@ private fun RankedNearbyOpportunity.toNearbyScanTarget(userLocation: Location): 
 private data class NearbyPresentation(
     val categoryLabel: String,
     val payoutText: String,
-    val payoutCents: Int,
+    val payoutCents: Int?,
     val estimatedMinutes: Int,
 )
 
@@ -482,48 +543,38 @@ private fun nearbyMetadata(
     demandScore: Double? = null,
 ): NearbyPresentation {
     val normalized = (types + listOfNotNull(siteType)).map { it.lowercase(Locale.US) }.toSet()
-    val scoreMultiplier = when {
-        (demandScore ?: 0.0) >= 0.8 -> 1.2
-        (demandScore ?: 0.0) >= 0.6 -> 1.1
-        (demandScore ?: 0.0) >= 0.4 -> 1.0
-        else -> 0.9
-    }
     val base = when {
         normalized.any { it in setOf("warehouse", "distribution_center", "logistics") } ->
-            NearbyPresentation("WAREHOUSE CANDIDATE", "$70", 7_000, 35)
+            NearbyPresentation("WAREHOUSE CANDIDATE", "Review gated", null, 35)
         normalized.any { it in setOf("manufacturing", "factory", "industrial") } ->
-            NearbyPresentation("FACTORY CANDIDATE", "$75", 7_500, 40)
+            NearbyPresentation("FACTORY CANDIDATE", "Review gated", null, 40)
         normalized.any { it in setOf("warehouse_store", "hardware_store", "home_improvement_store") } ->
-            NearbyPresentation("INDUSTRIAL CANDIDATE", "$58", 5_800, 32)
+            NearbyPresentation("INDUSTRIAL CANDIDATE", "Review gated", null, 32)
         normalized.any { it in setOf("store", "shopping_mall", "department_store", "supermarket", "retail", "grocery") } ->
-            NearbyPresentation("RETAIL CANDIDATE", "$40", 4_000, 25)
+            NearbyPresentation("RETAIL CANDIDATE", "Review gated", null, 25)
         normalized.contains("convenience_store") ->
-            NearbyPresentation("CONVENIENCE CANDIDATE", "$28", 2_800, 18)
+            NearbyPresentation("CONVENIENCE CANDIDATE", "Review gated", null, 18)
         normalized.any { it in setOf("hotel", "lodging", "hospitality") } ->
-            NearbyPresentation("HOSPITALITY CANDIDATE", "$80", 8_000, 40)
+            NearbyPresentation("HOSPITALITY CANDIDATE", "Review gated", null, 40)
         normalized.contains("parking") ->
-            NearbyPresentation("PARKING CANDIDATE", "$30", 3_000, 20)
+            NearbyPresentation("PARKING CANDIDATE", "Review gated", null, 20)
         normalized.contains("gym") ->
-            NearbyPresentation("FITNESS CANDIDATE", "$45", 4_500, 30)
+            NearbyPresentation("FITNESS CANDIDATE", "Review gated", null, 30)
         normalized.contains("museum") ->
-            NearbyPresentation("CULTURAL CANDIDATE", "$65", 6_500, 40)
+            NearbyPresentation("CULTURAL CANDIDATE", "Review gated", null, 40)
         normalized.contains("stadium") ->
-            NearbyPresentation("VENUE CANDIDATE", "$120", 12_000, 60)
+            NearbyPresentation("VENUE CANDIDATE", "Review gated", null, 60)
         normalized.any { it in setOf("transit_station", "train_station", "subway_station", "bus_station") } ->
-            NearbyPresentation("TRANSIT CANDIDATE", "$50", 5_000, 30)
+            NearbyPresentation("TRANSIT CANDIDATE", "Review gated", null, 30)
         normalized.contains("library") ->
-            NearbyPresentation("LIBRARY CANDIDATE", "$35", 3_500, 25)
+            NearbyPresentation("LIBRARY CANDIDATE", "Review gated", null, 25)
         normalized.any { it in setOf("movie_theater", "performing_arts_theater") } ->
-            NearbyPresentation("THEATER CANDIDATE", "$90", 9_000, 50)
+            NearbyPresentation("THEATER CANDIDATE", "Review gated", null, 50)
         normalized.any { it in setOf("university", "school") } ->
-            NearbyPresentation("CAMPUS CANDIDATE", "$55", 5_500, 35)
-        else -> NearbyPresentation("INFERRED CANDIDATE", "$45", 4_500, 30)
+            NearbyPresentation("CAMPUS CANDIDATE", "Review gated", null, 35)
+        else -> NearbyPresentation("INFERRED CANDIDATE", "Review gated", null, 30)
     }
-    val adjustedCents = (base.payoutCents * scoreMultiplier).toInt()
-    return base.copy(
-        payoutText = "$${adjustedCents / 100}",
-        payoutCents = adjustedCents,
-    )
+    return base
 }
 
 private fun condensedAddress(address: String): String {

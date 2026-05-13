@@ -102,8 +102,7 @@ struct StripeOnboardingView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 28)
 
-                    // MARK: Instant Pay
-                    sectionLabel("Instant Pay")
+                    sectionLabel("Cashout")
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
 
@@ -276,8 +275,8 @@ struct StripeOnboardingView: View {
             scheduleRow(
                 icon: "bolt.fill",
                 iconColor: Color(red: 0.9, green: 0.55, blue: 0.1),
-                title: "Instant payout",
-                subtitle: accountState?.instantPayoutEligible == true ? "Available for eligible balance" : "Unlocks only when Stripe marks the account eligible"
+                title: "Provider-gated cashout",
+                subtitle: accountState?.instantPayoutEligible == true ? "Eligible balance is available for a provider cashout request" : "Unlocks only when Stripe marks the account eligible"
             )
         }
         .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -309,7 +308,7 @@ struct StripeOnboardingView: View {
         .padding(.vertical, 14)
     }
 
-    // MARK: - Instant Pay Card
+    // MARK: - Cashout Card
 
     private var instantPayCard: some View {
         VStack(spacing: 0) {
@@ -326,7 +325,7 @@ struct StripeOnboardingView: View {
                     .foregroundStyle(.white)
 
                 Button { triggerInstantPayout() } label: {
-                    Text("Cash Out")
+                    Text("Request")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(canCashOut ? .white : Color(white: 0.4))
                         .padding(.horizontal, 14)
@@ -343,8 +342,8 @@ struct StripeOnboardingView: View {
             HStack {
                 Text(
                     accountState?.instantPayoutEligible == true
-                        ? "Funds arrive within minutes. Bank timing may vary."
-                        : "Unlocks after your account is verified."
+                        ? "Stripe has marked the balance eligible. Settlement timing still depends on provider and bank processing."
+                        : "Cashout stays locked until Stripe verifies the account and marks a balance eligible."
                 )
                 .font(.caption)
                 .foregroundStyle(Color(white: 0.3))
@@ -437,7 +436,7 @@ struct StripeOnboardingView: View {
         Task {
             do {
                 try await PayoutDeviceAuthenticationService.shared.authenticate(
-                    reason: "Unlock to request an instant payout."
+                    reason: "Unlock to request provider-gated cashout."
                 )
                 try await StripeConnectService.shared.triggerInstantPayout(amountCents: dollars * 100)
                 await loadAccountState()
@@ -445,7 +444,7 @@ struct StripeOnboardingView: View {
             } catch {
                 await MainActor.run {
                     isLoading = false
-                    errorMessage = (error as? LocalizedError)?.errorDescription ?? "Instant payout failed."
+                    errorMessage = (error as? LocalizedError)?.errorDescription ?? "Cashout request failed."
                 }
             }
         }

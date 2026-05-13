@@ -139,7 +139,7 @@ struct WalletView: View {
         }
     }
 
-    // MARK: - AI Earnings Insight
+    // MARK: - AI Review Insight
 
     @MainActor
     private func generateInsight() async {
@@ -179,7 +179,7 @@ struct WalletView: View {
                         ProgressView()
                             .scaleEffect(0.75)
                             .tint(Color(white: 0.5))
-                        Text("Generating earnings insight…")
+                        Text("Generating review insight…")
                             .font(BlueprintTheme.body(13, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textSecondary)
                     }

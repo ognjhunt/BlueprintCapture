@@ -352,9 +352,9 @@ function hasStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-function captureObjectKind(objectName: string): CaptureObjectKind {
+export function captureObjectKind(objectName: string): CaptureObjectKind {
   const fileName = basename(objectName);
-  if (fileName === "walkthrough.mov") return "walkthrough";
+  if (fileName === "walkthrough.mov" || fileName === "walkthrough.mp4") return "walkthrough";
   if (fileName === "capture_upload_complete.json") return "completion_marker";
   return "other";
 }
@@ -404,7 +404,8 @@ export function deriveRequestedRouting(manifest: Record<string, unknown> | null)
 export function buildWorldlabsPreviewFields(
   bucketName: string,
   pathInfo: CapturePathInfo,
-  previewSimulationRequested: boolean
+  previewSimulationRequested: boolean,
+  videoObjectName: string = `${pathInfo.rawPrefix}/walkthrough.mov`
 ): Record<string, unknown> {
   return {
     preview_simulation_requested: previewSimulationRequested,
@@ -415,9 +416,40 @@ export function buildWorldlabsPreviewFields(
       ? gsUri(bucketName, `${pathInfo.capturesPrefix}/worldlabs/input_manifest.json`)
       : null,
     worldlabs_input_video_uri: previewSimulationRequested
-      ? gsUri(bucketName, `${pathInfo.rawPrefix}/walkthrough.mov`)
+      ? gsUri(bucketName, videoObjectName)
       : null,
   };
+}
+
+export function resolveWalkthroughObjectName(
+  manifest: Record<string, unknown> | null,
+  pathInfo: CapturePathInfo,
+  finalizedObjectName?: string
+): string {
+  const finalizedFileName = finalizedObjectName ? basename(finalizedObjectName) : null;
+  if (
+    finalizedObjectName?.startsWith(`${pathInfo.rawPrefix}/`) &&
+    (finalizedFileName === "walkthrough.mov" || finalizedFileName === "walkthrough.mp4")
+  ) {
+    return finalizedObjectName;
+  }
+
+  const videoURI = asString(manifest?.video_uri);
+  if (videoURI) {
+    if (videoURI.startsWith(`${pathInfo.rawPrefix}/`)) {
+      return videoURI;
+    }
+    const rawPrefixIndex = videoURI.indexOf(`${pathInfo.rawPrefix}/`);
+    if (rawPrefixIndex >= 0) {
+      return videoURI.slice(rawPrefixIndex);
+    }
+    const videoFileName = basename(videoURI);
+    if (videoURI.startsWith("raw/") || videoURI === videoFileName) {
+      return `${pathInfo.rawPrefix}/${videoFileName}`;
+    }
+  }
+
+  return `${pathInfo.rawPrefix}/walkthrough.mov`;
 }
 
 export function buildTaskSiteContext(manifest: Record<string, unknown> | null): Record<string, unknown> {
@@ -466,6 +498,8 @@ function validateIdentityMapping(input: {
   const siteSubmissionId = asString(manifest?.site_submission_id) ?? null;
   const buyerRequestId = asString(manifest?.buyer_request_id) ?? null;
   const captureJobId = asString(manifest?.capture_job_id) ?? null;
+  const upstreamHandoff = asRecord(manifest?.upstream_handoff) ?? null;
+  const upstreamHandoffBlockers = asStringArray(upstreamHandoff?.blockers) ?? [];
 
   const blockReasons: string[] = [];
   const warnings: string[] = [];
@@ -491,6 +525,9 @@ function validateIdentityMapping(input: {
   if (!buyerRequestId && !captureJobId) {
     warnings.push("missing_business_request_identifier");
   }
+  for (const blocker of upstreamHandoffBlockers) {
+    warnings.push(`hosted_review_blocker:${blocker}`);
+  }
 
   return {
     blockReasons,
@@ -505,6 +542,8 @@ function validateIdentityMapping(input: {
       site_submission_id: siteSubmissionId,
       buyer_request_id: buyerRequestId,
       capture_job_id: captureJobId,
+      upstream_handoff: upstreamHandoff,
+      hosted_review_blockers: upstreamHandoffBlockers,
       completion_raw_prefix: completionRawPrefix,
     },
   };
@@ -800,17 +839,19 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
   }
   const schemaVersion = asString(manifest.schema_version);
   if (schemaVersion === "v3" || (asString(manifest.capture_schema_version)?.startsWith("3.") ?? false)) {
+    const captureSource = asString(manifest.capture_source);
     const v3RequiredStrings = [
       "capture_id",
       "coordinate_frame_session_id",
       "app_version",
       "app_build",
-      "ios_version",
-      "ios_build",
       "hardware_model_identifier",
       "device_model_marketing",
       "capture_profile_id",
     ];
+    if (captureSource === "iphone") {
+      v3RequiredStrings.push("ios_version", "ios_build");
+    }
     const v3RequiredBooleans = ["depth_supported"];
     for (const field of v3RequiredStrings) {
       if (!asString(manifest[field])) {
@@ -905,8 +946,6 @@ export const extractFrames = onObjectFinalized(
     const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
     const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
-    const walkthroughObjectName = `${pathInfo.rawPrefix}/walkthrough.mov`;
-    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
@@ -926,6 +965,8 @@ export const extractFrames = onObjectFinalized(
         ? await loadJsonObject(bucket, completionMarkerObjectName, tmp)
         : null;
     const manifestValidation = validateManifest(manifest);
+    const walkthroughObjectName = resolveWalkthroughObjectName(manifest, pathInfo, objectName);
+    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
 
     const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
     const arkitFrameQuality = await loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp);
@@ -1241,7 +1282,8 @@ export const extractFrames = onObjectFinalized(
     const worldlabsPreview = buildWorldlabsPreviewFields(
       bucketName,
       pathInfo,
-      routing.previewSimulationRequested
+      routing.previewSimulationRequested,
+      walkthroughObjectName
     );
     const claimedSensorRecord =
       typeof sceneMemoryCapture.sensor_availability === "object" && sceneMemoryCapture.sensor_availability
@@ -1369,6 +1411,7 @@ export const extractFrames = onObjectFinalized(
       requested_outputs: routing.requestedOutputs,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      upstream_handoff: asRecord(manifest?.upstream_handoff) ?? null,
       site_identity: siteIdentity,
       capture_topology: captureTopology,
       route_anchors: routeAnchors,
@@ -1396,8 +1439,9 @@ export const extractFrames = onObjectFinalized(
       requested_lanes: routing.requestedLanes,
       metadata: {
         scene_memory_capture: sceneMemoryCapture,
-        capture_rights: captureRights,
-        site_identity: siteIdentity,
+      capture_rights: captureRights,
+      upstream_handoff: asRecord(manifest?.upstream_handoff) ?? null,
+      site_identity: siteIdentity,
         capture_topology: captureTopology,
         route_anchors: routeAnchors,
         checkpoint_events: checkpointEvents,
