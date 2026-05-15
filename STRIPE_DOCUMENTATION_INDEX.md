@@ -1,5 +1,7 @@
 # Stripe Debugging Documentation Index
 
+> Current-vs-archived note: this root-level Stripe documentation is a historical debugging/change-log set. For current payout/provider truth, start with `README.md`, `docs/PRIVATE_ALPHA_READINESS.md`, and `docs/architecture/source-of-truth-map.md`. Do not treat these historical notes as proof that live payouts, provider readiness, external alpha, hosted review, or launch readiness are satisfied.
+
 ## 🚀 Quick Start
 
 **Start here:** [`README_STRIPE_DEBUGGING.md`](README_STRIPE_DEBUGGING.md)

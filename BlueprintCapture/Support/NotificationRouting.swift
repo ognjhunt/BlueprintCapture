@@ -165,6 +165,9 @@ final class NotificationRouter {
     private init() {}
 
     func handle(url: URL) {
+        if CaptureHandoffService.shared.handle(url: url) {
+            return
+        }
         guard let route = BlueprintRoute(url: url) else { return }
         emit(route: route, payload: nil)
     }

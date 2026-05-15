@@ -940,7 +940,7 @@ private struct OnboardingGlassesView: View {
                         .font(BlueprintTheme.display(30, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("Pair Meta smart glasses for supported hands-free capture, or skip and start review-gated iPhone capture.")
+                    Text("Pair supported smart glasses later, or start with review-gated iPhone capture now.")
                         .font(BlueprintTheme.body(15, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)

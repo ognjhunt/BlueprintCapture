@@ -480,7 +480,7 @@ export function buildTaskSiteContext(manifest: Record<string, unknown> | null): 
   };
 }
 
-function validateIdentityMapping(input: {
+export function validateIdentityMapping(input: {
   manifest: Record<string, unknown> | null;
   completionMarker: Record<string, unknown> | null;
   pathInfo: CapturePathInfo;
@@ -503,6 +503,7 @@ function validateIdentityMapping(input: {
 
   const blockReasons: string[] = [];
   const warnings: string[] = [];
+  const requiredUpstreamBlockers: string[] = [];
 
   if (manifestSceneId !== null && manifestSceneId !== pathInfo.sceneId) {
     blockReasons.push("manifest_scene_id_mismatch");
@@ -521,11 +522,23 @@ function validateIdentityMapping(input: {
   }
   if (!siteSubmissionId) {
     warnings.push("missing_site_submission_id");
+    requiredUpstreamBlockers.push("missing_site_submission_id");
+  }
+  if (!buyerRequestId) {
+    warnings.push("missing_buyer_request_id");
+    requiredUpstreamBlockers.push("missing_buyer_request_id");
+  }
+  if (!captureJobId) {
+    warnings.push("missing_capture_job_id");
+    requiredUpstreamBlockers.push("missing_capture_job_id");
   }
   if (!buyerRequestId && !captureJobId) {
     warnings.push("missing_business_request_identifier");
   }
-  for (const blocker of upstreamHandoffBlockers) {
+  const hostedReviewBlockers = Array.from(
+    new Set([...requiredUpstreamBlockers, ...upstreamHandoffBlockers])
+  );
+  for (const blocker of hostedReviewBlockers) {
     warnings.push(`hosted_review_blocker:${blocker}`);
   }
 
@@ -543,7 +556,7 @@ function validateIdentityMapping(input: {
       buyer_request_id: buyerRequestId,
       capture_job_id: captureJobId,
       upstream_handoff: upstreamHandoff,
-      hosted_review_blockers: upstreamHandoffBlockers,
+      hosted_review_blockers: hostedReviewBlockers,
       completion_raw_prefix: completionRawPrefix,
     },
   };

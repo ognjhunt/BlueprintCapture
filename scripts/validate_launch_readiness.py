@@ -51,6 +51,12 @@ REQUIRED_REAL_PROOF_REFERENCES = [
     "evidence.monitoring_runbook",
 ]
 
+REQUIRED_UPSTREAM_PROOF_IDS = [
+    "upstream.site_submission_id",
+    "upstream.buyer_request_id",
+    "upstream.capture_job_id",
+]
+
 PLACEHOLDER_MARKERS = ("example", "replace_me", "your-", "<", ">", "todo", "tbd", "placeholder")
 
 
@@ -89,6 +95,15 @@ def nested(value: dict[str, Any], dotted_path: str) -> Any:
             return None
         current = current[key]
     return current
+
+
+def nested_key_exists(value: dict[str, Any], dotted_path: str) -> bool:
+    current: Any = value
+    for key in dotted_path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            return False
+        current = current[key]
+    return True
 
 
 def parse_xcconfig(path: Path) -> dict[str, str]:
@@ -173,6 +188,36 @@ def require_number_at_least(proof: dict[str, Any], failures: list[str], path: st
         failures.append(f"{path} must be >= {minimum}")
 
 
+def require_bool_shape(proof: dict[str, Any], failures: list[str], path: str) -> None:
+    if not isinstance(nested(proof, path), bool):
+        failures.append(f"{path} must be a boolean")
+
+
+def require_number_shape(proof: dict[str, Any], failures: list[str], path: str) -> None:
+    if not isinstance(nested(proof, path), (int, float)):
+        failures.append(f"{path} must be a number")
+
+
+def require_launch_truthy(proof: dict[str, Any], failures: list[str], path: str, contract_only: bool) -> None:
+    if contract_only:
+        require_bool_shape(proof, failures, path)
+        return
+    require_truthy(proof, failures, path)
+
+
+def require_launch_number_at_least(
+    proof: dict[str, Any],
+    failures: list[str],
+    path: str,
+    minimum: int,
+    contract_only: bool,
+) -> None:
+    if contract_only:
+        require_number_shape(proof, failures, path)
+        return
+    require_number_at_least(proof, failures, path, minimum)
+
+
 def require_non_empty(proof: dict[str, Any], failures: list[str], path: str) -> None:
     value = nested(proof, path)
     if not isinstance(value, str) or not value.strip():
@@ -189,7 +234,13 @@ def validate_real_proof_not_placeholder(proof: dict[str, Any], failures: list[st
     if proof_path.name == "example.launch-proof.json":
         failures.append("ops/launch-readiness/example.launch-proof.json cannot be used for a real city launch")
 
-    proof_contract_paths = ["city_slug", "evidence_generated_at", "ops.launch_owner", *REQUIRED_REAL_PROOF_REFERENCES]
+    proof_contract_paths = [
+        "city_slug",
+        "evidence_generated_at",
+        "ops.launch_owner",
+        *REQUIRED_REAL_PROOF_REFERENCES,
+        *REQUIRED_UPSTREAM_PROOF_IDS,
+    ]
     for path in proof_contract_paths:
         value = nested(proof, path)
         if isinstance(value, str) and contains_placeholder(value):
@@ -219,6 +270,30 @@ def validate_real_proof_references(proof: dict[str, Any], failures: list[str], c
             failures.append(f"{path} must point to concrete evidence, not status text: {value}")
         if not any(marker in value for marker in (":", "/", "#")):
             failures.append(f"{path} must include an inspectable evidence reference: {value}")
+
+
+def validate_upstream_truth(proof: dict[str, Any], failures: list[str], contract_only: bool) -> None:
+    upstream = nested(proof, "upstream")
+    if not isinstance(upstream, dict):
+        failures.append("upstream must be an object with site_submission_id, buyer_request_id, capture_job_id, and blockers")
+        return
+    blockers = upstream.get("blockers")
+    if not isinstance(blockers, list):
+        failures.append("upstream.blockers must be a list")
+    if contract_only:
+        for path in REQUIRED_UPSTREAM_PROOF_IDS:
+            if not nested_key_exists(proof, path):
+                failures.append(f"{path} must be present as null or a real upstream id in contract-only proof")
+            value = nested(proof, path)
+            if value is not None and not isinstance(value, str):
+                failures.append(f"{path} must be null or a string")
+        return
+    for path in REQUIRED_UPSTREAM_PROOF_IDS:
+        value = nested(proof, path)
+        if not isinstance(value, str) or not value.strip() or contains_placeholder(value):
+            failures.append(f"{path} must be a real upstream id")
+    if blockers:
+        failures.append("upstream.blockers must be empty for real launch proof")
 
 
 def validate_release_xcconfig(path: Path, failures: list[str]) -> None:
@@ -277,51 +352,52 @@ def validate_proof(
     if proof_path is not None:
         validate_real_proof_not_placeholder(proof, failures, proof_path, contract_only)
     validate_real_proof_references(proof, failures, contract_only)
+    validate_upstream_truth(proof, failures, contract_only)
     if city_slug and proof.get("city_slug") != city_slug:
         failures.append(f"proof city_slug must be {city_slug}")
 
     require_non_empty(proof, failures, "evidence_generated_at")
-    require_truthy(proof, failures, "release.config_validated_by_archive_script")
-    require_truthy(proof, failures, "city.backend_supported")
-    require_number_at_least(proof, failures, "city.live_approved_job_count", 1)
-    require_number_at_least(proof, failures, "city.live_capture_target_count", 1)
-    require_truthy(proof, failures, "city.mock_fallback_disabled")
-    require_truthy(proof, failures, "city.internal_test_space_disabled")
-    require_truthy(proof, failures, "capture.real_device_capture_uploaded")
-    require_truthy(proof, failures, "capture.capture_submissions_document_exists")
-    require_truthy(proof, failures, "capture.raw_upload_complete_exists")
-    require_truthy(proof, failures, "pipeline.capture_descriptor_exists")
-    require_truthy(proof, failures, "pipeline.qa_report_exists")
-    require_truthy(proof, failures, "pipeline.pipeline_handoff_exists")
-    require_truthy(proof, failures, "pipeline.pubsub_handoff_succeeded")
-    require_truthy(proof, failures, "pipeline.pipeline_processed_capture")
-    require_truthy(proof, failures, "meta_glasses.physical_device_smoke_passed")
-    require_truthy(proof, failures, "meta_glasses.video_first_positioning_confirmed")
-    require_truthy(proof, failures, "meta_glasses.native_geometry_not_marketed")
-    require_truthy(proof, failures, "open_capture.review_gated")
+    require_launch_truthy(proof, failures, "release.config_validated_by_archive_script", contract_only)
+    require_launch_truthy(proof, failures, "city.backend_supported", contract_only)
+    require_launch_number_at_least(proof, failures, "city.live_approved_job_count", 1, contract_only)
+    require_launch_number_at_least(proof, failures, "city.live_capture_target_count", 1, contract_only)
+    require_launch_truthy(proof, failures, "city.mock_fallback_disabled", contract_only)
+    require_launch_truthy(proof, failures, "city.internal_test_space_disabled", contract_only)
+    require_launch_truthy(proof, failures, "capture.real_device_capture_uploaded", contract_only)
+    require_launch_truthy(proof, failures, "capture.capture_submissions_document_exists", contract_only)
+    require_launch_truthy(proof, failures, "capture.raw_upload_complete_exists", contract_only)
+    require_launch_truthy(proof, failures, "pipeline.capture_descriptor_exists", contract_only)
+    require_launch_truthy(proof, failures, "pipeline.qa_report_exists", contract_only)
+    require_launch_truthy(proof, failures, "pipeline.pipeline_handoff_exists", contract_only)
+    require_launch_truthy(proof, failures, "pipeline.pubsub_handoff_succeeded", contract_only)
+    require_launch_truthy(proof, failures, "pipeline.pipeline_processed_capture", contract_only)
+    require_launch_truthy(proof, failures, "meta_glasses.physical_device_smoke_passed", contract_only)
+    require_launch_truthy(proof, failures, "meta_glasses.video_first_positioning_confirmed", contract_only)
+    require_launch_truthy(proof, failures, "meta_glasses.native_geometry_not_marketed", contract_only)
+    require_launch_truthy(proof, failures, "open_capture.review_gated", contract_only)
     if nested(proof, "open_capture.payout_cents") != 0:
         failures.append("open_capture.payout_cents must be 0")
-    require_truthy(proof, failures, "open_capture.paid_anywhere_claim_disabled")
+    require_launch_truthy(proof, failures, "open_capture.paid_anywhere_claim_disabled", contract_only)
     require_non_empty(proof, failures, "payouts.provider_name")
-    require_truthy(proof, failures, "payouts.backend_configured")
-    require_truthy(proof, failures, "payouts.stripe_state_checked")
-    require_truthy(proof, failures, "payouts.provider_state_checked")
-    require_truthy(proof, failures, "payouts.live_provider_ready")
+    require_launch_truthy(proof, failures, "payouts.backend_configured", contract_only)
+    require_launch_truthy(proof, failures, "payouts.stripe_state_checked", contract_only)
+    require_launch_truthy(proof, failures, "payouts.provider_state_checked", contract_only)
+    require_launch_truthy(proof, failures, "payouts.live_provider_ready", contract_only)
     require_truthy(proof, failures, "payouts.contract_readiness_not_live_readiness")
-    require_truthy(proof, failures, "payouts.live_payout_execution_human_gate")
-    require_truthy(proof, failures, "payouts.identity_kyc_state_documented")
-    require_truthy(proof, failures, "payouts.background_check_state_documented")
-    require_truthy(proof, failures, "payouts.marketing_claims_require_stripe_ready")
+    require_launch_truthy(proof, failures, "payouts.live_payout_execution_human_gate", contract_only)
+    require_launch_truthy(proof, failures, "payouts.identity_kyc_state_documented", contract_only)
+    require_launch_truthy(proof, failures, "payouts.background_check_state_documented", contract_only)
+    require_launch_truthy(proof, failures, "payouts.marketing_claims_require_stripe_ready", contract_only)
     require_non_empty(proof, failures, "ops.launch_owner")
-    require_truthy(proof, failures, "ops.failed_upload_monitor")
-    require_truthy(proof, failures, "ops.submission_registration_monitor")
-    require_truthy(proof, failures, "ops.push_device_sync_monitor")
-    require_truthy(proof, failures, "ops.bridge_pipeline_monitor")
-    require_truthy(proof, failures, "ops.payout_exception_monitor_repo_contract")
-    require_truthy(proof, failures, "ops.payout_exception_monitor")
-    require_truthy(proof, failures, "ops.human_finance_review_gate")
-    require_truthy(proof, failures, "ops.session_events_queryable")
-    require_truthy(proof, failures, "ops.cloud_logging_handoff_alert")
+    require_launch_truthy(proof, failures, "ops.failed_upload_monitor", contract_only)
+    require_launch_truthy(proof, failures, "ops.submission_registration_monitor", contract_only)
+    require_launch_truthy(proof, failures, "ops.push_device_sync_monitor", contract_only)
+    require_launch_truthy(proof, failures, "ops.bridge_pipeline_monitor", contract_only)
+    require_launch_truthy(proof, failures, "ops.payout_exception_monitor_repo_contract", contract_only)
+    require_launch_truthy(proof, failures, "ops.payout_exception_monitor", contract_only)
+    require_launch_truthy(proof, failures, "ops.human_finance_review_gate", contract_only)
+    require_launch_truthy(proof, failures, "ops.session_events_queryable", contract_only)
+    require_launch_truthy(proof, failures, "ops.cloud_logging_handoff_alert", contract_only)
 
 
 def validate_live_routes(args: argparse.Namespace, failures: list[str], skip_network: bool = False) -> None:
@@ -416,6 +492,8 @@ def readiness_stage(failures: list[str]) -> str:
         or failure.startswith("open_capture.")
         or failure.startswith("payouts.")
         or failure.startswith("ops.")
+        or failure.startswith("upstream.")
+        or failure.startswith("upstream must be")
         for failure in failures
     ):
         return "proof_artifact_blocked"
@@ -437,6 +515,7 @@ def next_input_hint_for_stage(stage: str) -> str:
     if stage == "proof_artifact_blocked":
         return (
             "Provide a real city launch proof artifact ending in .launch-proof.json with concrete evidence references; "
+            "include real upstream site_submission_id, buyer_request_id, and capture_job_id links; "
             "use ops/launch-readiness/example.launch-proof.json only for --contract-only schema checks."
         )
     if stage == "live_inputs_blocked":

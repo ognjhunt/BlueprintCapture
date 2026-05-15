@@ -1,5 +1,7 @@
 # Autocomplete Search Fixes - Documentation Index
 
+> Current-vs-archived note: this root-level autocomplete documentation is a historical debugging/change-log set. For current repo orientation and release truth, start with `README.md`, `docs/CAPTURE_RAW_CONTRACT_V3.md`, `docs/PRIVATE_ALPHA_READINESS.md`, and `docs/architecture/`. Do not treat these historical notes as launch, payout, provider, hosted-review, or rights proof.
+
 ## �� Start Here
 
 **New to these fixes?** Start with one of these:
@@ -275,4 +277,3 @@ A: QUICK_REFERENCE_AUTOCOMPLETE.md (5 minutes)
 **Last Updated:** October 23, 2025
 **Documentation Version:** 1.0
 **Status:** Complete
-

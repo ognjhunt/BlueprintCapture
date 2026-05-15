@@ -3,29 +3,29 @@
   "city_slug": "example-city-st",
   "evidence_generated_at": "2026-04-24T00:00:00Z",
   "release": {
-    "config_validated_by_archive_script": true
+    "config_validated_by_archive_script": false
   },
   "city": {
-    "backend_supported": true,
-    "live_approved_job_count": 1,
-    "live_capture_target_count": 1,
-    "mock_fallback_disabled": true,
-    "internal_test_space_disabled": true
+    "backend_supported": false,
+    "live_approved_job_count": 0,
+    "live_capture_target_count": 0,
+    "mock_fallback_disabled": false,
+    "internal_test_space_disabled": false
   },
   "capture": {
-    "real_device_capture_uploaded": true,
-    "capture_submissions_document_exists": true,
-    "raw_upload_complete_exists": true
+    "real_device_capture_uploaded": false,
+    "capture_submissions_document_exists": false,
+    "raw_upload_complete_exists": false
   },
   "pipeline": {
-    "capture_descriptor_exists": true,
-    "qa_report_exists": true,
-    "pipeline_handoff_exists": true,
-    "pubsub_handoff_succeeded": true,
-    "pipeline_processed_capture": true
+    "capture_descriptor_exists": false,
+    "qa_report_exists": false,
+    "pipeline_handoff_exists": false,
+    "pubsub_handoff_succeeded": false,
+    "pipeline_processed_capture": false
   },
   "meta_glasses": {
-    "physical_device_smoke_passed": true,
+    "physical_device_smoke_passed": false,
     "video_first_positioning_confirmed": true,
     "native_geometry_not_marketed": true
   },
@@ -35,27 +35,38 @@
     "paid_anywhere_claim_disabled": true
   },
   "payouts": {
-    "provider_name": "stripe",
-    "backend_configured": true,
-    "stripe_state_checked": true,
-    "provider_state_checked": true,
-    "live_provider_ready": true,
+    "provider_name": "not_configured_contract_sample",
+    "backend_configured": false,
+    "stripe_state_checked": false,
+    "provider_state_checked": false,
+    "live_provider_ready": false,
     "contract_readiness_not_live_readiness": true,
-    "live_payout_execution_human_gate": true,
-    "identity_kyc_state_documented": true,
-    "background_check_state_documented": true,
+    "live_payout_execution_human_gate": false,
+    "identity_kyc_state_documented": false,
+    "background_check_state_documented": false,
     "marketing_claims_require_stripe_ready": true
   },
   "ops": {
-    "launch_owner": "example-owner",
-    "failed_upload_monitor": true,
-    "submission_registration_monitor": true,
-    "push_device_sync_monitor": true,
-    "bridge_pipeline_monitor": true,
+    "launch_owner": "contract-sample-owner",
+    "failed_upload_monitor": false,
+    "submission_registration_monitor": false,
+    "push_device_sync_monitor": false,
+    "bridge_pipeline_monitor": false,
     "payout_exception_monitor_repo_contract": true,
-    "payout_exception_monitor": true,
-    "human_finance_review_gate": true,
-    "session_events_queryable": true,
-    "cloud_logging_handoff_alert": true
+    "payout_exception_monitor": false,
+    "human_finance_review_gate": false,
+    "session_events_queryable": false,
+    "cloud_logging_handoff_alert": false
+  },
+  "upstream": {
+    "site_submission_id": null,
+    "buyer_request_id": null,
+    "capture_job_id": null,
+    "truth_state": "contract_sample_missing_upstream_ids",
+    "blockers": [
+      "missing_site_submission_id",
+      "missing_buyer_request_id",
+      "missing_capture_job_id"
+    ]
   }
 }

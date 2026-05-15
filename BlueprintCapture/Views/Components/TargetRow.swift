@@ -57,13 +57,13 @@ struct TargetRow: View {
 
             Spacer()
 
-            // Quoted amount
+            // Nearby discovery is review-gated unless a real assignment quote exists.
             VStack(alignment: .trailing, spacing: 4) {
-                Text("$\(item.estimatedPayoutUsd)")
+                Text("Review")
                     .font(.title3.weight(.bold))
-                    .foregroundStyle(BlueprintTheme.successGreen)
+                    .foregroundStyle(BlueprintTheme.textPrimary)
 
-                Text("Quoted")
+                Text("Payout gated")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

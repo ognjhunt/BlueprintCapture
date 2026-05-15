@@ -35,8 +35,15 @@
     "paid_anywhere_claim_disabled": true
   },
   "payouts": {
+    "provider_name": "<live-provider-name>",
     "backend_configured": true,
     "stripe_state_checked": true,
+    "provider_state_checked": true,
+    "live_provider_ready": true,
+    "contract_readiness_not_live_readiness": true,
+    "live_payout_execution_human_gate": true,
+    "identity_kyc_state_documented": true,
+    "background_check_state_documented": true,
     "marketing_claims_require_stripe_ready": true
   },
   "ops": {
@@ -45,9 +52,18 @@
     "submission_registration_monitor": true,
     "push_device_sync_monitor": true,
     "bridge_pipeline_monitor": true,
+    "payout_exception_monitor_repo_contract": true,
     "payout_exception_monitor": true,
+    "human_finance_review_gate": true,
     "session_events_queryable": true,
     "cloud_logging_handoff_alert": true
+  },
+  "upstream": {
+    "site_submission_id": "<real-webapp-site-submission-id>",
+    "buyer_request_id": "<real-webapp-buyer-request-id>",
+    "capture_job_id": "<real-approved-capture-job-id>",
+    "truth_state": "verified",
+    "blockers": []
   },
   "evidence": {
     "release_config_settings": "<path-or-artifact-ref>",
@@ -60,6 +76,11 @@
     "pipeline_handoff": "<pipeline-handoff-ref>",
     "meta_glasses_smoke": "<hardware-smoke-artifact-ref>",
     "stripe_account_state": "<stripe-state-artifact-ref>",
+    "payout_provider_state": "<payout-provider-state-ref>",
+    "payout_exception_monitor": "<payout-monitor-ref>",
+    "identity_kyc_decision": "<identity-kyc-decision-ref>",
+    "background_check_decision": "<background-check-decision-ref>",
+    "human_finance_review_gate": "<finance-review-gate-ref>",
     "monitoring_runbook": "<monitoring-runbook-ref>"
   }
 }

@@ -87,6 +87,7 @@ struct ScanRecordingView: View {
         }
         .onChange(of: phase) { _, newPhase in
             if newPhase == .recording, guidanceTip == nil, !isLoadingGuidance {
+                glassesManager.updateDisplayAdvisoryHint(advisoryHintForCurrentRecording())
                 Task { await generateGuidance() }
             }
         }
@@ -94,7 +95,9 @@ struct ScanRecordingView: View {
             switch newValue {
             case .streaming:
                 phase = .recording
+                glassesManager.updateDisplayAdvisoryHint(advisoryHintForCurrentRecording())
             case .finished(let artifacts):
+                glassesManager.updateDisplayUploadStatus(.queued)
                 uploadQueue.enqueueGlassesCapture(artifacts: artifacts, job: job)
                 phase = .uploading
             case .error(let message):
@@ -103,6 +106,9 @@ struct ScanRecordingView: View {
             default:
                 break
             }
+        }
+        .onChange(of: uploadQueue.uploadStatuses) { _, _ in
+            syncDisplayUploadStatus()
         }
     }
 
@@ -222,6 +228,7 @@ struct ScanRecordingView: View {
         case .recording:
             Button {
                 if isUITesting {
+                    glassesManager.updateDisplayUploadStatus(.uploading(progress: 0.42))
                     uploadQueue.simulateUITestUpload(for: job)
                     phase = .uploading
                 } else {
@@ -383,7 +390,47 @@ struct ScanRecordingView: View {
 
         // Start recording
         phase = .preparing("Starting recording…")
-        glassesManager.startCapture(jobId: job.id)
+        glassesManager.startCapture(job: job)
+    }
+
+    private func advisoryHintForCurrentRecording() -> MetaDisplayAdvisoryHint {
+        let duration = glassesManager.streamingInfo?.durationSeconds ?? 0
+        switch duration {
+        case ..<4:
+            return .holdSteady
+        case ..<10:
+            return .slowDown
+        case ..<18:
+            return .scanCorners
+        case ..<28:
+            return .captureDoorway
+        case ..<40:
+            return .turnLeft
+        case ..<55:
+            return .turnRight
+        default:
+            return .finishWhenComplete
+        }
+    }
+
+    private func syncDisplayUploadStatus() {
+        guard let status = uploadQueue.uploadStatuses.first(where: {
+            $0.metadata.captureJobId == job.id || $0.metadata.jobId == job.id || $0.metadata.targetId == job.id
+        }) else { return }
+
+        switch status.state {
+        case .queued:
+            glassesManager.updateDisplayUploadStatus(.queued)
+        case .uploading(let progress):
+            glassesManager.updateDisplayUploadStatus(.uploading(progress: progress))
+        case .completed:
+            glassesManager.updateDisplayUploadStatus(.done)
+            phase = .finished
+        case .failed(let message):
+            glassesManager.updateDisplayUploadStatus(.failed(message: message))
+            errorMessage = message
+            phase = .error
+        }
     }
 
     private func endAndDismiss() {

@@ -5,13 +5,16 @@ import ARKit
 import UIKit
 import CoreMotion
 
-// Import Meta DAT SDK modules when available
-// The SDK provides: MWDATCore, MWDATCamera, MWDATMockDevice
+// Import Meta DAT SDK modules when available.
+// Real DAT access stays out of simulator builds; MockDeviceKit remains the simulator path.
 #if canImport(MWDATCore) && !targetEnvironment(simulator)
 import MWDATCore
 #endif
 #if canImport(MWDATCamera) && !targetEnvironment(simulator)
 import MWDATCamera
+#endif
+#if canImport(MWDATDisplay) && !targetEnvironment(simulator)
+import MWDATDisplay
 #endif
 #if canImport(MWDATMockDevice)
 import MWDATMockDevice
@@ -25,7 +28,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     private static let unsupportedRealWearablesMessage = "Meta glasses require a physical iPhone build. Use MockDeviceKit in the simulator."
 
     nonisolated static var supportsRealWearables: Bool {
-        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
         true
         #else
         false
@@ -101,6 +104,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         var uploadPayload: CaptureUploadPayload {
             CaptureUploadPayload(packageURL: packageURL)
         }
+
+        var displayInteractionEventsURL: URL {
+            glassesDirectoryURL.appendingPathComponent("display_interaction_events.jsonl")
+        }
     }
 
     struct CaptureUploadPayload: Codable, Equatable {
@@ -111,9 +118,35 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let id: String
         let name: String
         let isMock: Bool
-        #if canImport(MWDATCore) && !targetEnvironment(simulator)
+        let supportsDisplay: Bool
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         let datIdentifier: DeviceIdentifier?
         #endif
+    }
+
+    struct MetaDisplayDebugState: Equatable {
+        var deviceName: String?
+        var deviceId: String?
+        var linkState: String?
+        var compatibility: String?
+        var updateWarning: MetaDisplayDeviceWarning?
+        var deviceSessionState: String?
+        var streamState: String?
+        var displayState: String?
+        var lastDisplaySendError: String?
+
+        var isEmpty: Bool {
+            [
+                deviceName,
+                deviceId,
+                linkState,
+                compatibility,
+                deviceSessionState,
+                streamState,
+                displayState,
+                lastDisplaySendError,
+            ].allSatisfy { ($0 ?? "").isEmpty } && updateWarning == nil
+        }
     }
 
     // MARK: - Published Properties
@@ -124,6 +157,8 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     @Published private(set) var currentFrame: UIImage?
     @Published private(set) var streamingInfo: StreamingInfo?
     @Published private(set) var isConnectedToMockDevice: Bool = false
+    @Published private(set) var displayHUDSnapshot: MetaDisplayHUDSnapshot?
+    @Published private(set) var displayDebugState = MetaDisplayDebugState()
     @Published var useMockDevice: Bool = false
     @Published var mockVideoURL: URL?
 
@@ -131,19 +166,34 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     private var mockDeviceKit: MWMockDeviceKit?
     private var cameraSession: MWCameraSession?
-    #if canImport(MWDATCore) && !targetEnvironment(simulator)
+    #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
     private let wearables: WearablesInterface = Wearables.shared
     private var registrationTask: Task<Void, Never>?
     private var devicesTask: Task<Void, Never>?
     private var registrationState: RegistrationState = Wearables.shared.registrationState
-    private var streamSession: StreamSession?
+    private var deviceSession: DeviceSession?
+    private var cameraStream: MWDATCamera.Stream?
     private var selectedDevice: DiscoveredDevice?
+    private var deviceSessionStateListenerToken: AnyListenerToken?
+    private var deviceSessionErrorListenerToken: AnyListenerToken?
+    private var compatibilityListenerToken: AnyListenerToken?
+    private var deviceStateTask: Task<Void, Never>?
     private var stateListenerToken: AnyListenerToken?
     private var videoFrameListenerToken: AnyListenerToken?
     private var errorListenerToken: AnyListenerToken?
     private var photoDataListenerToken: AnyListenerToken?
     private var pendingPhotoContinuation: CheckedContinuation<UIImage, Error>?
+    #if canImport(MWDATDisplay)
+    private var display: MWDATDisplay.Display?
+    private var displayStateListenerToken: AnyListenerToken?
     #endif
+    #endif
+
+    private let displayOverlayController = MetaDisplayOverlayController()
+    private var displayTargetMetadata: MetaDisplayTargetMetadata?
+    private var displayAdvisoryHint: MetaDisplayAdvisoryHint?
+    private var displayDeviceWarning: MetaDisplayDeviceWarning?
+    private var displayUploadStatus: MetaDisplayUploadStatus?
 
     private var currentArtifacts: CaptureArtifacts?
     private var videoWriter: AVAssetWriter?
@@ -190,6 +240,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        displayOverlayController.onAction = { [weak self] action in
+            Task { @MainActor [weak self] in
+                self?.handleDisplayAction(action)
+            }
+        }
+        displayOverlayController.onSendError = { [weak self] message in
+            Task { @MainActor [weak self] in
+                self?.displayDebugState.lastDisplaySendError = message
+            }
+        }
         companionARSession.delegate = self
         setupSDK()
     }
@@ -203,7 +263,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             print("\(Self.logPrefix) mockDeviceKit unavailable: \(error)")
         }
 
-        #if canImport(MWDATCore) && !targetEnvironment(simulator)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         registrationState = wearables.registrationState
         print("\(Self.logPrefix) initial registrationState=\(registrationState)")
         startWearablesObservers()
@@ -221,14 +281,14 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             // Use MockDeviceKit for testing
             startMockDeviceScan()
         } else {
-            #if canImport(MWDATCore) && !targetEnvironment(simulator)
+            #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
             if registrationState == .registered {
                 syncConnectionStateFromWearables(forceRefresh: true)
             } else {
                 connectionState = .registering
                 Task {
                     do {
-                        try wearables.startRegistration()
+                        try await wearables.startRegistration()
                         print("\(Self.logPrefix) wearables.startRegistration launched")
                     } catch let error as RegistrationError {
                         await MainActor.run {
@@ -261,18 +321,20 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 // Add simulated discovery delay for realistic UX
                 try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
 
-                #if canImport(MWDATCore) && !targetEnvironment(simulator)
+                #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
                 let mockDevice = DiscoveredDevice(
                     id: "mock-rayban-meta-001",
                     name: "Ray-Ban Meta (Mock)",
                     isMock: true,
+                    supportsDisplay: true,
                     datIdentifier: nil
                 )
                 #else
                 let mockDevice = DiscoveredDevice(
                     id: "mock-rayban-meta-001",
                     name: "Ray-Ban Meta (Mock)",
-                    isMock: true
+                    isMock: true,
+                    supportsDisplay: true
                 )
                 #endif
 
@@ -291,7 +353,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     func stopScanning() {
-        #if canImport(MWDATCore) && !targetEnvironment(simulator)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
         if useMockDevice {
             connectionState = .disconnected
             discoveredDevices = []
@@ -316,7 +378,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         if device.isMock {
             connectToMockDevice(device)
         } else {
-            #if canImport(MWDATCore) && !targetEnvironment(simulator)
+            #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
             connectToRealDevice(device)
             #else
             connectionState = .error(Self.unsupportedRealWearablesMessage)
@@ -342,6 +404,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     self.cameraSession = mockSession
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = true
+                    self.displayDebugState = MetaDisplayDebugState(
+                        deviceName: device.name,
+                        deviceId: device.id,
+                        linkState: "mock",
+                        compatibility: "mock",
+                        updateWarning: nil,
+                        deviceSessionState: "mock",
+                        streamState: "mock",
+                        displayState: "mock",
+                        lastDisplaySendError: nil
+                    )
                     self.persistLastConnectedDevice(device)
                     print("\(Self.logPrefix) connected mock device=\(device.name)")
                 }
@@ -354,7 +427,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    #if canImport(MWDATCore) && !targetEnvironment(simulator)
+    #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
     private func connectToRealDevice(_ device: DiscoveredDevice) {
         Task {
             do {
@@ -364,6 +437,31 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                     }
                     return
                 }
+
+                guard let datDevice = wearables.deviceForIdentifier(datIdentifier) else {
+                    await MainActor.run {
+                        self.connectionState = .error("Meta DAT could not resolve this device. Complete setup in Meta AI first.")
+                    }
+                    return
+                }
+
+                guard datDevice.supportsDisplay() else {
+                    await MainActor.run {
+                        self.connectionState = .error("This HUD requires Meta Ray-Ban Display glasses. Connect a display-capable device.")
+                    }
+                    return
+                }
+
+                let compatibility = datDevice.compatibility()
+                    guard compatibility == .compatible || compatibility == .undefined else {
+                        await MainActor.run {
+                            self.displayDeviceWarning = self.displayWarning(for: compatibility)
+                            self.displayDebugState.updateWarning = self.displayDeviceWarning
+                            self.refreshDisplayHUD(stateOverride: .warning)
+                            self.connectionState = .error(compatibility.displayString)
+                        }
+                        return
+                    }
 
                 let status = try await wearables.checkPermissionStatus(.camera)
                 print("\(Self.logPrefix) cameraPermissionStatus=\(status) device=\(device.name)")
@@ -378,26 +476,70 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
                 guard grantedStatus == .granted else {
                     await MainActor.run {
+                        self.displayDeviceWarning = .permissionRequired
+                        self.displayDebugState.updateWarning = .permissionRequired
+                        self.refreshDisplayHUD(stateOverride: .warning)
                         self.connectionState = .permissionRequired(deviceName: device.name)
                     }
                     return
                 }
 
                 let selector = SpecificDeviceSelector(device: datIdentifier)
-                let config = StreamSessionConfig(
+                let session = try wearables.createSession(deviceSelector: selector)
+                await MainActor.run {
+                    self.installDeviceSessionListeners(session)
+                    self.selectedDevice = device
+                    self.displayDebugState.deviceName = device.name
+                    self.displayDebugState.deviceId = device.id
+                    self.displayDebugState.linkState = String(describing: datDevice.linkState)
+                    self.displayDebugState.compatibility = String(describing: compatibility)
+                    self.displayDebugState.updateWarning = nil
+                    self.displayDebugState.deviceSessionState = String(describing: session.state)
+                }
+                let sessionStarted = Task {
+                    for await state in session.stateStream() {
+                        if state == .started {
+                            return
+                        }
+                    }
+                }
+                try session.start()
+                await sessionStarted.value
+
+                let config = StreamConfiguration(
                     videoCodec: .raw,
                     resolution: .low,
                     frameRate: 24
                 )
-                let session = StreamSession(streamSessionConfig: config, deviceSelector: selector)
+                guard let stream = try session.addStream(config: config) else {
+                    throw DeviceSessionError.unexpectedError(description: "Camera stream capability was unavailable for the selected device.")
+                }
+                let display = try session.addDisplay()
                 await MainActor.run {
-                    self.selectedDevice = device
-                    self.installStreamListeners(session)
-                    self.streamSession = session
+                    self.installStreamListeners(stream)
+                    self.installDisplayListeners(display)
+                    self.startDeviceStateObserver(for: datIdentifier)
+                    self.deviceSession = session
+                    self.cameraStream = stream
+                    self.display = display
+                    self.displayOverlayController.attachDisplay(display)
+                    self.displayDeviceWarning = nil
+                    self.displayDebugState.deviceSessionState = "started"
+                    self.displayDebugState.streamState = String(describing: stream.state)
+                    self.displayDebugState.displayState = String(describing: display.state)
                     self.connectionState = .connected(deviceName: device.name)
                     self.isConnectedToMockDevice = false
                     self.persistLastConnectedDevice(device)
                     print("\(Self.logPrefix) connected dat device=\(device.name)")
+                }
+            } catch let error as DeviceSessionError {
+                await MainActor.run {
+                    self.displayDeviceWarning = self.displayWarning(for: error)
+                    self.displayDebugState.updateWarning = self.displayDeviceWarning
+                    self.refreshDisplayHUD(stateOverride: .warning)
+                    let message = self.formatDeviceSessionError(error)
+                    print("\(Self.logPrefix) dat connect session error: \(message)")
+                    self.connectionState = .error(message)
                 }
             } catch let error as RegistrationError {
                 await MainActor.run {
@@ -420,12 +562,26 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         cameraSession = nil
-        #if canImport(MWDATCore) && !targetEnvironment(simulator)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
+        let stream = cameraStream
+        let session = deviceSession
         Task {
-            await self.streamSession?.stop()
+            await stream?.stop()
+            await self.displayOverlayController.stopDisplayIfAvailable()
+            session?.stop()
         }
-        streamSession = nil
+        deviceStateTask?.cancel()
+        deviceStateTask = nil
+        deviceSession = nil
+        cameraStream = nil
+        #if canImport(MWDATDisplay)
+        display = nil
+        displayStateListenerToken = nil
+        #endif
         selectedDevice = nil
+        deviceSessionStateListenerToken = nil
+        deviceSessionErrorListenerToken = nil
+        compatibilityListenerToken = nil
         stateListenerToken = nil
         videoFrameListenerToken = nil
         errorListenerToken = nil
@@ -434,6 +590,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         isConnectedToMockDevice = false
         currentFrame = nil
         streamingInfo = nil
+        displayHUDSnapshot = nil
+        displayUploadStatus = nil
+        displayDeviceWarning = nil
+        displayDebugState = MetaDisplayDebugState()
         connectionState = .disconnected
         print("\(Self.logPrefix) disconnected")
     }
@@ -446,10 +606,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             return nil
         }
         let isMock = UserDefaults.standard.bool(forKey: lastDeviceIsMockKey)
-        #if canImport(MWDATCore) && !targetEnvironment(simulator)
-        return DiscoveredDevice(id: id, name: name, isMock: isMock, datIdentifier: nil)
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
+        return DiscoveredDevice(id: id, name: name, isMock: isMock, supportsDisplay: isMock, datIdentifier: nil)
         #else
-        return DiscoveredDevice(id: id, name: name, isMock: isMock)
+        return DiscoveredDevice(id: id, name: name, isMock: isMock, supportsDisplay: isMock)
         #endif
     }
 
@@ -471,7 +631,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         UserDefaults.standard.set(device.isMock, forKey: lastDeviceIsMockKey)
     }
 
-    #if canImport(MWDATCore) && !targetEnvironment(simulator)
+    #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
     private func startWearablesObservers() {
         registrationTask?.cancel()
         devicesTask?.cancel()
@@ -489,15 +649,19 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             guard let self else { return }
             for await deviceIds in wearables.devicesStream() {
                 print("\(Self.logPrefix) devices.count=\(deviceIds.count)")
-                discoveredDevices = deviceIds.map { deviceId in
-                    let name = self.wearables.deviceForIdentifier(deviceId)?.nameOrId() ?? String(describing: deviceId)
+                let mappedDevices = deviceIds.map { deviceId in
+                    let datDevice = self.wearables.deviceForIdentifier(deviceId)
+                    let name = datDevice?.nameOrId() ?? String(describing: deviceId)
                     return DiscoveredDevice(
                         id: String(describing: deviceId),
                         name: name,
                         isMock: false,
+                        supportsDisplay: datDevice?.supportsDisplay() ?? false,
                         datIdentifier: deviceId
                     )
                 }
+                let displayCapableDevices = mappedDevices.filter(\.supportsDisplay)
+                discoveredDevices = displayCapableDevices.isEmpty ? mappedDevices : displayCapableDevices
                 syncConnectionStateFromWearables()
             }
         }
@@ -526,28 +690,54 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         print("\(Self.logPrefix) uiState=\(connectionState) discoveredDevices=\(discoveredDevices.count)")
     }
 
-    private func installStreamListeners(_ session: StreamSession) {
-        stateListenerToken = session.statePublisher.listen { [weak self] state in
+    private func installDeviceSessionListeners(_ session: DeviceSession) {
+        deviceSessionStateListenerToken = session.statePublisher.listen { [weak self] state in
+            Task { @MainActor [weak self] in
+                self?.handleDeviceSessionStateChange(state)
+            }
+        }
+        deviceSessionErrorListenerToken = session.errorPublisher.listen { [weak self] error in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                displayDeviceWarning = displayWarning(for: error)
+                displayDebugState.updateWarning = displayDeviceWarning
+                refreshDisplayHUD(stateOverride: .warning)
+                let message = formatDeviceSessionError(error)
+                print("\(Self.logPrefix) deviceSessionError=\(message)")
+                connectionState = .error(message)
+                if captureState.isActive {
+                    captureState = .error(message)
+                }
+            }
+        }
+    }
+
+    private func installStreamListeners(_ stream: MWDATCamera.Stream) {
+        stateListenerToken = stream.statePublisher.listen { [weak self] state in
             Task { @MainActor [weak self] in
                 self?.handleStreamStateChange(state)
             }
         }
-        videoFrameListenerToken = session.videoFramePublisher.listen { [weak self] frame in
+        videoFrameListenerToken = stream.videoFramePublisher.listen { [weak self] frame in
             Task { @MainActor [weak self] in
                 self?.handleDATVideoFrame(frame)
             }
         }
-        errorListenerToken = session.errorPublisher.listen { [weak self] error in
+        errorListenerToken = stream.errorPublisher.listen { [weak self] error in
             Task { @MainActor [weak self] in
-                let message = self?.formatStreamError(error) ?? error.localizedDescription
+                guard let self else { return }
+                displayDeviceWarning = displayWarning(for: error)
+                displayDebugState.updateWarning = displayDeviceWarning
+                refreshDisplayHUD(stateOverride: displayDeviceWarning == nil ? nil : .warning)
+                let message = formatStreamError(error)
                 print("\(Self.logPrefix) streamError=\(message)")
-                self?.connectionState = .error(message)
-                if self?.captureState.isActive == true {
-                    self?.captureState = .error(message)
+                connectionState = .error(message)
+                if captureState.isActive {
+                    captureState = .error(message)
                 }
             }
         }
-        photoDataListenerToken = session.photoDataPublisher.listen { [weak self] photoData in
+        photoDataListenerToken = stream.photoDataPublisher.listen { [weak self] photoData in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 if let image = UIImage(data: photoData.data) {
@@ -564,16 +754,80 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    private func handleStreamStateChange(_ state: StreamSessionState) {
-        print("\(Self.logPrefix) streamState=\(state)")
+    #if canImport(MWDATDisplay)
+    private func installDisplayListeners(_ display: MWDATDisplay.Display) {
+        displayStateListenerToken = display.statePublisher.listen { [weak self] state in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let stateText = String(describing: state)
+                displayDebugState.displayState = stateText
+                print("\(Self.logPrefix) displayState=\(stateText)")
+
+                let normalizedState = stateText.lowercased()
+                if normalizedState.contains("started") {
+                    await displayOverlayController.markDisplayStarted()
+                } else if normalizedState.contains("stopped") || normalizedState.contains("paused") {
+                    displayOverlayController.markDisplayStopped()
+                }
+            }
+        }
+    }
+    #endif
+
+    private func startDeviceStateObserver(for deviceIdentifier: DeviceIdentifier) {
+        deviceStateTask?.cancel()
+        deviceStateTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await state in wearables.deviceStateStream(for: deviceIdentifier) {
+                handleDeviceState(state)
+            }
+        }
+
+        if let datDevice = wearables.deviceForIdentifier(deviceIdentifier) {
+            compatibilityListenerToken = datDevice.addCompatibilityListener { [weak self] compatibility in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    displayDeviceWarning = displayWarning(for: compatibility)
+                    displayDebugState.compatibility = String(describing: compatibility)
+                    displayDebugState.updateWarning = displayDeviceWarning
+                    refreshDisplayHUD(stateOverride: displayDeviceWarning == nil ? nil : .warning)
+                }
+            }
+        }
+    }
+
+    private func handleDeviceSessionStateChange(_ state: DeviceSessionState) {
+        print("\(Self.logPrefix) deviceSessionState=\(state.description)")
+        displayDebugState.deviceSessionState = state.description
         switch state {
         case .paused:
             if captureState.isActive {
                 captureState = .paused
+                refreshDisplayHUD(stateOverride: .paused)
             }
         case .stopped:
             if case .preparing = captureState {
                 captureState = .idle
+                refreshDisplayHUD(stateOverride: .ready)
+            }
+        default:
+            break
+        }
+    }
+
+    private func handleStreamStateChange(_ state: StreamState) {
+        print("\(Self.logPrefix) streamState=\(state)")
+        displayDebugState.streamState = String(describing: state)
+        switch state {
+        case .paused:
+            if captureState.isActive {
+                captureState = .paused
+                refreshDisplayHUD(stateOverride: .paused)
+            }
+        case .stopped:
+            if case .preparing = captureState {
+                captureState = .idle
+                refreshDisplayHUD(stateOverride: .ready)
             }
         default:
             break
@@ -600,15 +854,101 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             )
             if let streamingInfo {
                 captureState = .streaming(streamingInfo)
+                if frameCount == 1 || frameCount % 30 == 0 {
+                    refreshDisplayHUD(stateOverride: .recording)
+                }
             }
         }
     }
 
-    private func formatStreamError(_ error: StreamSessionError) -> String {
+    private func handleDeviceState(_ state: DeviceState) {
+        switch state.thermalLevel {
+        case .severe, .critical:
+            displayDeviceWarning = .thermalCritical
+        case .emergency, .shutdown:
+            displayDeviceWarning = .thermalEmergency
+        default:
+            if displayDeviceWarning == .thermalCritical || displayDeviceWarning == .thermalEmergency {
+                displayDeviceWarning = nil
+            }
+        }
+        displayDebugState.updateWarning = displayDeviceWarning
+        refreshDisplayHUD(stateOverride: displayDeviceWarning == nil ? nil : .warning)
+    }
+
+    private func displayWarning(for compatibility: Compatibility) -> MetaDisplayDeviceWarning? {
+        switch compatibility {
+        case .deviceUpdateRequired:
+            return .firmwareUpdateRequired
+        case .sdkUpdateRequired:
+            return .datAppUpdateRequired
+        default:
+            return nil
+        }
+    }
+
+    private func displayWarning(for error: DeviceSessionError) -> MetaDisplayDeviceWarning? {
         switch error {
-        case .deviceNotFound:
+        case .thermalCritical:
+            return .thermalCritical
+        case .thermalEmergency:
+            return .thermalEmergency
+        case .peakPowerShutdown:
+            return .peakPowerShutdown
+        case .batteryCritical:
+            return .batteryCritical
+        case .datAppOnTheGlassesUpdateRequired:
+            return .glassesAppUpdateRequired
+        default:
+            return nil
+        }
+    }
+
+    private func displayWarning(for error: StreamError) -> MetaDisplayDeviceWarning? {
+        switch error {
+        case .permissionDenied:
+            return .permissionRequired
+        case .thermalCritical:
+            return .thermalCritical
+        case .thermalEmergency:
+            return .thermalEmergency
+        case .peakPowerShutdown:
+            return .peakPowerShutdown
+        case .batteryCritical:
+            return .batteryCritical
+        default:
+            return nil
+        }
+    }
+
+    private func formatDeviceSessionError(_ error: DeviceSessionError) -> String {
+        switch error {
+        case .noEligibleDevice:
+            return "No display-capable Meta glasses were eligible for this session."
+        case .sessionAlreadyExists:
+            return "A Meta display capture session is already active."
+        case .datAppOnTheGlassesUpdateRequired:
+            return "Update the DAT app on the glasses before using the display HUD."
+        case .dwaUnavailable:
+            return "Meta DAT display access is unavailable for this app model."
+        case .thermalCritical, .thermalEmergency:
+            return "The glasses reported a thermal warning. Let them cool before continuing."
+        case .peakPowerShutdown:
+            return "The glasses reported a peak-power shutdown warning."
+        case .batteryCritical:
+            return "The glasses battery is critical. Charge before continuing."
+        case .unexpectedError(let description):
+            return description
+        default:
+            return error.errorDescription ?? "The Meta glasses session failed."
+        }
+    }
+
+    private func formatStreamError(_ error: StreamError) -> String {
+        switch error {
+        case .deviceNotFound(_):
             return "Meta glasses not found. Open Meta AI and keep them nearby."
-        case .deviceNotConnected:
+        case .deviceNotConnected(_):
             return "Meta glasses are no longer connected."
         case .permissionDenied:
             return "Camera permission was denied in Meta AI."
@@ -618,6 +958,14 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             return "Video streaming failed. Try reconnecting the glasses."
         case .internalError:
             return "The Meta glasses SDK reported an internal error."
+        case .hingesClosed:
+            return "Open the glasses hinges before recording."
+        case .thermalCritical, .thermalEmergency:
+            return "The glasses reported a thermal warning. Let them cool before continuing."
+        case .peakPowerShutdown:
+            return "The glasses reported a peak-power shutdown warning."
+        case .batteryCritical:
+            return "The glasses battery is critical. Charge before continuing."
         @unknown default:
             return "An unknown Meta glasses error occurred."
         }
@@ -651,11 +999,142 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
     #endif
 
-    #if !canImport(MWDATCore) || targetEnvironment(simulator)
+    #if !canImport(MWDATCore) || !canImport(MWDATCamera) || targetEnvironment(simulator)
     func handleWearablesCallback(_ url: URL) -> Bool {
         false
     }
     #endif
+
+    // MARK: - Meta Display HUD
+
+    func updateDisplayAdvisoryHint(_ hint: MetaDisplayAdvisoryHint?) {
+        displayAdvisoryHint = hint
+        refreshDisplayHUD()
+    }
+
+    func updateDisplayUploadStatus(_ status: MetaDisplayUploadStatus?) {
+        displayUploadStatus = status
+        let state: MetaDisplayHUDState? = {
+            switch status {
+            case .queued, .uploading:
+                return .uploading
+            case .done:
+                return .done
+            case .failed:
+                return .error
+            case .none:
+                return nil
+            }
+        }()
+        refreshDisplayHUD(stateOverride: state)
+    }
+
+    var displayWarningActionText: String? {
+        displayDeviceWarning?.userActionText
+    }
+
+    var canOpenDisplayWarningAction: Bool {
+        guard Self.supportsRealWearables, !isConnectedToMockDevice else { return false }
+        switch displayDeviceWarning {
+        case .firmwareUpdateRequired, .datAppUpdateRequired, .glassesAppUpdateRequired:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func openDisplayWarningAction() {
+        guard canOpenDisplayWarningAction else { return }
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
+        let warning = displayDeviceWarning
+        Task {
+            do {
+                switch warning {
+                case .firmwareUpdateRequired:
+                    try await wearables.openFirmwareUpdate()
+                case .datAppUpdateRequired, .glassesAppUpdateRequired:
+                    try await wearables.openDATGlassesAppUpdate()
+                default:
+                    break
+                }
+            } catch {
+                await MainActor.run {
+                    self.displayDebugState.lastDisplaySendError = error.localizedDescription
+                }
+            }
+        }
+        #endif
+    }
+
+    private func handleDisplayAction(_ action: MetaDisplayAction) {
+        appendDisplayInteractionEvent(action: action)
+        switch action {
+        case .pause:
+            pauseCapture()
+        case .resume:
+            resumeCapture()
+        case .finish:
+            stopCapture()
+        case .checkpoint:
+            print("\(Self.logPrefix) display checkpoint frameCount=\(frameCount)")
+        }
+    }
+
+    private func refreshDisplayHUD(stateOverride: MetaDisplayHUDState? = nil) {
+        guard let target = displayTargetMetadata else { return }
+        let duration = streamingInfo?.durationSeconds ?? recordingStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        let snapshot = MetaDisplayOverlayController.makeSnapshot(
+            target: target,
+            captureState: stateOverride ?? displayHUDState(for: captureState),
+            durationSeconds: duration,
+            frameCount: frameCount,
+            advisoryHint: displayAdvisoryHint,
+            deviceWarning: displayDeviceWarning,
+            uploadStatus: displayUploadStatus,
+            supportsActions: Self.supportsRealWearables && !isConnectedToMockDevice
+        )
+        displayHUDSnapshot = snapshot
+        Task {
+            await displayOverlayController.render(snapshot)
+        }
+    }
+
+    private func displayHUDState(for state: CaptureState) -> MetaDisplayHUDState {
+        switch state {
+        case .idle, .preparing:
+            return .ready
+        case .streaming:
+            return .recording
+        case .paused:
+            return .paused
+        case .finished:
+            return displayUploadStatus == nil ? .done : .uploading
+        case .error:
+            return .error
+        }
+    }
+
+    private func appendDisplayInteractionEvent(action: MetaDisplayAction) {
+        guard let artifacts = currentArtifacts else { return }
+        let event = MetaDisplayInteractionEvent(
+            action: action,
+            capturedAt: Date(),
+            hudState: displayHUDSnapshot?.captureState ?? displayHUDState(for: captureState),
+            advisoryHint: displayAdvisoryHint,
+            frameCount: frameCount
+        )
+        guard let data = try? JSONSerialization.data(withJSONObject: event.sidecarPayload, options: [.withoutEscapingSlashes]) else {
+            return
+        }
+        if !FileManager.default.fileExists(atPath: artifacts.displayInteractionEventsURL.path) {
+            FileManager.default.createFile(atPath: artifacts.displayInteractionEventsURL.path, contents: nil)
+        }
+        guard let handle = try? FileHandle(forWritingTo: artifacts.displayInteractionEventsURL) else { return }
+        defer { try? handle.close() }
+        try? handle.seekToEnd()
+        handle.write(data)
+        handle.write(Data("\n".utf8))
+    }
 
     // MARK: - Mock Video Source
 
@@ -671,8 +1150,32 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     /// Starts a capture for a specific scan job. This does not change upload behavior; it only
     /// helps keep local artifact directories organized by jobId.
+    func startCapture(job: ScanJob) {
+        displayTargetMetadata = MetaDisplayTargetMetadata(
+            name: job.title,
+            address: job.address,
+            captureJobId: job.id,
+            captureBrief: job.workflowStepsOrInstructions.prefix(3).joined(separator: " "),
+            privacyReminder: MetaDisplayTargetMetadata.defaultPrivacyReminder,
+            allowedAdvisoryHints: MetaDisplayAdvisoryHint.allCases
+        )
+        displayUploadStatus = nil
+        displayDeviceWarning = nil
+        displayAdvisoryHint = nil
+        refreshDisplayHUD(stateOverride: .ready)
+        startCapture(jobId: job.id)
+    }
+
     func startCapture(jobId: String) {
         currentJobId = jobId
+        if displayTargetMetadata == nil {
+            displayTargetMetadata = MetaDisplayTargetMetadata(
+                name: "Capture target",
+                address: "",
+                captureJobId: jobId
+            )
+        }
+        refreshDisplayHUD(stateOverride: .ready)
         startCapture()
     }
 
@@ -688,6 +1191,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         captureState = .preparing
+        refreshDisplayHUD(stateOverride: .ready)
         print("⏺️ [GlassesCapture] Starting capture...")
 
         Task {
@@ -715,11 +1219,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                         fps: 30.0,
                         durationSeconds: 0
                     ))
+                    self.refreshDisplayHUD(stateOverride: .recording)
                     print("✅ [GlassesCapture] Capture started")
                 }
             } catch {
                 await MainActor.run {
                     self.captureState = .error("Failed to start capture: \(error.localizedDescription)")
+                    self.refreshDisplayHUD(stateOverride: .error)
                 }
             }
         }
@@ -751,6 +1257,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         let frameTimestampsLogURL = glassesDirectoryURL.appendingPathComponent("frame_timestamps.jsonl")
         let deviceStateLogURL = glassesDirectoryURL.appendingPathComponent("device_state.jsonl")
         let healthEventsLogURL = glassesDirectoryURL.appendingPathComponent("health_events.jsonl")
+        let displayInteractionEventsURL = glassesDirectoryURL.appendingPathComponent("display_interaction_events.jsonl")
         let companionPhoneDirectoryURL = recordingDir.appendingPathComponent("companion_phone", isDirectory: true)
         let companionPhonePosesLogURL = companionPhoneDirectoryURL.appendingPathComponent("poses.jsonl")
         let companionPhoneIntrinsicsURL = companionPhoneDirectoryURL.appendingPathComponent("session_intrinsics.json")
@@ -768,6 +1275,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         fileManager.createFile(atPath: frameTimestampsLogURL.path, contents: nil)
         fileManager.createFile(atPath: deviceStateLogURL.path, contents: nil)
         fileManager.createFile(atPath: healthEventsLogURL.path, contents: nil)
+        fileManager.createFile(atPath: displayInteractionEventsURL.path, contents: nil)
         fileManager.createFile(atPath: companionPhonePosesLogURL.path, contents: nil)
 
         return CaptureArtifacts(
@@ -911,6 +1419,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             "first_party_motion_available": false,
             "public_device_state_available": false,
             "public_health_events_available": false,
+            "display_hud_available": Self.supportsRealWearables,
+            "display_hud_truth_scope": "ux_telemetry",
+            "display_interaction_events": "glasses/display_interaction_events.jsonl",
+            "display_hud_truth_boundary": MetaDisplayHUDSnapshot.truthBoundary,
         ]
         let streamData = try JSONSerialization.data(withJSONObject: streamMetadata, options: [.prettyPrinted, .withoutEscapingSlashes])
         try streamData.write(to: artifacts.streamMetadataURL, options: .atomic)
@@ -1004,9 +1516,13 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     }
 
     private func startCameraStream() async throws {
-        #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
-        if let session = streamSession, !isConnectedToMockDevice {
-            await session.start()
+        #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
+        if let session = deviceSession, let stream = cameraStream, !isConnectedToMockDevice {
+            if displayDebugState.deviceSessionState != "started" {
+                try session.start()
+            }
+            await displayOverlayController.startDisplayIfAvailable()
+            await stream.start()
             return
         }
         #endif
@@ -1055,6 +1571,9 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                 durationSeconds: duration
             )
             captureState = .streaming(streamingInfo!)
+            if frameCount == 1 || frameCount % 30 == 0 {
+                refreshDisplayHUD(stateOverride: .recording)
+            }
         }
 
         // Log progress every 30 frames (1 second at 30fps)
@@ -1090,8 +1609,8 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     func pauseCapture() {
         guard case .streaming = captureState else { return }
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
-        if let session = streamSession, !isConnectedToMockDevice {
-            Task { await session.stop() }
+        if let stream = cameraStream, !isConnectedToMockDevice {
+            Task { await stream.stop() }
         } else {
             cameraSession?.pauseStreaming()
         }
@@ -1099,14 +1618,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         cameraSession?.pauseStreaming()
         #endif
         captureState = .paused
+        refreshDisplayHUD(stateOverride: .paused)
         print("⏸️ [GlassesCapture] Capture paused")
     }
 
     func resumeCapture() {
         guard captureState == .paused else { return }
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
-        if let session = streamSession, !isConnectedToMockDevice {
-            Task { await session.start() }
+        if let stream = cameraStream, !isConnectedToMockDevice {
+            Task { await stream.start() }
         } else {
             cameraSession?.resumeStreaming()
         }
@@ -1116,6 +1636,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         if let info = streamingInfo {
             captureState = .streaming(info)
         }
+        refreshDisplayHUD(stateOverride: .recording)
         print("▶️ [GlassesCapture] Capture resumed")
     }
 
@@ -1126,8 +1647,8 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
         // Stop camera stream
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
-        if let session = streamSession, !isConnectedToMockDevice {
-            Task { await session.stop() }
+        if let stream = cameraStream, !isConnectedToMockDevice {
+            Task { await stream.stop() }
         } else {
             cameraSession?.stopStreaming()
         }
@@ -1202,6 +1723,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             await MainActor.run {
                 self.currentArtifacts = finalArtifacts
                 self.captureState = .finished(finalArtifacts)
+                self.refreshDisplayHUD(stateOverride: .done)
                 self.videoWriter = nil
                 self.videoWriterInput = nil
                 self.pixelBufferAdaptor = nil
@@ -1274,10 +1796,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
-        if let session = streamSession, !isConnectedToMockDevice {
+        if let stream = cameraStream, !isConnectedToMockDevice {
             return try await withCheckedThrowingContinuation { continuation in
                 pendingPhotoContinuation = continuation
-                session.capturePhoto(format: .jpeg)
+                if !stream.capturePhoto(format: .jpeg) {
+                    pendingPhotoContinuation = nil
+                    continuation.resume(throwing: NSError(
+                        domain: "GlassesCapture",
+                        code: -6,
+                        userInfo: [NSLocalizedDescriptionKey: "The glasses did not accept the photo capture request."]
+                    ))
+                }
             }
         }
         #endif
@@ -1307,6 +1836,12 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         currentArtifacts = nil
         currentFrame = nil
         streamingInfo = nil
+        displayHUDSnapshot = nil
+        displayTargetMetadata = nil
+        displayAdvisoryHint = nil
+        displayDeviceWarning = nil
+        displayUploadStatus = nil
+        displayDebugState.lastDisplaySendError = nil
         captureState = .idle
     }
 }

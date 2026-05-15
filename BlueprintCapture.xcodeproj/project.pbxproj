@@ -19,6 +19,7 @@
 		89ED659B2EE4DCB700E460D5 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659A2EE4DCB700E460D5 /* MWDATCamera */; };
 		89ED659D2EE4DCB700E460D5 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659C2EE4DCB700E460D5 /* MWDATCore */; };
 		89ED659F2EE4DCB700E460D5 /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */; };
+		89ED65A22EE4DCB700E460D5 /* MWDATDisplay in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED65A12EE4DCB700E460D5 /* MWDATDisplay */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +85,7 @@
 				89ED659B2EE4DCB700E460D5 /* MWDATCamera in Frameworks */,
 				89BA640C2EA885A10038ECD0 /* FirebaseFirestore in Frameworks */,
 				89ED659D2EE4DCB700E460D5 /* MWDATCore in Frameworks */,
+				89ED65A22EE4DCB700E460D5 /* MWDATDisplay in Frameworks */,
 				89ED659F2EE4DCB700E460D5 /* MWDATMockDevice in Frameworks */,
 				89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */,
 				89BA64102EA885A10038ECD0 /* FirebaseMessaging in Frameworks */,
@@ -164,6 +166,7 @@
 				89BA645D2EAD35DB0038ECD0 /* GoogleSignInSwift */,
 				89ED659A2EE4DCB700E460D5 /* MWDATCamera */,
 				89ED659C2EE4DCB700E460D5 /* MWDATCore */,
+				89ED65A12EE4DCB700E460D5 /* MWDATDisplay */,
 				89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */,
 			);
 			productName = BlueprintCapture;
@@ -746,7 +749,7 @@
 			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 0.2.1;
+				minimumVersion = 0.7.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -806,6 +809,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
 			productName = MWDATCore;
+		};
+		89ED65A12EE4DCB700E460D5 /* MWDATDisplay */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
+			productName = MWDATDisplay;
 		};
 		89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */ = {
 			isa = XCSwiftPackageProductDependency;

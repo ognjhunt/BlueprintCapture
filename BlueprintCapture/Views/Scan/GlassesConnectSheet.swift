@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Minimal device connect UI for Meta smart glasses — Kled AI style.
+/// Minimal device connect UI for supported smart-glasses capture.
 struct GlassesConnectSheet: View {
     @ObservedObject var glassesManager: GlassesCaptureManager
     let onConnected: (() -> Void)?
@@ -49,6 +49,12 @@ struct GlassesConnectSheet: View {
                 // State card
                 stateCard
                     .padding(.horizontal, 20)
+
+                if !glassesManager.displayDebugState.isEmpty {
+                    displayDebugStateCard
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                }
 
                 // Discovered devices (scanning)
                 if glassesManager.connectionState == .waitingForDevice,
@@ -104,6 +110,97 @@ struct GlassesConnectSheet: View {
             errorCard(message: message)
         case .disconnected:
             disconnectedCard
+        }
+    }
+
+    // MARK: - Display debug state
+
+    private var displayDebugStateCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "display")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
+                Text("Internal display HUD pilot")
+                    .font(BlueprintTheme.body(13, weight: .semibold))
+                    .foregroundStyle(BlueprintTheme.textPrimary)
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                let state = glassesManager.displayDebugState
+                if let deviceName = state.deviceName, !deviceName.isEmpty {
+                    debugRow("Device", deviceName)
+                }
+                if let deviceId = state.deviceId, !deviceId.isEmpty {
+                    debugRow("ID", deviceId)
+                }
+                if let linkState = state.linkState, !linkState.isEmpty {
+                    debugRow("Link", linkState)
+                }
+                if let compatibility = state.compatibility, !compatibility.isEmpty {
+                    debugRow("Compatibility", compatibility)
+                }
+                if let deviceSessionState = state.deviceSessionState, !deviceSessionState.isEmpty {
+                    debugRow("Session", deviceSessionState)
+                }
+                if let streamState = state.streamState, !streamState.isEmpty {
+                    debugRow("Stream", streamState)
+                }
+                if let displayState = state.displayState, !displayState.isEmpty {
+                    debugRow("Display", displayState)
+                }
+                if let updateWarning = state.updateWarning {
+                    debugRow("Warning", updateWarning.displayText)
+                    Text(updateWarning.userActionText)
+                        .font(BlueprintTheme.body(11, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let sendError = state.lastDisplaySendError, !sendError.isEmpty {
+                    debugRow("Last send error", sendError)
+                }
+            }
+
+            if glassesManager.displayDebugState.updateWarning == nil,
+               let actionText = glassesManager.displayWarningActionText {
+                Text(actionText)
+                    .font(BlueprintTheme.body(11, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if glassesManager.canOpenDisplayWarningAction {
+                Button {
+                    glassesManager.openDisplayWarningAction()
+                } label: {
+                    Text("Open Update Flow")
+                        .font(BlueprintTheme.body(13, weight: .semibold))
+                        .foregroundStyle(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .blueprintEditorialCard(radius: 18, fill: BlueprintTheme.panel)
+    }
+
+    private func debugRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(BlueprintTheme.body(11, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textTertiary)
+                .frame(width: 82, alignment: .leading)
+            Text(value)
+                .font(BlueprintTheme.body(11, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
     }
 

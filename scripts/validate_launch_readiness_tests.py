@@ -46,6 +46,23 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
 
         self.assertEqual([], failures)
 
+    def test_contract_only_sample_does_not_claim_live_readiness(self) -> None:
+        proof_path = ROOT / "ops" / "launch-readiness" / "example.launch-proof.json"
+        proof = validator.load_json(proof_path)
+        failures: list[str] = []
+
+        validator.validate_proof(proof, failures, contract_only=True, city_slug=None, proof_path=proof_path)
+
+        self.assertEqual([], failures)
+        self.assertIsNone(proof["upstream"]["site_submission_id"])
+        self.assertIsNone(proof["upstream"]["buyer_request_id"])
+        self.assertIsNone(proof["upstream"]["capture_job_id"])
+        self.assertEqual(0, proof["city"]["live_approved_job_count"])
+        self.assertEqual(0, proof["city"]["live_capture_target_count"])
+        self.assertIs(False, proof["capture"]["real_device_capture_uploaded"])
+        self.assertIs(False, proof["pipeline"]["pubsub_handoff_succeeded"])
+        self.assertIs(False, proof["payouts"]["live_provider_ready"])
+
     def test_real_proof_rejects_placeholder_string_values(self) -> None:
         proof = validator.load_json(ROOT / "ops" / "launch-readiness" / "example.launch-proof.json")
         proof["contract_only"] = False
@@ -112,6 +129,23 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         )
 
         self.assertIn("evidence.pipeline_qa_report must be a non-empty string", failures)
+
+    def test_real_proof_requires_real_upstream_ids(self) -> None:
+        proof = self.real_proof_fixture()
+        proof["upstream"]["buyer_request_id"] = ""
+        proof["upstream"]["blockers"] = ["missing_buyer_request_id"]
+        failures: list[str] = []
+
+        validator.validate_proof(
+            proof,
+            failures,
+            contract_only=False,
+            city_slug="austin-tx",
+            proof_path=ROOT / "ops" / "launch-readiness" / "austin-tx.launch-proof.json",
+        )
+
+        self.assertIn("upstream.buyer_request_id must be a real upstream id", failures)
+        self.assertIn("upstream.blockers must be empty for real launch proof", failures)
 
     def test_real_proof_rejects_status_text_as_evidence_reference(self) -> None:
         proof = self.real_proof_fixture()
@@ -251,6 +285,10 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         )
         self.assertEqual(
             "proof_artifact_blocked",
+            validator.readiness_stage(["upstream.buyer_request_id must be a real upstream id"]),
+        )
+        self.assertEqual(
+            "proof_artifact_blocked",
             validator.readiness_stage(["Launch proof file not found: /tmp/missing.launch-proof.json"]),
         )
         self.assertEqual(
@@ -378,6 +416,33 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         proof["city_slug"] = "austin-tx"
         proof["evidence_generated_at"] = "2026-05-05T20:00:00Z"
         proof["ops"]["launch_owner"] = "founder-on-call"
+        proof["release"]["config_validated_by_archive_script"] = True
+        proof["city"].update(
+            {
+                "backend_supported": True,
+                "live_approved_job_count": 1,
+                "live_capture_target_count": 1,
+                "mock_fallback_disabled": True,
+                "internal_test_space_disabled": True,
+            }
+        )
+        proof["capture"].update(
+            {
+                "real_device_capture_uploaded": True,
+                "capture_submissions_document_exists": True,
+                "raw_upload_complete_exists": True,
+            }
+        )
+        proof["pipeline"].update(
+            {
+                "capture_descriptor_exists": True,
+                "qa_report_exists": True,
+                "pipeline_handoff_exists": True,
+                "pubsub_handoff_succeeded": True,
+                "pipeline_processed_capture": True,
+            }
+        )
+        proof["meta_glasses"]["physical_device_smoke_passed"] = True
         proof["evidence"] = {
             "release_config_settings": "build/BlueprintCaptureExternalRelease.settings#2026-05-05",
             "launch_status_response": "firestore:launch_status/austin-tx#run-2026-05-05",
@@ -396,9 +461,17 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
             "human_finance_review_gate": "ops-runbook:finance-review/austin-tx#owner-founder",
             "monitoring_runbook": "ops-runbook:first-city-ios-launch/austin-tx/2026-05-05",
         }
+        proof["upstream"] = {
+            "site_submission_id": "site-submission-austin-001",
+            "buyer_request_id": "buyer-request-austin-001",
+            "capture_job_id": "capture-job-austin-001",
+            "blockers": [],
+        }
         proof["payouts"].update(
             {
                 "provider_name": "stripe",
+                "backend_configured": True,
+                "stripe_state_checked": True,
                 "provider_state_checked": True,
                 "live_provider_ready": True,
                 "contract_readiness_not_live_readiness": True,
@@ -409,8 +482,15 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         )
         proof["ops"].update(
             {
+                "failed_upload_monitor": True,
+                "submission_registration_monitor": True,
+                "push_device_sync_monitor": True,
+                "bridge_pipeline_monitor": True,
                 "payout_exception_monitor_repo_contract": True,
+                "payout_exception_monitor": True,
                 "human_finance_review_gate": True,
+                "session_events_queryable": True,
+                "cloud_logging_handoff_alert": True,
             }
         )
         return proof

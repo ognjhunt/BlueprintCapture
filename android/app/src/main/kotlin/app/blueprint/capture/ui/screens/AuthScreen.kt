@@ -116,7 +116,7 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Sign up to track earnings and get paid.",
+                text = "Sign up to track capture reviews and eligible payouts.",
                 color = BlueprintTextMuted,
                 fontSize = 17.sp,
                 lineHeight = 24.sp,

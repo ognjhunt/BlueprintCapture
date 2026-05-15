@@ -122,6 +122,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>blueprint</string>
+				<string>blueprintcapture</string>
 			</array>
 		</dict>
 	</array>

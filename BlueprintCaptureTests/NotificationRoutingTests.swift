@@ -39,4 +39,45 @@ struct NotificationRoutingTests {
         #expect(decoded.route == payload.route)
         #expect(decoded.metadata["foo"] == "bar")
     }
+
+    @Test func captureHandoffRouteParsesOnlyOpaqueHandoffIds() throws {
+        let universalLink = try #require(URL(string: "https://tryblueprint.io/capture/open?handoff=opaque-token"))
+        let customScheme = try #require(URL(string: "blueprintcapture://capture?handoff=opaque-token"))
+        let unsafeDetails = try #require(URL(string: "blueprintcapture://capture?targetName=Dock%20A&captureJobId=job-1"))
+
+        #expect(CaptureHandoffRoute.parse(url: universalLink) == CaptureHandoffRoute(
+            handoff: "opaque-token",
+            source: .universalLink,
+            sourceURL: universalLink
+        ))
+        #expect(CaptureHandoffRoute.parse(url: customScheme) == CaptureHandoffRoute(
+            handoff: "opaque-token",
+            source: .customScheme,
+            sourceURL: customScheme
+        ))
+        #expect(CaptureHandoffRoute.parse(url: unsafeDetails) == nil)
+    }
+
+    @Test func captureHandoffMetadataDecodesServerAuthority() throws {
+        let json = """
+        {
+          "request_id": "req_123",
+          "capture_job_id": "job_456",
+          "target_name": "Dock A",
+          "address_label": "11 Warehouse Way",
+          "capture_brief": "Capture approved dock approach and threshold.",
+          "privacy_reminder": "Capture only approved areas.",
+          "allowed_advisory_hints": ["hold_steady", "slow_down"],
+          "truth_boundary": "Display HUD and scan coaching are advisory UX telemetry."
+        }
+        """
+
+        let metadata = try JSONDecoder().decode(CaptureHandoffMetadata.self, from: Data(json.utf8))
+
+        #expect(metadata.requestId == "req_123")
+        #expect(metadata.captureJobId == "job_456")
+        #expect(metadata.targetName == "Dock A")
+        #expect(metadata.addressLabel == "11 Warehouse Way")
+        #expect(metadata.allowedAdvisoryHints == ["hold_steady", "slow_down"])
+    }
 }

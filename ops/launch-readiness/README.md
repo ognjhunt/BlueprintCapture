@@ -12,6 +12,7 @@ The gate has two proof modes:
 Do not mark a real city green from the example artifact. A real proof file must be produced after a release-like hardware run and must point to actual storage, Firestore, pipeline, Meta-glasses, payout, and monitoring evidence.
 The real proof gate rejects `ops/launch-readiness/example.launch-proof.json` and placeholder strings such as `example`, `replace_me`, `your-*`, `todo`, or `tbd`; copying the example and flipping `contract_only` is not launch proof.
 The live-route gate also rejects placeholder auth tokens, city slugs, and coordinates before making backend calls.
+The contract-only example intentionally leaves `upstream.site_submission_id`, `upstream.buyer_request_id`, and `upstream.capture_job_id` as `null` and sets live/device/provider booleans to `false`; it proves schema shape, not launch readiness.
 Use `ops/launch-readiness/real-launch-proof.template.json` only as a shape reference. Fill a separate `<city>.launch-proof.json` with real values and evidence references; the template itself is intentionally not named `*.launch-proof.json`.
 
 The real launch proof must show:
@@ -22,6 +23,7 @@ The real launch proof must show:
 - mock job fallback and internal test space are disabled
 - a real-device capture uploaded and wrote `capture_submissions/{captureId}`
 - bridge artifacts and pipeline handoff completed
+- real upstream WebApp/request/job ids are present: `upstream.site_submission_id`, `upstream.buyer_request_id`, and `upstream.capture_job_id`
 - Meta glasses were smoke-tested on physical hardware, with video-first/non-geometry marketing confirmed
 - Open Capture Here remains review-gated and unpriced
 - payout claims are gated behind live Stripe/backend state
@@ -39,4 +41,9 @@ The real launch proof must also include non-placeholder evidence references:
 - `evidence.pipeline_handoff`
 - `evidence.meta_glasses_smoke`
 - `evidence.stripe_account_state`
+- `evidence.payout_provider_state`
+- `evidence.payout_exception_monitor`
+- `evidence.identity_kyc_decision`
+- `evidence.background_check_decision`
+- `evidence.human_finance_review_gate`
 - `evidence.monitoring_runbook`
