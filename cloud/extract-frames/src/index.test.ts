@@ -5,6 +5,7 @@ process.env.FIREBASE_CONFIG = JSON.stringify({ storageBucket: "test-bucket" });
 process.env.GCLOUD_PROJECT = "test-project";
 
 const {
+  buildRawCaptureLineageFields,
   buildTaskSiteContext,
   buildWorldlabsPreviewFields,
   canonicalWorldModelCandidate,
@@ -402,6 +403,41 @@ test("buildWorldlabsPreviewFields can use resolved mp4 walkthrough uri", () => {
   );
 });
 
+test("buildRawCaptureLineageFields preserves Meta raw video descriptor lineage", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "0"
+  );
+
+  assert.ok(pathInfo);
+  const fields = buildRawCaptureLineageFields(
+    "test-bucket",
+    pathInfo!,
+    {
+      capture_source: "meta_glasses",
+      capture_profile_id: "glasses_pov",
+      width: 1920,
+      height: 1080,
+      fps_source: 30,
+      device_model: "Ray-Ban Meta",
+      frame_timestamps_object: "scenes/scene-123/captures/capture-456/raw/glasses/frame_timestamps.jsonl",
+      stream_metadata_object: "scenes/scene-123/captures/capture-456/raw/glasses/stream_metadata.json",
+      privacy_lineage: { status: "raw_unprocessed" },
+      provenance_lineage: { original_media_sha256: "abc" },
+    },
+    "glasses",
+    "scenes/scene-123/captures/capture-456/raw/walkthrough.mov"
+  );
+
+  assert.equal(fields.source_device, "meta_glasses");
+  assert.equal(fields.capture_modality, "glasses_pov");
+  assert.equal(fields.raw_video_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov");
+  assert.equal((fields.media_metadata as any).frame_timestamps_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/glasses/frame_timestamps.jsonl");
+  assert.equal((fields.media_metadata as any).stream_metadata_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/glasses/stream_metadata.json");
+  assert.equal((fields.privacy_lineage as any).status, "raw_unprocessed");
+  assert.equal((fields.provenance_lineage as any).original_media_sha256, "abc");
+});
+
 test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest shape", () => {
   const merged = mergeManifestWithSidecars(
     {
@@ -425,6 +461,10 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
         schema_version: "v1",
         checkpoint_events: [{ anchor_id: "anchor_entry", pass_id: "pass-1", t_capture_sec: 1.0, completed: true }],
       },
+      relocalizationEvents: {
+        schema_version: "v1",
+        relocalization_events: [{ event_id: "relocalize-1", pass_id: "pass-1", status: "accepted" }],
+      },
     },
   );
 
@@ -435,6 +475,27 @@ test("mergeManifestWithSidecars lifts Android sidecar metadata into manifest sha
   assert.equal((merged as any)?.capture_mode?.requested_mode, "site_world_candidate");
   assert.equal((merged as any)?.route_anchors?.route_anchors?.[0]?.anchor_id, "anchor_entry");
   assert.equal((merged as any)?.checkpoint_events?.checkpoint_events?.[0]?.anchor_id, "anchor_entry");
+  assert.equal((merged as any)?.relocalization_events?.relocalization_events?.[0]?.event_id, "relocalize-1");
+});
+
+test("canonicalWorldModelCandidate requires stable site identity for iPhone captures", () => {
+  const result = canonicalWorldModelCandidate({
+    manifest: {
+      site_identity: null,
+      capture_mode: { requested_mode: "site_world_candidate", resolved_mode: "site_world_candidate" },
+    },
+    actualAvailability: {
+      arkit_poses: true,
+      arkit_intrinsics: true,
+      arkit_depth: true,
+    },
+    processingProfile: "pose_assisted",
+    captureRights: { derived_scene_generation_allowed: true },
+    captureSource: "iphone",
+  });
+
+  assert.equal(result.candidate, false);
+  assert.ok(result.reasoning.includes("site_id_present:false"));
 });
 
 test("canonicalWorldModelCandidate defers non-ARKit world model promotion until geometry stage", () => {

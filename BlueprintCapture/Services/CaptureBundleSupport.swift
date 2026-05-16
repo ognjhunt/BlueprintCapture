@@ -585,6 +585,7 @@ enum CaptureBundleContext {
     ) -> Bool {
         let captureMode = request.metadata.captureMode
         return captureMode?.resolvedMode == "site_world_candidate"
+            && stableSiteIdPresent(for: request)
             && evidence.arkitPoseRows > 0
             && evidence.arkitIntrinsicsValid
             && evidence.arkitDepthFrames > 0
@@ -603,6 +604,7 @@ enum CaptureBundleContext {
         let capabilities = evidence.captureCapabilities
         var gates: [String] = []
         gates.append("capture_mode_site_world_candidate:\(captureMode?.resolvedMode == "site_world_candidate")")
+        gates.append("site_id_present:\(stableSiteIdPresent(for: request))")
         gates.append("arkit_poses_valid:\(evidence.arkitPoseRows > 0)")
         gates.append("arkit_intrinsics_valid:\(evidence.arkitIntrinsicsValid)")
         gates.append("depth_coverage_ok:\(evidence.arkitDepthFrames > 0)")
@@ -632,6 +634,9 @@ enum CaptureBundleContext {
         evidence: CaptureEvidenceSummary
     ) -> [String] {
         var reasons: [String] = []
+        if !stableSiteIdPresent(for: request) {
+            reasons.append("missing_site_id")
+        }
         if evidence.arkitPoseRows <= 0 {
             reasons.append("missing_arkit_poses")
         }
@@ -651,6 +656,11 @@ enum CaptureBundleContext {
             reasons.append("derived_scene_generation_not_allowed")
         }
         return reasons
+    }
+
+    static func stableSiteIdPresent(for request: CaptureUploadRequest) -> Bool {
+        let siteId = request.metadata.siteIdentity?.siteId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return siteId?.isEmpty == false
     }
 
     static func worldModelCandidateDowngradeReason(

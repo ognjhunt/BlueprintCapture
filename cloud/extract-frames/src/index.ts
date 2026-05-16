@@ -252,6 +252,7 @@ export function mergeManifestWithSidecars(
     captureMode?: Record<string, unknown> | null;
     routeAnchors?: Record<string, unknown> | null;
     checkpointEvents?: Record<string, unknown> | null;
+    relocalizationEvents?: Record<string, unknown> | null;
   }
 ): Record<string, unknown> | null {
   const base = asRecord(manifest) || {};
@@ -262,6 +263,8 @@ export function mergeManifestWithSidecars(
     capture_mode: asRecord(base.capture_mode) || sidecars.captureMode || null,
     route_anchors: asRecord(base.route_anchors) || sidecars.routeAnchors || null,
     checkpoint_events: asRecord(base.checkpoint_events) || sidecars.checkpointEvents || null,
+    relocalization_events:
+      asRecord(base.relocalization_events) || sidecars.relocalizationEvents || null,
   };
 }
 
@@ -348,6 +351,22 @@ function asStringArray(value: unknown): string[] | undefined {
   return parsed.length > 0 ? parsed : [];
 }
 
+function normalizeCaptureSource(value: string | undefined): "iphone" | "android" | "glasses" | "unknown" {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "iphone") return "iphone";
+  if (normalized === "android" || normalized === "android_phone") return "android";
+  if (
+    normalized === "glasses" ||
+    normalized === "meta_glasses" ||
+    normalized === "metaglasses" ||
+    normalized === "rayban_meta" ||
+    normalized === "ray-ban_meta"
+  ) {
+    return "glasses";
+  }
+  return "unknown";
+}
+
 function hasStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
@@ -418,6 +437,54 @@ export function buildWorldlabsPreviewFields(
     worldlabs_input_video_uri: previewSimulationRequested
       ? gsUri(bucketName, videoObjectName)
       : null,
+  };
+}
+
+export function buildRawCaptureLineageFields(
+  bucketName: string,
+  pathInfo: CapturePathInfo,
+  manifest: Record<string, unknown> | null,
+  captureSource: "iphone" | "android" | "glasses" | "unknown",
+  walkthroughObjectName: string
+): Record<string, unknown> {
+  const sourceDeviceRaw =
+    asString(manifest?.source_device) ??
+    asString(manifest?.device_source) ??
+    asString(manifest?.capture_source);
+  const sourceDevice =
+    normalizeCaptureSource(sourceDeviceRaw) === "glasses" && sourceDeviceRaw?.toLowerCase().includes("meta")
+      ? "meta_glasses"
+      : sourceDeviceRaw ?? (captureSource === "glasses" ? "non_arkit_video" : captureSource);
+  const captureModality =
+    asString(manifest?.capture_modality) ??
+    asString(manifest?.capture_profile_id) ??
+    (captureSource === "glasses" ? "glasses_video_only" : null);
+  const frameTimestampsObject =
+    asString(manifest?.frame_timestamps_object) ??
+    (captureSource === "glasses" ? `${pathInfo.rawPrefix}/glasses/frame_timestamps.jsonl` : null);
+  const streamMetadataObject =
+    asString(manifest?.stream_metadata_object) ??
+    (captureSource === "glasses" ? `${pathInfo.rawPrefix}/glasses/stream_metadata.json` : null);
+  const rawVideoUri = gsUri(bucketName, walkthroughObjectName);
+  return {
+    source_device: sourceDevice,
+    capture_modality: captureModality,
+    raw_video_uri: rawVideoUri,
+    privacy_lineage: asRecord(manifest?.privacy_lineage) ?? null,
+    provenance_lineage: asRecord(manifest?.provenance_lineage) ?? null,
+    media_metadata: {
+      source_device: sourceDevice,
+      original_video_uri: rawVideoUri,
+      original_video_object: walkthroughObjectName,
+      frame_timestamps_uri: frameTimestampsObject ? gsUri(bucketName, frameTimestampsObject) : null,
+      stream_metadata_uri: streamMetadataObject ? gsUri(bucketName, streamMetadataObject) : null,
+      width: asFiniteNumber(manifest?.width) ?? null,
+      height: asFiniteNumber(manifest?.height) ?? null,
+      fps_source: asFiniteNumber(manifest?.fps_source) ?? null,
+      device_model: asString(manifest?.device_model) ?? null,
+      device_model_marketing: asString(manifest?.device_model_marketing) ?? null,
+      capture_start_epoch_ms: asFiniteNumber(manifest?.capture_start_epoch_ms) ?? null,
+    },
   };
 }
 
@@ -703,6 +770,28 @@ function normalizedCheckpointEvents(manifest: Record<string, unknown> | null): R
   };
 }
 
+function normalizedRelocalizationEvents(manifest: Record<string, unknown> | null): Record<string, unknown> | null {
+  const raw = asRecord(manifest?.relocalization_events);
+  if (!raw) return null;
+  const relocalizationEvents = Array.isArray(raw.relocalization_events)
+    ? raw.relocalization_events
+        .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+        .map((item) => ({
+          event_id: asString(item.event_id) ?? null,
+          pass_id: asString(item.pass_id) ?? null,
+          route_id: asString(item.route_id) ?? null,
+          t_capture_sec: typeof item.t_capture_sec === "number" ? item.t_capture_sec : null,
+          status: asString(item.status) ?? null,
+          anchor_id: asString(item.anchor_id) ?? null,
+          coordinate_frame_session_id: asString(item.coordinate_frame_session_id) ?? null,
+        }))
+    : [];
+  return {
+    schema_version: asString(raw.schema_version) ?? "v1",
+    relocalization_events: relocalizationEvents,
+  };
+}
+
 /**
  * Canonical world_model_candidate rule — shared across iOS finalizer, cloud bridge,
  * and local pipeline. Must be kept in sync.
@@ -728,6 +817,8 @@ export function canonicalWorldModelCandidate({
   captureSource: "iphone" | "android" | "glasses" | "unknown";
 }): { candidate: boolean; reasoning: string[] } {
   const captureMode = asRecord(manifest?.capture_mode);
+  const siteIdentity = asRecord(manifest?.site_identity);
+  const siteIdPresent = Boolean(asString(siteIdentity?.site_id));
   const resolvedMode = asString(captureMode?.resolved_mode) ?? "qualification_only";
   const requestedMode = asString(captureMode?.requested_mode) ?? "qualification_only";
   const arkitReady =
@@ -741,6 +832,7 @@ export function canonicalWorldModelCandidate({
     captureRights.derived_scene_generation_allowed === true;
   const reasoning: string[] = [
     `capture_mode_site_world_candidate:${resolvedMode === "site_world_candidate"}`,
+    `site_id_present:${siteIdPresent}`,
     `capture_source:${captureSource}`,
     `arkit_poses_valid:${actualAvailability.arkit_poses}`,
     `arkit_intrinsics_valid:${actualAvailability.arkit_intrinsics}`,
@@ -752,6 +844,7 @@ export function canonicalWorldModelCandidate({
     `awaiting_geometry_stage:${nonArkitDeferred}`,
   ];
   const candidate =
+    siteIdPresent &&
     resolvedMode === "site_world_candidate" &&
     arkitReady &&
     captureRights.derived_scene_generation_allowed === true;
@@ -958,6 +1051,7 @@ export const extractFrames = onObjectFinalized(
     const captureModeObjectName = `${pathInfo.rawPrefix}/capture_mode.json`;
     const routeAnchorsObjectName = `${pathInfo.rawPrefix}/route_anchors.json`;
     const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
+    const relocalizationEventsObjectName = `${pathInfo.rawPrefix}/relocalization_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
@@ -966,12 +1060,14 @@ export const extractFrames = onObjectFinalized(
     const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
     const sidecarRouteAnchors = await loadJsonObject(bucket, routeAnchorsObjectName, tmp);
     const sidecarCheckpointEvents = await loadJsonObject(bucket, checkpointEventsObjectName, tmp);
+    const sidecarRelocalizationEvents = await loadJsonObject(bucket, relocalizationEventsObjectName, tmp);
     const manifest = mergeManifestWithSidecars(rawManifest, {
       siteIdentity: sidecarSiteIdentity,
       captureTopology: sidecarCaptureTopology,
       captureMode: sidecarCaptureMode,
       routeAnchors: sidecarRouteAnchors,
       checkpointEvents: sidecarCheckpointEvents,
+      relocalizationEvents: sidecarRelocalizationEvents,
     });
     const completionMarker =
       objectKind === "completion_marker"
@@ -1245,14 +1341,7 @@ export const extractFrames = onObjectFinalized(
       pathInfo.captureSourcePath === "android_phone"
         ? pathInfo.captureSourcePath
         : "unknown");
-    const captureSource: "iphone" | "android" | "glasses" | "unknown" =
-      captureSourceRaw === "iphone"
-        ? "iphone"
-        : captureSourceRaw === "android" || captureSourceRaw === "android_phone"
-        ? "android"
-        : captureSourceRaw === "glasses"
-        ? "glasses"
-        : "unknown";
+    const captureSource = normalizeCaptureSource(captureSourceRaw);
     const poseMatchRate =
       sortedFiles.length > 0 ? Number((matchedPoseCount / sortedFiles.length).toFixed(6)) : 0;
     const p95PoseDeltaRaw = percentile(poseDeltaSecValues, 95);
@@ -1287,8 +1376,16 @@ export const extractFrames = onObjectFinalized(
     const captureRights = normalizedCaptureRights(manifest);
     const siteIdentity = normalizedSiteIdentity(manifest);
     const captureTopology = normalizedCaptureTopology(manifest);
+    const rawCaptureLineage = buildRawCaptureLineageFields(
+      bucketName,
+      pathInfo,
+      manifest,
+      captureSource,
+      walkthroughObjectName
+    );
     const routeAnchors = normalizedRouteAnchors(manifest);
     const checkpointEvents = normalizedCheckpointEvents(manifest);
+    const relocalizationEvents = normalizedRelocalizationEvents(manifest);
     // worldModelCandidate is computed AFTER actualAvailability is known (see below).
     const routing = deriveRequestedRouting(manifest);
     const taskSiteContext = buildTaskSiteContext(manifest);
@@ -1369,9 +1466,11 @@ export const extractFrames = onObjectFinalized(
     // Resolve capture_mode with source-aware semantics.
     const rawCaptureMode = asRecord(manifest?.capture_mode);
     const requestedMode = asString(rawCaptureMode?.requested_mode) ?? "qualification_only";
+    const stableSiteIdPresent = Boolean(asString(siteIdentity?.site_id));
     const deferGeometry =
       captureSource !== "iphone" &&
       requestedMode === "site_world_candidate" &&
+      stableSiteIdPresent &&
       captureRights.derived_scene_generation_allowed === true;
     const resolvedMode =
       worldModelCandidate || deferGeometry ? "site_world_candidate" : "qualification_only";
@@ -1380,13 +1479,16 @@ export const extractFrames = onObjectFinalized(
       resolved_mode: resolvedMode,
       downgrade_reason:
         requestedMode === "site_world_candidate" && resolvedMode === "qualification_only"
-          ? "awaiting_geometry_stage"
+          ? stableSiteIdPresent
+            ? "awaiting_geometry_stage"
+            : "missing_site_id"
           : null,
       geometry_status: deferGeometry && !worldModelCandidate ? "awaiting_geometry_stage" : null,
     };
 
     const runtimeBuildBlockers = [
       ...(captureSource === "iphone" ? [] : ["geometry_ready=false"]),
+      ...(stableSiteIdPresent ? [] : ["missing_site_id"]),
       ...(worldModelCandidate ? [] : ["world_model_candidate=false"]),
       ...(walkthroughExists ? [] : ["missing_walkthrough"]),
       ...(sortedFiles.length > 0 ? [] : ["missing_frames_index"]),
@@ -1398,12 +1500,16 @@ export const extractFrames = onObjectFinalized(
       scene_id: pathInfo.sceneId,
       capture_id: pathInfo.captureId,
       capture_source: captureSource,
+      source_device: rawCaptureLineage.source_device,
+      capture_modality: rawCaptureLineage.capture_modality,
       capture_profile_id: asString(manifest?.capture_profile_id) ?? null,
       capture_capabilities: manifest?.capture_capabilities ?? {},
       capture_tier: qualityGate.captureTier,
       processing_profile: qualityGate.processingProfile,
+      raw_video_uri: rawCaptureLineage.raw_video_uri,
       raw_prefix_uri: rawPrefixUri,
       frames_index_uri: framesIndexUri,
+      media_metadata: rawCaptureLineage.media_metadata,
       keyframe_uri: keyframeUri,
       intended_space_type: asString(manifest?.intended_space_type) ?? "unknown",
       quality: {
@@ -1424,11 +1530,14 @@ export const extractFrames = onObjectFinalized(
       requested_outputs: routing.requestedOutputs,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      privacy_lineage: rawCaptureLineage.privacy_lineage,
+      provenance_lineage: rawCaptureLineage.provenance_lineage,
       upstream_handoff: asRecord(manifest?.upstream_handoff) ?? null,
       site_identity: siteIdentity,
       capture_topology: captureTopology,
       route_anchors: routeAnchors,
       checkpoint_events: checkpointEvents,
+      relocalization_events: relocalizationEvents,
       capture_mode: captureMode,
       site_visit_id:
         asString(captureTopology?.site_visit_id) ??
@@ -1452,12 +1561,17 @@ export const extractFrames = onObjectFinalized(
       requested_lanes: routing.requestedLanes,
       metadata: {
         scene_memory_capture: sceneMemoryCapture,
-      capture_rights: captureRights,
-      upstream_handoff: asRecord(manifest?.upstream_handoff) ?? null,
-      site_identity: siteIdentity,
+        capture_rights: captureRights,
+        privacy_lineage: rawCaptureLineage.privacy_lineage,
+        provenance_lineage: rawCaptureLineage.provenance_lineage,
+        media_metadata: rawCaptureLineage.media_metadata,
+        source_device: rawCaptureLineage.source_device,
+        upstream_handoff: asRecord(manifest?.upstream_handoff) ?? null,
+        site_identity: siteIdentity,
         capture_topology: captureTopology,
         route_anchors: routeAnchors,
         checkpoint_events: checkpointEvents,
+        relocalization_events: relocalizationEvents,
         capture_mode: captureMode,
       },
       ...worldlabsPreview,
@@ -1545,6 +1659,10 @@ export const extractFrames = onObjectFinalized(
       region_id: asString(manifest?.region_id) ?? null,
       rights_profile: asString(manifest?.rights_profile) ?? null,
       capture_source: captureSource,
+      source_device: rawCaptureLineage.source_device,
+      capture_modality: rawCaptureLineage.capture_modality,
+      raw_video_uri: rawCaptureLineage.raw_video_uri,
+      media_metadata: rawCaptureLineage.media_metadata,
       qa_status: finalStatus,
       requested_outputs: routing.requestedOutputs,
       requested_lanes: routing.requestedLanes,
@@ -1556,6 +1674,8 @@ export const extractFrames = onObjectFinalized(
       task_site_context: taskSiteContext,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
+      privacy_lineage: rawCaptureLineage.privacy_lineage,
+      provenance_lineage: rawCaptureLineage.provenance_lineage,
       identity: identityValidation.identity,
       ...worldlabsPreview,
       generated_at: new Date().toISOString(),
