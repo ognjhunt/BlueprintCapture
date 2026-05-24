@@ -256,7 +256,8 @@ dependencies {
     implementation(libs.google.ar.core)
     implementation(libs.androidx.xr.runtime)
     implementation(libs.androidx.xr.projected)
-    implementation(libs.androidx.xr.glimmer)
+    // Glimmer DP4 artifacts require the Android 17 / AGP 9.2 toolchain; keep
+    // display-glasses UI on local Compose tokens until that upgrade is safe.
     implementation(libs.androidx.xr.arcore)
 
     implementation(libs.firebase.auth)
@@ -264,7 +265,6 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.storage)
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.ai)
     implementation(libs.play.services.auth)
     implementation(libs.play.services.location)
     implementation(libs.androidx.credentials)

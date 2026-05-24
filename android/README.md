@@ -47,6 +47,8 @@ BLUEPRINT_ACCOUNT_DELETION_URL=https://www.tryblueprint.io/account/delete
 BLUEPRINT_SUPPORT_EMAIL_ADDRESS=support@blueprint.app
 # Nearby/provider requests are proxied through BLUEPRINT_DEMAND_BACKEND_BASE_URL.
 # Do not ship Places or Gemini client keys in the Android app.
+# Android XR voice guidance is on-device only until a real Gemini Live
+# LiveModel connector is implemented and validated.
 ```
 
 `BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE=true` keeps the explicit location-based open-capture flow visible in the scan feed. This is distinct from approved marketplace jobs and requires a rights acknowledgement before capture starts.
@@ -88,6 +90,14 @@ The validator fails closed when release-safe values are missing:
 - `BLUEPRINT_ENABLE_GEMINI_MAPS_GROUNDING_FALLBACK=false`
 - `app/google-services.json` present
 - `POST_NOTIFICATIONS` still declared in the manifest
+- Android XR manifest gating matches the selected release track:
+  - default/mobile track: `android.software.xr.api.spatial` with `android:required="false"`
+  - dedicated Android XR track: set `BLUEPRINT_ANDROID_XR_RELEASE_TRACK=dedicated` and use `android:required="true"`
+
+The full validator also fails closed until `BLUEPRINT_ANDROID_XR_RELEASE_PROOF_PATH` points at a local
+non-secret proof JSON with passing device smoke, App Distribution smoke, and quality-review evidence.
+Use [docs/ANDROID_XR_RELEASE_PROOF.example.json](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/ANDROID_XR_RELEASE_PROOF.example.json)
+as the schema reference; keep the real proof local or otherwise outside tracked release config.
 
 ## Firebase
 
@@ -99,4 +109,4 @@ The validator fails closed when release-safe values are missing:
 
 Use Firebase App Distribution for internal Android installs. Gmail blocks direct APK attachments.
 
-Android is not part of the staged external 10 -> 25 -> 100 rollout until the validator above, release artifact build, and device notification/upload smoke are all green.
+Android is not part of the staged external 10 -> 25 -> 100 rollout until the validator above, release artifact build, Android XR proof gate, and device notification/upload smoke are all green.

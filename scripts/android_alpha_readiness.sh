@@ -45,7 +45,7 @@ run_android_config_validation() {
   local output
   local status
   set +e
-  output="$(./gradlew validateExternalAlphaReleaseConfig 2>&1)"
+  output="$(./gradlew --no-daemon validateExternalAlphaReleaseConfig 2>&1)"
   status=$?
   set -e
   if [[ -n "$output" ]]; then
@@ -59,6 +59,14 @@ run_android_config_validation() {
   fi
 }
 
+run_android_xr_config_validation() {
+  python3 "$ROOT/scripts/validate_android_xr_release_readiness.py" --mode config --repo-root "$ROOT"
+}
+
+run_android_xr_proof_validation() {
+  python3 "$ROOT/scripts/validate_android_xr_release_readiness.py" --mode proof --repo-root "$ROOT"
+}
+
 cd "$ANDROID_DIR"
 
 require_java
@@ -66,8 +74,11 @@ require_java
 echo "==> Validating Android external alpha release config"
 run_android_config_validation
 
+echo "==> Validating Android XR release config"
+run_android_xr_config_validation
+
 if [[ "$VALIDATE_ONLY" == "--validate-config-only" ]]; then
-  echo "Android external alpha config validation passed. Android still requires unit tests, release build, and device/App Distribution smoke before it can leave internal-only status."
+  echo "Android external alpha config validation passed. Android still requires unit tests, release build, Android XR proof, and device/App Distribution smoke before it can leave internal-only status."
   exit 0
 fi
 
@@ -77,4 +88,7 @@ echo "==> Running Android unit tests"
 echo "==> Building Android release artifact"
 ./gradlew assembleRelease
 
-echo "Android repo readiness checks passed. Android still requires device/App Distribution smoke signoff before it can leave internal-only status."
+echo "==> Validating Android XR release proof"
+run_android_xr_proof_validation
+
+echo "Android repo readiness checks passed with Android XR proof. Android still remains internal-only unless downstream proof and any human rollout approval are in scope."

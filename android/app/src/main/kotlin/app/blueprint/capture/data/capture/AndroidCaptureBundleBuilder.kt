@@ -77,7 +77,12 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         rawDirectory.mkdirs()
 
         walkthroughSource.copyTo(rawDirectory.resolve("walkthrough.mp4"), overwrite = true)
-        arcoreEvidenceDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("arcore")) }
+        val arcoreRawDirectory = rawDirectory.resolve("arcore")
+        if (request.captureSource == AndroidCaptureSource.AndroidXrGlasses) {
+            arcoreRawDirectory.deleteRecursively()
+        } else {
+            arcoreEvidenceDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, arcoreRawDirectory) }
+        }
         glassesEvidenceDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("glasses")) }
         companionPhoneDirectory?.takeIf { it.exists() }?.let { copyDirectory(it, rawDirectory.resolve("companion_phone")) }
         val motionFiles = materializeMotionFiles(rawDirectory, imuSamplesSource)
@@ -159,7 +164,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
                 geometryExpectedDownstream = bundleEvidence.geometryExpectedDownstream,
             ),
             captureRights = CaptureRights(
-                payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
+                payoutEligible = captureContributorPayoutEligible(request),
                 consentNotes = listOfNotNull(
                     request.rightsProfile?.let { "rights_profile:$it" },
                     request.siteIdentity?.siteIdSource?.let { "site_id_source:$it" },
@@ -192,9 +197,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureEvidence = bundleEvidence.captureEvidence,
             captureProfileId = bundleEvidence.captureProfileId,
             captureCapabilities = bundleEvidence.captureCapabilities,
-            captureRights = CaptureRights(
-                payoutEligible = (request.quotedPayoutCents ?: 0) > 0,
-            ),
+            captureRights = CaptureRights(payoutEligible = captureContributorPayoutEligible(request)),
             sceneMemory = SceneMemoryCapture(
                 sensorAvailability = bundleEvidence.sensorAvailability,
                 operatorNotes = request.operatorNotes,
@@ -209,7 +212,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureMode = request.captureMode,
         )
 
-        val hypothesis = request.taskHypothesis ?: request.synthesizedTaskHypothesis()
+        val hypothesis = request.taskHypothesis ?: synthesizeTaskHypothesis(request)
         val completion = UploadComplete(
             sceneId = request.sceneId,
             captureId = request.captureId,
@@ -217,7 +220,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val rightsConsent = RightsConsentFile(
             sceneId = request.sceneId,
             captureId = request.captureId,
-            captureContributorPayoutEligible = (request.quotedPayoutCents ?: 0) > 0,
+            captureContributorPayoutEligible = captureContributorPayoutEligible(request),
             consentNotes = listOfNotNull(request.rightsProfile?.let { "rights_profile:$it" }),
         )
         val videoTrack = VideoTrackFile(
@@ -387,7 +390,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
     }
 
     private fun evidenceTierFor(request: AndroidCaptureBundleRequest, captureModality: String): String {
-        val intakeComplete = request.intakePacket?.isComplete == true
+        val intakeComplete = isIntakeComplete(request.intakePacket)
         val scaffolding = request.scaffoldingPacket
         val validatedMetricBundle = !scaffolding?.calibrationAssets.isNullOrEmpty() &&
             (scaffolding?.validatedScaleMeters != null) &&
@@ -414,20 +417,25 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val arcoreRoot = rawDirectory.resolve("arcore")
         val glassesRoot = rawDirectory.resolve("glasses")
         val companionPhoneRoot = rawDirectory.resolve("companion_phone")
-        val arcorePoseRows = countJsonlRows(arcoreRoot.resolve("poses.jsonl"))
-        val arcoreIntrinsicsValid = isValidIntrinsicsFile(arcoreRoot.resolve("session_intrinsics.json"))
+        val allowArcoreEvidence = request.captureSource != AndroidCaptureSource.AndroidXrGlasses
+        val arcorePoseRows = if (allowArcoreEvidence) countJsonlRows(arcoreRoot.resolve("poses.jsonl")) else 0
+        val arcoreIntrinsicsValid =
+            allowArcoreEvidence && isValidIntrinsicsFile(arcoreRoot.resolve("session_intrinsics.json"))
         val arcoreDepthFrames = maxOf(
-            countFiles(arcoreRoot.resolve("depth")),
-            countManifestFrames(arcoreRoot.resolve("depth_manifest.json")),
+            if (allowArcoreEvidence) countFiles(arcoreRoot.resolve("depth")) else 0,
+            if (allowArcoreEvidence) countManifestFrames(arcoreRoot.resolve("depth_manifest.json")) else 0,
         )
         val arcoreConfidenceFrames = maxOf(
-            countFiles(arcoreRoot.resolve("confidence")),
-            countManifestFrames(arcoreRoot.resolve("confidence_manifest.json")),
+            if (allowArcoreEvidence) countFiles(arcoreRoot.resolve("confidence")) else 0,
+            if (allowArcoreEvidence) countManifestFrames(arcoreRoot.resolve("confidence_manifest.json")) else 0,
         )
-        val arcorePointCloudSamples = countJsonlRows(arcoreRoot.resolve("point_cloud.jsonl"))
-        val arcorePlaneRows = countJsonlRows(arcoreRoot.resolve("planes.jsonl"))
-        val arcoreTrackingStateRows = countJsonlRows(arcoreRoot.resolve("tracking_state.jsonl"))
-        val arcoreLightEstimateRows = countJsonlRows(arcoreRoot.resolve("light_estimates.jsonl"))
+        val arcorePointCloudSamples =
+            if (allowArcoreEvidence) countJsonlRows(arcoreRoot.resolve("point_cloud.jsonl")) else 0
+        val arcorePlaneRows = if (allowArcoreEvidence) countJsonlRows(arcoreRoot.resolve("planes.jsonl")) else 0
+        val arcoreTrackingStateRows =
+            if (allowArcoreEvidence) countJsonlRows(arcoreRoot.resolve("tracking_state.jsonl")) else 0
+        val arcoreLightEstimateRows =
+            if (allowArcoreEvidence) countJsonlRows(arcoreRoot.resolve("light_estimates.jsonl")) else 0
         val glassesFrameTimestampRows = countJsonlRows(glassesRoot.resolve("frame_timestamps.jsonl"))
         val glassesDeviceStateRows = countJsonlRows(glassesRoot.resolve("device_state.jsonl"))
         val glassesHealthEventRows = countJsonlRows(glassesRoot.resolve("health_events.jsonl"))
@@ -435,13 +443,20 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         val companionPhoneIntrinsicsValid = isValidIntrinsicsFile(companionPhoneRoot.resolve("session_intrinsics.json"))
         val companionPhoneCalibration = companionPhoneRoot.resolve("calibration.json").exists()
         val motionSamples = countJsonlRows(motionFile)
+        val isGlassesCapture = request.captureSource == AndroidCaptureSource.MetaGlasses ||
+            request.captureSource == AndroidCaptureSource.AndroidXrGlasses
         val motionProvenance =
-            if (request.captureSource == AndroidCaptureSource.MetaGlasses && motionSamples > 0) "phone_imu_diagnostic_only"
-            else if (motionSamples > 0) "phone_imu_accelerometer_gyroscope"
-            else null
+            if (isGlassesCapture && motionSamples > 0) {
+                "phone_imu_diagnostic_only"
+            } else if (motionSamples > 0) {
+                "phone_imu_accelerometer_gyroscope"
+            } else {
+                null
+            }
         val motionAuthority =
-            if (request.captureSource == AndroidCaptureSource.MetaGlasses && motionSamples > 0) CaptureAuthority.DiagnosticOnly
-            else if (motionSamples > 0) CaptureAuthority.AuthoritativeRaw
+            if (isGlassesCapture && motionSamples > 0) {
+                CaptureAuthority.DiagnosticOnly
+            } else if (motionSamples > 0) CaptureAuthority.AuthoritativeRaw
             else CaptureAuthority.NotAvailable
         val missingDepthReason =
             if (arcoreDepthFrames > 0) null
@@ -451,10 +466,6 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             request.captureSource == AndroidCaptureSource.MetaGlasses &&
                 (companionPhonePoseRows > 0 || companionPhoneIntrinsicsValid) -> "glasses_pov_companion_phone"
             request.captureSource == AndroidCaptureSource.MetaGlasses -> "glasses_pov"
-            request.captureSource == AndroidCaptureSource.AndroidXrGlasses &&
-                arcorePoseRows > 0 && arcoreIntrinsicsValid && arcoreDepthFrames > 0 -> "android_xr_glasses_arcore_depth"
-            request.captureSource == AndroidCaptureSource.AndroidXrGlasses &&
-                arcorePoseRows > 0 && arcoreIntrinsicsValid -> "android_xr_glasses_pose_only"
             request.captureSource == AndroidCaptureSource.AndroidXrGlasses -> "android_xr_glasses"
             arcorePoseRows > 0 && arcoreIntrinsicsValid && arcoreDepthFrames > 0 -> "android_arcore_depth"
             arcorePoseRows > 0 && arcoreIntrinsicsValid -> "android_arcore_pose_only"
@@ -464,10 +475,6 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             request.captureSource == AndroidCaptureSource.MetaGlasses &&
                 (companionPhonePoseRows > 0 || !request.scaffoldingPacket?.scaffoldingUsed.isNullOrEmpty()) -> "glasses_plus_scaffolding"
             request.captureSource == AndroidCaptureSource.MetaGlasses -> "glasses_video_only"
-            request.captureSource == AndroidCaptureSource.AndroidXrGlasses &&
-                arcorePoseRows > 0 && arcoreIntrinsicsValid && arcoreDepthFrames > 0 -> "android_xr_arcore_depth"
-            request.captureSource == AndroidCaptureSource.AndroidXrGlasses &&
-                arcorePoseRows > 0 && arcoreIntrinsicsValid -> "android_xr_arcore_pose_only"
             request.captureSource == AndroidCaptureSource.AndroidXrGlasses &&
                 !request.scaffoldingPacket?.scaffoldingUsed.isNullOrEmpty() -> "android_xr_plus_scaffolding"
             request.captureSource == AndroidCaptureSource.AndroidXrGlasses -> "android_xr_video_only"
@@ -508,6 +515,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             trackingState = arcoreTrackingStateRows > 0,
             relocalizationEvents = relocalizationEvents.isNotEmpty(),
             lightEstimate = arcoreLightEstimateRows > 0,
+            geospatial = false,
             motion = motionSamples > 0,
             motionAuthoritative = motionAuthority == CaptureAuthority.AuthoritativeRaw,
             companionPhonePose = companionPhonePoseRows > 0,
@@ -532,10 +540,12 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             trackingStateRows = arcoreTrackingStateRows,
             relocalizationEventRows = relocalizationEvents.size,
             lightEstimateRows = arcoreLightEstimateRows,
+            geospatialRows = 0,
             motionSamples = motionSamples,
             poseAuthority = poseAuthority,
             intrinsicsAuthority = intrinsicsAuthority,
             depthAuthority = depthAuthority,
+            geospatialAuthority = CaptureAuthority.NotAvailable,
             motionAuthority = motionAuthority,
             motionProvenance = motionProvenance,
             motionTimestampsCaptureRelative = motionSamples > 0,
@@ -555,6 +565,7 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             trackingState = sensorAvailability.trackingState,
             relocalizationEvents = sensorAvailability.relocalizationEvents,
             lightEstimate = sensorAvailability.lightEstimate,
+            geospatial = false,
             motion = sensorAvailability.motion,
             motionAuthoritative = sensorAvailability.motionAuthoritative,
             companionPhonePose = sensorAvailability.companionPhonePose,
@@ -571,10 +582,12 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             trackingStateRows = captureEvidence.trackingStateRows,
             relocalizationEventRows = captureEvidence.relocalizationEventRows,
             lightEstimateRows = captureEvidence.lightEstimateRows,
+            geospatialRows = 0,
             motionSamples = captureEvidence.motionSamples,
             poseAuthority = captureEvidence.poseAuthority,
             intrinsicsAuthority = captureEvidence.intrinsicsAuthority,
             depthAuthority = captureEvidence.depthAuthority,
+            geospatialAuthority = CaptureAuthority.NotAvailable,
             motionAuthority = captureEvidence.motionAuthority,
             motionProvenance = motionProvenance,
             geometrySource = geometrySource,
@@ -590,6 +603,36 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
             captureCapabilities = captureCapabilities,
             motionProvenance = motionProvenance,
             motionAuthority = motionAuthority,
+        )
+    }
+
+    private fun captureContributorPayoutEligible(request: AndroidCaptureBundleRequest): Boolean {
+        if (request.captureSource == AndroidCaptureSource.AndroidXrGlasses) return false
+        return (request.quotedPayoutCents ?: 0) > 0
+    }
+
+    private fun isIntakeComplete(packet: QualificationIntakePacket?): Boolean {
+        if (packet == null) return false
+        val hasWorkflow = !packet.workflowName.isNullOrBlank()
+        val hasSteps = packet.taskSteps.any { it.isNotBlank() }
+        val hasZoneOrOwner = !packet.zone.isNullOrBlank() || !packet.owner.isNullOrBlank()
+        return hasWorkflow && hasSteps && hasZoneOrOwner
+    }
+
+    private fun synthesizeTaskHypothesis(request: AndroidCaptureBundleRequest): TaskHypothesis {
+        val packet = request.intakePacket ?: QualificationIntakePacket()
+        val metadata = request.intakeMetadata ?: CaptureIntakeMetadata(source = CaptureIntakeSource.Authoritative)
+        return TaskHypothesis(
+            workflowName = packet.workflowName ?: request.workflowName,
+            taskSteps = packet.taskSteps.ifEmpty { request.taskSteps },
+            zone = packet.zone ?: request.zone,
+            owner = packet.owner ?: request.owner,
+            confidence = metadata.confidence,
+            source = metadata.source,
+            model = metadata.model,
+            fps = metadata.fps,
+            warnings = metadata.warnings,
+            status = CaptureTaskHypothesisStatus.Accepted,
         )
     }
 

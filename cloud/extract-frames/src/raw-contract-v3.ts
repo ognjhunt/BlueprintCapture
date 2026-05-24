@@ -136,6 +136,12 @@ function requireFiles(filesPresent: Set<string>, files: string[], blockers: stri
   }
 }
 
+function addBlocker(blockers: string[], blocker: string): void {
+  if (!blockers.includes(blocker)) {
+    blockers.push(blocker);
+  }
+}
+
 function hasWalkthroughFile(filesPresent: Set<string>, videoURI: string | undefined): boolean {
   if (videoURI) {
     const normalized = videoURI.startsWith("raw/") ? videoURI.slice("raw/".length) : videoURI;
@@ -249,6 +255,7 @@ export function validateRawCaptureBundleV3(
   const captureSource = asString(manifest.capture_source) ?? "unknown";
   const profileId = asString(manifest.capture_profile_id) ?? "";
   const capabilities = asRecord(manifest.capture_capabilities) ?? {};
+  const androidXrProfile = profileId.startsWith("android_xr");
 
   requireFiles(input.filesPresent, requiredBaseFiles, blockers);
 
@@ -347,6 +354,51 @@ export function validateRawCaptureBundleV3(
       input.filesPresent.has("companion_phone/calibration.json")
     ) {
       requireFiles(input.filesPresent, ["companion_phone/calibration.json"], blockers);
+    }
+  }
+
+  if (androidXrProfile) {
+    const poseClaimed =
+      hasCapability(capabilities, "camera_pose") ||
+      hasCapability(capabilities, "camera_intrinsics") ||
+      hasCapability(capabilities, "tracking_state");
+    const depthClaimed =
+      hasCapability(capabilities, "depth") ||
+      hasCapability(capabilities, "depth_confidence") ||
+      hasCapability(capabilities, "point_cloud") ||
+      hasCapability(capabilities, "planes");
+    const geospatialClaimed = hasCapability(capabilities, "geospatial");
+
+    if (poseClaimed) addBlocker(blockers, "android_xr_glasses_pose_claim_not_supported");
+    if (depthClaimed || manifest.depth_supported === true) {
+      addBlocker(blockers, "android_xr_glasses_depth_claim_not_supported");
+    }
+    if (geospatialClaimed) {
+      addBlocker(blockers, "android_xr_glasses_geospatial_claim_not_supported");
+    }
+    if (asRecord(manifest.capture_rights)?.capture_contributor_payout_eligible === true ||
+        input.rightsConsent?.capture_contributor_payout_eligible === true) {
+      addBlocker(blockers, "android_xr_glasses_payout_claim_not_supported");
+    }
+    if (profileId !== "android_xr_glasses") {
+      addBlocker(blockers, "android_xr_glasses_profile_must_be_video_only");
+    }
+
+    for (const sidecar of [
+      "arcore/poses.jsonl",
+      "arcore/frames.jsonl",
+      "arcore/session_intrinsics.json",
+      "arcore/tracking_state.jsonl",
+      "arcore/depth_manifest.json",
+      "arcore/confidence_manifest.json",
+      "arcore/point_cloud.jsonl",
+      "arcore/planes.jsonl",
+      "arcore/light_estimates.jsonl",
+      "arcore/geospatial.jsonl",
+    ]) {
+      if (input.filesPresent.has(sidecar)) {
+        addBlocker(blockers, `android_xr_glasses_arcore_sidecar_not_supported:${sidecar}`);
+      }
     }
   }
 

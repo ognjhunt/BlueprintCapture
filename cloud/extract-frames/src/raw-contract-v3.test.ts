@@ -280,6 +280,133 @@ test("validateRawCaptureBundleV3 accepts Android ARCore V3.1 bundle without ARKi
   assert.deepEqual(result.blockers, []);
 });
 
+test("validateRawCaptureBundleV3 rejects Android XR glasses pose depth geospatial and payout proof claims", () => {
+  const filesPresent = new Set<string>([
+    "manifest.json",
+    "provenance.json",
+    "rights_consent.json",
+    "capture_context.json",
+    "intake_packet.json",
+    "task_hypothesis.json",
+    "recording_session.json",
+    "capture_topology.json",
+    "route_anchors.json",
+    "checkpoint_events.json",
+    "relocalization_events.json",
+    "overlap_graph.json",
+    "video_track.json",
+    "walkthrough.mp4",
+    "motion.jsonl",
+    "semantic_anchor_observations.jsonl",
+    "capture_upload_complete.json",
+    "hashes.json",
+    "sync_map.jsonl",
+    "glasses/stream_metadata.json",
+    "glasses/frame_timestamps.jsonl",
+    "glasses/device_state.jsonl",
+    "glasses/health_events.jsonl",
+    "arcore/poses.jsonl",
+    "arcore/frames.jsonl",
+    "arcore/session_intrinsics.json",
+    "arcore/tracking_state.jsonl",
+    "arcore/depth_manifest.json",
+    "arcore/geospatial.jsonl",
+  ]);
+  const artifacts = Object.fromEntries(
+    [...filesPresent].filter((file) => file !== "hashes.json").map((file) => [file, "hash"])
+  );
+  const input: RawCaptureBundleV3Input = {
+    filesPresent,
+    manifest: {
+      schema_version: "v3",
+      capture_schema_version: "3.1.0",
+      scene_id: "scene-1",
+      capture_id: "capture-1",
+      capture_source: "glasses",
+      capture_tier_hint: "tier2_glasses",
+      coordinate_frame_session_id: "cfs-1",
+      video_uri: "raw/walkthrough.mp4",
+      capture_start_epoch_ms: 1700000000000,
+      app_version: "1.0.0",
+      app_build: "100",
+      os_version: "Android 16",
+      hardware_model_identifier: "Google Android XR glasses",
+      device_model_marketing: "Google Android XR glasses",
+      capture_profile_id: "android_xr_arcore_depth",
+      capture_capabilities: {
+        camera_pose: true,
+        camera_intrinsics: true,
+        depth: true,
+        depth_confidence: true,
+        tracking_state: true,
+        geospatial: true,
+      },
+      capture_rights: {
+        capture_contributor_payout_eligible: true,
+      },
+      has_lidar: false,
+      depth_supported: true,
+      fps_source: 15,
+      width: 1280,
+      height: 720,
+    },
+    provenance: { scene_id: "scene-1", capture_id: "capture-1" },
+    rightsConsent: {
+      scene_id: "scene-1",
+      capture_id: "capture-1",
+      redaction_required: true,
+      capture_contributor_payout_eligible: true,
+    },
+    captureContext: { scene_id: "scene-1", capture_id: "capture-1" },
+    recordingSession: {
+      coordinate_frame_session_id: "cfs-1",
+      world_frame_definition: "unavailable_no_public_world_tracking",
+      units: "meters",
+      handedness: "right_handed",
+      gravity_aligned: false,
+      session_reset_count: 0,
+    },
+    captureTopology: { coordinate_frame_session_id: "cfs-1" },
+    completionMarker: { scene_id: "scene-1", capture_id: "capture-1" },
+    hashes: { artifacts },
+    sessionIntrinsics: null,
+    depthManifest: null,
+    confidenceManifest: null,
+    poses: [],
+    frames: [],
+    frameQuality: [],
+    arcoreSessionIntrinsics: { coordinate_frame_session_id: "cfs-1" },
+    arcoreDepthManifest: { frames: [] },
+    arcorePoses: [
+      {
+        frame_id: "000001",
+        t_capture_sec: 0.0,
+        coordinate_frame_session_id: "cfs-1",
+        T_world_camera: [
+          [1, 0, 0, 0],
+          [0, 1, 0, 0],
+          [0, 0, 1, 0],
+          [0, 0, 0, 1],
+        ],
+      },
+    ],
+    arcoreFrames: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    arcoreTracking: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    syncMap: [{ frame_id: "000001", t_capture_sec: 0.0 }],
+    motion: [],
+    semanticAnchorObservations: [],
+  };
+
+  const result = validateRawCaptureBundleV3(input);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.blockers.includes("android_xr_glasses_pose_claim_not_supported"));
+  assert.ok(result.blockers.includes("android_xr_glasses_depth_claim_not_supported"));
+  assert.ok(result.blockers.includes("android_xr_glasses_geospatial_claim_not_supported"));
+  assert.ok(result.blockers.includes("android_xr_glasses_arcore_sidecar_not_supported:arcore/poses.jsonl"));
+  assert.ok(result.blockers.includes("android_xr_glasses_payout_claim_not_supported"));
+});
+
 test("validateRawCaptureBundleV3 rejects missing hash coverage for required files", () => {
   const input = makeValidInput();
   const artifacts = input.hashes?.artifacts as Record<string, string>;

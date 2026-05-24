@@ -10,7 +10,7 @@ Raw bundles may now carry:
 
 - `capture_profile_id`
 - `capture_capabilities`
-- `arcore/*` raw sidecars for Android ARCore captures
+- `arcore/*` raw sidecars for Android ARCore captures only
 - `glasses/*` raw sidecars for glasses POV metadata
 - `companion_phone/*` sidecars for uncalibrated companion-phone pose scaffolds
 
@@ -19,6 +19,7 @@ The bridge must preserve the raw-vs-derived distinction:
 - raw first-party evidence stays authoritative
 - `capture_capabilities` declares what the device truthfully captured
 - downstream geometry remains derived and must not be mislabeled as raw evidence
+- Android XR projected glasses currently use `android_xr_glasses` as a video-first profile and must not promote ARCore sidecars into pose, depth, geospatial, or payout proof
 
 ## Input Paths
 
@@ -65,7 +66,7 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   "capture_schema_version": "3.1.0",
   "capture_source": "iphone|android|glasses",
   "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses",
-  "capture_profile_id": "iphone_arkit_lidar|iphone_arkit_non_lidar|android_arcore_depth|android_arcore_pose_only|android_camera_only|glasses_pov|glasses_pov_companion_phone",
+  "capture_profile_id": "iphone_arkit_lidar|iphone_arkit_non_lidar|android_arcore_depth|android_arcore_pose_only|android_camera_only|glasses_pov|glasses_pov_companion_phone|android_xr_glasses",
   "capture_capabilities": {}
 }
 ```
@@ -86,6 +87,7 @@ The manifest must also carry normalized scene-memory and rights metadata:
       "arkit_depth": false,
       "arkit_confidence": false,
       "arkit_meshes": false,
+      "geospatial": false,
       "motion": false
     },
     "operator_notes": [],
@@ -129,10 +131,12 @@ The manifest also includes a validated `capture_evidence` block:
     "tracking_state_rows": 0,
     "relocalization_event_rows": 0,
     "light_estimate_rows": 0,
+    "geospatial_rows": 0,
     "motion_samples": 0,
     "pose_authority": "not_available",
     "intrinsics_authority": "not_available",
     "depth_authority": "not_available",
+    "geospatial_authority": "not_available",
     "motion_authority": "diagnostic_only",
     "motion_provenance": null,
     "motion_timestamps_capture_relative": false,

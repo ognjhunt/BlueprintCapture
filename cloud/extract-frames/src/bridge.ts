@@ -54,6 +54,7 @@ export type ArtifactAvailability = {
   planes?: boolean;
   tracking_state?: boolean;
   light_estimate?: boolean;
+  geospatial?: boolean;
   companion_phone_pose?: boolean;
   companion_phone_intrinsics?: boolean;
   companion_phone_calibration?: boolean;
@@ -317,7 +318,33 @@ export function evaluateClaimedArtifacts(input: {
 }): ClaimedArtifactEvaluation {
   const blockers: string[] = [];
   const warnings: string[] = [];
-  const valid = input.actual;
+  const valid: ArtifactAvailability = {
+    arkit_poses: input.claimed.arkit_poses === true && input.actual.arkit_poses === true,
+    arkit_intrinsics: input.claimed.arkit_intrinsics === true && input.actual.arkit_intrinsics === true,
+    arkit_depth: input.claimed.arkit_depth === true && input.actual.arkit_depth === true,
+    arkit_confidence: input.claimed.arkit_confidence === true && input.actual.arkit_confidence === true,
+    arkit_meshes: input.claimed.arkit_meshes === true && input.actual.arkit_meshes === true,
+    motion: input.claimed.motion === true && input.actual.motion === true,
+    camera_pose: input.claimed.camera_pose === true && input.actual.camera_pose === true,
+    camera_intrinsics:
+      input.claimed.camera_intrinsics === true && input.actual.camera_intrinsics === true,
+    depth: input.claimed.depth === true && input.actual.depth === true,
+    depth_confidence:
+      input.claimed.depth_confidence === true && input.actual.depth_confidence === true,
+    point_cloud: input.claimed.point_cloud === true && input.actual.point_cloud === true,
+    planes: input.claimed.planes === true && input.actual.planes === true,
+    tracking_state: input.claimed.tracking_state === true && input.actual.tracking_state === true,
+    light_estimate: input.claimed.light_estimate === true && input.actual.light_estimate === true,
+    geospatial: input.claimed.geospatial === true && input.actual.geospatial === true,
+    companion_phone_pose:
+      input.claimed.companion_phone_pose === true && input.actual.companion_phone_pose === true,
+    companion_phone_intrinsics:
+      input.claimed.companion_phone_intrinsics === true &&
+      input.actual.companion_phone_intrinsics === true,
+    companion_phone_calibration:
+      input.claimed.companion_phone_calibration === true &&
+      input.actual.companion_phone_calibration === true,
+  };
 
   if (input.claimed.arkit_poses && !input.actual.arkit_poses) {
     blockers.push("claimed_arkit_poses_missing_or_empty");
@@ -360,6 +387,9 @@ export function evaluateClaimedArtifacts(input: {
   }
   if (input.claimed.light_estimate && !input.actual.light_estimate) {
     warnings.push("claimed_light_estimate_missing_or_empty");
+  }
+  if (input.claimed.geospatial && !input.actual.geospatial) {
+    blockers.push("claimed_geospatial_missing_or_empty");
   }
   if (input.claimed.companion_phone_pose && !input.actual.companion_phone_pose) {
     warnings.push("claimed_companion_phone_pose_missing_or_empty");
@@ -434,6 +464,9 @@ export function buildCaptureBundleReferences(input: {
   }
   if (input.availability.light_estimate) {
     captureBundle.arcore_light_estimates_uri = `${base}/arcore/light_estimates.jsonl`;
+  }
+  if (input.availability.geospatial) {
+    captureBundle.arcore_geospatial_uri = `${base}/arcore/geospatial.jsonl`;
   }
   if (input.availability.companion_phone_pose) {
     captureBundle.companion_phone_poses_uri = `${base}/companion_phone/poses.jsonl`;

@@ -206,6 +206,45 @@ test("evaluateClaimedArtifacts blocks false pose and intrinsics claims", () => {
   assert.ok(evaluation.warnings.includes("claimed_arkit_depth_missing_or_empty"));
 });
 
+test("evaluateClaimedArtifacts does not promote unclaimed arcore sidecars into proof", () => {
+  const evaluation = evaluateClaimedArtifacts({
+    claimed: {
+      arkit_poses: false,
+      arkit_intrinsics: false,
+      arkit_depth: false,
+      arkit_confidence: false,
+      arkit_meshes: false,
+      motion: false,
+      camera_pose: false,
+      camera_intrinsics: false,
+      depth: false,
+      depth_confidence: false,
+      geospatial: false,
+    },
+    actual: {
+      arkit_poses: false,
+      arkit_intrinsics: false,
+      arkit_depth: false,
+      arkit_confidence: false,
+      arkit_meshes: false,
+      motion: false,
+      camera_pose: true,
+      camera_intrinsics: true,
+      depth: true,
+      depth_confidence: true,
+      geospatial: true,
+    },
+  });
+
+  assert.equal(evaluation.valid.camera_pose, false);
+  assert.equal(evaluation.valid.camera_intrinsics, false);
+  assert.equal(evaluation.valid.depth, false);
+  assert.equal(evaluation.valid.depth_confidence, false);
+  assert.equal(evaluation.valid.geospatial, false);
+  assert.deepEqual(evaluation.blockers, []);
+  assert.deepEqual(evaluation.warnings, []);
+});
+
 test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
   const captureBundle = buildCaptureBundleReferences({
     bucketName: "bucket",

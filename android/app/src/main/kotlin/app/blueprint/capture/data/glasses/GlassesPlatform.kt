@@ -35,8 +35,8 @@ object MetaDatGlassesPlatform : GlassesPlatform {
 
 object AndroidXrProjectedPlatform : GlassesPlatform {
     override val id: GlassesPlatformId = GlassesPlatformId.AndroidXrProjected
-    override val title: String = "Android XR AI glasses"
-    override val subtitle: String = "Projected Android-hosted activity for display and audio-first glasses."
+    override val title: String = "Android XR glasses"
+    override val subtitle: String = "Projected phone-hosted flow for audio-only and display glasses."
     override val capabilities: GlassesCapabilities = GlassesCapabilities(
         hasDisplay = false,
         supportsProjectedCamera = true,

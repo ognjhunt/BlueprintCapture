@@ -42,9 +42,11 @@ import androidx.xr.projected.experimental.ExperimentalProjectedApi
 import androidx.xr.projected.permissions.ProjectedPermissionsRequestParams
 import androidx.xr.projected.permissions.ProjectedPermissionsResultContract
 import app.blueprint.capture.data.glasses.GlassesCapabilities
+import app.blueprint.capture.data.glasses.AndroidXrUxMode
+import app.blueprint.capture.data.glasses.AndroidXrUxState
 import app.blueprint.capture.data.glasses.voice.AndroidOnDeviceSpeechInput
+import app.blueprint.capture.data.glasses.voice.AndroidXrVoiceGuidancePolicy
 import app.blueprint.capture.data.glasses.voice.AndroidVoiceOutput
-import app.blueprint.capture.data.glasses.voice.GeminiLiveVoiceConnector
 import app.blueprint.capture.data.glasses.voice.VoiceSessionOrchestrator
 import app.blueprint.capture.data.glasses.voice.VoiceSessionState
 import app.blueprint.capture.data.model.CaptureLaunch
@@ -65,6 +67,7 @@ class GlassesProjectedActivity : ComponentActivity() {
     private var captureManager: AndroidXrProjectedCaptureManager? = null
     private var voiceSessionOrchestrator: VoiceSessionOrchestrator? = null
     private var activeRecording: Recording? = null
+    private val voiceGuidancePolicy = AndroidXrVoiceGuidancePolicy.default()
 
     private var captureLaunch by mutableStateOf<CaptureLaunch?>(null)
     private var areVisualsOn by mutableStateOf(true)
@@ -128,7 +131,7 @@ class GlassesProjectedActivity : ComponentActivity() {
                         onStartVoice = {
                             voiceSessionOrchestrator?.startSession(
                                 welcomeText = buildWelcomeText(captureLaunch, isVisualUiSupported),
-                                preferGeminiLive = true,
+                                preferGeminiLive = voiceGuidancePolicy.preferGeminiLive,
                             )
                         },
                         onStartCapture = ::startProjectedCapture,
@@ -145,7 +148,7 @@ class GlassesProjectedActivity : ComponentActivity() {
         if (permissionsGranted) {
             voiceSessionOrchestrator?.startSession(
                 welcomeText = buildWelcomeText(captureLaunch, isVisualUiSupported),
-                preferGeminiLive = true,
+                preferGeminiLive = voiceGuidancePolicy.preferGeminiLive,
             )
         }
     }
@@ -213,7 +216,7 @@ class GlassesProjectedActivity : ComponentActivity() {
         voiceSessionOrchestrator?.release()
         voiceSessionOrchestrator = VoiceSessionOrchestrator(
             scope = lifecycleScope,
-            geminiLiveConnector = GeminiLiveVoiceConnector(context = this),
+            geminiLiveConnector = voiceGuidancePolicy.geminiLiveConnector,
             speechInput = AndroidOnDeviceSpeechInput(
                 context = this,
                 onResults = { matches, confidences ->
@@ -238,8 +241,12 @@ class GlassesProjectedActivity : ComponentActivity() {
                     partialTranscript = null
                 }
                 captureStatus = when (state) {
-                    is VoiceSessionState.Starting -> "Starting voice session."
-                    is VoiceSessionState.Listening -> "Listening via ${state.source.replace('_', ' ')}."
+                    is VoiceSessionState.Starting ->
+                        if (state.prefersGeminiLive) "Starting Gemini Live voice session."
+                        else voiceGuidancePolicy.statusMessage
+                    is VoiceSessionState.Listening ->
+                        if (state.source == "gemini_live") "Listening via Gemini Live."
+                        else "Listening via on-device speech."
                     is VoiceSessionState.Thinking -> "Heard: ${state.transcript}"
                     is VoiceSessionState.Speaking ->
                         if (state.fallback) "Speaking guidance with on-device voice fallback."
@@ -314,10 +321,24 @@ class GlassesProjectedActivity : ComponentActivity() {
         hasDisplay: Boolean,
     ): String {
         val target = captureLaunch?.label ?: "Blueprint Capture"
-        return if (hasDisplay) {
-            "Android XR session ready for $target."
-        } else {
-            "Android XR audio session ready for $target. Voice guidance is active."
+        val uxState = AndroidXrUxState.from(
+            isProjectedDeviceConnected = true,
+            capabilities = GlassesCapabilities(
+                hasDisplay = hasDisplay,
+                supportsProjectedCamera = true,
+                supportsProjectedMic = true,
+                supportsDevicePose = false,
+                supportsGeospatial = false,
+            ),
+            hasCaptureTarget = captureLaunch != null,
+        )
+        return when (uxState.mode) {
+            AndroidXrUxMode.DisplayGlasses ->
+                "Display-glasses Android XR session ready for $target. Visual projected UI and voice guidance are active."
+            AndroidXrUxMode.AudioOnlyGlasses ->
+                "Audio-only Android XR session ready for $target. Voice-led guidance is active because no projected visual UI is available."
+            AndroidXrUxMode.WaitingForDevice ->
+                "Android XR session is waiting for paired audio or display glasses."
         }
     }
 }
@@ -344,6 +365,17 @@ private fun GlassesProjectedScreen(
     onStopCapture: () -> Unit,
     onClose: () -> Unit,
 ) {
+    val uxState = AndroidXrUxState.from(
+        isProjectedDeviceConnected = true,
+        capabilities = GlassesCapabilities(
+            hasDisplay = isVisualUiSupported,
+            supportsProjectedCamera = true,
+            supportsProjectedMic = true,
+            supportsDevicePose = false,
+            supportsGeospatial = false,
+        ),
+        hasCaptureTarget = captureLaunch != null,
+    )
     if (!isVisualUiSupported || !areVisualsOn) {
         // Audio-only mode: no visual UI rendered. Voice is the entire UX.
         // This composable intentionally renders nothing — the voice orchestrator
@@ -374,6 +406,15 @@ private fun GlassesProjectedScreen(
                 text = captureLaunch?.label ?: "Android XR",
                 style = MaterialTheme.typography.headlineSmall,
                 color = GlimmerColors.Primary,
+            )
+
+            GlimmerInfoCard(
+                title = "XR mode",
+                body = if (uxState.mode == AndroidXrUxMode.DisplayGlasses && areVisualsOn) {
+                    "${uxState.title}. ${uxState.capabilitySummary.joinToString(" • ")}."
+                } else {
+                    uxState.body
+                },
             )
 
             // Status chip
@@ -551,8 +592,10 @@ private fun AudioOnlyAnnouncer(
 
 private fun VoiceSessionState.toHumanLabel(): String = when (this) {
     VoiceSessionState.Idle -> "Idle"
-    is VoiceSessionState.Starting -> "Starting"
-    is VoiceSessionState.Listening -> "Listening (${source.replace('_', ' ')})"
+    is VoiceSessionState.Starting ->
+        if (prefersGeminiLive) "Starting Gemini Live" else "On-device speech guidance"
+    is VoiceSessionState.Listening ->
+        if (source == "gemini_live") "Listening via Gemini Live" else "Listening via on-device speech"
     is VoiceSessionState.Thinking -> "Thinking about \"$transcript\""
     is VoiceSessionState.Speaking -> "Speaking"
     is VoiceSessionState.Errored -> "Error: $message"

@@ -25,7 +25,7 @@ xcodebuild -project BlueprintCapture.xcodeproj \
 
 1. Complete onboarding.
 2. Reserve or select a capture target.
-3. Record with iPhone or Meta glasses.
+3. Record with iPhone, or with an approved Meta glasses repeat-walk path when the assignment and proof chain allow it.
 4. Let the app finalize the raw bundle.
 5. Upload the bundle under `scenes/{scene_id}/captures/{capture_id}/raw/`.
 
@@ -40,7 +40,7 @@ xcodebuild -project BlueprintCapture.xcodeproj \
 ## Alpha Notes
 
 - Honest empty states are valid. Do not inject demo marketplace targets in production-like builds.
-- Android glasses capture should only be started from a real target or open-capture flow so the bundle keeps truthful site metadata.
+- Android/Meta glasses capture should only be started from a real target or open-capture flow so the bundle keeps truthful site metadata. Public Google/Meta smart-glasses language stays limited to approved repeat walkthroughs where assignment, hardware, launch proof, and downstream capture proof exist.
 - Direct-provider AI features and Android payout onboarding are out of scope unless you explicitly wire and validate real provider contracts.
 
 ## Key Paths

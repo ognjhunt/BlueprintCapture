@@ -1101,6 +1101,7 @@ export const extractFrames = onObjectFinalized(
       planes: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/planes.jsonl`),
       tracking_state: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/tracking_state.jsonl`),
       light_estimate: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/light_estimates.jsonl`),
+      geospatial: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/geospatial.jsonl`),
       companion_phone_pose: await fileHasContent(bucket, `${pathInfo.rawPrefix}/companion_phone/poses.jsonl`),
       companion_phone_intrinsics: isValidIntrinsicsPayload(
         await loadJsonObject(bucket, `${pathInfo.rawPrefix}/companion_phone/session_intrinsics.json`, tmp)
@@ -1419,6 +1420,7 @@ export const extractFrames = onObjectFinalized(
       planes: claimedCapabilities.planes === true,
       tracking_state: claimedCapabilities.tracking_state === true,
       light_estimate: claimedCapabilities.light_estimate === true,
+      geospatial: claimedCapabilities.geospatial === true,
       companion_phone_pose: claimedCapabilities.companion_phone_pose === true,
       companion_phone_intrinsics: claimedCapabilities.companion_phone_intrinsics === true,
       companion_phone_calibration: claimedCapabilities.companion_phone_calibration === true,

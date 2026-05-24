@@ -12,6 +12,7 @@ Use this matrix before running commands in `BlueprintCapture`. Default to local,
 | `rg ...` / `rg --files` | Local search | Safe. Prefer over broad slow scans. |
 | `xcodebuild -list -project BlueprintCapture.xcodeproj` | iOS project introspection | Safe; no external mutation. |
 | `PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_launch_readiness_tests.py` | Local Python validator tests | Safe; avoids `__pycache__`. |
+| `PYTHONDONTWRITEBYTECODE=1 python3 scripts/android_xr_release_readiness_tests.py` | Local Android XR readiness validator tests | Safe; avoids `__pycache__`. |
 | `cd cloud/extract-frames && npm test` | Local cloud bridge tests | Safe; no deploy. |
 | `cd cloud/referral-earnings && npm test` | Local cloud backend tests | Safe; no deploy. |
 
@@ -33,6 +34,7 @@ Do not assume simulator success proves Meta glasses, provider, push notification
 | `cd android && ANDROID_HOME=/Users/nijelhunt_1/Library/Android/sdk ./gradlew testDebugUnitTest` | Local unit tests | Safe when SDK is installed. |
 | `cd android && ANDROID_HOME=/Users/nijelhunt_1/Library/Android/sdk ./gradlew assembleDebug` | Local debug build | Safe. |
 | `cd android && ./gradlew validateExternalAlphaReleaseConfig` | Local config validation | Safe; should fail closed if release-safe properties are missing. |
+| `python3 scripts/validate_android_xr_release_readiness.py --mode config` | Local Android XR manifest/release-track validation | Safe; no live device, Firebase, or App Distribution mutation. |
 
 `android/local.properties` is ignored and should remain local. If Android tooling cannot find the SDK, prefer setting `ANDROID_HOME=/Users/nijelhunt_1/Library/Android/sdk` in the command instead of editing local config.
 
@@ -52,7 +54,7 @@ Do not run `firebase deploy`, production function invocations, live HTTP mutatio
 | Command | Expected behavior | Safety notes |
 | --- | --- | --- |
 | `./scripts/archive_external_alpha.sh --validate-config-only` | Fails closed if ignored release xcconfig is missing, placeholder, or incomplete | Treat missing config as `release_config_blocked`, not a code bug. Do not edit `Config/*.xcconfig` during repo orientation work. |
-| `./scripts/android_alpha_readiness.sh --validate-config-only` | Fails closed if Android release properties are missing, placeholders, or unsafe | Treat missing Android release properties as `android_release_config_blocked`, not a code bug. |
+| `./scripts/android_alpha_readiness.sh --validate-config-only` | Fails closed if Android release properties are missing, placeholders, unsafe, or Android XR manifest gating does not match the release track | Treat missing Android release properties as `android_release_config_blocked`, not a code bug. |
 | `./scripts/launch_city_readiness.sh` | Requires real launch proof path, auth token, city slug, lat/lng, release config, and cross-repo proof | Not a generic local smoke test. Run only when live launch-proof verification is requested. |
 | `./scripts/alpha_readiness.sh` | Broad release-like gate | Can build and run many checks. Use when release validation is in scope, not for small doc-only edits. |
 

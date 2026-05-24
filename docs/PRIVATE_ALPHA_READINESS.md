@@ -19,7 +19,7 @@
 
 ## Current launch posture
 - External 100-user rollout posture on 2026-03-26: iOS only.
-- Android has a repo-local release validator/build lane, but it remains internal-only until `./scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
+- Android has a repo-local release validator/build lane, but it remains internal-only until `./scripts/android_alpha_readiness.sh` passes with real release config, Android XR proof, and device/App Distribution smoke signed off.
 - Demand/opportunity ranking runs against the direct Firebase router.
 - Nearby discovery, autocomplete, and details are proxied through the demand backend:
   - `POST /v1/nearby/discovery`
@@ -39,7 +39,7 @@
 - Run `./scripts/launch_city_readiness.sh` with a real `BLUEPRINT_LAUNCH_PROOF_PATH`, authenticated `BLUEPRINT_LAUNCH_AUTH_TOKEN`, `BLUEPRINT_LAUNCH_CITY_SLUG`, `BLUEPRINT_LAUNCH_LAT`, and `BLUEPRINT_LAUNCH_LNG` before marketing a city. The script self-tests its validator first; the example proof under `ops/launch-readiness/` is only for contract validation.
 - The real launch proof must include non-placeholder `evidence.*` references for release config, launch status, demand feed, capture submission, raw upload completion, pipeline descriptor/QA/handoff, Meta-glasses smoke, Stripe state, and monitoring runbook.
 - `alpha_readiness.sh` preboots a simulator, runs the cloud tests, runs the focused iOS unit/UI suite, builds the release app bundle, and fails if the bundle contains `Secrets*.plist`, provider keys, mock-job fallback, internal test space, missing remote notifications, missing backend URLs, or missing support/legal config.
-- Use `./scripts/android_alpha_readiness.sh` for Android internal release validation. It validates release-safe config, runs `testDebugUnitTest`, and builds `assembleRelease`.
+- Use `./scripts/android_alpha_readiness.sh` for Android internal release validation. It validates release-safe config, validates Android XR manifest/proof gates, runs `testDebugUnitTest`, and builds `assembleRelease`.
 
 ## Core-path manual checklist
 - Launch a release-like build and confirm the app opens without a secret/config crash.

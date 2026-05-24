@@ -1,0 +1,38 @@
+{
+  "schema_version": "android_xr_release_readiness_v1",
+  "checked_at": "2026-05-24T00:00:00Z",
+  "reviewer": "replace-with-human-reviewer",
+  "release_track": "mobile",
+  "device_smoke": {
+    "result": "blocked",
+    "device_kind": "android_xr_headset_or_wired_glasses",
+    "device_model": "replace-with-device-model",
+    "android_xr_build": "replace-with-build-id",
+    "evidence_path": "replace-with-local-evidence-path-or-ticket",
+    "notes": "Set result to pass only after the XR launch, permissions, capture, finalization, and upload-queue flow are verified on the stated device."
+  },
+  "app_distribution_smoke": {
+    "result": "blocked",
+    "distribution_surface": "firebase_app_distribution_internal",
+    "tester_group": "replace-with-internal-tester-group",
+    "evidence_path": "replace-with-local-evidence-path-or-ticket",
+    "notes": "Set result to pass only after a tester installs the release candidate from App Distribution and opens the Android XR path."
+  },
+  "quality_guidelines_review": {
+    "result": "blocked",
+    "guidelines_checked": [
+      "core Android app quality",
+      "Android XR app quality",
+      "startup responsiveness",
+      "ANR/crash review",
+      "safe strobing and motion behavior",
+      "hand/input fallback behavior"
+    ],
+    "evidence_path": "replace-with-local-review-path-or-ticket",
+    "notes": "Set result to pass only after review against current Android XR quality guidance."
+  },
+  "public_distribution_claims": {
+    "audio_display_glasses_ready": false,
+    "notes": "Keep false until Android XR distribution for audio/display glasses is explicitly available and proven for Blueprint."
+  }
+}

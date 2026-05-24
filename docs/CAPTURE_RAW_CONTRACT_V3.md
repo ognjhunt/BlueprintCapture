@@ -193,18 +193,28 @@ Required fields:
 - `android_arcore_depth`
 - `android_arcore_pose_only`
 - `android_camera_only`
+- `android_xr_glasses`
 - `glasses_pov`
 - `glasses_pov_companion_phone`
 
 `capture_capabilities` carries:
 
 - neutral availability flags such as `camera_pose`, `camera_intrinsics`, `depth`, `depth_confidence`, `point_cloud`, `planes`, `feature_points`, `tracking_state`, `relocalization_events`, `light_estimate`, `motion`, `motion_authoritative`, `companion_phone_pose`, `companion_phone_intrinsics`, `companion_phone_calibration`
-- normalized evidence counters such as `pose_rows`, `intrinsics_valid`, `depth_frames`, `confidence_frames`, `mesh_files`, `point_cloud_samples`, `plane_rows`, `feature_point_rows`, `tracking_state_rows`, `relocalization_event_rows`, `light_estimate_rows`, `motion_samples`
-- authority labels such as `pose_authority`, `intrinsics_authority`, `depth_authority`, `motion_authority`
+- neutral geospatial availability flag `geospatial`; this is capture-time sensor proof only, not the same thing as a site address or `site_identity.geo`
+- normalized evidence counters such as `pose_rows`, `intrinsics_valid`, `depth_frames`, `confidence_frames`, `mesh_files`, `point_cloud_samples`, `plane_rows`, `feature_point_rows`, `tracking_state_rows`, `relocalization_event_rows`, `light_estimate_rows`, `geospatial_rows`, `motion_samples`
+- authority labels such as `pose_authority`, `intrinsics_authority`, `depth_authority`, `geospatial_authority`, `motion_authority`
 - `motion_provenance`
 - `missing_depth_reason` when `depth=false`; allowed values are `not_supported`, `not_enabled`, `temporarily_unavailable`, `dropped_at_write`, or `invalid_for_frame`
 - `geometry_source`
 - `geometry_expected_downstream`
+
+Android XR projected glasses / Google AI glasses:
+
+- Current Android XR projected capture is video-first. Bundles must use `capture_profile_id = "android_xr_glasses"` unless a future explicit Blueprint contract adds verified XR tracking sidecars.
+- The projected-glasses path must not write or claim ARCore pose, intrinsics, depth, point cloud, plane, tracking-state, light-estimate, or geospatial proof from `arcore/` sidecars.
+- Phone IMU samples on Android XR glasses are diagnostic companion-device evidence only. They must use `motion_authority = "diagnostic_only"` and must not set `motion_authoritative = true`.
+- `site_identity.geo` may preserve target/place latitude and longitude, but it is not geospatial tracking proof and must not set `capture_capabilities.geospatial=true`.
+- Quoted payout copy or target economics are not payout eligibility proof. Android XR glasses bundles must not set `capture_rights.capture_contributor_payout_eligible=true` or `rights_consent.capture_contributor_payout_eligible=true`.
 
 `upstream_handoff` carries launch/hosted-review linkage truth. Missing `site_submission_id`,
 `buyer_request_id`, or `capture_job_id` must remain listed in `upstream_handoff.blockers`; raw

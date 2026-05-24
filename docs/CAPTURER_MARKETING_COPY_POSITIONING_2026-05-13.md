@@ -15,7 +15,7 @@ The copy system must preserve these boundaries:
 - Generated scenes, world-model outputs, previews, and review artifacts are downstream products. They are not captured truth.
 - In-app hints can coach capture quality and task flow. They must not decide payout, rights, buyer trust, provider readiness, or commercialization.
 - Payout eligibility must come from real upstream assignment, backend review, rights scope, quality review, and provider configuration. It must not be inferred from place type, estimated effort, or demo data.
-- Smart glasses are optional capture devices for supported/internal paths. They must not be messaged as a public launch-ready surface without physical-device proof and downstream Pipeline/WebApp proof for the same capture chain.
+- Smart glasses are optional capture devices for supported/internal paths. Google/Meta smart-glasses support must be messaged only for approved repeat walkthroughs where the assignment, hardware, launch proof, and downstream Pipeline/WebApp proof exist for the same capture chain.
 
 ## 2026 Research Snapshot
 
@@ -177,17 +177,18 @@ Internal hypothesis:
 Allowed:
 
 - "Optional for supported hands-free capture."
-- "Phone capture is available first; glasses can be connected later when supported."
+- "Phone capture is available first; Google/Meta glasses can be connected later when the approved assignment and proof chain support them."
+- "Google/Meta smart glasses are supported only for approved repeat walkthroughs when assignment, hardware, launch proof, and downstream capture proof exist."
 - "Meta glasses and Android XR paths are internal or limited until device proof and downstream proof exist."
 - "Target-scoped glasses capture finalizes into the same raw bundle/upload pipeline when enabled."
 
 Blocked:
 
-- "Smart-glasses launch is ready."
+- "Google or Meta smart-glasses launch is ready."
 - "Capture with glasses anywhere."
 - "Connect glasses to unlock paid jobs."
 - "Android XR is public-ready."
-- Any copy that implies Meta device support is available for all capturers, all cities, or all assignments.
+- Any copy that implies Google/Meta device support is available for all capturers, all cities, or all assignments.
 
 ## First-25 Capturer Cohort
 
@@ -235,7 +236,7 @@ Pilot:
 Smart-glasses step:
 
 - Headline: "Optional smart-glasses capture"
-- Body: "Phone capture is the default. Connect supported glasses later for limited hands-free paths when your cohort and device are enabled."
+- Body: "Phone capture is the default. Google/Meta glasses are limited to approved repeat walkthroughs when the assignment, hardware, launch proof, and downstream capture proof are in place."
 - CTA: "Skip for now"
 
 ### Capture Assignment

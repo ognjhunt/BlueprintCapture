@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.glasses.GlassesCaptureState
 import app.blueprint.capture.data.glasses.AndroidXrProjectedPlatform
+import app.blueprint.capture.data.glasses.AndroidXrUxState
 import app.blueprint.capture.data.glasses.GlassesPlatformId
 import app.blueprint.capture.data.glasses.MetaDatGlassesPlatform
 import app.blueprint.capture.data.model.CaptureLaunch
@@ -294,6 +295,11 @@ private fun AndroidXrPanel(
     captureLaunch: CaptureLaunch?,
     onLaunch: () -> Unit,
 ) {
+    val uxState = AndroidXrUxState.from(
+        isProjectedDeviceConnected = uiState.isProjectedDeviceConnected,
+        capabilities = uiState.capabilities,
+        hasCaptureTarget = captureLaunch != null,
+    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -304,35 +310,25 @@ private fun AndroidXrPanel(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                text = if (uiState.isProjectedDeviceConnected) {
-                    "Android XR glasses detected"
-                } else {
-                    "Waiting for Android XR glasses"
-                },
+                text = uxState.title,
                 color = BlueprintTextPrimary,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = uiState.launchMessage,
+                text = uxState.body,
                 color = BlueprintTextMuted,
                 fontSize = 14.sp,
                 lineHeight = 20.sp,
             )
             Text(
-                text = buildString {
-                    append(if (uiState.capabilities.supportsProjectedCamera) "Projected camera" else "No projected camera")
-                    append(" • ")
-                    append(if (uiState.capabilities.supportsProjectedMic) "Projected mic" else "No projected mic")
-                    append(" • ")
-                    append(
-                        if (uiState.capabilities.supportsDevicePose || uiState.capabilities.supportsGeospatial) {
-                            "World tracking available"
-                        } else {
-                            "World tracking unverified"
-                        },
-                    )
-                },
+                text = uxState.capabilitySummary.joinToString(" • "),
+                color = BlueprintTextMuted,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Text(
+                text = uiState.launchMessage,
                 color = BlueprintTextMuted,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
@@ -363,7 +359,7 @@ private fun AndroidXrPanel(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = if (captureLaunch != null) "Launch Android XR capture" else "Open Android XR readiness mode",
+                    text = uxState.primaryAction,
                     color = BlueprintBlack,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,

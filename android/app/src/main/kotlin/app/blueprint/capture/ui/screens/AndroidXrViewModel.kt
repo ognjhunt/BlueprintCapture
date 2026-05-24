@@ -41,7 +41,7 @@ data class AndroidXrUiState(
     val captureLaunch: CaptureLaunch? = null,
     val isProjectedDeviceConnected: Boolean = false,
     val capabilities: GlassesCapabilities = AndroidXrProjectedPlatform.capabilities,
-    val launchMessage: String = "Launch the projected activity on connected Android XR glasses to validate video-first capture on hardware.",
+    val launchMessage: String = "Pair audio glasses or display glasses, then launch the projected activity to validate capture on hardware.",
     val launchError: String? = null,
     val isFinalizing: Boolean = false,
     val queuedUploadId: String? = null,
@@ -69,9 +69,9 @@ class AndroidXrViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(
                     isProjectedDeviceConnected = connected,
                     launchMessage = if (connected) {
-                        "Connected Android XR glasses detected. Open the projected activity to validate projected camera, mic, and display behavior on hardware."
+                        "Connected Android XR glasses detected. Runtime display state will determine whether the session uses audio-only guidance or display-glasses UI."
                     } else {
-                        "No Android XR projected device is connected yet. Use a paired AI-glasses device or emulator."
+                        "No Android XR projected device is connected yet. Use paired audio glasses, display glasses, or a projected-glasses emulator."
                     },
                 )
             }

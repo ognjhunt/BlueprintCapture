@@ -398,6 +398,70 @@ class AndroidCaptureBundleBuilderTest {
         assertThat(recordingSession.gravityAligned).isFalse()
     }
 
+    @Test
+    fun `bundle builder keeps android xr glasses from claiming arcore geospatial or payout proof`() {
+        val tempDir = createTempDirectory("android-capture-xr-fail-closed").toFile()
+        val sourceVideo = File(tempDir, "walkthrough.mp4").apply { writeBytes(byteArrayOf(0x01, 0x02, 0x03)) }
+        val arcoreSource = File(tempDir, "accidental-arcore-source").apply { mkdirs() }
+        File(arcoreSource, "depth").mkdirs()
+        File(arcoreSource, "confidence").mkdirs()
+        File(arcoreSource, "poses.jsonl").writeText("""{"frame_id":"000001","t_capture_sec":0.0,"T_world_camera":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}
+""")
+        File(arcoreSource, "frames.jsonl").writeText("""{"frame_id":"000001","t_capture_sec":0.0}
+""")
+        File(arcoreSource, "tracking_state.jsonl").writeText("""{"frame_id":"000001","t_capture_sec":0.0}
+""")
+        File(arcoreSource, "session_intrinsics.json").writeText("""{"fx":1,"fy":1,"cx":1,"cy":1,"width":1,"height":1}""")
+        File(arcoreSource, "depth_manifest.json").writeText("""{"schema_version":"v1","frames":[{"frame_id":"000001","depth_path":"arcore/depth/000001.png"}]}""")
+        File(arcoreSource, "depth/000001.png").writeBytes(byteArrayOf(0x01))
+        val imuFile = File(tempDir, "motion.jsonl").apply {
+            writeText(canonicalMotionLine("phone_imu_accelerometer_gyroscope"))
+        }
+        val request = AndroidCaptureBundleRequest(
+            sceneId = "scene-123",
+            captureId = "capture-123",
+            creatorId = "tester",
+            deviceModel = "Google Android XR glasses",
+            osVersion = "Android 16",
+            fpsSource = 15.0,
+            width = 1280,
+            height = 720,
+            captureStartEpochMs = 1_700_000_000_000,
+            captureSource = AndroidCaptureSource.AndroidXrGlasses,
+            quotedPayoutCents = 750,
+        )
+
+        val result = AndroidCaptureBundleBuilder().writeBundle(
+            outputRoot = tempDir,
+            request = request,
+            walkthroughSource = sourceVideo,
+            imuSamplesSource = imuFile,
+            arcoreEvidenceDirectory = arcoreSource,
+        )
+
+        val manifest = json.decodeFromString<CaptureManifest>(result.manifestFile.readText())
+        assertThat(manifest.captureProfileId).isEqualTo("android_xr_glasses")
+        assertThat(manifest.captureCapabilities.cameraPose).isFalse()
+        assertThat(manifest.captureCapabilities.cameraIntrinsics).isFalse()
+        assertThat(manifest.captureCapabilities.depth).isFalse()
+        assertThat(manifest.captureCapabilities.depthConfidence).isFalse()
+        assertThat(manifest.captureCapabilities.geospatial).isFalse()
+        assertThat(manifest.captureCapabilities.poseRows).isEqualTo(0)
+        assertThat(manifest.captureCapabilities.depthFrames).isEqualTo(0)
+        assertThat(manifest.captureCapabilities.geospatialRows).isEqualTo(0)
+        assertThat(manifest.captureEvidence.poseAuthority).isEqualTo(CaptureAuthority.NotAvailable)
+        assertThat(manifest.captureEvidence.depthAuthority).isEqualTo(CaptureAuthority.NotAvailable)
+        assertThat(manifest.captureEvidence.geospatialAuthority).isEqualTo(CaptureAuthority.NotAvailable)
+        assertThat(manifest.captureEvidence.motionAuthority).isEqualTo(CaptureAuthority.DiagnosticOnly)
+        assertThat(manifest.captureCapabilities.motionAuthoritative).isFalse()
+        assertThat(manifest.sceneMemoryCapture.motionProvenance).isEqualTo("phone_imu_diagnostic_only")
+        assertThat(manifest.captureRights.payoutEligible).isFalse()
+        assertThat(File(result.rawDirectory, "arcore/poses.jsonl").exists()).isFalse()
+
+        val rightsConsent = json.decodeFromString<RightsConsentFile>(result.rightsConsentFile.readText())
+        assertThat(rightsConsent.captureContributorPayoutEligible).isFalse()
+    }
+
     private fun sha256Hex(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256").digest(file.readBytes())
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
