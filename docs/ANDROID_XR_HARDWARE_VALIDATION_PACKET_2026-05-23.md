@@ -19,6 +19,18 @@ For the current no-sidecar Android XR path, the claim ceiling is:
 
 Generated artifacts, local tests, emulator behavior, and queued uploads are not raw hardware proof by themselves.
 
+## Offline No-Hardware Packet
+
+Before physical hardware exists, generate the fail-closed operator packet with:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/author_android_xr_no_hardware_packet.py --operator "$USER"
+```
+
+This writes a blocked packet and local evidence notes under `output/android_xr_hardware_packets/<run-id>/`, then validates it with `scripts/validate_android_xr_hardware_packet.py --require-artifacts`. A valid no-hardware packet must keep `HW-P0` through `HW-P6` blocked and all readiness claims false.
+
+Use [Android XR Offline No-Hardware Packet](ANDROID_XR_OFFLINE_NO_HARDWARE_PACKET.md) for the short operator workflow. Do not copy a generated blocked packet into the completed hardware-proof lane.
+
 ## Web Research Snapshot
 
 Last checked during this run: 2026-05-23 America/Chicago.
@@ -310,6 +322,47 @@ Blockers:
 
 Next input needed:
 ```
+
+## Offline Machine-Checkable Packet
+
+Use `scripts/validate_android_xr_hardware_packet.py` for repo-local packet validation before or after a physical run. This validator checks the packet shape only; it does not require hardware, Google/Meta credentials, Firebase config, release config, or upload access.
+
+Example packet fixtures:
+
+- `docs/fixtures/android_xr_hardware_packets/completed_video_first.example.json`
+- `docs/fixtures/android_xr_hardware_packets/blocked_no_hardware.example.json`
+
+Validate the examples:
+
+```bash
+python3 scripts/validate_android_xr_hardware_packet.py \
+  --packet docs/fixtures/android_xr_hardware_packets/completed_video_first.example.json
+```
+
+```bash
+python3 scripts/validate_android_xr_hardware_packet.py \
+  --packet docs/fixtures/android_xr_hardware_packets/blocked_no_hardware.example.json
+```
+
+For a real physical run, copy one fixture into a run-specific evidence folder, replace the run metadata, gate results, failure codes, timestamps, and artifact paths, then run:
+
+```bash
+python3 scripts/validate_android_xr_hardware_packet.py \
+  --packet /path/to/android-xr-hardware-packet.json \
+  --evidence-root /path/to/evidence-root \
+  --require-artifacts
+```
+
+The packet schema is intentionally conservative:
+
+- every required gate `HW-P0` through `HW-P6` must be present
+- every gate must include a UTC ISO-8601 `checked_at` timestamp
+- blocked, failed, or not-run gates must use one of the documented failure codes above
+- every gate must include concrete artifact paths; `--require-artifacts` makes local paths exist-on-disk checks
+- `claim_ceiling` must remain the current video-first Android XR ceiling
+- `no_claims` must keep hardware, public/external-alpha, launch, payout, provider, buyer-access, hosted-review, native pose/IMU, depth, geospatial, Pipeline-quality, world-model, and Gemini Live readiness claims explicitly false
+
+The fixtures are examples only. They are not physical hardware proof.
 
 ## Negative Claim Audit
 

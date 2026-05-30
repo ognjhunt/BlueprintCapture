@@ -7,6 +7,7 @@ It is intentionally stricter than "the app can record video" or "the bundle comp
 Use these companion runbooks for physical-device validation:
 
 - [Android XR Hardware Validation Packet](ANDROID_XR_HARDWARE_VALIDATION_PACKET_2026-05-23.md)
+- [Android XR Offline No-Hardware Packet](ANDROID_XR_OFFLINE_NO_HARDWARE_PACKET.md)
 - [Android XR On-Device QA Checklist](ANDROID_XR_ON_DEVICE_QA_CHECKLIST_2026-05-23.md)
 
 ## Current Position
@@ -36,8 +37,8 @@ Current hard blockers before public or launch-facing claims:
 | --- | --- | --- | --- | --- | --- |
 | Android phone camera-only | Implemented internal path | `walkthrough.mp4`, `manifest.json`, `capture_capabilities.depth=false`, explicit `missing_depth_reason`, no `arcore/*` claims | base V3 files validate; bridge can extract frames and emit descriptor/QA/handoff | video/scaffolding lanes only unless downstream validated metric evidence exists | internal pre-screen video |
 | Android phone ARCore | Implemented internal path, device-dependent | `arcore/poses.jsonl`, `frames.jsonl`, `session_intrinsics.json`, `tracking_state.jsonl`; optional `point_cloud`, `planes`, `light_estimates`, depth/confidence manifests and files | bridge requires ARCore sidecars when Android profile/capabilities claim them; validates identities, frame series, transforms, referenced depth/confidence paths, and sync rows | materialization reads ARCore poses/intrinsics/depth references and can expose `geometry_source = "arcore"` | internal metric capture candidate, not launch proof by itself |
-| Android XR projected glasses video-only | Implemented path, hardware smoke still required | projected `walkthrough.mp4`; bundle says `android_xr_glasses` / `android_xr_video_only`; no pose/depth/geospatial authority; phone IMU remains diagnostic only; world frame unavailable | bridge should treat it as glasses/video evidence because `capture_source = "glasses"`; no ARCore geometry should be claimed | Pipeline currently normalizes `android_*` profiles toward Android source, so same-capture package proof is required before asserting downstream readiness | internal video-first XR proof only |
-| Android XR projected + validated ARCore/device-pose sidecars | Not proven in this repo | would require real projected/XR pose stream, intrinsics, tracking state, sync map, coordinate-frame semantics, and optional depth/planes | bridge must explicitly recognize `android_xr_*` geometry profiles and require `arcore/*` or XR-specific sidecars when capabilities claim them | Pipeline must preserve Android XR modality instead of silently degrading to generic Android/video/scaffolding | future XR metric evidence lane |
+| Android XR projected glasses video-only | Implemented path, hardware smoke still required | projected `walkthrough.mp4`; bundle says `android_xr_glasses` / `android_xr_video_only`; no pose/depth/geospatial authority; phone IMU remains diagnostic only; world frame unavailable | bridge treats it as glasses/video evidence because `capture_source = "glasses"`; no ARCore geometry should be claimed | Pipeline preserves `android_xr_video_only`, strips geometry/provider/payout readiness claims, resolves default lanes to qualification only, and skips retrieval geometry until a new contract exists | internal video-first XR proof only |
+| Android XR projected + validated ARCore/device-pose sidecars | Not proven in this repo | would require real projected/XR pose stream, intrinsics, tracking state, sync map, coordinate-frame semantics, and optional depth/planes | bridge must explicitly recognize a new Android XR geometry profile and require `arcore/*` or XR-specific sidecars when capabilities claim them | Pipeline must add a new explicit modality/profile contract before allowing XR geometry, retrieval, world-model, provider, payout, or hosted-readiness promotion | future XR metric evidence lane |
 | Android XR AI-glasses audio/display UX | Implemented as advisory UX | display/audio-only capability state, projected permission results, voice fallback status | no geometry or world-model effect | no geometry or site-world effect | capture guidance only |
 
 ## Required Proof Chain
@@ -91,14 +92,14 @@ The current repo state intentionally keeps Android XR projected glasses in a vid
 - `AndroidCaptureBundleBuilder` emits `android_xr_glasses` for projected glasses and refuses to promote accidental `arcore/*` files into pose, depth, geospatial, or payout proof.
 - `docs/CAPTURE_RAW_CONTRACT_V3.md` lists `android_xr_glasses` as the current Android XR profile and states that future projected-glasses geometry requires a new explicit Blueprint contract.
 - `cloud/extract-frames/src/raw-contract-v3.ts` rejects Android XR glasses bundles that claim ARCore pose, intrinsics, depth, point cloud, planes, tracking-state, light-estimate, geospatial evidence, or capture-contributor payout eligibility.
-- `BlueprintCapturePipeline` source inference still needs same-capture package proof before any downstream Android XR readiness claim. Local raw-bundle validity is not enough to claim Pipeline, hosted-review, buyer-access, payout, or launch readiness.
+- `BlueprintCapturePipeline` preserves `android_xr_video_only` as a video-first modality, clears geometry/provider/hosted/payout readiness claims from the descriptor, resolves default downstream lanes to qualification only, and refuses retrieval geometry with `android_xr_video_only_requires_explicit_geometry_contract`.
 
 Resolution requirement before any future XR geometry lane:
 
-- define a new explicit Android XR geometry profile and sidecar contract instead of reusing the video-only `android_xr_glasses` profile
+- define a new explicit Android XR geometry profile and sidecar contract instead of reusing the video-only `android_xr_glasses` / `android_xr_video_only` path
 - decide whether Android XR projected captures are downstream source `glasses`, source `android`, or a normalized subtype under one source
 - update bridge validation so future XR geometry/depth claims require the right sidecars regardless of top-level `capture_source`
-- update Pipeline modality normalization so any future XR geometry modality is preserved or intentionally downgraded with an explicit reason
+- update Pipeline modality normalization so any future XR geometry modality is preserved under its new contract or intentionally downgraded with an explicit reason
 - add same-capture negative tests proving Android XR cannot claim pose, depth, geospatial, payout, hosted-review, buyer-access, or launch readiness without the relevant upstream and downstream evidence
 
 ## Minimum Proof Pack For Android XR Internal Readiness
@@ -116,8 +117,19 @@ For one physical Android XR capture:
 - storage proof that `capture_upload_complete.json` landed after all raw files
 - bridge `capture_descriptor.json`, `qa_report.json`, and `pipeline_handoff.json`
 - Pipeline output path or explicit Pipeline blocker for the same capture id
+- offline hardware packet validation via `scripts/validate_android_xr_hardware_packet.py` with explicit no-claim states still false
 
 Passing local Gradle tests alone is not enough for this proof pack.
+
+## Offline Blocked Packet
+
+When no Android XR hardware exists yet, use the local authoring helper instead of weakening the proof standard:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/author_android_xr_no_hardware_packet.py --operator "$USER"
+```
+
+The generated packet is useful for operator handoff because it captures current repo evidence and names the blocked gates, but it remains a blocked/no-hardware packet. It must not be used to claim Capture upload readiness, Pipeline readiness, WebApp linkage, payout readiness, provider readiness, public launch readiness, Gemini Live readiness, Meta DAT readiness, or world-model readiness.
 
 ## Minimum Proof Pack For Android XR Geometry Readiness
 

@@ -1,0 +1,135 @@
+{
+  "schema_version": "android_xr_hardware_validation_packet_v1",
+  "packet_status": "blocked",
+  "fixture_note": "Offline example only. This represents a blocked run before physical Android XR proof exists.",
+  "run": {
+    "run_id": "android-xr-fixture-blocked-no-hardware",
+    "started_at": "2026-05-24T13:00:00Z",
+    "completed_at": "2026-05-24T13:05:00Z",
+    "operator": "offline-fixture",
+    "repo_path": "/Users/nijelhunt_1/workspace/BlueprintCapture",
+    "git_branch": "main",
+    "git_commit_sha": "0000000000000000000000000000000000000000",
+    "dirty_worktree_summary": "fixture only; no live hardware proof",
+    "app_build_type": "debug",
+    "app_version_build": "fixture-android-xr-blocked",
+    "host_phone_model": "fixture host phone",
+    "host_phone_android_build": "fixture Android build",
+    "android_xr_device_type": "display glasses",
+    "android_xr_device_model": "not available for this blocked fixture",
+    "android_xr_os_build": "not available for this blocked fixture",
+    "pairing_method": "physical",
+    "network": "offline",
+    "test_account_user_id": "fixture_user_blocked",
+    "capture_target_label": "fixture indoor route",
+    "scene_id": "scene_android_xr_fixture_blocked",
+    "capture_id": "cap_android_xr_fixture_blocked",
+    "rights_basis": "documented permission fixture",
+    "downstream_pipeline_webapp_validation_planned": "no"
+  },
+  "claim_ceiling": {
+    "capture_source": "glasses",
+    "capture_tier_hint": "tier2_glasses",
+    "capture_profile_id": "android_xr_glasses",
+    "capture_modality": "android_xr_video_only",
+    "world_frame_definition": "unavailable_no_public_world_tracking"
+  },
+  "no_claims": {
+    "hardware_ready": false,
+    "public_or_external_alpha_ready": false,
+    "launch_ready": false,
+    "payout_ready": false,
+    "provider_ready": false,
+    "buyer_access_ready": false,
+    "hosted_review_ready": false,
+    "native_pose_ready": false,
+    "native_imu_ready": false,
+    "depth_ready": false,
+    "geospatial_ready": false,
+    "pipeline_quality_ready": false,
+    "world_model_ready": false,
+    "gemini_live_ready": false
+  },
+  "gates": {
+    "HW-P0": {
+      "result": "blocked",
+      "checked_at": "2026-05-24T13:01:00Z",
+      "failure_codes": [
+        "xr_pairing_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P0/pairing-note.txt"
+      ],
+      "notes": "No target Android XR hardware was paired during this offline fixture."
+    },
+    "HW-P1": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:02:00Z",
+      "failure_codes": [
+        "projected_launch_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P1/projected-launch-not-run.md"
+      ],
+      "notes": "Projected activity launch was not attempted because HW-P0 was blocked."
+    },
+    "HW-P2": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:02:30Z",
+      "failure_codes": [
+        "projected_permission_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P2/permissions-not-run.md"
+      ],
+      "notes": "Projected device permissions were not tested because no hardware was paired."
+    },
+    "HW-P3": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:03:00Z",
+      "failure_codes": [
+        "projected_camera_bind_failed",
+        "thermal_or_battery_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P3/camera-mic-thermal-not-run.md"
+      ],
+      "notes": "Projected camera, microphone, voice, and thermal smoke were not tested."
+    },
+    "HW-P4": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:03:30Z",
+      "failure_codes": [
+        "bundle_validation_failed"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P4/raw-bundle-not-run.md"
+      ],
+      "notes": "No hardware capture occurred, so no raw bundle was finalized."
+    },
+    "HW-P5": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:04:00Z",
+      "failure_codes": [
+        "upload_queue_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P5/upload-not-run.md"
+      ],
+      "notes": "No raw bundle existed to enqueue or upload."
+    },
+    "HW-P6": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T13:05:00Z",
+      "failure_codes": [
+        "bridge_handoff_blocked",
+        "pipeline_materialization_blocked",
+        "upstream_truth_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/blocked/HW-P6/downstream-not-run.md"
+      ],
+      "notes": "Bridge, Pipeline, and WebApp chain were not run and must not be claimed."
+    }
+  }
+}

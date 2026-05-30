@@ -41,6 +41,7 @@ REQUIRED_REAL_PROOF_REFERENCES = [
     "evidence.pipeline_descriptor",
     "evidence.pipeline_qa_report",
     "evidence.pipeline_handoff",
+    "evidence.same_capture_lineage_packet",
     "evidence.meta_glasses_smoke",
     "evidence.stripe_account_state",
     "evidence.payout_provider_state",
@@ -296,6 +297,75 @@ def validate_upstream_truth(proof: dict[str, Any], failures: list[str], contract
         failures.append("upstream.blockers must be empty for real launch proof")
 
 
+def validate_same_capture_lineage_truth(proof: dict[str, Any], failures: list[str], contract_only: bool) -> None:
+    lineage = nested(proof, "same_capture_lineage")
+    if not isinstance(lineage, dict):
+        failures.append("same_capture_lineage must be an object summarizing the same-capture lineage packet")
+        return
+    claims = lineage.get("claims") if isinstance(lineage.get("claims"), dict) else {}
+    geometry = lineage.get("geometry") if isinstance(lineage.get("geometry"), dict) else {}
+    repo_blockers = lineage.get("repo_blockers")
+
+    contract_shape_paths = [
+        "same_capture_lineage.raw_bundle_upload_complete",
+        "same_capture_lineage.bridge_handoff_capture_id_matches",
+        "same_capture_lineage.pipeline_capture_id_matches",
+        "same_capture_lineage.webapp_upstream_ids_present",
+        "same_capture_lineage.geometry.fallback_used",
+        "same_capture_lineage.geometry.ready_for_world_model",
+        "same_capture_lineage.geometry.geometry_live_ready",
+        "same_capture_lineage.claims.hosted_review_claim_allowed",
+        "same_capture_lineage.claims.world_model_ready_claim_allowed",
+        "same_capture_lineage.claims.launch_claim_allowed",
+    ]
+    for path in contract_shape_paths:
+        require_bool_shape(proof, failures, path)
+    if not isinstance(repo_blockers, list):
+        failures.append("same_capture_lineage.repo_blockers must be a list")
+    if not isinstance(geometry.get("geometry_source"), (str, type(None))):
+        failures.append("same_capture_lineage.geometry.geometry_source must be null or a string")
+    if not isinstance(lineage.get("capture_id"), (str, type(None))):
+        failures.append("same_capture_lineage.capture_id must be null or a string")
+    if not isinstance(lineage.get("paperclip_issue_id"), (str, type(None))):
+        failures.append("same_capture_lineage.paperclip_issue_id must be null or a string")
+    if claims.get("launch_claim_allowed") is not False:
+        failures.append(
+            "same_capture_lineage.claims.launch_claim_allowed must remain false; live launch proof comes from live route/provider/payment evidence"
+        )
+    if contract_only:
+        return
+
+    if lineage.get("schema_version") != "same_capture_lineage_packet.v1":
+        failures.append("same_capture_lineage.schema_version must be same_capture_lineage_packet.v1")
+    if lineage.get("status") != "repo_proven":
+        failures.append("same_capture_lineage.status must be repo_proven for real launch proof")
+    capture_id = lineage.get("capture_id")
+    if not isinstance(capture_id, str) or not capture_id.strip() or contains_placeholder(capture_id):
+        failures.append("same_capture_lineage.capture_id must be a real capture id")
+    paperclip_issue_id = lineage.get("paperclip_issue_id")
+    if not isinstance(paperclip_issue_id, str) or not paperclip_issue_id.strip() or contains_placeholder(paperclip_issue_id):
+        failures.append("same_capture_lineage.paperclip_issue_id must be a durable Paperclip issue id")
+    for path in (
+        "same_capture_lineage.raw_bundle_upload_complete",
+        "same_capture_lineage.bridge_handoff_capture_id_matches",
+        "same_capture_lineage.pipeline_capture_id_matches",
+        "same_capture_lineage.webapp_upstream_ids_present",
+        "same_capture_lineage.claims.hosted_review_claim_allowed",
+        "same_capture_lineage.claims.world_model_ready_claim_allowed",
+    ):
+        require_truthy(proof, failures, path)
+    if repo_blockers:
+        failures.append("same_capture_lineage.repo_blockers must be empty for real launch proof")
+    if geometry.get("fallback_used") is not False:
+        failures.append("same_capture_lineage.geometry.fallback_used must be false")
+    if geometry.get("geometry_source") != "video_to_world":
+        failures.append("same_capture_lineage.geometry.geometry_source must be video_to_world")
+    if geometry.get("ready_for_world_model") is not True:
+        failures.append("same_capture_lineage.geometry.ready_for_world_model must be true")
+    if geometry.get("geometry_live_ready") is not True:
+        failures.append("same_capture_lineage.geometry.geometry_live_ready must be true")
+
+
 def validate_release_xcconfig(path: Path, failures: list[str]) -> None:
     values = parse_xcconfig(path)
     required_keys = [
@@ -353,6 +423,7 @@ def validate_proof(
         validate_real_proof_not_placeholder(proof, failures, proof_path, contract_only)
     validate_real_proof_references(proof, failures, contract_only)
     validate_upstream_truth(proof, failures, contract_only)
+    validate_same_capture_lineage_truth(proof, failures, contract_only)
     if city_slug and proof.get("city_slug") != city_slug:
         failures.append(f"proof city_slug must be {city_slug}")
 
@@ -488,6 +559,8 @@ def readiness_stage(failures: list[str]) -> str:
         or failure.startswith("city.")
         or failure.startswith("capture.")
         or failure.startswith("pipeline.")
+        or failure.startswith("same_capture_lineage.")
+        or failure.startswith("same_capture_lineage must be")
         or failure.startswith("meta_glasses.")
         or failure.startswith("open_capture.")
         or failure.startswith("payouts.")
@@ -515,7 +588,7 @@ def next_input_hint_for_stage(stage: str) -> str:
     if stage == "proof_artifact_blocked":
         return (
             "Provide a real city launch proof artifact ending in .launch-proof.json with concrete evidence references; "
-            "include real upstream site_submission_id, buyer_request_id, and capture_job_id links; "
+            "include real upstream site_submission_id, buyer_request_id, capture_job_id, and same-capture lineage packet links; "
             "use ops/launch-readiness/example.launch-proof.json only for --contract-only schema checks."
         )
     if stage == "live_inputs_blocked":

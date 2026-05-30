@@ -85,7 +85,11 @@ android/.idea/
 # Local build outputs
 build/
 builds/
-/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/capture-public-copy-truth/
+!/.agents/skills/capture-public-copy-truth/SKILL.md
 
 # Cloud Functions
 cloud/**/node_modules/

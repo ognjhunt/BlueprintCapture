@@ -1,0 +1,132 @@
+{
+  "schema_version": "android_xr_hardware_validation_packet_v1",
+  "packet_status": "completed",
+  "fixture_note": "Offline example only. This is not real Android XR hardware proof.",
+  "run": {
+    "run_id": "android-xr-fixture-completed-video-first",
+    "started_at": "2026-05-24T12:00:00Z",
+    "completed_at": "2026-05-24T12:18:00Z",
+    "operator": "offline-fixture",
+    "repo_path": "/Users/nijelhunt_1/workspace/BlueprintCapture",
+    "git_branch": "main",
+    "git_commit_sha": "0000000000000000000000000000000000000000",
+    "dirty_worktree_summary": "fixture only; no live hardware proof",
+    "app_build_type": "debug",
+    "app_version_build": "fixture-android-xr-video-first",
+    "host_phone_model": "fixture host phone",
+    "host_phone_android_build": "fixture Android build",
+    "android_xr_device_type": "display glasses",
+    "android_xr_device_model": "fixture display glasses",
+    "android_xr_os_build": "fixture Android XR build",
+    "pairing_method": "physical",
+    "network": "offline",
+    "test_account_user_id": "fixture_user_completed",
+    "capture_target_label": "fixture indoor route",
+    "scene_id": "scene_android_xr_fixture_completed",
+    "capture_id": "cap_android_xr_fixture_completed",
+    "rights_basis": "documented permission fixture",
+    "downstream_pipeline_webapp_validation_planned": "no"
+  },
+  "claim_ceiling": {
+    "capture_source": "glasses",
+    "capture_tier_hint": "tier2_glasses",
+    "capture_profile_id": "android_xr_glasses",
+    "capture_modality": "android_xr_video_only",
+    "world_frame_definition": "unavailable_no_public_world_tracking"
+  },
+  "no_claims": {
+    "hardware_ready": false,
+    "public_or_external_alpha_ready": false,
+    "launch_ready": false,
+    "payout_ready": false,
+    "provider_ready": false,
+    "buyer_access_ready": false,
+    "hosted_review_ready": false,
+    "native_pose_ready": false,
+    "native_imu_ready": false,
+    "depth_ready": false,
+    "geospatial_ready": false,
+    "pipeline_quality_ready": false,
+    "world_model_ready": false,
+    "gemini_live_ready": false
+  },
+  "gates": {
+    "HW-P0": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:02:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P0/git-status.txt",
+        "evidence/completed/HW-P0/device-list.txt",
+        "evidence/completed/HW-P0/app-install-path.txt"
+      ],
+      "notes": "Example completed environment/install gate. Replace paths with real artifacts during a physical run."
+    },
+    "HW-P1": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:04:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P1/projected-launch-logcat.txt",
+        "evidence/completed/HW-P1/display-capability-note.txt"
+      ],
+      "notes": "Example projected activity launch gate."
+    },
+    "HW-P2": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:06:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P2/permission-result-logcat.txt",
+        "evidence/completed/HW-P2/retry-note.txt"
+      ],
+      "notes": "Example projected camera/mic permission gate."
+    },
+    "HW-P3": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:12:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P3/video-record-event-logcat.txt",
+        "evidence/completed/HW-P3/walkthrough-metadata.json",
+        "evidence/completed/HW-P3/thermal-battery-note.txt"
+      ],
+      "notes": "Example camera, mic, voice fallback, and thermal smoke gate."
+    },
+    "HW-P4": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:14:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P4/raw-bundle-file-list.txt",
+        "evidence/completed/HW-P4/manifest.json",
+        "evidence/completed/HW-P4/recording_session.json",
+        "evidence/completed/HW-P4/hashes.json"
+      ],
+      "notes": "Example raw bundle finalization gate. Manifest must stay android_xr_video_only with no pose/depth/geospatial claim."
+    },
+    "HW-P5": {
+      "result": "pass",
+      "checked_at": "2026-05-24T12:16:00Z",
+      "failure_codes": [],
+      "artifact_paths": [
+        "evidence/completed/HW-P5/upload-queue-state.json",
+        "evidence/completed/HW-P5/upload-logcat.txt"
+      ],
+      "notes": "Example upload queue gate."
+    },
+    "HW-P6": {
+      "result": "blocked_not_run",
+      "checked_at": "2026-05-24T12:18:00Z",
+      "failure_codes": [
+        "bridge_handoff_blocked",
+        "pipeline_materialization_blocked",
+        "upstream_truth_blocked"
+      ],
+      "artifact_paths": [
+        "evidence/completed/HW-P6/downstream-not-run.md"
+      ],
+      "notes": "Hardware-only example. Bridge, Pipeline, and WebApp claims remain blocked for this packet."
+    }
+  }
+}

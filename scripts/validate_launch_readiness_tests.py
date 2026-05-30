@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import re
 import sys
 import types
 import unittest
@@ -27,6 +28,117 @@ spec.loader.exec_module(validator)
 
 
 class LaunchReadinessValidatorTests(unittest.TestCase):
+    CLAIM_DOC_PATTERN = re.compile(
+        r"\b("
+        r"stripe|payouts?|earnings|paid assignment|marketplace|provider readiness|"
+        r"provider-ready|production-ready|buyer-ready|launch-ready|launch ready|"
+        r"android[_ -]xr|ai[- ]glasses|smart[- ]glasses|google glasses|meta glasses|"
+        r"catalyst|capturer|investor"
+        r")\b",
+        re.IGNORECASE,
+    )
+    DOC_SCAN_EXTENSIONS = {".md", ".txt"}
+    DOC_SCAN_EXCLUDED_PARTS = {
+        ".git",
+        ".gradle",
+        ".pytest_cache",
+        ".ruff_cache",
+        "DerivedData",
+        "build",
+        "node_modules",
+    }
+    PUBLIC_COPY_TRUTH_INDEX = "docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md"
+    PUBLIC_COPY_WORKFLOW = ".agents/skills/capture-public-copy-truth/SKILL.md"
+    PUBLIC_COPY_WORKFLOW_REQUIRED_SOURCES = [
+        "README.md",
+        "docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md",
+        "docs/architecture/source-of-truth-map.md",
+        "docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md",
+        "docs/ANDROID_XR_AI_GLASSES_READINESS.md",
+        "PLATFORM_CONTEXT.md",
+        "WORLD_MODEL_STRATEGY_CONTEXT.md",
+        "docs/CAPTURE_RAW_CONTRACT_V3.md",
+        "docs/PRIVATE_ALPHA_READINESS.md",
+    ]
+    ARCHIVED_DOCS_REQUIRING_WARNING = [
+        "CHANGES_APPLIED.md",
+        "FILES_ADDED.md",
+        "README_STRIPE_DEBUGGING.md",
+        "SETTINGS_INTEGRATION_GUIDE.md",
+        "SETTINGS_TAB_SUMMARY.md",
+        "STRIPE_BACKEND_CONFIG.md",
+        "STRIPE_CONFIGURATION_CHECKLIST.md",
+        "STRIPE_DEBUG_QUICK_START.md",
+        "STRIPE_DEBUGGING_GUIDE.md",
+        "STRIPE_ERROR_REFERENCE.txt",
+        "STRIPE_FLOW_DIAGRAM.md",
+        "STRIPE_IMPLEMENTATION_SUMMARY.txt",
+        "STRIPE_ISSUE_SUMMARY.md",
+        "STRIPE_QUICK_SETUP.md",
+    ]
+
+    def test_public_copy_claim_docs_are_indexed_and_stale_docs_warned(self) -> None:
+        index_path = ROOT / self.PUBLIC_COPY_TRUTH_INDEX
+
+        self.assertTrue(
+            index_path.exists(),
+            f"{self.PUBLIC_COPY_TRUTH_INDEX} must classify docs with payout/provider/marketplace/readiness claims",
+        )
+
+        index_text = index_path.read_text(encoding="utf-8")
+        risky_docs = self.claim_doc_paths(index_path)
+        missing_from_index = [path for path in risky_docs if f"`{path}`" not in index_text]
+
+        self.assertEqual([], missing_from_index)
+
+        for relative_path in self.ARCHIVED_DOCS_REQUIRING_WARNING:
+            text = (ROOT / relative_path).read_text(encoding="utf-8")[:1200].lower()
+            self.assertIn("current-vs-public-copy note", text, relative_path)
+            self.assertIn("historical/internal", text, relative_path)
+            self.assertIn("not current payout, provider, launch, buyer, or earnings proof", text, relative_path)
+
+    def test_public_copy_truth_workflow_exists_and_forces_claim_classification(self) -> None:
+        workflow_path = ROOT / self.PUBLIC_COPY_WORKFLOW
+
+        self.assertTrue(workflow_path.exists(), f"{self.PUBLIC_COPY_WORKFLOW} must exist")
+
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        workflow_text_lower = workflow_text.lower()
+
+        for source_path in self.PUBLIC_COPY_WORKFLOW_REQUIRED_SOURCES:
+            self.assertIn(source_path, workflow_text)
+
+        for classification in ("approved", "blocked", "proof-required"):
+            self.assertIn(classification, workflow_text_lower)
+
+        for output_field in (
+            "Audience:",
+            "Candidate source:",
+            "Source docs checked:",
+            "Decision: approved | blocked | proof-required",
+            "Claim log:",
+            "Approved phrasing:",
+            "Blocked phrasing:",
+            "Proof required:",
+            "Next action:",
+        ):
+            self.assertIn(output_field, workflow_text)
+
+        self.assertIn("Do not draft external submission copy as if submitted.", workflow_text)
+
+    def claim_doc_paths(self, index_path: Path) -> list[str]:
+        paths: list[str] = []
+        for path in ROOT.rglob("*"):
+            if path == index_path or path.suffix.lower() not in self.DOC_SCAN_EXTENSIONS:
+                continue
+            if any(part in self.DOC_SCAN_EXCLUDED_PARTS for part in path.relative_to(ROOT).parts):
+                continue
+
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if self.CLAIM_DOC_PATTERN.search(text):
+                paths.append(path.relative_to(ROOT).as_posix())
+        return sorted(paths)
+
     def test_contract_only_proof_cannot_be_used_for_real_launch(self) -> None:
         proof_path = ROOT / "ops" / "launch-readiness" / "example.launch-proof.json"
         proof = validator.load_json(proof_path)
@@ -62,6 +174,11 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         self.assertIs(False, proof["capture"]["real_device_capture_uploaded"])
         self.assertIs(False, proof["pipeline"]["pubsub_handoff_succeeded"])
         self.assertIs(False, proof["payouts"]["live_provider_ready"])
+        self.assertEqual("blocked", proof["same_capture_lineage"]["status"])
+        self.assertIs(False, proof["same_capture_lineage"]["webapp_upstream_ids_present"])
+        self.assertIs(False, proof["same_capture_lineage"]["claims"]["hosted_review_claim_allowed"])
+        self.assertIs(False, proof["same_capture_lineage"]["claims"]["world_model_ready_claim_allowed"])
+        self.assertIs(False, proof["same_capture_lineage"]["claims"]["launch_claim_allowed"])
 
     def test_real_proof_rejects_placeholder_string_values(self) -> None:
         proof = validator.load_json(ROOT / "ops" / "launch-readiness" / "example.launch-proof.json")
@@ -146,6 +263,49 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
 
         self.assertIn("upstream.buyer_request_id must be a real upstream id", failures)
         self.assertIn("upstream.blockers must be empty for real launch proof", failures)
+
+    def test_real_proof_requires_same_capture_lineage_webapp_ids_and_paperclip_issue(self) -> None:
+        proof = self.real_proof_fixture()
+        proof["same_capture_lineage"]["webapp_upstream_ids_present"] = False
+        proof["same_capture_lineage"]["paperclip_issue_id"] = ""
+        proof["same_capture_lineage"]["repo_blockers"] = ["missing_webapp_capture_job_id"]
+        failures: list[str] = []
+
+        validator.validate_proof(
+            proof,
+            failures,
+            contract_only=False,
+            city_slug="austin-tx",
+            proof_path=ROOT / "ops" / "launch-readiness" / "austin-tx.launch-proof.json",
+        )
+
+        self.assertIn("same_capture_lineage.webapp_upstream_ids_present must be true", failures)
+        self.assertIn("same_capture_lineage.paperclip_issue_id must be a durable Paperclip issue id", failures)
+        self.assertIn("same_capture_lineage.repo_blockers must be empty for real launch proof", failures)
+
+    def test_real_proof_blocks_fallback_geometry_as_same_capture_world_model_proof(self) -> None:
+        proof = self.real_proof_fixture()
+        proof["same_capture_lineage"]["geometry"].update(
+            {
+                "geometry_source": "fallback_geometry",
+                "fallback_used": True,
+                "ready_for_world_model": True,
+                "geometry_live_ready": False,
+            }
+        )
+        failures: list[str] = []
+
+        validator.validate_proof(
+            proof,
+            failures,
+            contract_only=False,
+            city_slug="austin-tx",
+            proof_path=ROOT / "ops" / "launch-readiness" / "austin-tx.launch-proof.json",
+        )
+
+        self.assertIn("same_capture_lineage.geometry.fallback_used must be false", failures)
+        self.assertIn("same_capture_lineage.geometry.geometry_source must be video_to_world", failures)
+        self.assertIn("same_capture_lineage.geometry.geometry_live_ready must be true", failures)
 
     def test_real_proof_rejects_status_text_as_evidence_reference(self) -> None:
         proof = self.real_proof_fixture()
@@ -286,6 +446,10 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         self.assertEqual(
             "proof_artifact_blocked",
             validator.readiness_stage(["upstream.buyer_request_id must be a real upstream id"]),
+        )
+        self.assertEqual(
+            "proof_artifact_blocked",
+            validator.readiness_stage(["same_capture_lineage.webapp_upstream_ids_present must be true"]),
         )
         self.assertEqual(
             "proof_artifact_blocked",
@@ -452,6 +616,7 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
             "pipeline_descriptor": "gs://blueprint-prod-pipeline/austin/capture-austin-001/capture_descriptor.json",
             "pipeline_qa_report": "gs://blueprint-prod-pipeline/austin/capture-austin-001/qa_report.json",
             "pipeline_handoff": "pubsub:blueprint-capture-pipeline/austin/capture-austin-001",
+            "same_capture_lineage_packet": "gs://blueprint-prod-pipeline/austin/capture-austin-001/same_capture_lineage_packet.json",
             "meta_glasses_smoke": "ops-log:meta-glasses-smoke/austin/run-2026-05-05",
             "stripe_account_state": "stripe-account-state:acct_launch_ready_20260505",
             "payout_provider_state": "stripe-account-state:acct_launch_ready_20260505#provider-readiness",
@@ -466,6 +631,28 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
             "buyer_request_id": "buyer-request-austin-001",
             "capture_job_id": "capture-job-austin-001",
             "blockers": [],
+        }
+        proof["same_capture_lineage"] = {
+            "schema_version": "same_capture_lineage_packet.v1",
+            "status": "repo_proven",
+            "capture_id": "capture-austin-001",
+            "raw_bundle_upload_complete": True,
+            "bridge_handoff_capture_id_matches": True,
+            "pipeline_capture_id_matches": True,
+            "webapp_upstream_ids_present": True,
+            "paperclip_issue_id": "PC-AUSTIN-001",
+            "geometry": {
+                "geometry_source": "video_to_world",
+                "fallback_used": False,
+                "ready_for_world_model": True,
+                "geometry_live_ready": True,
+            },
+            "claims": {
+                "hosted_review_claim_allowed": True,
+                "world_model_ready_claim_allowed": True,
+                "launch_claim_allowed": False,
+            },
+            "repo_blockers": [],
         }
         proof["payouts"].update(
             {

@@ -1,5 +1,7 @@
 # Stripe Debugging Implementation ✅
 
+> Current-vs-public-copy note: This document is historical/internal Stripe debugging context. It is not current payout, provider, launch, buyer, or earnings proof, and it must not be reused as external capturer or startup copy without reconciling against `README.md`, `docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md`, and `docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md`.
+
 ## What Was Done
 
 Your Stripe integration now has **comprehensive console logging** to help you debug the "Unable to load Stripe account status" and "Failed to open onboarding" errors.

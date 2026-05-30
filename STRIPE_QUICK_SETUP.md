@@ -1,5 +1,7 @@
 # Stripe Quick Setup - Blueprint (Replit Backend)
 
+> Current-vs-public-copy note: This document is historical/internal Stripe setup context. It is not current payout, provider, launch, buyer, or earnings proof, and it must not be reused as external capturer or startup copy without reconciling against `README.md`, `docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md`, and `docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md`.
+
 ## ⚡ TL;DR - Get Running in 5 Minutes
 
 ### Step 1: Update Secrets.plist

@@ -5,6 +5,8 @@ Status: prepared local packet only. No application was opened, submitted, or tra
 Prepared: 2026-05-24
 Repo: `/Users/nijelhunt_1/workspace/BlueprintCapture`
 
+Audience note: external-draft answer bank for a possible Google Catalyst submission. Do not treat it as public marketing copy or proof of Android XR, payout, provider, buyer, or launch readiness.
+
 ## Submission Recommendation
 
 Submit one Catalyst application for **audio glasses / display glasses** first.

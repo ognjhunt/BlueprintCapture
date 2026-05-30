@@ -68,5 +68,29 @@
       "missing_buyer_request_id",
       "missing_capture_job_id"
     ]
+  },
+  "same_capture_lineage": {
+    "schema_version": "same_capture_lineage_packet.v1",
+    "status": "blocked",
+    "capture_id": null,
+    "raw_bundle_upload_complete": false,
+    "bridge_handoff_capture_id_matches": false,
+    "pipeline_capture_id_matches": false,
+    "webapp_upstream_ids_present": false,
+    "paperclip_issue_id": null,
+    "geometry": {
+      "geometry_source": null,
+      "fallback_used": false,
+      "ready_for_world_model": false,
+      "geometry_live_ready": false
+    },
+    "claims": {
+      "hosted_review_claim_allowed": false,
+      "world_model_ready_claim_allowed": false,
+      "launch_claim_allowed": false
+    },
+    "repo_blockers": [
+      "contract_sample_missing_same_capture_lineage_packet"
+    ]
   }
 }

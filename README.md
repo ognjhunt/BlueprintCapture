@@ -56,6 +56,7 @@ capture automatically.
 - ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.
 - Raw bundle metadata reports only evidence that was actually captured and validated.
 - No production-like build should fabricate live capture supply or fake payout/provider readiness.
+- Public/startup-facing copy must follow [docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md) and [docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md) before reusing Stripe, payout, provider, marketplace, buyer-ready, or launch-ready language.
 
 ## Alpha Scope
 

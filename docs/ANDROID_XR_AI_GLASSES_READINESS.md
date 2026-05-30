@@ -15,6 +15,7 @@ Note on current terminology: Android XR Developer Preview 4 documentation now us
 Related validation artifacts:
 
 - [Android XR Hardware Validation Packet](ANDROID_XR_HARDWARE_VALIDATION_PACKET_2026-05-23.md)
+- [Android XR Offline No-Hardware Packet](ANDROID_XR_OFFLINE_NO_HARDWARE_PACKET.md)
 - [Android XR On-Device QA Checklist](ANDROID_XR_ON_DEVICE_QA_CHECKLIST_2026-05-23.md)
 - [Capture-to-Pipeline Android XR Proof Map](CAPTURE_TO_PIPELINE_ANDROID_XR_PROOF_MAP.md)
 - [Android XR Release Proof Example](ANDROID_XR_RELEASE_PROOF.example.json)
@@ -65,6 +66,21 @@ Hardware validation is a checklist, not a completed state. Before claiming Andro
 - XREAL Project Aura / wired XR glasses if Blueprint pursues that form factor
 
 Each hardware pass must prove projected camera permission UX, projected mic permission UX, recording start/stop, upload queueing, display on/off behavior, and generated bundle contents. Do not mark world tracking, ARCore pose/depth, geospatial authority, launch readiness, or payout readiness complete unless the raw bundle contains the corresponding validated evidence.
+
+Offline packet validation is available through:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 scripts/author_android_xr_no_hardware_packet.py --operator "$USER"
+```
+
+That authoring helper creates a valid blocked/no-hardware packet under `output/android_xr_hardware_packets/`, writes local repo evidence notes, and validates the packet with the existing validator. It is an operator handoff artifact only; it does not satisfy physical-device proof.
+
+```bash
+python3 scripts/validate_android_xr_hardware_packet.py \
+  --packet docs/fixtures/android_xr_hardware_packets/blocked_no_hardware.example.json
+```
+
+This validator enforces required hardware gates, failure codes, UTC timestamps, artifact path shape, and explicit no-claim states without requiring hardware, Google/Meta credentials, Firebase config, release config, or upload access. For a physical evidence folder, add `--evidence-root /path/to/evidence-root --require-artifacts`.
 
 ## Release-Readiness Gates
 

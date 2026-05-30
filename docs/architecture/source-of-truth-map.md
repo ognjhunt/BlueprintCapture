@@ -141,6 +141,8 @@ Use these current orientation surfaces first:
 - `WORLD_MODEL_STRATEGY_CONTEXT.md`
 - `docs/CAPTURE_RAW_CONTRACT_V3.md`
 - `docs/PRIVATE_ALPHA_READINESS.md`
+- `docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md`
+- `docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md`
 - `docs/architecture/ai-onboarding-map.md`
 - `docs/architecture/command-safety-matrix.md`
 
