@@ -361,59 +361,21 @@ fun ScanScreen(
     }
 
     (pendingRightsLaunch ?: pendingRightsGlassesLaunch)?.let {
-        AlertDialog(
-            onDismissRequest = {
+        RightsAcknowledgementDialog(
+            onDismiss = {
                 pendingRightsLaunch = null
                 pendingRightsGlassesLaunch = null
             },
-            containerColor = androidx.compose.ui.graphics.Color(0xFF111111),
-            title = {
-                Text(
-                    text = "Review capture rights",
-                    color = androidx.compose.ui.graphics.Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            },
-            text = {
-                Text(
-                    text = "Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand qualification, privacy, and rights checks may still block downstream use.",
-                    color = androidx.compose.ui.graphics.Color(0xFF888888),
-                    fontSize = 14.sp,
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val confirmedLaunch = pendingRightsLaunch
-                        val confirmedGlassesLaunch = pendingRightsGlassesLaunch
-                        pendingRightsLaunch = null
-                        pendingRightsGlassesLaunch = null
-                        if (confirmedLaunch != null) {
-                            onStartCapture(confirmedLaunch)
-                        } else if (confirmedGlassesLaunch != null) {
-                            glassesCaptureLaunch = confirmedGlassesLaunch
-                            showGlassesSheet = true
-                        }
-                    },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = BlueprintTeal,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("I Confirm")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(
-                    onClick = {
-                        pendingRightsLaunch = null
-                        pendingRightsGlassesLaunch = null
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, BlueprintBorder),
-                ) {
-                    Text("Cancel", color = BlueprintTextPrimary)
+            onConfirm = {
+                val confirmedLaunch = pendingRightsLaunch
+                val confirmedGlassesLaunch = pendingRightsGlassesLaunch
+                pendingRightsLaunch = null
+                pendingRightsGlassesLaunch = null
+                if (confirmedLaunch != null) {
+                    onStartCapture(confirmedLaunch)
+                } else if (confirmedGlassesLaunch != null) {
+                    glassesCaptureLaunch = confirmedGlassesLaunch
+                    showGlassesSheet = true
                 }
             },
         )

@@ -1,401 +1,123 @@
-# Android Feature Parity: Implementation Spec
-*Three remaining gaps to iOS parity — prioritised by implementation effort*
+# Android Feature Parity: Current Implementation Status
 
----
+Last reconciled: 2026-05-31
 
-## Gap 1 — Contributor Profile: Remove DemoData Fallbacks
-**Effort: Small (~1 hour) · Risk: Low · File: `ContributorProfileRepository.kt`**
+This document is a parity status note, not a public launch-readiness certificate.
+It must stay aligned with the root capture doctrine:
 
-### What's wrong
+- Capture truth and raw bundle integrity come before qualification.
+- Generated, provider, payout, hosted-review, or downstream artifacts are not the same thing as
+  captured evidence.
+- Repo-local implementation status must stay separate from private SDK, hardware, release,
+  payment, and live-backend proof.
 
-`observeProfile()` returns fake data in two situations:
+## Current Summary
 
-```kotlin
-// BUG 1: On Firestore error → full fake profile shown as if real
-if (error != null) {
-    trySend(DemoData.contributorProfile.copy(uid = uid))  // ← wrong
-    return@addSnapshotListener
-}
+The previous version of this file described an old three-gap backlog. That is no longer accurate.
+Two of those gaps are already addressed in the current Android code:
 
-// BUG 2: Document doesn't exist yet → fake profile instead of null
-val profile = snapshot?.toContributorProfile(uid)
-    ?: DemoData.contributorProfile.copy(uid = uid)        // ← wrong
-trySend(profile)
+1. Contributor profile no longer silently falls back to a demo identity.
+2. Wallet ledger tabs no longer rely on static mock rows for payouts/history.
 
-// BUG 3: Individual missing fields silently replaced with demo values
-name = data["name"] as? String ?: DemoData.contributorProfile.name   // ← wrong
-email = data["email"] as? String ?: DemoData.contributorProfile.email // ← wrong
+The remaining Meta DAT / private-SDK glasses work is not a normal repo-local implementation gap.
+The app now has a private-SDK-gated implementation path and a disabled-stub path, but real Meta
+glasses proof still requires external inputs: GitHub Packages credentials, `MWDAT_ENABLE_PRIVATE_SDK`,
+Meta hardware, Meta AI registration/permissions, and physical-device capture proof.
+
+## Status Matrix
+
+| Area | Repo-local status | Implementation evidence | Test / verification evidence | Claim ceiling |
+|---|---|---|---|---|
+| Contributor profile demo fallback | Complete. The repository fails closed to `null` for missing auth, Firestore listener errors, and missing user docs; missing profile fields become empty strings instead of demo identity values. | `android/app/src/main/kotlin/app/blueprint/capture/data/profile/ContributorProfileRepository.kt` - `observeProfile()` and `DocumentSnapshot.toContributorProfile()` | `rg -n "DemoData\\.contributorProfile|Alex Rivera" android/app/src/main/kotlin/app/blueprint/capture android/app/src/test` should return no profile fallback hits; `./gradlew testDebugUnitTest` must pass. | Android may show real Firestore-backed profile state or empty/null state only. Do not reintroduce demo contributor identity as a fallback. |
+| Wallet payout/history ledger | Complete for capture history and paid-payout rows. Cashouts remain intentionally empty unless a real provider-backed cashout collection is wired. | `android/app/src/main/kotlin/app/blueprint/capture/ui/screens/WalletViewModel.kt` - injects `CaptureHistoryRepository`, loads history on init/refresh, derives `payoutEntries` from `CaptureSubmissionStage.Paid`; `android/app/src/main/kotlin/app/blueprint/capture/ui/screens/WalletScreen.kt` - `WalletLedgerContent()` renders loaded entries, loading state, and accurate empty states; `android/app/src/main/kotlin/app/blueprint/capture/data/capture/CaptureHistoryRepository.kt` - `fetchHistory()` reads `capture_submissions` for the current user. | `rg -n "payoutEntries|historyEntries|fetchHistory|delay\\(900\\)" android/app/src/main/kotlin/app/blueprint/capture/ui/screens/WalletViewModel.kt android/app/src/main/kotlin/app/blueprint/capture/ui/screens/WalletScreen.kt android/app/src/main/kotlin/app/blueprint/capture/data/capture/CaptureHistoryRepository.kt`; `./gradlew testDebugUnitTest` must pass. | Wallet history and paid rows can be treated as repository-backed UI. Cashout execution, provider onboarding, and payout settlement are not proven. |
+| Meta DAT glasses private SDK | Implementation scaffold exists, but real private-SDK and hardware proof remain blocked externally. | `android/app/build.gradle.kts` - `MWDAT_ENABLE_PRIVATE_SDK` gates `BuildConfig.MWDAT_PRIVATE_SDK_ENABLED` and swaps in `src/metaStub/kotlin` when disabled; `android/settings.gradle.kts` - GitHub Packages repository expects `gpr.user` / `gpr.token`; `android/app/src/main/kotlin/app/blueprint/capture/BlueprintCaptureApplication.kt` - initializes `Wearables` only when the private SDK flag is enabled; `android/app/src/main/kotlin/app/blueprint/capture/ui/screens/GlassesViewModel.kt` - reports disabled private-SDK truth and routes authorized real devices through `GlassesCaptureManager`; `android/app/src/main/kotlin/app/blueprint/capture/data/glasses/GlassesCaptureManager.kt` - owns stream session, capture artifacts, and canonical glasses sidecars. | `android/app/src/test/kotlin/app/blueprint/capture/data/glasses/GlassesCaptureManagerTest.kt`; `android/app/src/test/kotlin/app/blueprint/capture/data/capture/AndroidCaptureBundleBuilderTest.kt` checks Meta companion-phone/glasses sidecars and Android XR fail-closed bundle claims; `./gradlew testDebugUnitTest` must pass. | Repo-local tests can prove stubbed compilation and raw-contract shaping. They do not prove real Meta DAT connectivity, physical glasses capture, provider readiness, payout readiness, hosted-review readiness, or public launch readiness. |
+| Android XR projected glasses | Implemented as internal video-first capture path; not geometry-authoritative. | `docs/CAPTURE_RAW_CONTRACT_V3.md` and `AndroidCaptureBundleBuilder` keep `capture_profile_id = "android_xr_glasses"` and `capture_modality = "android_xr_video_only"` unless a future explicit geometry contract exists. | `AndroidCaptureBundleBuilderTest` includes Android XR contract and fail-closed tests. See `docs/CAPTURE_TO_PIPELINE_ANDROID_XR_PROOF_MAP.md` for the broader proof map. | Internal video-first evidence only until physical Android XR hardware proof and downstream proof exist for the same capture. |
+
+## Completed Gaps - Do Not Reopen As Parity Work
+
+### Contributor profile
+
+Do not spend a future repo-local `/goal` redoing the old demo-profile fallback removal.
+Current code already has the intended contract:
+
+- `null` profile means unauthenticated, listener error, or no bootstrapped Firestore user doc.
+- Existing Firestore docs become `ContributorProfile` values.
+- Missing string fields default to `""`, not to `DemoData`.
+- `role` still defaults to `"capturer"` as a role fallback, not as a fake identity.
+
+Future work in this area should be limited to focused tests, UI polish, or backend schema changes
+when explicitly requested. It should not restore "Alex Rivera" or any other demo identity as
+production-like profile truth.
+
+### Wallet ledger
+
+Do not spend a future repo-local `/goal` replacing static wallet rows with repository data again.
+Current code already loads history from `CaptureHistoryRepository.fetchHistory()` and passes
+`payoutEntries` / `historyEntries` into `WalletLedgerContent()`.
+
+The only intentionally empty ledger lane is cashouts. Cashouts should stay empty until a real
+provider-backed collection or backend endpoint exists. Do not fill that tab with mock provider rows,
+fake transfer status, or inferred payout settlement.
+
+## Meta DAT / Private SDK Boundary
+
+The Meta DAT path has two separate statuses:
+
+1. Repo-local implementation: present behind `MWDAT_ENABLE_PRIVATE_SDK` with a disabled stub path for
+   ordinary local builds.
+2. Real glasses proof: blocked until private credentials, the private dependency, Meta AI setup,
+   device permission flow, and physical hardware capture are available and tested.
+
+The real verification command is:
+
+```bash
+cd /Users/nijelhunt_1/workspace/BlueprintCapture/android
+ANDROID_HOME=/Users/nijelhunt_1/Library/Android/sdk ./gradlew :app:compileDebugKotlin -PMWDAT_ENABLE_PRIVATE_SDK=true
 ```
 
-This means a user who never saved a name would see "Alex Rivera" instead of a blank,
-and a Firestore outage would surface convincing-looking fake data as real.
+That command is expected to require all of the following:
 
-### What to change
+- valid `gpr.user`
+- valid `gpr.token`
+- access to `https://maven.pkg.github.com/facebook/meta-wearables-dat-android`
+- `MWDAT_APPLICATION_ID` / `MWDAT_CLIENT_TOKEN` when using non-dev Meta app registration
+- physical Meta glasses for runtime proof
+- screenshots/logs/raw bundle evidence for the same capture id before any readiness claim
 
-**`ContributorProfileRepository.kt` — `observeProfile()`:**
+Passing normal local unit tests without `-PMWDAT_ENABLE_PRIVATE_SDK=true` proves only the stubbed
+local lane and contract-level behavior.
 
-| Location | Current | Change to |
-|---|---|---|
-| `if (error != null)` branch | `trySend(DemoData....)` | `trySend(null)` |
-| Null fallback after `toContributorProfile` | `?: DemoData.contributorProfile.copy(uid)` | `?: null` — emit null for "document not yet created" |
-| `toContributorProfile` — `name` field | `?: DemoData.contributorProfile.name` | `?: ""` |
-| `toContributorProfile` — `email` field | `?: DemoData.contributorProfile.email` | `?: ""` |
+## Not Eligible For Repo-Local `/goal` Closeout
 
-**After the change** the flow contract is:
-- `null` = not authenticated / Firestore error / document not yet bootstrapped
-- Real `ContributorProfile` with empty-string fields = authenticated but profile data missing
+The items below require external secrets, physical devices, distribution systems, payment/provider
+accounts, or live services. A repo-local autonomous run may document the blocker, validate local
+schemas, or update fail-closed copy, but it must not mark these as done from local code/tests alone:
 
-No UI changes are needed — `WalletViewModel` and `ScanViewModel` already null-check the profile via
-`.orEmpty()` / `?.let { }`.
+- Meta DAT private SDK proof: requires GitHub Packages credentials, `MWDAT_ENABLE_PRIVATE_SDK=true`,
+  Meta app credentials, Meta AI setup, and physical glasses.
+- Release backend URL: requires real `BLUEPRINT_BACKEND_BASE_URL` and
+  `BLUEPRINT_DEMAND_BACKEND_BASE_URL` owned by the release environment.
+- Firebase App Distribution / device smoke: requires an installable artifact, real tester/device
+  install, notification/upload smoke, and signed-off evidence.
+- Payout provider: requires real provider account/config proof such as
+  `BLUEPRINT_PAYOUT_PROVIDER_READY=true` with backend evidence. UI balances/history do not prove
+  payout onboarding or settlement.
+- Live backend proof: requires actual backend calls and same-capture evidence through Capture,
+  bridge, Pipeline, and WebApp surfaces where applicable.
 
-### Acceptance test
-1. Sign in with a brand-new account (no prior Firestore `users` doc).
-2. Wallet screen should show `$0.00` and zero captures — not "Alex Rivera's" balances.
-3. Kill network. Pull-to-refresh. Balance card should stay at last-known value (Firestore offline
-   cache) — not silently switch to demo values.
+If any of these are missing, the correct status is externally blocked, not "implementation gap" and
+not "done."
 
----
+## Verification Commands
 
-## Gap 2 — Wallet Ledger Tabs: Real Data
-**Effort: Medium (~4-6 hours) · Risk: Low · Files: `WalletScreen.kt`, `WalletViewModel.kt`, `CaptureHistoryRepository.kt`**
+Use these checks after editing this document or before relying on it in a future parity goal:
 
-### What's wrong
-
-The three ledger tabs — **Payouts**, **Cashouts**, **History** — are permanently hardcoded empty:
-
-```kotlin
-// WalletScreen.kt — WalletLedgerContent()
-val (title, subtitle) = when (selectedTab) {
-    WalletLedgerTab.Payouts  -> "No payouts yet"  to "Approved captures will appear here."
-    WalletLedgerTab.Cashouts -> "No cashouts yet" to "Cashouts will appear here once processed."
-    WalletLedgerTab.History  -> "No history yet"  to "Wallet activity will appear here."
-}
-// Always shows the empty-state box regardless of actual data
+```bash
+rg -n "demo|mock wallet|three[[:space:]]+remaining|MWDAT|private SDK|blocked" \
+  android/IMPLEMENTATION_SPEC.md android/README.md docs
 ```
 
-Additionally, `WalletViewModel.refresh()` does `delay(900)` and nothing else. The balance stats
-(`totalEarnings`, `availableBalance`, etc.) are already live from Firestore via `observeProfile()` —
-the fake refresh is pointless noise but doesn't break anything.
-
-### Data sources
-
-`CaptureHistoryRepository` (already implemented) queries `capture_submissions` ordered by
-`submitted_at DESC`. Its `CaptureHistoryEntry` has:
-
-```kotlin
-data class CaptureHistoryEntry(
-    val id: String,
-    val jobTitle: String,
-    val submittedAt: Date?,
-    val payoutCents: Int,
-    val stage: CaptureSubmissionStage,   // InReview | NeedsRecapture | Paid
-    val jobId: String?,
-)
+```bash
+cd /Users/nijelhunt_1/workspace/BlueprintCapture/android
+ANDROID_HOME=/Users/nijelhunt_1/Library/Android/sdk ./gradlew testDebugUnitTest
 ```
-
-This is sufficient to drive all three tabs:
-- **History** tab → all entries, sorted by `submittedAt DESC`
-- **Payouts** tab → entries where `stage == Paid`
-- **Cashouts** tab → requires a separate `payouts` or `cashout_requests` Firestore collection
-  (iOS reads from a `payouts` subcollection under `users/{uid}/payouts`). If this collection doesn't
-  exist in the current Firestore schema, show an empty state with accurate copy ("No cashouts yet").
-
-### Implementation plan
-
-#### Step 1 — Expose history in `WalletViewModel`
-
-Add `CaptureHistoryRepository` injection and a `_history` StateFlow:
-
-```kotlin
-// In WalletViewModel
-private val _history = MutableStateFlow<List<CaptureHistoryEntry>>(emptyList())
-private val _historyLoading = MutableStateFlow(false)
-```
-
-Combine into `WalletUiState`:
-```kotlin
-data class WalletUiState(
-    // ... existing fields ...
-    val payoutEntries: List<CaptureHistoryEntry> = emptyList(),  // stage == Paid
-    val historyEntries: List<CaptureHistoryEntry> = emptyList(), // all entries
-    val isLedgerLoading: Boolean = false,
-)
-```
-
-Load on init and on `refresh()`:
-```kotlin
-fun refresh() {
-    if (isRefreshing.value) return
-    viewModelScope.launch {
-        isRefreshing.value = true
-        _historyLoading.value = true
-        val entries = historyRepository.fetchHistory()
-        _history.value = entries
-        _historyLoading.value = false
-        isRefreshing.value = false
-    }
-}
-```
-
-Replace the fake `delay(900)` with this real call. The Firestore profile listener already
-auto-updates the balance card, so no additional fetch is needed for stats.
-
-#### Step 2 — Replace `WalletLedgerContent` with real rows
-
-```
-WalletLedgerContent(
-    selectedTab,
-    payoutEntries  = state.payoutEntries,
-    historyEntries = state.historyEntries,
-    isLoading      = state.isLedgerLoading,
-)
-```
-
-Each row should show:
-- Job title
-- Submitted date (formatted, e.g. "Mar 18")
-- Payout amount in dollars
-- Stage badge: teal chip for "Paid", muted for "In Review", amber for "Needs Recapture"
-
-Loading state: show `CircularProgressIndicator` centred while `isLedgerLoading == true`.
-
-Empty state (keep existing empty-state composable, just conditionally shown).
-
-#### Step 3 — Cashouts tab
-
-Check if your Firestore schema has a `users/{uid}/payouts` or `cashout_requests` collection.
-- **If yes**: add `fetchCashouts()` to `CaptureHistoryRepository` querying that collection.
-- **If no**: leave the tab as an empty state with copy "No cashouts yet — cashouts processed through
-  your connected payout method will appear here." (already accurate).
-
-### Acceptance test
-1. Submit 2+ captures. Approve one in the admin console (set `status = "paid"`).
-2. Open Wallet → History tab: both captures visible.
-3. Open Payouts tab: only the approved/paid one visible.
-4. Tap refresh — spinner appears, data reloads from Firestore, spinner stops.
-5. New account with no submissions: all tabs show empty states with correct copy.
-
----
-
-## Gap 3 — Meta Glasses Capture Pipeline (MWDAT SDK)
-**Effort: Large (~2-3 days) · Risk: High (SDK availability unknown) · Files: `GlassesViewModel.kt`, new `GlassesCaptureManager.kt`, `CaptureSessionViewModel.kt`**
-
-### What's wrong
-
-`connect()` fakes a connection with `delay(1500)`. There is no capture lifecycle at all — no
-`startCapture()`, no `stopCapture()`, no artifact handoff to the upload pipeline:
-
-```kotlin
-fun connect(device: GlassesDevice) {
-    _state.value = GlassesConnectionState.Connecting(device)
-    viewModelScope.launch {
-        delay(1500)                                              // ← fake
-        _state.value = GlassesConnectionState.Connected(device.name)
-    }
-}
-// startCapture() — does not exist
-// stopCapture()  — does not exist
-// CaptureArtifacts handoff — does not exist
-```
-
-### iOS reference architecture
-
-iOS `GlassesCaptureManager.swift` has:
-
-```swift
-enum GlassesCaptureState { idle, preparing, streaming, paused, finished, error(String) }
-
-struct StreamingInfo { let fps: Double; let framesReceived: Int; let durationSec: Double }
-struct CaptureArtifacts { let videoUrl: URL; let framesDirectory: URL; let metadataUrl: URL }
-
-class GlassesCaptureManager: ObservableObject {
-    @Published var captureState: GlassesCaptureState = .idle
-    @Published var streamingInfo: StreamingInfo?
-    @Published var lastArtifacts: CaptureArtifacts?
-
-    func connect(device: DiscoveredDevice) async throws
-    func startCapture(outputDirectory: URL) async throws
-    func pauseCapture()
-    func resumeCapture()
-    func stopCapture() async throws -> CaptureArtifacts
-}
-```
-
-### Prerequisite — MWDAT Android SDK
-
-Before writing any code, confirm:
-
-1. **Does an Android MWDAT SDK exist?** The iOS SDK is from Meta/Luxottica's internal MWDAT
-   programme. As of early 2026, only an iOS SDK is publicly documented. Check with your Meta
-   partnership contact for an Android equivalent (AAR or Maven artifact).
-2. **If the SDK exists** — get the AAR and add it to `android/app/libs/`. Then add to
-   `app/build.gradle.kts`:
-   ```kotlin
-   dependencies {
-       implementation(files("libs/mwdat-sdk.aar"))
-   }
-   ```
-3. **If no Android SDK exists** — see "Fallback approach" below.
-
-### Implementation plan (assuming SDK exists)
-
-#### New file: `GlassesCaptureManager.kt`
-
-Mirrors iOS `GlassesCaptureManager`. Owns the SDK session lifecycle, independent of the ViewModel:
-
-```kotlin
-sealed class GlassesCaptureState {
-    object Idle : GlassesCaptureState()
-    object Preparing : GlassesCaptureState()
-    data class Streaming(val fps: Double, val framesReceived: Int, val durationSec: Double)
-        : GlassesCaptureState()
-    object Paused : GlassesCaptureState()
-    data class Finished(val artifacts: GlassesCaptureArtifacts) : GlassesCaptureState()
-    data class Error(val message: String) : GlassesCaptureState()
-}
-
-data class GlassesCaptureArtifacts(
-    val videoFile: File,
-    val framesDirectory: File,
-    val metadataFile: File,
-)
-
-@Singleton
-class GlassesCaptureManager @Inject constructor(
-    @ApplicationContext private val context: Context,
-) {
-    val captureState: StateFlow<GlassesCaptureState>
-
-    suspend fun connect(deviceAddress: String)          // replaces fake delay(1500)
-    suspend fun startCapture(outputDir: File)
-    fun pauseCapture()
-    fun resumeCapture()
-    suspend fun stopCapture(): GlassesCaptureArtifacts
-    fun disconnect()
-}
-```
-
-Key implementation notes for each method:
-- **`connect()`**: Call `MWDATSession.connect(address)` (or equivalent SDK entry point). Emit
-  `Preparing` immediately, `Streaming` on success, `Error` on timeout/failure.
-- **`startCapture(outputDir)`**: Call `session.startRecording(outputDir)`. SDK streams frames to
-  `outputDir/frames/` and writes metadata JSON.
-- **`stopCapture()`**: Call `session.stopRecording()`. SDK returns artifact paths. Wrap into
-  `GlassesCaptureArtifacts` and emit `Finished(artifacts)`.
-- **`pauseCapture()` / `resumeCapture()`**: Maps to SDK pause/resume if supported, else no-op.
-
-#### Modify `GlassesViewModel.kt`
-
-Inject `GlassesCaptureManager`:
-```kotlin
-class GlassesViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val captureManager: GlassesCaptureManager,  // ← add
-) : ViewModel()
-```
-
-Replace `connect()`:
-```kotlin
-fun connect(device: GlassesDevice) {
-    _state.value = GlassesConnectionState.Connecting(device)
-    viewModelScope.launch {
-        runCatching { captureManager.connect(device.id) }
-            .onSuccess { _state.value = GlassesConnectionState.Connected(device.name) }
-            .onFailure { _state.value = GlassesConnectionState.Error(it.message ?: "Connection failed") }
-    }
-}
-```
-
-Add capture controls exposed to the UI:
-```kotlin
-val captureState: StateFlow<GlassesCaptureState> = captureManager.captureState
-
-fun startCapture(outputDir: File) {
-    viewModelScope.launch { runCatching { captureManager.startCapture(outputDir) } }
-}
-
-fun stopCaptureAndGetArtifacts(): Flow<GlassesCaptureArtifacts?> = flow {
-    emit(runCatching { captureManager.stopCapture() }.getOrNull())
-}
-```
-
-#### Handoff to upload pipeline
-
-When `stopCapture()` returns `GlassesCaptureArtifacts`, the flow mirrors phone-camera capture:
-
-1. Build an `AndroidCaptureBundleRequest` with `captureSource = AndroidCaptureSource.MetaGlasses`
-2. Pass `artifacts.videoFile` as the video input to `AndroidCaptureBundleBuilder.writeBundle()`
-3. Enqueue via `CaptureUploadRepository.enqueueBundleUpload()`
-
-`AndroidCaptureBundleRequest` already has `captureSource: AndroidCaptureSource` with
-`MetaGlasses` as a defined enum value — no model changes needed.
-
-#### Modify `GlassesConnectionSheet.kt`
-
-The `Connected` state card needs "Start Capture" / "Stop Capture" buttons wired to
-`viewModel.startCapture()` / `viewModel.stopCaptureAndGetArtifacts()`. The existing card only
-shows a disconnect link — extend it:
-
-```kotlin
-is GlassesConnectionState.Connected -> {
-    ConnectedCard(
-        deviceName = s.deviceName,
-        captureState = captureState,
-        onStartCapture = { viewModel.startCapture(outputDir) },
-        onStopCapture  = { viewModel.stopCaptureAndGetArtifacts() },
-        onDisconnect   = viewModel::disconnect,
-    )
-}
-```
-
-### Fallback approach (if no Android MWDAT SDK)
-
-If Meta has no Android SDK, the realistic fallback is to make the connection *honest* rather than
-fake, and surface a clear message:
-
-1. **Real BLE GATT connection**: `GlassesViewModel` already scans for real devices. Extend
-   `connect()` to open a real BLE GATT connection using `device.connectGatt()`. Expose actual
-   connection state (connecting → connected → disconnected) driven by `BluetoothGattCallback`.
-2. **Honest capture UI**: When connected, show a card that reads "Video capture from Meta Glasses
-   requires the MWDAT SDK — currently unavailable on Android. Audio annotation mode only." then
-   offer to record an audio note via the phone mic and submit it as `captureSource = "android"`.
-3. **Remove mock injection**: Delete `injectMock()` and the emulator fake. Either find a real device
-   or show a "No glasses found" empty state honestly.
-
-This is the minimum to remove the lie from the UI without requiring an SDK that may not exist.
-
-### Acceptance test (SDK path)
-1. Launch app, open Glasses sheet, scan, select real Ray-Ban Meta device.
-2. BLE connection completes — state shows "Connected" with real GATT (no `delay()`).
-3. Tap "Start Capture" — frames begin streaming, streaming info updates (FPS counter).
-4. Tap "Stop Capture" — artifacts returned, upload enqueued, appears in upload queue overlay.
-5. Admin console shows `capture_source: "meta_glasses"` on the submission document.
-
----
-
-## Implementation Order
-
-| # | Gap | Why this order |
-|---|---|---|
-| 1 | ContributorProfile DemoData | 15-minute fix, unblocks accurate data everywhere |
-| 2 | Wallet Ledger real data | Medium effort, completely self-contained, high user-visible value |
-| 3 | Meta Glasses pipeline | Blocked on MWDAT SDK availability — confirm first, then implement |
-
----
-
-## Files Changed Per Gap
-
-### Gap 1 — ContributorProfile
-- `data/profile/ContributorProfileRepository.kt` — 4 line changes
-
-### Gap 2 — Wallet Ledger
-- `ui/screens/WalletViewModel.kt` — inject `CaptureHistoryRepository`, real `refresh()`
-- `ui/screens/WalletScreen.kt` — replace `WalletLedgerContent` with real row list
-- `data/capture/CaptureHistoryRepository.kt` — already implemented, no changes needed
-  (optionally: add `fetchCashouts()` if `users/{uid}/payouts` collection exists)
-
-### Gap 3 — Meta Glasses
-- **New**: `data/glasses/GlassesCaptureManager.kt` — SDK session lifecycle
-- `ui/screens/GlassesViewModel.kt` — inject manager, real `connect()`, add capture controls
-- `ui/screens/GlassesConnectionSheet.kt` — add Start/Stop Capture buttons to Connected card
-- `di/AppModule.kt` — no changes (Hilt picks up `@Singleton` via `@Inject constructor`)

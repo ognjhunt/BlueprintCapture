@@ -1006,7 +1006,18 @@ struct CaptureBundleAndInferenceTests {
             captureContextHint: nil,
             sceneMemory: nil,
             captureRights: CaptureRightsMetadata(derivedSceneGenerationAllowed: true),
-            siteIdentity: nil,
+            siteIdentity: SiteIdentity(
+                siteId: "site-world",
+                siteIdSource: "site_submission",
+                placeId: nil,
+                siteName: nil,
+                addressFull: nil,
+                geo: nil,
+                buildingId: nil,
+                floorId: nil,
+                roomId: nil,
+                zoneId: nil
+            ),
             captureTopology: nil,
             captureMode: CaptureModeMetadata(
                 requestedMode: "site_world_candidate",

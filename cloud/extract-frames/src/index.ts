@@ -21,7 +21,20 @@ import {
   type PoseRow,
   type PoseIndex,
 } from "./bridge.js";
+import {
+  captureObjectKind,
+  parseCapturePath,
+  resolveWalkthroughObjectName,
+  type CapturePathInfo,
+} from "./capture-paths.js";
 import { parseStrictJsonLines } from "./jsonl.js";
+
+export {
+  captureObjectKind,
+  parseCapturePath,
+  resolveWalkthroughObjectName,
+} from "./capture-paths.js";
+export type { CapturePathInfo } from "./capture-paths.js";
 
 const storage = new Storage();
 const pubsub = new PubSub();
@@ -32,7 +45,6 @@ const PIPELINE_HANDOFF_TOPIC =
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
 type PoseMatchType = "frame_id" | "time";
-type CaptureObjectKind = "walkthrough" | "completion_marker" | "other";
 
 function zeroPad(n: number, width: number): string {
   const s = String(n);
@@ -123,84 +135,6 @@ async function loadArkitFrameQuality(
     logger.error("Failed to load ARKit frame log", { frameLogObjectName, error });
     throw error;
   }
-}
-
-type CapturePathInfo = {
-  mode: "scenes" | "targets";
-  sceneId: string;
-  captureSourcePath: string | null;
-  captureId: string;
-  scenePrefix: string;
-  capturePrefix: string;
-  rawPrefix: string;
-  framesPrefix: string;
-  capturesPrefix: string;
-  keyframeObjectName: string;
-};
-
-export function parseCapturePath(objectName: string, generation: string): CapturePathInfo | null {
-  const parts = objectName.split("/");
-  if (
-    parts.length >= 6 &&
-    parts[0] === "scenes" &&
-    parts[2] === "captures" &&
-    parts[4] === "raw"
-  ) {
-    const sceneId = parts[1];
-    const captureId = parts[3];
-    const scenePrefix = `scenes/${sceneId}`;
-    const capturePrefix = `${scenePrefix}/captures/${captureId}`;
-    return {
-      mode: "scenes",
-      sceneId,
-      captureSourcePath: null,
-      captureId,
-      scenePrefix,
-      capturePrefix,
-      rawPrefix: `${capturePrefix}/raw`,
-      framesPrefix: `${capturePrefix}/frames`,
-      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
-      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
-    };
-  }
-  if (parts.length >= 6 && parts[0] === "scenes" && parts[4] === "raw") {
-    const sceneId = parts[1];
-    const captureSourcePath = parts[2];
-    const captureId = parts[3];
-    const scenePrefix = `scenes/${sceneId}`;
-    const capturePrefix = `${scenePrefix}/${captureSourcePath}/${captureId}`;
-    return {
-      mode: "scenes",
-      sceneId,
-      captureSourcePath,
-      captureId,
-      scenePrefix,
-      capturePrefix,
-      rawPrefix: `${capturePrefix}/raw`,
-      framesPrefix: `${capturePrefix}/frames`,
-      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
-      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
-    };
-  }
-  if (parts.length >= 4 && parts[0] === "targets" && parts[2] === "raw") {
-    const sceneId = parts[1];
-    const captureId = `legacy-${generation || Date.now()}`;
-    const scenePrefix = `targets/${sceneId}`;
-    const capturePrefix = `${scenePrefix}`;
-    return {
-      mode: "targets",
-      sceneId,
-      captureSourcePath: "unknown",
-      captureId,
-      scenePrefix,
-      capturePrefix,
-      rawPrefix: `${capturePrefix}/raw`,
-      framesPrefix: `${capturePrefix}/frames`,
-      capturesPrefix: `${scenePrefix}/captures/${captureId}`,
-      keyframeObjectName: `${scenePrefix}/images/${captureId}_keyframe.jpg`,
-    };
-  }
-  return null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -371,13 +305,6 @@ function hasStringArray(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
-export function captureObjectKind(objectName: string): CaptureObjectKind {
-  const fileName = basename(objectName);
-  if (fileName === "walkthrough.mov" || fileName === "walkthrough.mp4") return "walkthrough";
-  if (fileName === "capture_upload_complete.json") return "completion_marker";
-  return "other";
-}
-
 export function deriveRequestedRouting(manifest: Record<string, unknown> | null): {
   requestedOutputs: string[];
   requestedLanes: string[];
@@ -486,37 +413,6 @@ export function buildRawCaptureLineageFields(
       capture_start_epoch_ms: asFiniteNumber(manifest?.capture_start_epoch_ms) ?? null,
     },
   };
-}
-
-export function resolveWalkthroughObjectName(
-  manifest: Record<string, unknown> | null,
-  pathInfo: CapturePathInfo,
-  finalizedObjectName?: string
-): string {
-  const finalizedFileName = finalizedObjectName ? basename(finalizedObjectName) : null;
-  if (
-    finalizedObjectName?.startsWith(`${pathInfo.rawPrefix}/`) &&
-    (finalizedFileName === "walkthrough.mov" || finalizedFileName === "walkthrough.mp4")
-  ) {
-    return finalizedObjectName;
-  }
-
-  const videoURI = asString(manifest?.video_uri);
-  if (videoURI) {
-    if (videoURI.startsWith(`${pathInfo.rawPrefix}/`)) {
-      return videoURI;
-    }
-    const rawPrefixIndex = videoURI.indexOf(`${pathInfo.rawPrefix}/`);
-    if (rawPrefixIndex >= 0) {
-      return videoURI.slice(rawPrefixIndex);
-    }
-    const videoFileName = basename(videoURI);
-    if (videoURI.startsWith("raw/") || videoURI === videoFileName) {
-      return `${pathInfo.rawPrefix}/${videoFileName}`;
-    }
-  }
-
-  return `${pathInfo.rawPrefix}/walkthrough.mov`;
 }
 
 export function buildTaskSiteContext(manifest: Record<string, unknown> | null): Record<string, unknown> {
