@@ -4,11 +4,11 @@ BlueprintCapture is the evidence-capture app for Blueprint.
 
 It records walkthrough evidence, preserves raw sensor data, packages a capture bundle, and uploads that bundle for downstream bridge processing and optional trust outputs.
 
-This repo sits on the capturer side of Blueprint's capture-to-world-model platform:
+This repo sits on the capturer side of Blueprint's capture-to-evaluation/data-package platform:
 
 - capturers gather truthful real-site evidence
 - site operators can control access, rights, and commercialization boundaries
-- robot teams buy site-specific downstream packages and hosted access
+- robot teams buy Task Evaluation Runs, Post-Training Data Packages, and hosted access
 
 The app owns real-time capture coaching only. It does not make final readiness, payout, rights, or buyer-trust decisions in-app, and it does not run reconstruction, world models, or scene generation locally.
 

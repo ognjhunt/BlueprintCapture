@@ -30,7 +30,7 @@ Read these first:
 Platform context you must preserve:
 
 - `BlueprintCapture` is the capture client and evidence collection tool.
-- It is capture-first and world-model-product-first.
+- It is capture-first and real-site robot-evaluation/data-package first.
 - The app owns capture coaching and truthful bundle creation.
 - The app does not own final readiness decisions, rights/compliance interpretation, payout approval, or buyer-trust decisions.
 - Downstream handoff to pipeline is required for alpha truth.

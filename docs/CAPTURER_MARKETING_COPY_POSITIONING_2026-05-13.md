@@ -49,7 +49,7 @@ Core public positioning:
 
 Expanded public positioning:
 
-> BlueprintCapture helps approved capturers record real places so Blueprint can build rights-aware, provenance-safe site-specific world-model packages for robot teams. Captures are reviewed for quality, scope, rights, and downstream eligibility before any payout or buyer-facing use.
+> BlueprintCapture helps approved capturers record real places so Blueprint can build rights-aware, provenance-safe Task Evaluation Runs and Post-Training Data Packages for robot teams. Captures are reviewed for quality, scope, rights, and downstream eligibility before any payout or buyer-facing use.
 
 Pilot positioning:
 
@@ -319,7 +319,7 @@ Current findings from 2026-05-13:
 - A Swift comment referenced "Kled AI style." Remove competitor-branded implementation comments.
 - `BlueprintCapture/Models/SkuPricing.swift` contains a local $50/hour payout heuristic. It is not a public compensation policy. Keep it internal, avoid public copy based on it, and replace with backend quotes before public launch.
 - Root-level Stripe/setup summaries still contain stale implementation-era wording such as mock earnings and production-ready claims. They are historical docs, not public copy, but should be excluded from public messaging and cleaned separately if this repo is being packaged for external review.
-- Internal docs still use "marketplace" for demand ranking and operational mechanics. That is acceptable internally when it describes supply/demand logic, but public capturer copy should lead with capture, review, and site-specific world-model value.
+- Internal docs still use "marketplace" for demand ranking and operational mechanics. That is acceptable internally when it describes supply/demand logic, but public capturer copy should lead with capture, review, Task Evaluation Run value, and Post-Training Data Package value.
 
 ## Founder-Approval Blockers
 

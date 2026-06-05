@@ -36,7 +36,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `CHANGES_APPLIED.md` | Unsafe/stale archive | Historical Stripe/debug note; warning required. |
 | `CLAUDE.md` | Current source-of-truth | Agent rule file; not external copy. |
 | `FILES_ADDED.md` | Unsafe/stale archive | Historical settings/mock-earnings summary; warning required. |
-| `PLATFORM_CONTEXT.md` | Current source-of-truth | Platform doctrine; use with capture-first/world-model-product-first framing. |
+| `PLATFORM_CONTEXT.md` | Current source-of-truth | Platform doctrine; use with capture-first, real-site robot-evaluation/data-package-first framing. |
 | `QUICKSTART.md` | Current source-of-truth | Developer quickstart with proof limits; not public readiness copy. |
 | `README.md` | Current source-of-truth | Primary repo orientation and alpha boundaries. |
 | `README_STRIPE_DEBUGGING.md` | Unsafe/stale archive | Historical Stripe debug guide; warning required. |

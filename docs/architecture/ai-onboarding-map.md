@@ -187,7 +187,7 @@ Referral and payout-related writes are external-service mutations. Local tests a
 1. `BlueprintCapture` records evidence and writes a canonical raw bundle under `scenes/{scene_id}/captures/{capture_id}/raw/`.
 2. The client uploads raw files and writes `capture_upload_complete.json` last.
 3. `cloud/extract-frames` sees the completion marker or supported legacy trigger, validates raw/sidecar truth, extracts frames, builds descriptor and QA artifacts, and publishes a Pipeline handoff.
-4. `BlueprintCapturePipeline` consumes the descriptor/handoff to materialize site-specific world-model packages, hosted artifacts, and optional trust outputs.
+4. `BlueprintCapturePipeline` consumes the descriptor/handoff to materialize Task Evaluation Run artifacts, Post-Training Data Package artifacts, hosted artifacts, generated/model-derived support assets, and optional trust outputs.
 5. `Blueprint-WebApp` is the buyer, licensing, ops, and hosted-review surface. WebApp and Pipeline decide downstream buyer/hosted/review state; Capture does not.
 
 Missing upstream ids (`site_submission_id`, `buyer_request_id`, `capture_job_id`) are hosted-review and launch blockers. The raw capture can still be valid evidence while buyer access, payout, hosted review, and launch-ready claims remain blocked.
