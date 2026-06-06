@@ -276,6 +276,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function asRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined)
+    .map((item) => ({ ...item }));
+}
+
 function asStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const parsed = value
@@ -309,6 +317,8 @@ export function deriveRequestedRouting(manifest: Record<string, unknown> | null)
   requestedOutputs: string[];
   requestedLanes: string[];
   previewSimulationRequested: boolean;
+  robotEvalDatasetRequested: boolean;
+  robotEvalPublicationGateRequired: boolean;
 } {
   const requestedOutputs = asStringArray(manifest?.requested_outputs) ?? [];
   const requestedLanes = new Set<string>();
@@ -329,6 +339,15 @@ export function deriveRequestedRouting(manifest: Record<string, unknown> | null)
         requestedLanes.add("scene_memory");
         requestedLanes.add("preview_simulation");
         break;
+      case "robot_eval_dataset":
+        requestedLanes.add("evaluation_prep");
+        requestedLanes.add("robot_eval_dataset");
+        break;
+      case "task_evaluation_run":
+        requestedLanes.add("evaluation_prep");
+        requestedLanes.add("robot_eval_dataset");
+        requestedLanes.add("task_evaluation_run");
+        break;
       default:
         requestedLanes.add(output);
         break;
@@ -344,6 +363,12 @@ export function deriveRequestedRouting(manifest: Record<string, unknown> | null)
     requestedOutputs,
     requestedLanes: Array.from(requestedLanes),
     previewSimulationRequested: requestedOutputs.includes("preview_simulation"),
+    robotEvalDatasetRequested:
+      requestedOutputs.includes("robot_eval_dataset") ||
+      requestedOutputs.includes("task_evaluation_run"),
+    robotEvalPublicationGateRequired:
+      requestedOutputs.includes("robot_eval_dataset") ||
+      requestedOutputs.includes("task_evaluation_run"),
   };
 }
 
@@ -418,6 +443,7 @@ export function buildRawCaptureLineageFields(
 export function buildTaskSiteContext(manifest: Record<string, unknown> | null): Record<string, unknown> {
   const captureProfile = asRecord(manifest?.capture_profile);
   const environmentVariability = asRecord(manifest?.environment_variability);
+  const routeAnchors = asRecord(manifest?.route_anchors);
   return {
     workflow_name: asString(manifest?.task_text_hint) ?? null,
     task_steps: asStringArray(manifest?.task_steps) ?? [],
@@ -440,6 +466,125 @@ export function buildTaskSiteContext(manifest: Record<string, unknown> | null): 
     floor_condition_notes: asStringArray(environmentVariability?.floor_condition_notes) ?? [],
     reflective_surface_notes: asStringArray(environmentVariability?.reflective_surface_notes) ?? [],
     access_rules: asStringArray(environmentVariability?.access_rules) ?? [],
+    robot_eval_task_anchor_candidates: [
+      ...asRecordArray(manifest?.robot_eval_task_anchors),
+      ...asRecordArray(manifest?.task_anchor_candidates),
+    ],
+    robot_eval_scene_asset_hints: [
+      ...asRecordArray(manifest?.robot_eval_scene_assets),
+      ...asRecordArray(manifest?.scene_asset_hints),
+    ],
+    robot_eval_robot_profile_candidates: [
+      ...asRecordArray(manifest?.robot_eval_robot_profiles),
+      ...asRecordArray(manifest?.robot_profiles),
+    ],
+    robot_eval_route_anchor_candidates: asRecordArray(routeAnchors?.route_anchors),
+  };
+}
+
+export function buildRobotEvalHandoffFields(input: {
+  routing: {
+    robotEvalDatasetRequested?: boolean;
+    robotEvalPublicationGateRequired?: boolean;
+  };
+  taskSiteContext: Record<string, unknown>;
+  identity: Record<string, unknown>;
+}): Record<string, unknown> {
+  const requested = input.routing.robotEvalDatasetRequested === true;
+  const targetKpi = asString(input.taskSiteContext.target_kpi) ?? null;
+  const zone = asString(input.taskSiteContext.zone) ?? null;
+  const hostedReviewBlockers = asStringArray(input.identity.hosted_review_blockers) ?? [];
+  const taskAnchorCandidates = asRecordArray(
+    input.taskSiteContext.robot_eval_task_anchor_candidates
+  );
+  const sceneAssetHints = asRecordArray(input.taskSiteContext.robot_eval_scene_asset_hints);
+  const robotProfileCandidates = asRecordArray(
+    input.taskSiteContext.robot_eval_robot_profile_candidates
+  );
+  const routeAnchorCandidates = asRecordArray(
+    input.taskSiteContext.robot_eval_route_anchor_candidates
+  );
+  return {
+    robot_eval_dataset_requested: requested,
+    robot_eval_publication_gate_required:
+      requested && input.routing.robotEvalPublicationGateRequired === true,
+    robot_eval_required_artifacts: [
+      "site_card",
+      "task_cards",
+      "scenario_cards",
+      "eval_cards",
+      "task_ontology_v1",
+      "scenario_family_library",
+      "scoring_methodology",
+      "proof_boundaries",
+      "task_thresholds",
+      "publication_readiness",
+    ],
+    robot_eval_missing_proof_labels: [
+      "needs_robot_pov",
+      "needs_human_demo",
+      "needs_action_logs",
+      "needs_actual_outcome",
+      "needs_policy_api_endpoint_ref",
+      "needs_docker_container_ref",
+      "needs_recorded_action_trace_ref",
+      "needs_high_level_skill_trace_ref",
+      "needs_teleop_demo_ref",
+      "needs_sim_controller_plugin_ref",
+    ],
+    robot_eval_task_thresholds: {
+      threshold_source: targetKpi
+        ? "capture_manifest_target_kpi"
+        : "pipeline_default_publication_gate",
+      target_kpi: targetKpi,
+      zone,
+      claim_boundary: "capture_target_kpi_is_threshold_context_not_robot_readiness_proof",
+    },
+    robot_eval_cpu_preflight_inputs: {
+      task_anchor_candidates: taskAnchorCandidates,
+      scene_asset_hints: sceneAssetHints,
+      robot_profile_candidates: robotProfileCandidates,
+      route_anchor_candidates: routeAnchorCandidates,
+      source_policy:
+        "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
+      claim_boundary:
+        "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+    },
+    robot_eval_episode_spec_inputs: {
+      task_anchor_candidate_count: taskAnchorCandidates.length,
+      scene_asset_hint_count: sceneAssetHints.length,
+      robot_profile_candidate_count: robotProfileCandidates.length,
+      route_anchor_candidate_count: routeAnchorCandidates.length,
+      review_required: true,
+      claim_boundary:
+        "episode_spec_inputs_can_seed_pipeline_review_but_cannot_set_proof_booleans",
+    },
+    robot_eval_publication_blockers: hostedReviewBlockers,
+  };
+}
+
+export function buildPipelineStatusEvent(input: {
+  bucketName: string;
+  pathInfo: CapturePathInfo;
+  objectName: string;
+  objectKind: string;
+  qaStatus: string;
+  pipelineHandoffUri: string;
+}): Record<string, unknown> {
+  return {
+    event_type: "capture.raw_upload_complete.v1",
+    scene_id: input.pathInfo.sceneId,
+    capture_id: input.pathInfo.captureId,
+    raw_prefix: input.pathInfo.rawPrefix,
+    raw_prefix_uri: gsUri(input.bucketName, input.pathInfo.rawPrefix),
+    upload_completion_marker_uri: gsUri(
+      input.bucketName,
+      `${input.pathInfo.rawPrefix}/capture_upload_complete.json`
+    ),
+    trigger_object: input.objectName,
+    trigger_kind: input.objectKind,
+    qa_status: input.qaStatus,
+    pipeline_handoff_uri: input.pipelineHandoffUri,
   };
 }
 
@@ -534,6 +679,10 @@ async function publishPipelineHandoff(payload: Record<string, unknown>): Promise
       scene_id: String(payload.scene_id ?? ""),
       capture_id: String(payload.capture_id ?? ""),
       qa_status: String(payload.qa_status ?? ""),
+      raw_prefix_uri: String(payload.raw_prefix_uri ?? ""),
+      status_event_type: String(
+        asRecord(payload.pipeline_status_event)?.event_type ?? "capture.raw_upload_complete.v1"
+      ),
       preview_simulation_requested:
         payload.preview_simulation_requested === true ? "true" : "false",
     },
@@ -1341,6 +1490,11 @@ export const extractFrames = onObjectFinalized(
     }
     finalWarnings.push(...identityValidation.warnings);
     sceneMemoryCapture.sensor_availability = claimedArtifactEvaluation.valid;
+    const robotEvalHandoff = buildRobotEvalHandoffFields({
+      routing,
+      taskSiteContext,
+      identity: identityValidation.identity,
+    });
 
     // Compute world_model_candidate deterministically from actual artifact presence.
     // This is the canonical rule shared with iOS finalizer and local pipeline.
@@ -1473,6 +1627,7 @@ export const extractFrames = onObjectFinalized(
         capture_mode: captureMode,
       },
       ...worldlabsPreview,
+      ...robotEvalHandoff,
       generated_at: new Date().toISOString(),
     };
 
@@ -1531,6 +1686,15 @@ export const extractFrames = onObjectFinalized(
     captureDescriptor.qa_status = finalStatus;
     captureDescriptor.qa_report_uri = qaReportUri;
     captureDescriptor.pipeline_handoff_uri = pipelineHandoffUri;
+    const pipelineStatusEvent = buildPipelineStatusEvent({
+      bucketName,
+      pathInfo,
+      objectName,
+      objectKind,
+      qaStatus: finalStatus,
+      pipelineHandoffUri,
+    });
+    captureDescriptor.pipeline_status_event = pipelineStatusEvent;
 
     await bucket
       .file(`${pathInfo.capturesPrefix}/capture_descriptor.json`)
@@ -1565,10 +1729,13 @@ export const extractFrames = onObjectFinalized(
       requested_outputs: routing.requestedOutputs,
       requested_lanes: routing.requestedLanes,
       raw_prefix_uri: rawPrefixUri,
+      raw_prefix: pathInfo.rawPrefix,
       frames_index_uri: framesIndexUri,
       capture_descriptor_uri: captureDescriptorUri,
       qa_report_uri: qaReportUri,
+      pipeline_handoff_uri: pipelineHandoffUri,
       keyframe_uri: keyframeUri,
+      pipeline_status_event: pipelineStatusEvent,
       task_site_context: taskSiteContext,
       scene_memory_capture: sceneMemoryCapture,
       capture_rights: captureRights,
@@ -1576,6 +1743,7 @@ export const extractFrames = onObjectFinalized(
       provenance_lineage: rawCaptureLineage.provenance_lineage,
       identity: identityValidation.identity,
       ...worldlabsPreview,
+      ...robotEvalHandoff,
       generated_at: new Date().toISOString(),
     };
 

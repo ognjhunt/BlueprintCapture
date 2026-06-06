@@ -37,6 +37,36 @@ private func makeRawManifestData(
 }
 
 struct CaptureBundleAndInferenceTests {
+    @Test
+    func uploadFilePlanKeepsCompletionMarkerLast() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("capture-upload-plan-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw", isDirectory: true)
+        let glasses = raw.appendingPathComponent("glasses", isDirectory: true)
+        try fileManager.createDirectory(at: glasses, withIntermediateDirectories: true)
+        let manifest = raw.appendingPathComponent("manifest.json")
+        let video = raw.appendingPathComponent("walkthrough.mov")
+        let streamMetadata = glasses.appendingPathComponent("stream_metadata.json")
+        let completion = raw.appendingPathComponent("capture_upload_complete.json")
+        try Data("{}".utf8).write(to: manifest)
+        try Data([0x01, 0x02, 0x03]).write(to: video)
+        try Data("{}".utf8).write(to: streamMetadata)
+        try Data("{}".utf8).write(to: completion)
+
+        let plan = try #require(CaptureUploadFilePlan.make(for: root))
+
+        #expect(plan.payloadFiles == [streamMetadata, manifest, video])
+        #expect(plan.completionMarkerFile == completion)
+        #expect(plan.uploadOrder.last == completion)
+        #expect(plan.totalPayloadBytes == 7)
+        #expect(plan.uploadOrder.map { $0.path.replacingOccurrences(of: root.path + "/", with: "") } == [
+            "raw/glasses/stream_metadata.json",
+            "raw/manifest.json",
+            "raw/walkthrough.mov",
+            "raw/capture_upload_complete.json",
+        ])
+    }
 
     @Test
     func finalizerAndExportProducePipelineReadyBundle() async throws {

@@ -6,6 +6,8 @@ process.env.GCLOUD_PROJECT = "test-project";
 
 const {
   buildRawCaptureLineageFields,
+  buildPipelineStatusEvent,
+  buildRobotEvalHandoffFields,
   buildTaskSiteContext,
   buildWorldlabsPreviewFields,
   canonicalWorldModelCandidate,
@@ -62,6 +64,191 @@ test("validateIdentityMapping preserves missing upstream ids as hosted-review bl
     "missing_buyer_request_id",
     "missing_capture_job_id",
   ]);
+});
+
+test("deriveRequestedRouting exposes robot eval dataset publication routing", () => {
+  const routing = deriveRequestedRouting({
+    requested_outputs: ["robot_eval_dataset", "task_evaluation_run"],
+  });
+
+  assert.equal(routing.robotEvalDatasetRequested, true);
+  assert.equal(routing.robotEvalPublicationGateRequired, true);
+  assert.ok(routing.requestedLanes.includes("robot_eval_dataset"));
+  assert.ok(routing.requestedLanes.includes("task_evaluation_run"));
+  assert.ok(routing.requestedLanes.includes("evaluation_prep"));
+});
+
+test("buildRobotEvalHandoffFields carries publication package and missing-proof metadata", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "0"
+  );
+  assert.ok(pathInfo);
+
+  const identityValidation = validateIdentityMapping({
+    manifest: {
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      site_submission_id: "site-submission-1",
+      buyer_request_id: "buyer-request-1",
+    },
+    completionMarker: {
+      sceneId: "scene-123",
+      captureId: "capture-456",
+      rawPrefix: "scenes/scene-123/captures/capture-456/raw",
+    },
+    pathInfo,
+  });
+  const routing = deriveRequestedRouting({
+    requested_outputs: ["robot_eval_dataset"],
+  });
+  const taskSiteContext = buildTaskSiteContext({
+    task_text_hint: "Move totes from receiving to shelf staging",
+    target_kpi: "Complete in under 45 seconds with zero collisions",
+    zone: "receiving",
+    task_anchor_candidates: [
+      {
+        task_id: "move_tote_receiving_to_staging",
+        start_zone: [0, 0, 0],
+        goal_zone: [2, 1, 0],
+        confidence: "capturer_hint",
+      },
+    ],
+    scene_asset_hints: [
+      {
+        asset_type: "ply",
+        path_hint: "pipeline/advanced_geometry/3dgs_compressed.ply",
+      },
+    ],
+    robot_profiles: [
+      {
+        robot_profile_id: "mobile_manipulator_rgbd_fixture",
+        source: "capturer_hint",
+      },
+    ],
+    route_anchors: {
+      route_anchors: [
+        {
+          anchor_id: "receiving_start",
+          label: "Receiving start",
+        },
+      ],
+    },
+  });
+
+  const fields = buildRobotEvalHandoffFields({
+    routing,
+    taskSiteContext,
+    identity: identityValidation.identity,
+  });
+
+  assert.equal(fields.robot_eval_dataset_requested, true);
+  assert.equal(fields.robot_eval_publication_gate_required, true);
+  assert.deepEqual(fields.robot_eval_required_artifacts, [
+    "site_card",
+    "task_cards",
+    "scenario_cards",
+    "eval_cards",
+    "task_ontology_v1",
+    "scenario_family_library",
+    "scoring_methodology",
+    "proof_boundaries",
+    "task_thresholds",
+    "publication_readiness",
+  ]);
+  assert.deepEqual(fields.robot_eval_missing_proof_labels, [
+    "needs_robot_pov",
+    "needs_human_demo",
+    "needs_action_logs",
+    "needs_actual_outcome",
+    "needs_policy_api_endpoint_ref",
+    "needs_docker_container_ref",
+    "needs_recorded_action_trace_ref",
+    "needs_high_level_skill_trace_ref",
+    "needs_teleop_demo_ref",
+    "needs_sim_controller_plugin_ref",
+  ]);
+  assert.deepEqual(fields.robot_eval_task_thresholds, {
+    threshold_source: "capture_manifest_target_kpi",
+    target_kpi: "Complete in under 45 seconds with zero collisions",
+    zone: "receiving",
+    claim_boundary: "capture_target_kpi_is_threshold_context_not_robot_readiness_proof",
+  });
+  assert.deepEqual(fields.robot_eval_episode_spec_inputs, {
+    task_anchor_candidate_count: 1,
+    scene_asset_hint_count: 1,
+    robot_profile_candidate_count: 1,
+    route_anchor_candidate_count: 1,
+    review_required: true,
+    claim_boundary:
+      "episode_spec_inputs_can_seed_pipeline_review_but_cannot_set_proof_booleans",
+  });
+  assert.deepEqual(fields.robot_eval_cpu_preflight_inputs, {
+    task_anchor_candidates: [
+      {
+        task_id: "move_tote_receiving_to_staging",
+        start_zone: [0, 0, 0],
+        goal_zone: [2, 1, 0],
+        confidence: "capturer_hint",
+      },
+    ],
+    scene_asset_hints: [
+      {
+        asset_type: "ply",
+        path_hint: "pipeline/advanced_geometry/3dgs_compressed.ply",
+      },
+    ],
+    robot_profile_candidates: [
+      {
+        robot_profile_id: "mobile_manipulator_rgbd_fixture",
+        source: "capturer_hint",
+      },
+    ],
+    route_anchor_candidates: [
+      {
+        anchor_id: "receiving_start",
+        label: "Receiving start",
+      },
+    ],
+    source_policy:
+      "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
+    claim_boundary:
+      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+  });
+  assert.deepEqual(fields.robot_eval_publication_blockers, ["missing_capture_job_id"]);
+});
+
+test("buildPipelineStatusEvent emits canonical raw upload completion trigger payload", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "7"
+  );
+  assert.ok(pathInfo);
+
+  const event = buildPipelineStatusEvent({
+    bucketName: "test-bucket",
+    pathInfo,
+    objectName: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    objectKind: "completion_marker",
+    qaStatus: "passed",
+    pipelineHandoffUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/pipeline_handoff.json",
+  });
+
+  assert.deepEqual(event, {
+    event_type: "capture.raw_upload_complete.v1",
+    scene_id: "scene-123",
+    capture_id: "capture-456",
+    raw_prefix: "scenes/scene-123/captures/capture-456/raw",
+    raw_prefix_uri: "gs://test-bucket/scenes/scene-123/captures/capture-456/raw",
+    upload_completion_marker_uri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    trigger_object: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    trigger_kind: "completion_marker",
+    qa_status: "passed",
+    pipeline_handoff_uri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/pipeline_handoff.json",
+  });
 });
 
 test("captureObjectKind treats mp4 walkthrough uploads as bridge triggers", () => {

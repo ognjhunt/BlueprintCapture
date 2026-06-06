@@ -838,7 +838,7 @@ struct ScanHomeView: View {
             .compactMap { $0 }
             .joined(separator: " • ")
         let isApprovedLaunchScope = item.permissionTier == .approved
-        let hasUpstreamBootstrap = item.job.siteSubmissionId != nil || item.job.buyerRequestId != nil || isApprovedLaunchScope
+        let hasUpstreamBootstrap = item.job.siteSubmissionId != nil || item.job.buyerRequestId != nil
         let intakePacket = item.job.qualificationIntakePacket
         let approvedIntakePacket = (isApprovedLaunchScope && intakePacket.isComplete) ? intakePacket : nil
         let captureRights: CaptureRightsMetadata? = isApprovedLaunchScope ? CaptureRightsMetadata(

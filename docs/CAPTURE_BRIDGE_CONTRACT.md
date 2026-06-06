@@ -270,11 +270,50 @@ This payload is written to shared storage and published to Pub/Sub topic
 It includes:
 
 - raw, descriptor, and QA URIs
+- `raw_prefix`, `raw_prefix_uri`, and `pipeline_status_event` for the completed raw upload
 - `requested_outputs` and normalized `requested_lanes`
 - business identifiers such as `site_submission_id`, `buyer_request_id`, and `capture_job_id`
 - task/site context lifted from capture intake
 - rights and scene-memory blocks
 - World Labs preview intent and reserved URIs when `preview_simulation` is requested
+- robot-eval publication intent when `requested_outputs` includes
+  `robot_eval_dataset` or `task_evaluation_run`
+- `robot_eval_required_artifacts`, including `site_card`, `task_cards`,
+  `scenario_cards`, `eval_cards`, `task_ontology_v1`,
+  `scenario_family_library`, `scoring_methodology`, `proof_boundaries`,
+  `task_thresholds`, and `publication_readiness`
+- `robot_eval_missing_proof_labels` for robot POV, demos, action logs, actual
+  outcomes, and six structured robot-team submission modalities
+- `robot_eval_task_thresholds` as target-KPI context only, not robot readiness
+  or safety proof
+- `robot_eval_cpu_preflight_inputs` with advisory task-anchor candidates, scene
+  asset hints, robot-profile candidates, and route-anchor candidates for
+  Pipeline CPU/pre-GPU review
+- `robot_eval_episode_spec_inputs` with candidate counts and `review_required`
+  for Pipeline `episode_spec.v1` compilation
+- `robot_eval_publication_blockers` copied from hosted-review/upstream identity
+  blockers
+
+Those CPU/episode fields are candidate inputs only. Raw capture evidence,
+Pipeline validators, and proof-boundary manifests remain authoritative for
+scale, collision, simulator, policy, robot-readiness, and safety claims.
+
+`pipeline_status_event` is the canonical automation trigger shape:
+
+```json
+{
+  "event_type": "capture.raw_upload_complete.v1",
+  "scene_id": "string",
+  "capture_id": "string",
+  "raw_prefix": "scenes/{scene_id}/captures/{capture_id}/raw",
+  "raw_prefix_uri": "gs://...",
+  "upload_completion_marker_uri": "gs://.../capture_upload_complete.json",
+  "trigger_object": "scenes/{scene_id}/captures/{capture_id}/raw/capture_upload_complete.json",
+  "trigger_kind": "completion_marker",
+  "qa_status": "passed|blocked",
+  "pipeline_handoff_uri": "gs://..."
+}
+```
 
 ## Notes
 

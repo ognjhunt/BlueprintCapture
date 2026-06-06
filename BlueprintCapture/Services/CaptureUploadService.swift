@@ -13,6 +13,53 @@ import FirebaseAuth
 import FirebaseFirestore
 #endif
 
+struct CaptureUploadFilePlan: Equatable {
+    static let completionMarkerFilename = "capture_upload_complete.json"
+
+    let payloadFiles: [URL]
+    let completionMarkerFile: URL?
+    let totalPayloadBytes: Int64
+
+    var uploadOrder: [URL] {
+        payloadFiles + [completionMarkerFile].compactMap { $0 }
+    }
+
+    static func make(for uploadRoot: URL, fileManager: FileManager = .default) -> CaptureUploadFilePlan? {
+        guard let enumerator = fileManager.enumerator(
+            at: uploadRoot,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        var files: [URL] = []
+        var totalBytes: Int64 = 0
+        var completionMarkerFile: URL?
+        for case let url as URL in enumerator {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                continue
+            }
+            if url.lastPathComponent == completionMarkerFilename {
+                completionMarkerFile = url
+            } else {
+                files.append(url)
+                if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
+                    totalBytes += Int64(size)
+                }
+            }
+        }
+        files.sort { $0.path < $1.path }
+        return CaptureUploadFilePlan(
+            payloadFiles: files,
+            completionMarkerFile: completionMarkerFile,
+            totalPayloadBytes: totalBytes
+        )
+    }
+}
+
 struct QualificationIntakePacket: Equatable, Codable {
     let schemaVersion: String
     let workflowName: String?
@@ -884,30 +931,14 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         // Gather files
-        guard let enumerator = FileManager.default.enumerator(at: uploadRoot, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+        guard let uploadPlan = CaptureUploadFilePlan.make(for: uploadRoot) else {
             print("❌ [UploadService] Failed to enumerate directory at \(uploadRoot.path)")
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
-
-        var files: [URL] = []
-        var totalBytes: Int64 = 0
-        let completionFilename = "capture_upload_complete.json"
-        var completionMarkerFile: URL?
-        for case let url as URL in enumerator {
-            var isRegular: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isRegular), !isRegular.boolValue {
-                if url.lastPathComponent == completionFilename {
-                    completionMarkerFile = url
-                } else {
-                    files.append(url)
-                    if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize {
-                        totalBytes += Int64(size)
-                    }
-                }
-            }
-        }
-        files.sort { $0.path < $1.path }
+        let files = uploadPlan.payloadFiles
+        let totalBytes = uploadPlan.totalPayloadBytes
+        let completionMarkerFile = uploadPlan.completionMarkerFile
         guard !files.isEmpty || completionMarkerFile != nil else {
             print("❌ [UploadService] No files found to upload under \(uploadRoot.path)")
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
@@ -996,7 +1027,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         if let completionMarkerFile {
-            let completionRemotePath = remoteBasePath + completionFilename
+            let completionRemotePath = remoteBasePath + CaptureUploadFilePlan.completionMarkerFilename
             let completionRef = storage.reference(withPath: completionRemotePath)
             let completionUploaded = await uploadCompletionMarker(
                 at: completionMarkerFile,

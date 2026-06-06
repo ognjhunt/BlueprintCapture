@@ -59,6 +59,49 @@ enum class CaptureUploadWorkOutcome {
     Failure,
 }
 
+internal data class CaptureUploadFilePlan(
+    val payloadFiles: List<File>,
+    val completionMarker: File?,
+) {
+    val uploadOrder: List<File> = payloadFiles + listOfNotNull(completionMarker)
+}
+
+internal object CaptureUploadContract {
+    private val segmentSanitizeRegex = "[^a-z0-9._-]+".toRegex()
+    const val completionMarkerFilename = "capture_upload_complete.json"
+
+    fun buildRemotePrefix(
+        sceneId: String,
+        captureId: String,
+    ): String {
+        val sceneSegment = sanitizePathSegment(sceneId)
+        val captureSegment = sanitizePathSegment(captureId)
+        return "scenes/$sceneSegment/captures/$captureSegment/"
+    }
+
+    fun registrationRawPrefix(remotePrefix: String): String = "${remotePrefix}raw/"
+
+    fun planBundleFiles(bundleRoot: File): CaptureUploadFilePlan {
+        val files = bundleRoot.walkTopDown()
+            .filter(File::isFile)
+            .sortedBy { file -> file.absolutePath }
+            .toMutableList()
+        val completionMarkerIndex = files.indexOfFirst { it.name == completionMarkerFilename }
+        val completionMarker = if (completionMarkerIndex >= 0) files.removeAt(completionMarkerIndex) else null
+        return CaptureUploadFilePlan(
+            payloadFiles = files,
+            completionMarker = completionMarker,
+        )
+    }
+
+    private fun sanitizePathSegment(value: String): String {
+        return value.lowercase()
+            .replace(segmentSanitizeRegex, "-")
+            .trim('-')
+            .ifBlank { "capture" }
+    }
+}
+
 @Singleton
 class CaptureUploadRepository @Inject constructor(
     private val sharedPreferences: SharedPreferences,
@@ -107,8 +150,8 @@ class CaptureUploadRepository @Inject constructor(
         if (existingItem != null && existingItem.status.isActive) {
             return uploadId
         }
-        val remotePrefix = buildRemotePrefix(
-            creatorId = request.creatorId,
+        val remotePrefix = CaptureUploadContract.buildRemotePrefix(
+            sceneId = request.sceneId,
             captureId = request.captureId,
         )
         val item = UploadQueueItem(
@@ -122,7 +165,9 @@ class CaptureUploadRepository @Inject constructor(
             localBundlePath = bundleRoot.absolutePath,
             remotePrefix = remotePrefix,
             creatorId = request.creatorId,
-            captureJobId = request.jobId,
+            jobId = request.jobId,
+            captureJobId = request.captureJobId,
+            buyerRequestId = request.buyerRequestId,
             siteSubmissionId = request.siteSubmissionId,
             captureStartEpochMs = request.captureStartEpochMs,
             captureDurationMs = request.captureDurationMs,
@@ -307,21 +352,17 @@ class CaptureUploadRepository @Inject constructor(
             throw PermanentUploadException("Local capture bundle is missing.")
         }
 
-        val files = bundleRoot.walkTopDown()
-            .filter(File::isFile)
-            .sortedBy { file -> file.absolutePath }
-            .toMutableList()
+        val filePlan = CaptureUploadContract.planBundleFiles(bundleRoot)
+        val files = filePlan.payloadFiles
+        val completionMarker = filePlan.completionMarker
 
-        if (files.isEmpty()) {
+        if (filePlan.uploadOrder.isEmpty()) {
             throw PermanentUploadException("Capture bundle has no files to upload.")
         }
 
-        val completionMarkerIndex = files.indexOfFirst { it.name == "capture_upload_complete.json" }
-        val completionMarker = if (completionMarkerIndex >= 0) files.removeAt(completionMarkerIndex) else null
-
         val totalBytes = files.sumOf { it.length().coerceAtLeast(1L) }.coerceAtLeast(1L)
-        val remotePrefix = item.remotePrefix ?: buildRemotePrefix(
-            creatorId = item.creatorId ?: "anonymous",
+        val remotePrefix = item.remotePrefix ?: CaptureUploadContract.buildRemotePrefix(
+            sceneId = item.sceneId.ifBlank { item.captureId.ifBlank { item.id } },
             captureId = item.captureId.ifBlank { item.id },
         )
 
@@ -533,16 +574,19 @@ class CaptureUploadRepository @Inject constructor(
         if (includeSubmittedAt) {
             payload["submitted_at"] = recordedAt
         }
-        item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
+        item.jobId?.takeIf(String::isNotBlank)?.let { payload["job_id"] = it }
         item.captureJobId?.takeIf(String::isNotBlank)?.let { payload["capture_job_id"] = it }
         item.siteSubmissionId?.takeIf(String::isNotBlank)?.let { payload["site_submission_id"] = it }
-        resolvedBuyerRequestId(item, siteIdentity)?.let { payload["buyer_request_id"] = it }
+        val buyerRequestId = item.buyerRequestId?.takeIf(String::isNotBlank)
+            ?: resolvedBuyerRequestId(item, siteIdentity)
+        buyerRequestId?.let { payload["buyer_request_id"] = it }
         item.quotedPayoutCents?.let { payload["estimated_payout_cents"] = it }
         item.captureDurationMs?.let { payload["capture_duration_ms"] = it }
         if (item.requestedOutputs.isNotEmpty()) {
             payload["requested_outputs"] = item.requestedOutputs
         }
-        item.remotePrefix?.takeIf(String::isNotBlank)?.let { payload["raw_prefix"] = "${it}raw/" }
+        item.remotePrefix?.takeIf(String::isNotBlank)
+            ?.let { payload["raw_prefix"] = CaptureUploadContract.registrationRawPrefix(it) }
         if (item.motionSampleCount > 0) {
             payload["motion_sample_count"] = item.motionSampleCount
             payload["motion_provenance"] = "phone_imu_accelerometer_gyroscope"
@@ -1076,20 +1120,11 @@ class CaptureUploadRepository @Inject constructor(
         return copy(
             sceneId = derivedSceneId,
             captureId = derivedCaptureId,
-            remotePrefix = remotePrefix ?: buildRemotePrefix(
-                creatorId = creatorId ?: "anonymous",
+            remotePrefix = remotePrefix ?: CaptureUploadContract.buildRemotePrefix(
+                sceneId = derivedSceneId,
                 captureId = derivedCaptureId,
             ),
         )
-    }
-
-    private fun buildRemotePrefix(
-        creatorId: String,
-        captureId: String,
-    ): String {
-        val creatorSegment = sanitizePathSegment(creatorId)
-        val captureSegment = sanitizePathSegment(captureId)
-        return "captures/$creatorSegment/$captureSegment/"
     }
 
     private fun contentTypeFor(file: File): String {
@@ -1100,13 +1135,6 @@ class CaptureUploadRepository @Inject constructor(
                 "mp4" -> "video/mp4"
                 else -> "application/octet-stream"
             }
-    }
-
-    private fun sanitizePathSegment(value: String): String {
-        return value.lowercase()
-            .replace(SEGMENT_SANITIZE_REGEX, "-")
-            .trim('-')
-            .ifBlank { "capture" }
     }
 
     private fun uniqueWorkName(id: String): String = "$WORK_TAG-$id"
@@ -1152,7 +1180,6 @@ class CaptureUploadRepository @Inject constructor(
         const val WORK_TAG = "capture_upload"
         const val MAX_AUTO_RETRIES = 5
         const val AUTO_CLEAR_DELAY_MS = 4_000L
-        val SEGMENT_SANITIZE_REGEX = "[^a-z0-9._-]+".toRegex()
     }
 }
 

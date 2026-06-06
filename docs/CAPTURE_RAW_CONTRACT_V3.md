@@ -186,6 +186,24 @@ Required fields:
 - `rights_profile`
 - `requested_outputs`
 
+`requested_outputs` may include `robot_eval_dataset` to request the
+pre-publication Site/Task/Scenario/Eval Card package, task thresholds, and
+publication readiness gate. It may include `task_evaluation_run` when the
+capture should also be routed toward a robot-team Task Evaluation Run request.
+The bridge normalizes those outputs into `robot_eval_dataset`,
+`task_evaluation_run`, and `evaluation_prep` lanes in `pipeline_handoff.json`.
+
+Optional advisory fields may seed Pipeline CPU/pre-GPU review:
+
+- `task_anchor_candidates` or `robot_eval_task_anchors`
+- `scene_asset_hints` or `robot_eval_scene_assets`
+- `robot_profiles` or `robot_eval_robot_profiles`
+- `route_anchors.route_anchors`
+
+These fields are hints only. They do not prove metric scale, collision
+readiness, simulator execution, policy success, robot readiness, deployment
+readiness, or safety validation.
+
 `capture_profile_id` values currently written:
 
 - `iphone_arkit_lidar`

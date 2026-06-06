@@ -51,14 +51,15 @@ final class UploadQueueViewModel: ObservableObject {
     func enqueueGlassesCapture(artifacts: GlassesCaptureManager.CaptureArtifacts, job: ScanJob) {
         let quotedPayoutCents = job.explicitPayoutCents
         let payoutEligible = quotedPayoutCents != nil
+        let hasUpstreamBootstrap = job.siteSubmissionId != nil || job.buyerRequestId != nil
         let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: job.id,
             reservationId: nil,
             jobId: job.id,
-            captureJobId: job.id,
+            captureJobId: hasUpstreamBootstrap ? job.id : nil,
             buyerRequestId: job.buyerRequestId,
-            siteSubmissionId: job.siteSubmissionId ?? job.id,
+            siteSubmissionId: job.siteSubmissionId,
             regionId: job.regionId,
             creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: artifacts.startedAt,
@@ -119,14 +120,15 @@ final class UploadQueueViewModel: ObservableObject {
 
     func simulateUITestUpload(for job: ScanJob) {
             let now = Date()
+            let hasUpstreamBootstrap = job.siteSubmissionId != nil || job.buyerRequestId != nil
             let metadata = CaptureUploadMetadata(
             id: UUID(),
             targetId: job.id,
             reservationId: nil,
             jobId: job.id,
-            captureJobId: job.id,
+            captureJobId: hasUpstreamBootstrap ? job.id : nil,
             buyerRequestId: job.buyerRequestId,
-            siteSubmissionId: job.siteSubmissionId ?? job.id,
+            siteSubmissionId: job.siteSubmissionId,
             regionId: job.regionId,
             creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: now,

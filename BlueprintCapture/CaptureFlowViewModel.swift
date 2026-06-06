@@ -619,8 +619,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let explicitPayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange
-        let metadataCaptureJobId = reviewSeed?.captureJobId ?? (isSpaceReviewMode ? nil : jobId)
-        let metadataSiteSubmissionId = reviewSeed?.siteSubmissionId ?? (isSpaceReviewMode ? nil : jobId)
+        let metadataCaptureJobId = reviewSeed?.captureJobId
+        let metadataSiteSubmissionId = reviewSeed?.siteSubmissionId
         let contextParts = [currentTargetInfo?.name, currentAddress, spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty]
         let seedIntakePacket = (reviewSeed?.intakePacket?.isComplete == true) ? reviewSeed?.intakePacket : nil
         let seedIntakeMetadata = seedIntakePacket.map { _ in CaptureIntakeMetadata(source: .authoritative) }
