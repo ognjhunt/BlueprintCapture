@@ -252,6 +252,15 @@ struct ScanRecordingView: View {
             .buttonStyle(BlueprintPrimaryButtonStyle())
             .accessibilityIdentifier("scan-recording-back")
 
+        case .finished:
+            Button {
+                dismiss()
+            } label: {
+                Text("Back to capture feed")
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .accessibilityIdentifier("scan-recording-back")
+
         case .error:
             VStack(spacing: 10) {
                 Button {

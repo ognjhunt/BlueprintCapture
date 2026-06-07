@@ -31,7 +31,7 @@ struct SpaceReviewSeed: Identifiable, Equatable {
         siteSubmissionId: String? = nil,
         regionId: String? = nil,
         rightsProfile: String? = nil,
-        requestedOutputs: [String] = ["qualification", "review_intake"],
+        requestedOutputs: [String] = CaptureRequestedOutputs.reviewIntake,
         suggestedContext: String? = nil,
         intakePacket: QualificationIntakePacket? = nil,
         captureRights: CaptureRightsMetadata? = nil,
@@ -55,16 +55,7 @@ struct SpaceReviewSeed: Identifiable, Equatable {
 }
 
 private func normalizeRequestedOutputs(_ outputs: [String]) -> [String] {
-    var normalized: [String] = []
-    for output in outputs {
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !normalized.contains(trimmed) else { continue }
-        normalized.append(trimmed)
-    }
-    if normalized.contains("preview_simulation") && !normalized.contains("deeper_evaluation") {
-        normalized.append("deeper_evaluation")
-    }
-    return normalized
+    CaptureRequestedOutputs.normalized(outputs)
 }
 
 enum SiteWorldSiteScale: String, CaseIterable, Identifiable {
@@ -614,8 +605,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         let requestedOutputs = normalizeRequestedOutputs(
             reviewSeed?.requestedOutputs
                 ?? (isSpaceReviewMode
-                    ? ["qualification", "review_intake"]
-                    : ["qualification", "preview_simulation", "deeper_evaluation"])
+                    ? CaptureRequestedOutputs.reviewIntake
+                    : CaptureRequestedOutputs.robotEvaluation)
         )
         let rightsProfile = reviewSeed?.rightsProfile ?? (isSpaceReviewMode ? "review_required" : nil)
         let explicitPayoutRange = currentTargetInfo?.estimatedPayoutRange ?? reviewSeed?.payoutRange

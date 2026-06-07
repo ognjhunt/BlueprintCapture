@@ -26,6 +26,8 @@ import app.blueprint.capture.data.capture.SiteIdentity
 import app.blueprint.capture.data.capture.TaskHypothesis
 import app.blueprint.capture.data.capture.isComplete
 import app.blueprint.capture.data.model.CaptureLaunch
+import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -292,9 +294,18 @@ data class CaptureReviewDraft(
             taskHypothesis = taskHypothesis,
             quotedPayoutCents = capture.quotedPayoutCents,
             rightsProfile = capture.rightsProfile,
-            requestedOutputs = capture.requestedOutputs.ifEmpty {
-                listOf("qualification", "review_intake")
-            },
+            requestedOutputs = CaptureRequestedOutputs.normalize(
+                capture.requestedOutputs.ifEmpty {
+                    if (
+                        capture.permissionTone == CapturePermissionTone.Approved ||
+                        !capture.siteSubmissionId.isNullOrBlank()
+                    ) {
+                        CaptureRequestedOutputs.RobotEvaluation
+                    } else {
+                        CaptureRequestedOutputs.ReviewIntake
+                    }
+                },
+            ),
             motionSampleCount = motionSampleCount,
         )
     }

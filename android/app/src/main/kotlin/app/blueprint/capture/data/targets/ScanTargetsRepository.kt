@@ -4,6 +4,7 @@ import android.util.Log
 import android.location.Location
 import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.model.DemoData
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.data.model.VenuePermission
@@ -104,6 +105,16 @@ class ScanTargetsRepository @Inject constructor(
                         }
                         val rightsProfile = doc.getString("rights_profile")
                         val venuePermission = doc.venuePermission(rightsProfile)
+                        val permissionTone = doc.permissionTone(readyNow, rightsProfile)
+                        val requestedOutputs = CaptureRequestedOutputs.normalize(
+                            doc.stringList("requested_outputs").ifEmpty {
+                                if (permissionTone == CapturePermissionTone.Approved) {
+                                    CaptureRequestedOutputs.RobotEvaluation
+                                } else {
+                                    CaptureRequestedOutputs.ReviewIntake
+                                }
+                            },
+                        )
 
                         ScanTarget(
                             id = doc.id,
@@ -118,7 +129,7 @@ class ScanTargetsRepository @Inject constructor(
                             addressText = address.ifBlank { subtitle },
                             categoryLabel = doc.getString("category")?.uppercase(),
                             estimatedMinutes = estimatedMinutes,
-                            permissionTone = doc.permissionTone(readyNow, rightsProfile),
+                            permissionTone = permissionTone,
                             imageUrl = doc.getString("preview_url") ?: doc.getString("image_url"),
                             workflowName = doc.getString("workflow_name") ?: title,
                             workflowSteps = workflowSteps,
@@ -127,8 +138,7 @@ class ScanTargetsRepository @Inject constructor(
                             siteSubmissionId = doc.getString("site_submission_id"),
                             quotedPayoutCents = doc.number("quoted_payout_cents")
                                 ?: doc.number("payout_cents"),
-                            requestedOutputs = doc.stringList("requested_outputs")
-                                .ifEmpty { listOf("qualification") },
+                            requestedOutputs = requestedOutputs,
                             rightsProfile = rightsProfile,
                             lat = lat,
                             lng = lng,

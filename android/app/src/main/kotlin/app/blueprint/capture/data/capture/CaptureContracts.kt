@@ -1,5 +1,6 @@
 package app.blueprint.capture.data.capture
 
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -66,7 +67,7 @@ data class AndroidCaptureBundleRequest(
     @SerialName("task_hypothesis") val taskHypothesis: TaskHypothesis? = null,
     @SerialName("quoted_payout_cents") val quotedPayoutCents: Int? = null,
     @SerialName("rights_profile") val rightsProfile: String? = null,
-    @SerialName("requested_outputs") val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
+    @SerialName("requested_outputs") val requestedOutputs: List<String> = CaptureRequestedOutputs.ReviewIntake,
     // Phase 2 world-model fields
     @SerialName("site_identity") val siteIdentity: SiteIdentity? = null,
     @SerialName("capture_topology") val captureTopology: CaptureTopologyMetadata? = null,

@@ -206,13 +206,14 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
   "capture_job_id": "string|null",
   "region_id": "string|null",
   "rights_profile": "string|null",
-  "requested_outputs": ["qualification", "preview_simulation"],
+  "requested_outputs": ["qualification", "robot_eval_dataset", "task_evaluation_run"],
   "scene_memory_capture": {},
   "capture_rights": {},
   "task_site_context": {},
   "identity": {},
-  "requested_lanes": ["qualification", "scene_memory", "preview_simulation"],
-  "preview_simulation_requested": true,
+  "requested_lanes": ["evaluation_prep", "robot_eval_dataset", "task_evaluation_run"],
+  "preview_simulation_requested": false,
+  "robot_eval_dataset_requested": true,
   "worldlabs_request_manifest_uri": "gs://...",
   "worldlabs_input_manifest_uri": "gs://...",
   "worldlabs_input_video_uri": "gs://...",
@@ -271,7 +272,7 @@ It includes:
 
 - raw, descriptor, and QA URIs
 - `raw_prefix`, `raw_prefix_uri`, and `pipeline_status_event` for the completed raw upload
-- `requested_outputs` and normalized `requested_lanes`
+- `requested_outputs` and routing `requested_lanes`
 - business identifiers such as `site_submission_id`, `buyer_request_id`, and `capture_job_id`
 - task/site context lifted from capture intake
 - rights and scene-memory blocks

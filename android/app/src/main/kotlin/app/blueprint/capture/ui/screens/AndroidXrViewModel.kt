@@ -24,6 +24,7 @@ import app.blueprint.capture.data.glasses.AndroidXrProjectedPlatform
 import app.blueprint.capture.data.glasses.GlassesCapabilities
 import app.blueprint.capture.data.glasses.androidxr.AndroidXrProjectedLaunch
 import app.blueprint.capture.data.model.CaptureLaunch
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import androidx.xr.projected.ProjectedContext
 import androidx.xr.projected.experimental.ExperimentalProjectedApi
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -252,7 +253,15 @@ private fun CaptureLaunch.toAndroidXrBundleRequest(
         intakeMetadata = CaptureIntakeMetadata(source = CaptureIntakeSource.HumanManual),
         quotedPayoutCents = quotedPayoutCents,
         rightsProfile = rightsProfile,
-        requestedOutputs = requestedOutputs.ifEmpty { listOf("qualification", "review_intake") },
+        requestedOutputs = CaptureRequestedOutputs.normalize(
+            requestedOutputs.ifEmpty {
+                if (!siteSubmissionId.isNullOrBlank() || !targetId.isNullOrBlank()) {
+                    CaptureRequestedOutputs.RobotEvaluation
+                } else {
+                    CaptureRequestedOutputs.ReviewIntake
+                }
+            },
+        ),
         siteIdentity = SiteIdentity(
             siteId = siteId,
             siteIdSource = siteIdSource ?: if (!siteSubmissionId.isNullOrBlank()) {

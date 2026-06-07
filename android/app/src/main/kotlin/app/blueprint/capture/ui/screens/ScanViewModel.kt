@@ -14,6 +14,7 @@ import app.blueprint.capture.data.capture.SubmissionSummary
 import app.blueprint.capture.data.config.LocalConfigProvider
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.model.DemandOpportunityFeedRequest
 import app.blueprint.capture.data.model.OpportunityCandidatePlace
 import app.blueprint.capture.data.model.RankedNearbyOpportunity
@@ -384,7 +385,7 @@ class ScanViewModel @Inject constructor(
             checkinRadiusM = 999_999,
             priorityWeight = 100.0,
             quotedPayoutCents = null,
-            requestedOutputs = listOf("qualification", "review_intake"),
+            requestedOutputs = CaptureRequestedOutputs.ReviewIntake,
             rightsProfile = "open_capture_review",
             workflowName = "Open Capture Here",
             workflowSteps = listOf(
@@ -459,7 +460,7 @@ private fun NearbyPlace.toNearbyScanTarget(userLocation: Location): ScanTarget {
             "Walk the accessible common areas in one continuous pass.",
             "Pause at major transitions and call out blocked or restricted areas.",
         ),
-        requestedOutputs = listOf("qualification", "review_intake"),
+        requestedOutputs = CaptureRequestedOutputs.ReviewIntake,
         quotedPayoutCents = metadata.payoutCents,
         lat = lat,
         lng = lng,
@@ -508,7 +509,7 @@ private fun RankedNearbyOpportunity.toNearbyScanTarget(userLocation: Location): 
                 "Pause at major transitions and call out blocked or restricted areas.",
             )
         },
-        requestedOutputs = listOf("qualification", "review_intake"),
+        requestedOutputs = CaptureRequestedOutputs.ReviewIntake,
         quotedPayoutCents = metadata.payoutCents,
         lat = lat,
         lng = lng,

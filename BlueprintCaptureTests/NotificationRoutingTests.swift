@@ -63,6 +63,11 @@ struct NotificationRoutingTests {
         {
           "request_id": "req_123",
           "capture_job_id": "job_456",
+          "buyer_request_id": "buyer_789",
+          "site_submission_id": "site_101",
+          "region_id": "durham-nc",
+          "rights_profile": "documented_permission",
+          "requested_outputs": ["qualification", "robot_eval_dataset", "task_evaluation_run"],
           "target_name": "Dock A",
           "address_label": "11 Warehouse Way",
           "capture_brief": "Capture approved dock approach and threshold.",
@@ -76,6 +81,11 @@ struct NotificationRoutingTests {
 
         #expect(metadata.requestId == "req_123")
         #expect(metadata.captureJobId == "job_456")
+        #expect(metadata.buyerRequestId == "buyer_789")
+        #expect(metadata.siteSubmissionId == "site_101")
+        #expect(metadata.regionId == "durham-nc")
+        #expect(metadata.rightsProfile == "documented_permission")
+        #expect(metadata.requestedOutputs == ["qualification", "robot_eval_dataset", "task_evaluation_run"])
         #expect(metadata.targetName == "Dock A")
         #expect(metadata.addressLabel == "11 Warehouse Way")
         #expect(metadata.allowedAdvisoryHints == ["hold_steady", "slow_down"])

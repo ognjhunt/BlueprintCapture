@@ -828,7 +828,9 @@ final class GlassesUploadViewModel: ObservableObject {
             priorityWeight: 1.0,
             quotedPayoutCents: nil,
             rightsProfile: nil,
-            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            requestedOutputs: targetId == nil
+                ? CaptureRequestedOutputs.reviewIntake
+                : CaptureRequestedOutputs.robotEvaluation,
             intakePacket: nil,
             intakeMetadata: nil,
             taskHypothesis: nil,

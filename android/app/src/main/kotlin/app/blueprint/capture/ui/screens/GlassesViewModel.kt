@@ -25,6 +25,7 @@ import app.blueprint.capture.data.glasses.GlassesCaptureManager
 import app.blueprint.capture.data.glasses.GlassesCaptureArtifacts
 import app.blueprint.capture.data.glasses.GlassesCaptureState
 import app.blueprint.capture.data.model.CaptureLaunch
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.config.LocalConfigProvider
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.types.DeviceIdentifier
@@ -516,7 +517,15 @@ private fun CaptureLaunch.toGlassesBundleRequest(
         intakeMetadata = CaptureIntakeMetadata(source = CaptureIntakeSource.HumanManual),
         quotedPayoutCents = quotedPayoutCents,
         rightsProfile = rightsProfile,
-        requestedOutputs = requestedOutputs.ifEmpty { listOf("qualification", "review_intake") },
+        requestedOutputs = CaptureRequestedOutputs.normalize(
+            requestedOutputs.ifEmpty {
+                if (!siteSubmissionId.isNullOrBlank() || !targetId.isNullOrBlank()) {
+                    CaptureRequestedOutputs.RobotEvaluation
+                } else {
+                    CaptureRequestedOutputs.ReviewIntake
+                }
+            },
+        ),
         siteIdentity = SiteIdentity(
             siteId = siteId,
             siteIdSource = siteIdSource ?: if (!siteSubmissionId.isNullOrBlank()) {

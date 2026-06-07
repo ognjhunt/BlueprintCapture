@@ -582,7 +582,7 @@ final class ScanHomeViewModel: ObservableObject {
                 "I understand qualification, privacy, and rights checks can block downstream use.",
             ],
             rightsProfile: nil,
-            requestedOutputs: ["qualification", "review_intake"],
+            requestedOutputs: CaptureRequestedOutputs.reviewIntake,
             workflowName: "Open Capture Here",
             workflowSteps: [
                 "Confirm rights and consent for this capture.",
@@ -1029,7 +1029,7 @@ extension ScanHomeViewModel {
                 "Downstream use still depends on privacy, provenance, and rights review."
             ],
             rightsProfile: "approved_launch_target",
-            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            requestedOutputs: CaptureRequestedOutputs.robotEvaluation,
             workflowName: "Approved launch target",
             workflowSteps: workflowSteps,
             targetKPI: priorityNote,
@@ -1165,7 +1165,7 @@ extension ScanHomeViewModel {
             recaptureReason: nil,
             rightsChecklist: ["Treat as inferred nearby candidate until Blueprint review completes"],
             rightsProfile: "review_required",
-            requestedOutputs: ["qualification", "review_intake"],
+            requestedOutputs: CaptureRequestedOutputs.reviewIntake,
             workflowName: suggestedWorkflows.first ?? "Inferred nearby candidate review",
             workflowSteps: workflowSteps,
             targetKPI: nil,

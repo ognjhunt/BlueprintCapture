@@ -1,6 +1,7 @@
 package app.blueprint.capture.ui.screens
 
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.model.ScanTarget
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -47,6 +48,6 @@ class ScanOpenCaptureParityTest {
         estimatedMinutes = 10,
         permissionTone = CapturePermissionTone.Review,
         detailChecklist = emptyList(),
-        requestedOutputs = listOf("qualification"),
+        requestedOutputs = CaptureRequestedOutputs.ReviewIntake,
     )
 }

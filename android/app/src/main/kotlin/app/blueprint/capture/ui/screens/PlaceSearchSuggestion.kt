@@ -3,6 +3,7 @@ package app.blueprint.capture.ui.screens
 import app.blueprint.capture.data.capture.SiteGeoPoint
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.places.PlaceDetails
 import app.blueprint.capture.data.places.PlacePrediction
 import java.util.Locale
@@ -63,7 +64,7 @@ fun PlaceSearchSuggestion.toOpenCaptureLaunch(
         workflowName = "Space review",
         workflowSteps = listOf(workflowContext),
         detailChecklist = defaultSubmissionChecklist,
-        requestedOutputs = listOf("qualification", "review_intake"),
+        requestedOutputs = CaptureRequestedOutputs.ReviewIntake,
         placeId = siteId,
         siteIdSource = "open_capture",
         latitude = details?.lat,

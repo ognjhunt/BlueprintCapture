@@ -6,6 +6,7 @@ process.env.GCLOUD_PROJECT = "test-project";
 
 const {
   buildRawCaptureLineageFields,
+  buildPipelineHandoffPayload,
   buildPipelineStatusEvent,
   buildRobotEvalHandoffFields,
   buildTaskSiteContext,
@@ -216,6 +217,114 @@ test("buildRobotEvalHandoffFields carries publication package and missing-proof 
       "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
   });
   assert.deepEqual(fields.robot_eval_publication_blockers, ["missing_capture_job_id"]);
+});
+
+test("buildPipelineHandoffPayload carries bridge descriptor and robot eval inputs", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "7"
+  );
+  assert.ok(pathInfo);
+  const routing = deriveRequestedRouting({
+    requested_outputs: ["qualification", "robot_eval_dataset", "task_evaluation_run"],
+  });
+  const taskSiteContext = buildTaskSiteContext({
+    task_text_hint: "Move totes from receiving to shelf staging",
+    target_kpi: "Complete in under 45 seconds with zero collisions",
+    zone: "receiving",
+    task_anchor_candidates: [{ task_id: "move_tote", confidence: "capturer_hint" }],
+  });
+  const identity = {
+    site_submission_id: "site-submission-1",
+    buyer_request_id: "buyer-request-1",
+    capture_job_id: "capture-job-1",
+    hosted_review_blockers: [],
+  };
+  const robotEvalHandoff = buildRobotEvalHandoffFields({
+    routing,
+    taskSiteContext,
+    identity,
+  });
+  const pipelineStatusEvent = buildPipelineStatusEvent({
+    bucketName: "test-bucket",
+    pathInfo,
+    objectName: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    objectKind: "completion_marker",
+    qaStatus: "passed",
+    pipelineHandoffUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/pipeline_handoff.json",
+  });
+
+  const payload = buildPipelineHandoffPayload({
+    bucketName: "test-bucket",
+    pathInfo,
+    objectName: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    objectKind: "completion_marker",
+    manifest: {
+      site_submission_id: "site-submission-1",
+      buyer_request_id: "buyer-request-1",
+      capture_job_id: "capture-job-1",
+      region_id: "bay-area",
+      rights_profile: "documented_permission",
+    },
+    captureSource: "iphone",
+    rawCaptureLineage: {
+      source_device: "iphone",
+      capture_modality: "iphone_video",
+      raw_video_uri:
+        "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov",
+      media_metadata: { width: 1920, height: 1080 },
+      privacy_lineage: { status: "raw_private" },
+      provenance_lineage: { source: "capture_client" },
+    },
+    qaStatus: "passed",
+    routing,
+    rawPrefixUri: "gs://test-bucket/scenes/scene-123/captures/capture-456/raw",
+    framesIndexUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/frames/index.jsonl",
+    captureDescriptorUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/capture_descriptor.json",
+    qaReportUri: "gs://test-bucket/scenes/scene-123/captures/capture-456/qa_report.json",
+    pipelineHandoffUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/pipeline_handoff.json",
+    keyframeUri:
+      "gs://test-bucket/scenes/scene-123/captures/capture-456/frames/frame_000001.jpg",
+    pipelineStatusEvent,
+    taskSiteContext,
+    sceneMemoryCapture: { sensor_availability: { arkit_poses: true } },
+    captureRights: { consent_status: "documented_permission" },
+    identity,
+    worldlabsPreview: {},
+    robotEvalHandoff,
+  });
+
+  assert.equal(payload.capture_descriptor_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/capture_descriptor.json");
+  assert.equal(payload.pipeline_handoff_uri, "gs://test-bucket/scenes/scene-123/captures/capture-456/pipeline_handoff.json");
+  assert.deepEqual(payload.requested_outputs, [
+    "qualification",
+    "robot_eval_dataset",
+    "task_evaluation_run",
+  ]);
+  assert.deepEqual(payload.requested_lanes, [
+    "qualification",
+    "evaluation_prep",
+    "robot_eval_dataset",
+    "task_evaluation_run",
+  ]);
+  assert.equal(payload.site_submission_id, "site-submission-1");
+  assert.equal(payload.buyer_request_id, "buyer-request-1");
+  assert.equal(payload.capture_job_id, "capture-job-1");
+  assert.equal(payload.robot_eval_dataset_requested, true);
+  assert.deepEqual(payload.robot_eval_cpu_preflight_inputs, {
+    task_anchor_candidates: [{ task_id: "move_tote", confidence: "capturer_hint" }],
+    scene_asset_hints: [],
+    robot_profile_candidates: [],
+    route_anchor_candidates: [],
+    source_policy:
+      "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
+    claim_boundary:
+      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+  });
 });
 
 test("buildPipelineStatusEvent emits canonical raw upload completion trigger payload", () => {

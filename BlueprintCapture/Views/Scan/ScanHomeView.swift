@@ -162,7 +162,8 @@ struct ScanHomeView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenScanJobDetail)) { note in
             guard let jobId = note.userInfo?["jobId"] as? String else { return }
-            Task { await openJobDetail(jobId: jobId) }
+            let handoffMetadata = note.userInfo?["handoffMetadata"] as? CaptureHandoffMetadata
+            Task { await openJobDetail(jobId: jobId, handoffMetadata: handoffMetadata) }
         }
         .onReceive(NotificationCenter.default.publisher(for: ActivationFunnelStore.changedNotification)) { _ in
             activationSnapshot = ActivationFunnelStore.shared.snapshot()
@@ -839,6 +840,12 @@ struct ScanHomeView: View {
             .joined(separator: " • ")
         let isApprovedLaunchScope = item.permissionTier == .approved
         let hasUpstreamBootstrap = item.job.siteSubmissionId != nil || item.job.buyerRequestId != nil
+        let defaultRequestedOutputs = (isApprovedLaunchScope || hasUpstreamBootstrap)
+            ? CaptureRequestedOutputs.robotEvaluation
+            : CaptureRequestedOutputs.reviewIntake
+        let requestedOutputs = item.job.requestedOutputs.isEmpty
+            ? defaultRequestedOutputs
+            : CaptureRequestedOutputs.normalized(item.job.requestedOutputs)
         let intakePacket = item.job.qualificationIntakePacket
         let approvedIntakePacket = (isApprovedLaunchScope && intakePacket.isComplete) ? intakePacket : nil
         let captureRights: CaptureRightsMetadata? = isApprovedLaunchScope ? CaptureRightsMetadata(
@@ -861,7 +868,7 @@ struct ScanHomeView: View {
             siteSubmissionId: item.job.siteSubmissionId,
             regionId: item.job.regionId,
             rightsProfile: item.job.rightsProfile,
-            requestedOutputs: item.job.requestedOutputs.isEmpty ? ["qualification", "review_intake"] : item.job.requestedOutputs,
+            requestedOutputs: requestedOutputs,
             suggestedContext: suggestedContext.nilIfEmpty,
             intakePacket: approvedIntakePacket,
             captureRights: captureRights,
@@ -875,7 +882,7 @@ struct ScanHomeView: View {
         }
     }
 
-    private func openJobDetail(jobId: String) async {
+    private func openJobDetail(jobId: String, handoffMetadata: CaptureHandoffMetadata? = nil) async {
         if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
             handleItemSelection(match)
             return
@@ -883,7 +890,31 @@ struct ScanHomeView: View {
         await viewModel.refresh()
         if let match = viewModel.items.first(where: { $0.job.id == jobId }) {
             handleItemSelection(match)
+            return
         }
+        if let handoffMetadata {
+            await MainActor.run {
+                reviewSubmissionSeed = reviewSeed(from: handoffMetadata)
+            }
+        }
+    }
+
+    private func reviewSeed(from metadata: CaptureHandoffMetadata) -> SpaceReviewSeed {
+        let requestedOutputs = metadata.requestedOutputs.isEmpty
+            ? CaptureRequestedOutputs.robotEvaluation
+            : metadata.requestedOutputs
+        return SpaceReviewSeed(
+            id: metadata.captureJobId,
+            title: metadata.targetName,
+            address: metadata.addressLabel,
+            captureJobId: metadata.captureJobId,
+            buyerRequestId: metadata.buyerRequestId,
+            siteSubmissionId: metadata.siteSubmissionId,
+            regionId: metadata.regionId,
+            rightsProfile: metadata.rightsProfile,
+            requestedOutputs: requestedOutputs,
+            suggestedContext: metadata.captureBrief
+        )
     }
 
     private func handleItemSelection(_ item: ScanHomeViewModel.JobItem) {

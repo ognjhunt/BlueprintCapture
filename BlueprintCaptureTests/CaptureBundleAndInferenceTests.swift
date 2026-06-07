@@ -770,7 +770,7 @@ struct CaptureBundleAndInferenceTests {
             siteSubmissionId: "durham-nc-ccb-plaza",
             regionId: "durham-nc",
             rightsProfile: "approved_launch_target",
-            requestedOutputs: ["qualification", "preview_simulation", "deeper_evaluation"],
+            requestedOutputs: ["qualification", "robot_eval_dataset", "task_evaluation_run"],
             suggestedContext: "public plaza common access",
             intakePacket: intake,
             captureRights: rights,
@@ -814,6 +814,7 @@ struct CaptureBundleAndInferenceTests {
         #expect(pending.metadata.captureMode?.requestedMode == "site_world_candidate")
         #expect(pending.metadata.rightsProfile == "approved_launch_target")
         #expect(pending.metadata.specialTaskType == .curatedNearby)
+        #expect(pending.metadata.requestedOutputs == ["qualification", "robot_eval_dataset", "task_evaluation_run"])
     }
 
     @Test

@@ -18,6 +18,41 @@ enum class MainTab {
     Profile,
 }
 
+object CaptureRequestedOutputs {
+    val ReviewIntake = listOf("qualification", "review_intake")
+    val RobotEvaluation = listOf("qualification", "robot_eval_dataset", "task_evaluation_run")
+
+    fun normalize(outputs: List<String>): List<String> {
+        val normalized = outputs
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .toMutableList()
+        val asksForLegacyEvaluation =
+            normalized.contains("preview_simulation") ||
+                normalized.contains("deeper_evaluation")
+        val asksForRobotEvaluation =
+            normalized.contains("robot_eval_dataset") ||
+                normalized.contains("task_evaluation_run")
+        if (asksForLegacyEvaluation || asksForRobotEvaluation) {
+            normalized.appendIfMissing("robot_eval_dataset")
+        }
+        if (normalized.contains("deeper_evaluation") || normalized.contains("task_evaluation_run")) {
+            normalized.appendIfMissing("task_evaluation_run")
+        }
+        if (normalized.contains("preview_simulation") && !normalized.contains("deeper_evaluation")) {
+            normalized.appendIfMissing("deeper_evaluation")
+        }
+        return normalized
+    }
+
+    private fun MutableList<String>.appendIfMissing(output: String) {
+        if (!contains(output)) {
+            add(output)
+        }
+    }
+}
+
 data class CaptureLaunch(
     val label: String,
     val categoryLabel: String? = null,
@@ -39,7 +74,7 @@ data class CaptureLaunch(
     val workflowSteps: List<String> = emptyList(),
     val zone: String? = null,
     val owner: String? = null,
-    val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
+    val requestedOutputs: List<String> = CaptureRequestedOutputs.ReviewIntake,
     val quotedPayoutCents: Int? = null,
     val rightsProfile: String? = null,
     val autoStartRecorder: Boolean = false,
@@ -103,7 +138,7 @@ data class ScanTarget(
     val owner: String? = null,
     val siteSubmissionId: String? = null,
     val quotedPayoutCents: Int? = null,
-    val requestedOutputs: List<String> = listOf("qualification", "review_intake"),
+    val requestedOutputs: List<String> = CaptureRequestedOutputs.ReviewIntake,
     val rightsProfile: String? = null,
     // Phase 2 location + ranking fields
     val lat: Double? = null,

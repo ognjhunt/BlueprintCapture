@@ -435,6 +435,44 @@ struct CaptureCapabilitiesMetadata: Equatable, Codable {
     let geometryExpectedDownstream: Bool
 }
 
+enum CaptureRequestedOutputs {
+    static let reviewIntake = ["qualification", "review_intake"]
+    static let robotEvaluation = ["qualification", "robot_eval_dataset", "task_evaluation_run"]
+
+    static func normalized(_ outputs: [String]) -> [String] {
+        var normalized: [String] = []
+        for output in outputs {
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !normalized.contains(trimmed) else { continue }
+            normalized.append(trimmed)
+        }
+
+        let asksForLegacyEvaluation =
+            normalized.contains("preview_simulation") ||
+            normalized.contains("deeper_evaluation")
+        let asksForRobotEvaluation =
+            normalized.contains("robot_eval_dataset") ||
+            normalized.contains("task_evaluation_run")
+
+        if asksForLegacyEvaluation || asksForRobotEvaluation {
+            append("robot_eval_dataset", to: &normalized)
+        }
+        if normalized.contains("deeper_evaluation") || normalized.contains("task_evaluation_run") {
+            append("task_evaluation_run", to: &normalized)
+        }
+        if normalized.contains("preview_simulation") && !normalized.contains("deeper_evaluation") {
+            append("deeper_evaluation", to: &normalized)
+        }
+        return normalized
+    }
+
+    private static func append(_ output: String, to values: inout [String]) {
+        if !values.contains(output) {
+            values.append(output)
+        }
+    }
+}
+
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo

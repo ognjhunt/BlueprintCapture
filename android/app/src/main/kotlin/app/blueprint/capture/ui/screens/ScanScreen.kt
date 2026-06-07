@@ -92,6 +92,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 import app.blueprint.capture.data.model.ScanTarget
 import app.blueprint.capture.ui.theme.BlueprintBlack
 import app.blueprint.capture.ui.theme.BlueprintBorder
@@ -2727,7 +2728,15 @@ private fun ScanTarget.toLaunch(autoStartRecorder: Boolean = false): CaptureLaun
         workflowSteps = workflowSteps,
         zone = zone,
         owner = owner,
-        requestedOutputs = requestedOutputs.ifEmpty { listOf("qualification", "review_intake") },
+        requestedOutputs = CaptureRequestedOutputs.normalize(
+            requestedOutputs.ifEmpty {
+                if (permissionTone == CapturePermissionTone.Approved) {
+                    CaptureRequestedOutputs.RobotEvaluation
+                } else {
+                    CaptureRequestedOutputs.ReviewIntake
+                }
+            },
+        ),
         quotedPayoutCents = quotedPayoutCents,
         rightsProfile = rightsProfile,
         autoStartRecorder = autoStartRecorder,

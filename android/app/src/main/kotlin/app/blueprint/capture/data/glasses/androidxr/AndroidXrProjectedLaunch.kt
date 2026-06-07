@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import app.blueprint.capture.GlassesProjectedActivity
 import app.blueprint.capture.data.model.CaptureLaunch
+import app.blueprint.capture.data.model.CaptureRequestedOutputs
 
 object AndroidXrProjectedLaunch {
     private const val EXTRA_LABEL = "xr_capture_label"
@@ -65,8 +66,10 @@ object AndroidXrProjectedLaunch {
             workflowSteps = intent.getStringArrayListExtra(EXTRA_WORKFLOW_STEPS).orEmpty(),
             zone = intent.getStringExtra(EXTRA_ZONE),
             owner = intent.getStringExtra(EXTRA_OWNER),
-            requestedOutputs = intent.getStringArrayListExtra(EXTRA_REQUESTED_OUTPUTS).orEmpty()
-                .ifEmpty { listOf("qualification", "review_intake") },
+            requestedOutputs = CaptureRequestedOutputs.normalize(
+                intent.getStringArrayListExtra(EXTRA_REQUESTED_OUTPUTS).orEmpty()
+                    .ifEmpty { CaptureRequestedOutputs.ReviewIntake },
+            ),
             quotedPayoutCents = intent.getIntExtra(EXTRA_QUOTED_PAYOUT_CENTS, -1).takeIf { it >= 0 },
             rightsProfile = intent.getStringExtra(EXTRA_RIGHTS_PROFILE),
         )

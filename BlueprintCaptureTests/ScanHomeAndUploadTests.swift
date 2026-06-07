@@ -492,7 +492,7 @@ struct ScanHomeAndUploadTests {
         #expect(job.payoutCents == 0)
         #expect(job.quotedPayoutCents == nil)
         #expect(job.rightsProfile == "approved_launch_target")
-        #expect(job.requestedOutputs == ["qualification", "preview_simulation", "deeper_evaluation"])
+        #expect(job.requestedOutputs == ["qualification", "robot_eval_dataset", "task_evaluation_run"])
         #expect(job.demandSourceKinds == ["city_launch_approved"])
         #expect(ScanHomeViewModel.permissionTier(for: job) == .approved)
     }

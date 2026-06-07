@@ -39,6 +39,11 @@ struct CaptureHandoffMetadata: Equatable, Sendable, Decodable {
 
     let requestId: String
     let captureJobId: String
+    let buyerRequestId: String?
+    let siteSubmissionId: String?
+    let regionId: String?
+    let rightsProfile: String?
+    let requestedOutputs: [String]
     let targetName: String
     let addressLabel: String
     let captureBrief: String?
@@ -51,6 +56,16 @@ struct CaptureHandoffMetadata: Equatable, Sendable, Decodable {
         case requestIdSnake = "request_id"
         case captureJobId
         case captureJobIdSnake = "capture_job_id"
+        case buyerRequestId
+        case buyerRequestIdSnake = "buyer_request_id"
+        case siteSubmissionId
+        case siteSubmissionIdSnake = "site_submission_id"
+        case regionId
+        case regionIdSnake = "region_id"
+        case rightsProfile
+        case rightsProfileSnake = "rights_profile"
+        case requestedOutputs
+        case requestedOutputsSnake = "requested_outputs"
         case targetName
         case targetNameSnake = "target_name"
         case addressLabel
@@ -69,6 +84,13 @@ struct CaptureHandoffMetadata: Equatable, Sendable, Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         requestId = try container.decodeString(.requestId, .requestIdSnake)
         captureJobId = try container.decodeString(.captureJobId, .captureJobIdSnake)
+        buyerRequestId = try container.decodeOptionalString(.buyerRequestId, .buyerRequestIdSnake)
+        siteSubmissionId = try container.decodeOptionalString(.siteSubmissionId, .siteSubmissionIdSnake)
+        regionId = try container.decodeOptionalString(.regionId, .regionIdSnake)
+        rightsProfile = try container.decodeOptionalString(.rightsProfile, .rightsProfileSnake)
+        requestedOutputs = CaptureRequestedOutputs.normalized(
+            try container.decodeOptionalStrings(.requestedOutputs, .requestedOutputsSnake) ?? []
+        )
         targetName = try container.decodeString(.targetName, .targetNameSnake)
         addressLabel = try container.decodeString(.addressLabel, .addressLabelSnake)
         captureBrief = try container.decodeOptionalString(.captureBrief, .captureBriefSnake)

@@ -190,8 +190,12 @@ Required fields:
 pre-publication Site/Task/Scenario/Eval Card package, task thresholds, and
 publication readiness gate. It may include `task_evaluation_run` when the
 capture should also be routed toward a robot-team Task Evaluation Run request.
-The bridge normalizes those outputs into `robot_eval_dataset`,
-`task_evaluation_run`, and `evaluation_prep` lanes in `pipeline_handoff.json`.
+The bridge carries those outputs through `pipeline_handoff.json` and includes
+`robot_eval_dataset` / `task_evaluation_run` routing labels. `BlueprintCapturePipeline`
+treats those labels as aliases for the current executable stages:
+`robot_eval_dataset` resolves through `qualification -> evaluation_prep`, and
+`task_evaluation_run` resolves through
+`qualification -> evaluation_prep -> simulation_automation`.
 
 Optional advisory fields may seed Pipeline CPU/pre-GPU review:
 
@@ -266,7 +270,7 @@ Example:
   "video_codec": "h264",
   "color_space": "bt709",
   "rights_profile": "documented_permission",
-  "requested_outputs": ["qualification", "scene_memory", "preview_simulation"]
+  "requested_outputs": ["qualification", "robot_eval_dataset", "task_evaluation_run"]
 }
 ```
 
@@ -384,7 +388,7 @@ Example:
   "capture_job_id": "job_321",
   "region_id": "nyc_metro",
   "capture_source": "iphone_video",
-  "requested_outputs": ["qualification", "scene_memory", "preview_simulation"],
+  "requested_outputs": ["qualification", "robot_eval_dataset", "task_evaluation_run"],
   "capture_modality": "iphone_arkit_lidar",
   "evidence_tier": "qualified_metric_capture",
   "task_text_hint": "Inbound pallet walk",
@@ -1127,7 +1131,8 @@ Hard fail:
 - `capture_upload_complete.json` identity does not match path identity.
 - `scene_id` or `capture_id` mismatch between path and sidecars.
 - `coordinate_frame_session_id` mismatch between ARKit sidecars.
-- `rights_consent.json` missing when `requested_outputs` includes `scene_memory` or `preview_simulation`.
+- `rights_consent.json` missing when `requested_outputs` includes `scene_memory`,
+  `preview_simulation`, `robot_eval_dataset`, or `task_evaluation_run`.
 
 Downgrade from `pose_assisted` to `video_only`:
 - Pose match coverage below threshold.

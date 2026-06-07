@@ -588,6 +588,75 @@ export function buildPipelineStatusEvent(input: {
   };
 }
 
+export function buildPipelineHandoffPayload(input: {
+  bucketName: string;
+  pathInfo: CapturePathInfo;
+  objectName: string;
+  objectKind: string;
+  manifest: Record<string, unknown> | null;
+  captureSource: string;
+  rawCaptureLineage: Record<string, unknown>;
+  qaStatus: string;
+  routing: {
+    requestedOutputs: string[];
+    requestedLanes: string[];
+  };
+  rawPrefixUri: string;
+  framesIndexUri: string;
+  captureDescriptorUri: string;
+  qaReportUri: string;
+  pipelineHandoffUri: string;
+  keyframeUri: string | null;
+  pipelineStatusEvent: Record<string, unknown>;
+  taskSiteContext: Record<string, unknown>;
+  sceneMemoryCapture: Record<string, unknown>;
+  captureRights: Record<string, unknown>;
+  identity: Record<string, unknown>;
+  worldlabsPreview: Record<string, unknown>;
+  robotEvalHandoff: Record<string, unknown>;
+  generatedAt?: string;
+}): Record<string, unknown> {
+  return {
+    schema_version: "v1",
+    handoff_source: "BlueprintCapture.extractFrames",
+    handoff_topic: PIPELINE_HANDOFF_TOPIC,
+    handoff_trigger_object: input.objectName,
+    handoff_trigger_kind: input.objectKind,
+    scene_id: input.pathInfo.sceneId,
+    capture_id: input.pathInfo.captureId,
+    site_submission_id: asString(input.manifest?.site_submission_id) ?? null,
+    buyer_request_id: asString(input.manifest?.buyer_request_id) ?? null,
+    capture_job_id: asString(input.manifest?.capture_job_id) ?? null,
+    region_id: asString(input.manifest?.region_id) ?? null,
+    rights_profile: asString(input.manifest?.rights_profile) ?? null,
+    capture_source: input.captureSource,
+    source_device: input.rawCaptureLineage.source_device,
+    capture_modality: input.rawCaptureLineage.capture_modality,
+    raw_video_uri: input.rawCaptureLineage.raw_video_uri,
+    media_metadata: input.rawCaptureLineage.media_metadata,
+    qa_status: input.qaStatus,
+    requested_outputs: input.routing.requestedOutputs,
+    requested_lanes: input.routing.requestedLanes,
+    raw_prefix_uri: input.rawPrefixUri,
+    raw_prefix: input.pathInfo.rawPrefix,
+    frames_index_uri: input.framesIndexUri,
+    capture_descriptor_uri: input.captureDescriptorUri,
+    qa_report_uri: input.qaReportUri,
+    pipeline_handoff_uri: input.pipelineHandoffUri,
+    keyframe_uri: input.keyframeUri,
+    pipeline_status_event: input.pipelineStatusEvent,
+    task_site_context: input.taskSiteContext,
+    scene_memory_capture: input.sceneMemoryCapture,
+    capture_rights: input.captureRights,
+    privacy_lineage: input.rawCaptureLineage.privacy_lineage,
+    provenance_lineage: input.rawCaptureLineage.provenance_lineage,
+    identity: input.identity,
+    ...input.worldlabsPreview,
+    ...input.robotEvalHandoff,
+    generated_at: input.generatedAt ?? new Date().toISOString(),
+  };
+}
+
 export function validateIdentityMapping(input: {
   manifest: Record<string, unknown> | null;
   completionMarker: Record<string, unknown> | null;
@@ -1707,45 +1776,30 @@ export const extractFrames = onObjectFinalized(
         contentType: "application/json",
       });
 
-    const pipelineHandoffPayload: Record<string, unknown> = {
-      schema_version: "v1",
-      handoff_source: "BlueprintCapture.extractFrames",
-      handoff_topic: PIPELINE_HANDOFF_TOPIC,
-      handoff_trigger_object: objectName,
-      handoff_trigger_kind: objectKind,
-      scene_id: pathInfo.sceneId,
-      capture_id: pathInfo.captureId,
-      site_submission_id: asString(manifest?.site_submission_id) ?? null,
-      buyer_request_id: asString(manifest?.buyer_request_id) ?? null,
-      capture_job_id: asString(manifest?.capture_job_id) ?? null,
-      region_id: asString(manifest?.region_id) ?? null,
-      rights_profile: asString(manifest?.rights_profile) ?? null,
-      capture_source: captureSource,
-      source_device: rawCaptureLineage.source_device,
-      capture_modality: rawCaptureLineage.capture_modality,
-      raw_video_uri: rawCaptureLineage.raw_video_uri,
-      media_metadata: rawCaptureLineage.media_metadata,
-      qa_status: finalStatus,
-      requested_outputs: routing.requestedOutputs,
-      requested_lanes: routing.requestedLanes,
-      raw_prefix_uri: rawPrefixUri,
-      raw_prefix: pathInfo.rawPrefix,
-      frames_index_uri: framesIndexUri,
-      capture_descriptor_uri: captureDescriptorUri,
-      qa_report_uri: qaReportUri,
-      pipeline_handoff_uri: pipelineHandoffUri,
-      keyframe_uri: keyframeUri,
-      pipeline_status_event: pipelineStatusEvent,
-      task_site_context: taskSiteContext,
-      scene_memory_capture: sceneMemoryCapture,
-      capture_rights: captureRights,
-      privacy_lineage: rawCaptureLineage.privacy_lineage,
-      provenance_lineage: rawCaptureLineage.provenance_lineage,
+    const pipelineHandoffPayload = buildPipelineHandoffPayload({
+      bucketName,
+      pathInfo,
+      objectName,
+      objectKind,
+      manifest,
+      captureSource,
+      rawCaptureLineage,
+      qaStatus: finalStatus,
+      routing,
+      rawPrefixUri,
+      framesIndexUri,
+      captureDescriptorUri,
+      qaReportUri,
+      pipelineHandoffUri,
+      keyframeUri,
+      pipelineStatusEvent,
+      taskSiteContext,
+      sceneMemoryCapture,
+      captureRights,
       identity: identityValidation.identity,
-      ...worldlabsPreview,
-      ...robotEvalHandoff,
-      generated_at: new Date().toISOString(),
-    };
+      worldlabsPreview,
+      robotEvalHandoff,
+    });
 
     let handoffMessageId: string;
     try {

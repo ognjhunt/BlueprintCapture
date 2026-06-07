@@ -33,8 +33,7 @@ final class CorePathUITests: XCTestCase {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let approvedTask = app.buttons["capturer-task-ui_test_job_approved"]
-        XCTAssertTrue(approvedTask.waitForExistence(timeout: 10))
+        let approvedTask = waitForApprovedTask(in: app)
         approvedTask.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
@@ -50,8 +49,7 @@ final class CorePathUITests: XCTestCase {
         let app = configuredApp(scenario: "corePath")
         app.launch()
 
-        let approvedTask = app.buttons["capturer-task-ui_test_job_approved"]
-        XCTAssertTrue(approvedTask.waitForExistence(timeout: 10))
+        let approvedTask = waitForApprovedTask(in: app)
         approvedTask.tap()
 
         let stopButton = app.buttons["scan-recording-stop"]
@@ -81,5 +79,19 @@ final class CorePathUITests: XCTestCase {
         app.launchEnvironment["BLUEPRINT_UI_TEST_MODE"] = "1"
         app.launchEnvironment["BLUEPRINT_UI_TEST_SCENARIO"] = scenario
         return app
+    }
+
+    private func waitForApprovedTask(in app: XCUIApplication) -> XCUIElement {
+        let approvedTask = app.buttons["capturer-task-ui_test_job_approved"]
+        if approvedTask.waitForExistence(timeout: 10) {
+            return approvedTask
+        }
+
+        let scrollView = app.scrollViews.firstMatch
+        for _ in 0..<4 where !approvedTask.exists {
+            scrollView.swipeUp()
+        }
+        XCTAssertTrue(approvedTask.waitForExistence(timeout: 3))
+        return approvedTask
     }
 }
