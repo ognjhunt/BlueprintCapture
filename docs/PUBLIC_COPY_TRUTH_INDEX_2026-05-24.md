@@ -68,6 +68,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md` | Current source-of-truth | Approved/blocked copy guardrail for capturer-facing language. |
 | `docs/DEMAND_DRIVEN_OPPORTUNITY_SERVICE_2026-03.md` | Current source-of-truth | Internal service spec; marketplace mechanics are not public supply claims. |
 | `docs/GPU_PIPELINE_COMPATIBILITY.md` | Current source-of-truth | Compatibility contract; provider/runtime support is not commercialization proof. |
+| `docs/MOBILE_RELEASE_PROOF_GAP_ANALYZER_2026-05-31.md` | Current source-of-truth | Repo-local validate-only release-proof gap report; blocked release config, device, distribution, payout, provider, and downstream proof remain blockers, not launch proof. |
 | `docs/NEXT_SESSION_ALPHA_READINESS_MASTER_PROMPT_2026-03-22.md` | Historical/internal | Next-session prompt; not launch state. |
 | `docs/NEXT_SESSION_ANDROID_XR_MASTER_PROMPT_2026-03-25.md` | Historical/internal | Android XR continuation prompt; not current hardware, public launch, provider, or Catalyst proof. |
 | `docs/NEXT_SESSION_TRUE_ERROR_SPECS_2026-03-18.md` | Historical/internal | Next-session prompt/spec; not current public copy. |
