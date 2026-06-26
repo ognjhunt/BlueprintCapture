@@ -40,4 +40,15 @@ struct OnboardingCaptureUXCopyTests {
         #expect(message == "We couldn't determine your location. Try again or enter the address manually.")
         #expect(!message.contains("kCLErrorDomain"))
     }
+
+    @MainActor
+    @Test
+    func captureFlowLocationFailureUsesHumanReadableGuidance() {
+        let viewModel = CaptureFlowViewModel()
+        let error = NSError(domain: kCLErrorDomain, code: CLError.Code.locationUnknown.rawValue)
+
+        viewModel.locationManager(CLLocationManager(), didFailWithError: error)
+
+        #expect(viewModel.locationError == "We couldn't determine your location yet. Try again or enter the address manually.")
+    }
 }

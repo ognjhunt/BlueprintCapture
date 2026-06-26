@@ -96,9 +96,9 @@ struct CaptureBundleAndInferenceTests {
             targetId: "scene-123",
             reservationId: nil,
             jobId: "scene-123",
-            captureJobId: "scene-123",
+            captureJobId: "capture-job-scene-123",
             buyerRequestId: "req-scene-123",
-            siteSubmissionId: "scene-123",
+            siteSubmissionId: "site-submission-scene-123",
             regionId: "bay-area",
             creatorId: "tester",
             capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
@@ -149,7 +149,9 @@ struct CaptureBundleAndInferenceTests {
         let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
         let manifest = try #require(manifestObject as? [String: Any])
         #expect(manifest["scene_id"] as? String == "scene-123")
-        #expect(manifest["site_submission_id"] as? String == "scene-123")
+        #expect(manifest["site_submission_id"] as? String == "site-submission-scene-123")
+        #expect(manifest["buyer_request_id"] as? String == "req-scene-123")
+        #expect(manifest["capture_job_id"] as? String == "capture-job-scene-123")
         #expect(manifest["video_uri"] as? String == "raw/walkthrough.mov")
         #expect(manifest["capture_modality"] as? String == "iphone_video_only")
         #expect(manifest["capture_profile_id"] as? String == "iphone_arkit_non_lidar")
@@ -200,7 +202,9 @@ struct CaptureBundleAndInferenceTests {
 
         let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
         let context = try #require(contextObject as? [String: Any])
-        #expect(context["site_submission_id"] as? String == "scene-123")
+        #expect(context["site_submission_id"] as? String == "site-submission-scene-123")
+        #expect(context["buyer_request_id"] as? String == "req-scene-123")
+        #expect(context["capture_job_id"] as? String == "capture-job-scene-123")
         #expect(context["intake_source"] as? String == "ai_inferred")
         #expect(context["intake_inference_model"] as? String == "gemini-3-flash-preview")
         #expect(context["task_hypothesis_status"] as? String == "accepted")
@@ -315,6 +319,87 @@ struct CaptureBundleAndInferenceTests {
         #expect(context["site_submission_id"] == nil)
         let contextUpstreamHandoff = try #require(context["upstream_handoff"] as? [String: Any])
         #expect(contextUpstreamHandoff["hosted_review_truth_state"] as? String == "blocked_missing_upstream_ids")
+    }
+
+    @Test
+    func finalizerNormalizesAndBlocksInvalidUpstreamIds() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-invalid-upstream-\(UUID().uuidString)", isDirectory: true)
+        let raw = root.appendingPathComponent("raw-source", isDirectory: true)
+        try fileManager.createDirectory(at: raw, withIntermediateDirectories: true)
+
+        let fixedCaptureUUID = try #require(UUID(uuidString: "11111111-1111-1111-1111-111111111111"))
+        let fixedCaptureId = fixedCaptureUUID.uuidString
+        try Data("video".utf8).write(to: raw.appendingPathComponent("walkthrough.mov"))
+        try makeRawManifestData(
+            sceneId: "scene-invalid-upstream",
+            captureId: fixedCaptureId,
+            videoUri: "raw/walkthrough.mov",
+            captureProfileId: "iphone_arkit_non_lidar",
+            captureCapabilities: [
+                "camera_pose": false,
+                "depth": false,
+                "motion": false
+            ]
+        ).write(to: raw.appendingPathComponent("manifest.json"))
+        try Data("".utf8).write(to: raw.appendingPathComponent("motion.jsonl"))
+
+        let metadata = CaptureUploadMetadata(
+            id: fixedCaptureUUID,
+            targetId: "scene-invalid-upstream",
+            reservationId: nil,
+            jobId: "job-invalid-upstream",
+            captureJobId: " \(fixedCaptureId) ",
+            buyerRequestId: " buyer-request-valid ",
+            siteSubmissionId: " placeholder-site-submission ",
+            regionId: nil,
+            creatorId: "tester",
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            uploadedAt: nil,
+            captureSource: .iphoneVideo,
+            specialTaskType: .buyerRequested,
+            priorityWeight: nil,
+            quotedPayoutCents: nil,
+            rightsProfile: "review_required",
+            requestedOutputs: ["robot_eval_dataset", "task_evaluation_run"],
+            intakePacket: nil,
+            intakeMetadata: nil,
+            taskHypothesis: nil,
+            scaffoldingPacket: nil,
+            captureModality: nil,
+            evidenceTier: nil,
+            captureContextHint: nil,
+            sceneMemory: nil,
+            captureRights: nil,
+            siteIdentity: nil,
+            captureTopology: nil,
+            captureMode: nil
+        )
+
+        let finalizer = CaptureBundleFinalizer()
+        let request = CaptureUploadRequest(packageURL: raw, metadata: metadata)
+        _ = try finalizer.finalize(request: request, mode: .localExport())
+        #expect(finalizer.validateRawBundle(in: raw).isEmpty)
+
+        let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("manifest.json")))
+        let manifest = try #require(manifestObject as? [String: Any])
+        #expect(manifest["site_submission_id"] is NSNull)
+        #expect(manifest["buyer_request_id"] as? String == "buyer-request-valid")
+        #expect(manifest["capture_job_id"] is NSNull)
+        let upstreamHandoff = try #require(manifest["upstream_handoff"] as? [String: Any])
+        #expect(upstreamHandoff["site_submission_id_present"] as? Bool == false)
+        #expect(upstreamHandoff["buyer_request_id_present"] as? Bool == true)
+        #expect(upstreamHandoff["capture_job_id_present"] as? Bool == false)
+        #expect((upstreamHandoff["blockers"] as? [String]) == [
+            "invalid_site_submission_id_placeholder",
+            "invalid_capture_job_id_matches_capture_id"
+        ])
+
+        let contextObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("capture_context.json")))
+        let context = try #require(contextObject as? [String: Any])
+        #expect(context["site_submission_id"] == nil)
+        #expect(context["buyer_request_id"] as? String == "buyer-request-valid")
+        #expect(context["capture_job_id"] == nil)
     }
 
     @Test

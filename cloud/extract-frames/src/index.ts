@@ -293,6 +293,39 @@ function asStringArray(value: unknown): string[] | undefined {
   return parsed.length > 0 ? parsed : [];
 }
 
+const UPSTREAM_PLACEHOLDER_PREFIXES = [
+  "placeholder",
+  "replace_me",
+  "dummy",
+  "sample",
+  "example",
+  "mock",
+];
+
+function invalidUpstreamIdBlockers(
+  fieldName: string,
+  value: string | null,
+  pathInfo: CapturePathInfo
+): string[] {
+  if (!value) return [];
+  const normalized = value.toLowerCase();
+  const blockers: string[] = [];
+  if (
+    UPSTREAM_PLACEHOLDER_PREFIXES.some(
+      (prefix) =>
+        normalized === prefix ||
+        normalized.startsWith(`${prefix}-`) ||
+        normalized.startsWith(`${prefix}_`)
+    )
+  ) {
+    blockers.push(`invalid_${fieldName}_placeholder`);
+  }
+  if (value === pathInfo.captureId) {
+    blockers.push(`invalid_${fieldName}_matches_capture_id`);
+  }
+  return blockers;
+}
+
 function normalizeCaptureSource(value: string | undefined): "iphone" | "android" | "glasses" | "unknown" {
   const normalized = (value ?? "").trim().toLowerCase();
   if (normalized === "iphone") return "iphone";
@@ -538,7 +571,7 @@ export function buildRobotEvalHandoffFields(input: {
         : "pipeline_default_publication_gate",
       target_kpi: targetKpi,
       zone,
-      claim_boundary: "capture_target_kpi_is_threshold_context_not_robot_readiness_proof",
+      claim_boundary: "capture_target_kpi_is_threshold_context_not_rank_fidelity_proof",
     },
     robot_eval_cpu_preflight_inputs: {
       task_anchor_candidates: taskAnchorCandidates,
@@ -548,7 +581,7 @@ export function buildRobotEvalHandoffFields(input: {
       source_policy:
         "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
       claim_boundary:
-        "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+        "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_rank_fidelity",
     },
     robot_eval_episode_spec_inputs: {
       task_anchor_candidate_count: taskAnchorCandidates.length,
@@ -677,6 +710,31 @@ export function validateIdentityMapping(input: {
   const captureJobId = asString(manifest?.capture_job_id) ?? null;
   const upstreamHandoff = asRecord(manifest?.upstream_handoff) ?? null;
   const upstreamHandoffBlockers = asStringArray(upstreamHandoff?.blockers) ?? [];
+  const invalidSiteSubmissionIdBlockers = invalidUpstreamIdBlockers(
+    "site_submission_id",
+    siteSubmissionId,
+    pathInfo
+  );
+  const invalidBuyerRequestIdBlockers = invalidUpstreamIdBlockers(
+    "buyer_request_id",
+    buyerRequestId,
+    pathInfo
+  );
+  const invalidCaptureJobIdBlockers = invalidUpstreamIdBlockers(
+    "capture_job_id",
+    captureJobId,
+    pathInfo
+  );
+  const invalidUpstreamBlockers = [
+    ...invalidSiteSubmissionIdBlockers,
+    ...invalidBuyerRequestIdBlockers,
+    ...invalidCaptureJobIdBlockers,
+  ];
+  const safeSiteSubmissionId =
+    invalidSiteSubmissionIdBlockers.length === 0 ? siteSubmissionId : null;
+  const safeBuyerRequestId =
+    invalidBuyerRequestIdBlockers.length === 0 ? buyerRequestId : null;
+  const safeCaptureJobId = invalidCaptureJobIdBlockers.length === 0 ? captureJobId : null;
 
   const blockReasons: string[] = [];
   const warnings: string[] = [];
@@ -697,23 +755,24 @@ export function validateIdentityMapping(input: {
   if (completionRawPrefix !== null && completionRawPrefix !== pathInfo.rawPrefix) {
     blockReasons.push("completion_raw_prefix_mismatch");
   }
-  if (!siteSubmissionId) {
+  if (!safeSiteSubmissionId && invalidSiteSubmissionIdBlockers.length === 0) {
     warnings.push("missing_site_submission_id");
     requiredUpstreamBlockers.push("missing_site_submission_id");
   }
-  if (!buyerRequestId) {
+  if (!safeBuyerRequestId && invalidBuyerRequestIdBlockers.length === 0) {
     warnings.push("missing_buyer_request_id");
     requiredUpstreamBlockers.push("missing_buyer_request_id");
   }
-  if (!captureJobId) {
+  if (!safeCaptureJobId && invalidCaptureJobIdBlockers.length === 0) {
     warnings.push("missing_capture_job_id");
     requiredUpstreamBlockers.push("missing_capture_job_id");
   }
-  if (!buyerRequestId && !captureJobId) {
+  blockReasons.push(...invalidUpstreamBlockers);
+  if (!safeBuyerRequestId && !safeCaptureJobId) {
     warnings.push("missing_business_request_identifier");
   }
   const hostedReviewBlockers = Array.from(
-    new Set([...requiredUpstreamBlockers, ...upstreamHandoffBlockers])
+    new Set([...requiredUpstreamBlockers, ...invalidUpstreamBlockers, ...upstreamHandoffBlockers])
   );
   for (const blocker of hostedReviewBlockers) {
     warnings.push(`hosted_review_blocker:${blocker}`);
@@ -729,9 +788,9 @@ export function validateIdentityMapping(input: {
       manifest_capture_id: manifestCaptureId,
       completion_scene_id: completionSceneId,
       completion_capture_id: completionCaptureId,
-      site_submission_id: siteSubmissionId,
-      buyer_request_id: buyerRequestId,
-      capture_job_id: captureJobId,
+      site_submission_id: safeSiteSubmissionId,
+      buyer_request_id: safeBuyerRequestId,
+      capture_job_id: safeCaptureJobId,
       upstream_handoff: upstreamHandoff,
       hosted_review_blockers: hostedReviewBlockers,
       completion_raw_prefix: completionRawPrefix,

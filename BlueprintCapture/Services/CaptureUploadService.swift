@@ -1193,9 +1193,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return payload
     }
 
+    private func normalizedExternalId(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
     private func resolvedBuyerRequestId(for request: CaptureUploadRequest) -> String? {
-        if let explicit = request.metadata.buyerRequestId?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !explicit.isEmpty {
+        if let explicit = normalizedExternalId(request.metadata.buyerRequestId) {
             return explicit
         }
         if let siteIdentity = request.metadata.siteIdentity,
@@ -1216,7 +1220,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     ) -> [String: Any] {
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
-        let assignmentState = request.metadata.captureJobId == nil
+        let captureJobId = normalizedExternalId(request.metadata.captureJobId)
+        let siteSubmissionId = normalizedExternalId(request.metadata.siteSubmissionId)
+        let assignmentState = captureJobId == nil
             ? "unassigned_or_open_capture"
             : "assigned_capture_job"
 
@@ -1254,13 +1260,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         if includeSubmittedAt {
             payload["submitted_at"] = Timestamp(date: recordedAt)
         }
-        if let captureJobId = request.metadata.captureJobId {
+        if let captureJobId {
             payload["capture_job_id"] = captureJobId
         }
         if let buyerRequestId = resolvedBuyerRequestId(for: request) {
             payload["buyer_request_id"] = buyerRequestId
         }
-        if let siteSubmissionId = request.metadata.siteSubmissionId {
+        if let siteSubmissionId {
             payload["site_submission_id"] = siteSubmissionId
         }
         if let regionId = request.metadata.regionId {
@@ -1432,7 +1438,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func captureAssignmentState(for request: CaptureUploadRequest) -> String {
-        request.metadata.captureJobId == nil
+        normalizedExternalId(request.metadata.captureJobId) == nil
             ? "unassigned_or_open_capture"
             : "assigned_capture_job"
     }
@@ -1444,6 +1450,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     ) -> [String: Any] {
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
+        let captureJobId = normalizedExternalId(request.metadata.captureJobId)
+        let siteSubmissionId = normalizedExternalId(request.metadata.siteSubmissionId)
         var payload: [String: Any] = [
             "capture_id": captureId,
             "scene_id": sceneId,
@@ -1469,13 +1477,13 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             ]
         ]
 
-        if let captureJobId = request.metadata.captureJobId {
+        if let captureJobId {
             payload["capture_job_id"] = captureJobId
         }
         if let buyerRequestId = resolvedBuyerRequestId(for: request) {
             payload["buyer_request_id"] = buyerRequestId
         }
-        if let siteSubmissionId = request.metadata.siteSubmissionId {
+        if let siteSubmissionId {
             payload["site_submission_id"] = siteSubmissionId
         }
         if let regionId = request.metadata.regionId {

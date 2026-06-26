@@ -205,8 +205,8 @@ Optional advisory fields may seed Pipeline CPU/pre-GPU review:
 - `route_anchors.route_anchors`
 
 These fields are hints only. They do not prove metric scale, collision
-readiness, simulator execution, policy success, robot readiness, deployment
-readiness, or safety validation.
+readiness, simulator execution, policy success, generated-world rank fidelity, deployment
+readiness, or off-scope validation.
 
 `capture_profile_id` values currently written:
 

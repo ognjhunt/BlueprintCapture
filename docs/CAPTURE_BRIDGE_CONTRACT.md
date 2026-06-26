@@ -285,7 +285,7 @@ It includes:
   `task_thresholds`, and `publication_readiness`
 - `robot_eval_missing_proof_labels` for robot POV, demos, action logs, actual
   outcomes, and six structured robot-team submission modalities
-- `robot_eval_task_thresholds` as target-KPI context only, not robot readiness
+- `robot_eval_task_thresholds` as target-KPI context only, not generated-world rank fidelity
   or safety proof
 - `robot_eval_cpu_preflight_inputs` with advisory task-anchor candidates, scene
   asset hints, robot-profile candidates, and route-anchor candidates for
@@ -297,7 +297,7 @@ It includes:
 
 Those CPU/episode fields are candidate inputs only. Raw capture evidence,
 Pipeline validators, and proof-boundary manifests remain authoritative for
-scale, collision, simulator, policy, robot-readiness, and safety claims.
+scale, collision, simulator, policy, rank-fidelity, and safety claims.
 
 `pipeline_status_event` is the canonical automation trigger shape:
 

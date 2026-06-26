@@ -774,6 +774,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let blockers: [String]
     }
 
+    private struct NormalizedUpstreamId {
+        let value: String?
+        let blockers: [String]
+    }
+
     private struct UploadCompletionFile: Codable {
         let schemaVersion: String
         let sceneId: String
@@ -1258,27 +1263,54 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         ]
     }
 
-    private func upstreamHandoff(for request: CaptureUploadRequest) -> UpstreamHandoffMetadata {
-        let siteSubmissionId = request.metadata.siteSubmissionId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let buyerRequestId = request.metadata.buyerRequestId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-        let captureJobId = request.metadata.captureJobId?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+    private func normalizedUpstreamId(
+        _ rawValue: String?,
+        fieldName: String,
+        captureId: String
+    ) -> NormalizedUpstreamId {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty else {
+            return NormalizedUpstreamId(value: nil, blockers: ["missing_\(fieldName)"])
+        }
+
+        let normalized = value.lowercased()
+        let placeholderPrefixes = ["placeholder", "replace_me", "dummy", "sample", "example", "mock"]
+        if placeholderPrefixes.contains(where: { normalized == $0 || normalized.hasPrefix("\($0)-") || normalized.hasPrefix("\($0)_") }) {
+            return NormalizedUpstreamId(value: nil, blockers: ["invalid_\(fieldName)_placeholder"])
+        }
+        if value == captureId {
+            return NormalizedUpstreamId(value: nil, blockers: ["invalid_\(fieldName)_matches_capture_id"])
+        }
+
+        return NormalizedUpstreamId(value: value, blockers: [])
+    }
+
+    private func upstreamHandoff(for request: CaptureUploadRequest, captureId: String) -> UpstreamHandoffMetadata {
+        let siteSubmission = normalizedUpstreamId(
+            request.metadata.siteSubmissionId,
+            fieldName: "site_submission_id",
+            captureId: captureId
+        )
+        let buyerRequest = normalizedUpstreamId(
+            request.metadata.buyerRequestId,
+            fieldName: "buyer_request_id",
+            captureId: captureId
+        )
+        let captureJob = normalizedUpstreamId(
+            request.metadata.captureJobId,
+            fieldName: "capture_job_id",
+            captureId: captureId
+        )
         var blockers: [String] = []
-        if siteSubmissionId == nil {
-            blockers.append("missing_site_submission_id")
-        }
-        if buyerRequestId == nil {
-            blockers.append("missing_buyer_request_id")
-        }
-        if captureJobId == nil {
-            blockers.append("missing_capture_job_id")
-        }
+        blockers.append(contentsOf: siteSubmission.blockers)
+        blockers.append(contentsOf: buyerRequest.blockers)
+        blockers.append(contentsOf: captureJob.blockers)
         return UpstreamHandoffMetadata(
-            siteSubmissionId: siteSubmissionId,
-            buyerRequestId: buyerRequestId,
-            captureJobId: captureJobId,
-            siteSubmissionIdPresent: siteSubmissionId != nil,
-            buyerRequestIdPresent: buyerRequestId != nil,
-            captureJobIdPresent: captureJobId != nil,
+            siteSubmissionId: siteSubmission.value,
+            buyerRequestId: buyerRequest.value,
+            captureJobId: captureJob.value,
+            siteSubmissionIdPresent: siteSubmission.value != nil,
+            buyerRequestIdPresent: buyerRequest.value != nil,
+            captureJobIdPresent: captureJob.value != nil,
             hostedReviewTruthState: blockers.isEmpty ? "upstream_ids_present" : "blocked_missing_upstream_ids",
             blockers: blockers
         )
@@ -1327,13 +1359,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let evidence = inspectEvidence(in: directory, request: request)
         let capabilities = evidence.captureCapabilities
         let topology = effectiveCaptureTopology(for: request, directory: directory)
-        let upstreamHandoff = upstreamHandoff(for: request)
+        let upstreamHandoff = upstreamHandoff(for: request, captureId: captureId)
         let derivedScaffolding = Array(Set((request.metadata.scaffoldingPacket?.scaffoldingUsed ?? []).filter { !$0.hasPrefix("arkit_") } + evidence.derivedScaffoldingUsed)).sorted()
         json["scene_id"] = sceneId
         json["capture_id"] = captureId
-        json["site_submission_id"] = request.metadata.siteSubmissionId ?? NSNull()
-        json["buyer_request_id"] = request.metadata.buyerRequestId ?? NSNull()
-        json["capture_job_id"] = request.metadata.captureJobId ?? NSNull()
+        json["site_submission_id"] = upstreamHandoff.siteSubmissionId ?? NSNull()
+        json["buyer_request_id"] = upstreamHandoff.buyerRequestId ?? NSNull()
+        json["capture_job_id"] = upstreamHandoff.captureJobId ?? NSNull()
         json["upstream_handoff"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(upstreamHandoff))
         json["region_id"] = request.metadata.regionId as Any
         json["special_task_type"] = request.metadata.specialTaskType?.rawValue as Any
@@ -1430,7 +1462,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let normalizedRights = normalizedCaptureRights(for: request)
         let capabilities = evidence.captureCapabilities
         let taskHypothesis = request.metadata.taskHypothesis ?? synthesizedTaskHypothesis(for: request)
-        let upstreamHandoff = upstreamHandoff(for: request)
+        let captureId = CaptureBundleContext.captureIdentifier(for: request)
+        let upstreamHandoff = upstreamHandoff(for: request, captureId: captureId)
         let resolvedCaptureMode: CaptureModeMetadata? = request.metadata.captureMode.map { captureMode in
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
                 ? "site_world_candidate"
@@ -1444,10 +1477,10 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let context = CaptureContextFile(
             schemaVersion: "v1",
             sceneId: CaptureBundleContext.sceneIdentifier(for: request),
-            captureId: CaptureBundleContext.captureIdentifier(for: request),
-            siteSubmissionId: request.metadata.siteSubmissionId,
-            buyerRequestId: request.metadata.buyerRequestId,
-            captureJobId: request.metadata.captureJobId,
+            captureId: captureId,
+            siteSubmissionId: upstreamHandoff.siteSubmissionId,
+            buyerRequestId: upstreamHandoff.buyerRequestId,
+            captureJobId: upstreamHandoff.captureJobId,
             upstreamHandoff: upstreamHandoff,
             regionId: request.metadata.regionId,
             captureSource: request.metadata.captureSource.rawValue,

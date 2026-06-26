@@ -50,31 +50,23 @@ Core bundle files:
 - `motion.jsonl`
 - `semantic_anchor_observations.jsonl`
 
-<<<<<<< HEAD
-Modality-specific files:
+Modality-specific files are required only when the manifest capability/profile
+claims the corresponding raw evidence.
 
-- iPhone: `arkit/poses.jsonl`, `arkit/frames.jsonl`, `arkit/frame_quality.jsonl`, `arkit/session_intrinsics.json`
-- iPhone depth: `arkit/depth_manifest.json`, `arkit/confidence_manifest.json`, `arkit/depth/*.png`, `arkit/confidence/*.png`
-- Android ARCore: `arcore/poses.jsonl`, `arcore/frames.jsonl`, `arcore/session_intrinsics.json`, `arcore/tracking_state.jsonl`, `arcore/point_cloud.jsonl`, `arcore/planes.jsonl`, `arcore/light_estimates.jsonl`, `arcore/depth_manifest.json`, `arcore/confidence_manifest.json`
-- Glasses: `glasses/stream_metadata.json`, `glasses/frame_timestamps.jsonl`, `glasses/device_state.jsonl`, `glasses/health_events.jsonl`
-- Companion phone: `companion_phone/poses.jsonl`, `companion_phone/session_intrinsics.json`, `companion_phone/calibration.json`
-
-Optional high-value evidence:
-
-- `arkit/meshes/*.obj`
-=======
 ### iPhone / ARKit
 
 | File or Folder | Purpose |
 |------|---------|
 | `motion.jsonl` | Device motion samples |
 | `arkit/poses.jsonl` | Camera pose timeline |
-| `arkit/intrinsics.json` | Camera calibration |
+| `arkit/session_intrinsics.json` | Camera calibration |
 | `arkit/frames.jsonl` | ARKit frame timing |
+| `arkit/frame_quality.jsonl` | ARKit frame quality evidence |
+| `arkit/depth_manifest.json` | Depth manifest |
+| `arkit/confidence_manifest.json` | Depth confidence manifest |
 | `arkit/depth/*.png` | Depth evidence |
 | `arkit/confidence/*.png` | Depth confidence evidence |
-| `arkit/meshes/*.obj` | ARKit mesh evidence |
->>>>>>> c5e8ed3 (Sync platform context with bridge and GPU contracts)
+| `arkit/meshes/*.obj` | Optional high-value ARKit mesh evidence |
 
 ### Android / ARCore
 
@@ -106,29 +98,7 @@ Optional high-value evidence:
 
 Current raw bundles write `schema_version = "v3"` and `capture_schema_version = "3.1.0"`.
 
-<<<<<<< HEAD
 Required manifest fields include:
-=======
-```json
-{
-  "scene_id": "string",
-  "video_uri": "string",
-  "device_model": "string",
-  "os_version": "string",
-  "fps_source": 30.0,
-  "width": 1920,
-  "height": 1440,
-  "capture_start_epoch_ms": 1702137045123,
-  "has_lidar": true,
-  "depth_supported": true,
-  "capture_schema_version": "3.1.0",
-  "capture_source": "iphone|android|glasses",
-  "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses",
-  "capture_profile_id": "iphone_arkit_lidar|iphone_arkit_non_lidar|android_arcore_depth|android_arcore_pose_only|android_camera_only|glasses_pov|glasses_pov_companion_phone",
-  "capture_capabilities": {}
-}
-```
->>>>>>> c5e8ed3 (Sync platform context with bridge and GPU contracts)
 
 - `scene_id`
 - `capture_id`
@@ -153,9 +123,11 @@ Required manifest fields include:
 - `rights_profile`
 - `requested_outputs`
 
-<<<<<<< HEAD
 `capture_capabilities` must truthfully describe what was captured. It is not a downstream inference summary.
-=======
+
+`scene_memory_capture` and `capture_rights` preserve the downstream eligibility
+and rights posture without upgrading raw evidence:
+
 ```json
 {
   "scene_memory_capture": {
@@ -252,7 +224,6 @@ Finalized bundles always include `task_hypothesis.json`, even when the task hypo
 - `health_events.jsonl` preserves device health markers
 
 These files help downstream scene-memory derivation stay capture-backed.
->>>>>>> c5e8ed3 (Sync platform context with bridge and GPU contracts)
 
 The bridge must preserve the raw-vs-derived distinction:
 
@@ -264,20 +235,6 @@ The bridge must preserve the raw-vs-derived distinction:
 
 The bridge writes:
 
-<<<<<<< HEAD
-- `scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl`
-- `scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json`
-- `scenes/{scene_id}/captures/{capture_id}/qa_report.json`
-- `scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json`
-
-The bridge then publishes the finalized handoff payload to Pub/Sub topic `blueprint-capture-pipeline-handoff`.
-
-## Compatibility Notes
-
-- Legacy `android_phone` bundles may still be accepted during migration, but the canonical downstream contract is now `android`.
-- Generated scenes are downstream derived products, not raw truth.
-- There is no generation request payload in this repo’s contract.
-=======
 ```text
 scenes/{scene_id}/captures/{capture_id}/frames/index.jsonl
 scenes/{scene_id}/captures/{capture_id}/capture_descriptor.json
@@ -285,7 +242,15 @@ scenes/{scene_id}/captures/{capture_id}/qa_report.json
 scenes/{scene_id}/captures/{capture_id}/pipeline_handoff.json
 ```
 
-The bridge now triggers downstream pipeline orchestration by publishing `pipeline_handoff.json` to Pub/Sub after upload completion and QA materialization. See [CAPTURE_BRIDGE_CONTRACT.md](CAPTURE_BRIDGE_CONTRACT.md) for the full handoff contract.
+The bridge triggers downstream pipeline orchestration by publishing the finalized
+`pipeline_handoff.json` payload to Pub/Sub topic
+`blueprint-capture-pipeline-handoff` after upload completion and QA
+materialization. See [CAPTURE_BRIDGE_CONTRACT.md](CAPTURE_BRIDGE_CONTRACT.md)
+for the full handoff contract.
+
+## Compatibility Notes
 
 Legacy `android_phone` bundles may still be accepted during migration, but the canonical contract emitted downstream is now `android`.
->>>>>>> c5e8ed3 (Sync platform context with bridge and GPU contracts)
+
+Generated scenes are downstream derived products, not raw truth. There is no
+generation request payload in this repo's raw upload contract.

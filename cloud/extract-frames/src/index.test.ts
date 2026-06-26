@@ -49,9 +49,9 @@ test("validateIdentityMapping preserves missing upstream ids as hosted-review bl
       capture_id: "capture-456",
     },
     completionMarker: {
-      sceneId: "scene-123",
-      captureId: "capture-456",
-      rawPrefix: "scenes/scene-123/captures/capture-456/raw",
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      raw_prefix: "scenes/scene-123/captures/capture-456/raw",
     },
     pathInfo,
   });
@@ -64,6 +64,42 @@ test("validateIdentityMapping preserves missing upstream ids as hosted-review bl
     "missing_site_submission_id",
     "missing_buyer_request_id",
     "missing_capture_job_id",
+  ]);
+});
+
+test("validateIdentityMapping blocks placeholder and capture-derived upstream ids", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "0"
+  );
+  assert.ok(pathInfo);
+
+  const validation = validateIdentityMapping({
+    manifest: {
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      site_submission_id: "placeholder-site-submission",
+      buyer_request_id: " buyer-request-1 ",
+      capture_job_id: "capture-456",
+    },
+    completionMarker: {
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      raw_prefix: "scenes/scene-123/captures/capture-456/raw",
+    },
+    pathInfo,
+  });
+
+  assert.deepEqual(validation.blockReasons, [
+    "invalid_site_submission_id_placeholder",
+    "invalid_capture_job_id_matches_capture_id",
+  ]);
+  assert.equal(validation.identity.site_submission_id, null);
+  assert.equal(validation.identity.buyer_request_id, "buyer-request-1");
+  assert.equal(validation.identity.capture_job_id, null);
+  assert.deepEqual(validation.identity.hosted_review_blockers, [
+    "invalid_site_submission_id_placeholder",
+    "invalid_capture_job_id_matches_capture_id",
   ]);
 });
 
@@ -94,9 +130,9 @@ test("buildRobotEvalHandoffFields carries publication package and missing-proof 
       buyer_request_id: "buyer-request-1",
     },
     completionMarker: {
-      sceneId: "scene-123",
-      captureId: "capture-456",
-      rawPrefix: "scenes/scene-123/captures/capture-456/raw",
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      raw_prefix: "scenes/scene-123/captures/capture-456/raw",
     },
     pathInfo,
   });
@@ -173,7 +209,7 @@ test("buildRobotEvalHandoffFields carries publication package and missing-proof 
     threshold_source: "capture_manifest_target_kpi",
     target_kpi: "Complete in under 45 seconds with zero collisions",
     zone: "receiving",
-    claim_boundary: "capture_target_kpi_is_threshold_context_not_robot_readiness_proof",
+    claim_boundary: "capture_target_kpi_is_threshold_context_not_rank_fidelity_proof",
   });
   assert.deepEqual(fields.robot_eval_episode_spec_inputs, {
     task_anchor_candidate_count: 1,
@@ -214,7 +250,7 @@ test("buildRobotEvalHandoffFields carries publication package and missing-proof 
     source_policy:
       "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
     claim_boundary:
-      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_rank_fidelity",
   });
   assert.deepEqual(fields.robot_eval_publication_blockers, ["missing_capture_job_id"]);
 });
@@ -323,7 +359,7 @@ test("buildPipelineHandoffPayload carries bridge descriptor and robot eval input
     source_policy:
       "capture_handoff_candidates_only_raw_capture_and_pipeline_validators_remain_authoritative",
     claim_boundary:
-      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_robot_readiness",
+      "cpu_preflight_inputs_are_advisory_and_do_not_prove_scene_scale_collision_or_rank_fidelity",
   });
 });
 

@@ -375,6 +375,8 @@ private struct AuthStepView: View {
     let onContinue: () -> Void
 
     @StateObject private var vm = AuthViewModel()
+    @State private var isContinuingAsGuest = false
+    @State private var guestContinueError: String?
     @FocusState private var focusedField: AuthFocusField?
 
     enum AuthFocusField: Hashable { case name, email, password, confirmPassword }
@@ -385,15 +387,26 @@ private struct AuthStepView: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Color.clear
-                        .frame(height: 60)
+                    HStack {
+                        Spacer()
+                        Button(isContinuingAsGuest ? "Starting guest session..." : "Continue as guest") {
+                            Task { await continueAsGuest() }
+                        }
+                        .font(BlueprintTheme.body(14, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .disabled(isContinuingAsGuest || vm.isBusy)
+                        .accessibilityIdentifier("auth-continue-guest")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 60)
+                    .padding(.bottom, 26)
 
                     // Title
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Create your account")
                             .font(BlueprintTheme.display(34, weight: .semibold))
                             .foregroundStyle(BlueprintTheme.textPrimary)
-                        Text("Sign in so your first raw bundle can be attributed and uploaded.")
+                        Text("Sign in for account attribution, or continue with a guest session for review-gated capture.")
                             .font(BlueprintTheme.body(15, weight: .medium))
                             .foregroundStyle(BlueprintTheme.textSecondary)
                     }
@@ -501,6 +514,20 @@ private struct AuthStepView: View {
                             )
                         }
 
+                        if let err = guestContinueError, !err.isEmpty {
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.circle.fill").font(.caption)
+                                Text(err).font(.caption)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(Color(red: 0.95, green: 0.35, blue: 0.35))
+                            .padding(12)
+                            .background(
+                                Color.white.opacity(0.06),
+                                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            )
+                        }
+
                         // Submit
                         Button {
                             Task { await vm.submit() }
@@ -530,7 +557,24 @@ private struct AuthStepView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
+            if UserDeviceService.hasRegisteredAccount() {
+                onContinue()
+            }
+        }
+    }
+
+    @MainActor
+    private func continueAsGuest() async {
+        guestContinueError = nil
+        isContinuingAsGuest = true
+        defer { isContinuingAsGuest = false }
+
+        do {
+            _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
             onContinue()
+        } catch {
+            guestContinueError = (error as? LocalizedError)?.errorDescription
+                ?? "Blueprint could not start a guest session. Check your connection and try again."
         }
     }
 
@@ -898,10 +942,17 @@ private struct OnboardingPermissionsView: View {
             alertsManager.refreshNotificationStatus()
             await MainActor.run {
                 refreshStatuses()
+                cameraGranted = cameraGranted || cam
+                locationGranted = locationGranted || location
+                motionGranted = motionGranted || motion
                 UserDeviceService.setPermission("notifications", granted: notificationsGranted)
                 ActivationFunnelStore.shared.record(.permissionsGrantedOrBlocked, metadata: permissionMetadata())
                 isRequesting = false
-                if requiredGranted { onContinue() } else { showAlert = true }
+                if (cam && location && motion) || requiredGranted {
+                    onContinue()
+                } else {
+                    showAlert = true
+                }
             }
         }
     }
