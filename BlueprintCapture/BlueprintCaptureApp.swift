@@ -30,19 +30,14 @@ struct BlueprintCaptureApp: App {
             Group {
                 if RuntimeConfig.current.isUITesting {
                     UITestRootView()
-                } else if isOnboarded {
-                    LaunchCityGateRootView(viewModel: launchCityGateViewModel) {
-                        MainTabView(
-                            glassesManager: glassesManager,
-                            uploadQueue: uploadQueue,
-                            alertsManager: alertsManager
-                        )
-                    }
                 } else {
-                    OnboardingFlowView(
-                        glassesManager: glassesManager,
-                        alertsManager: alertsManager
-                    )
+                    // Redesigned BlueprintCapture UI (ink/paper/brass). The real
+                    // capture/upload managers stay alive and are injected for future
+                    // wiring; the new presentation layer is the shipping UI.
+                    BPAppRoot()
+                        .environmentObject(glassesManager)
+                        .environmentObject(uploadQueue)
+                        .environmentObject(alertsManager)
                 }
             }
             .onAppear {
@@ -61,7 +56,9 @@ struct BlueprintCaptureApp: App {
                 }
             }
             .environmentObject(notificationPreferences)
-            .preferredColorScheme(.dark)
+            // Paper is the default; the viewfinder, sign-in hero and balance panel
+            // declare `.dark` locally.
+            .preferredColorScheme(.light)
         }
     }
 }
