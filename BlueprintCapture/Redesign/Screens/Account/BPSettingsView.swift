@@ -27,7 +27,7 @@ struct BPSettingsView: View {
                     group("Alerts") {
                         toggleRow("Assignment alerts", "New assignments near you.", $assignmentAlerts)
                         BPDivider(color: BP.lineSoft)
-                        toggleRow("Payout updates", "Payout sent and processing updates.", $payoutUpdates)
+                        toggleRow("Payout status", "Provider setup, review, and manual payout status updates.", $payoutUpdates)
                         BPDivider(color: BP.lineSoft)
                         toggleRow("QA / recapture", "When a capture passes QA or needs recapture.", $qaRecapture)
                     }

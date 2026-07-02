@@ -39,7 +39,7 @@ struct BPSignInView: View {
 
     private var headline: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Capture real sites.\nGet paid for truthful evidence.")
+            Text("Capture real sites.\nTrack truthful evidence.")
                 .font(.bpDisplay(30))
                 .foregroundStyle(BP.onInk)
                 .fixedSize(horizontal: false, vertical: true)
@@ -52,7 +52,7 @@ struct BPSignInView: View {
 
     private var chips: some View {
         HStack(spacing: Space.s) {
-            ForEach(["Field instrument", "Privacy-aware", "Per-capture payout"], id: \.self) { label in
+            ForEach(["Field instrument", "Privacy-aware", "Review-gated"], id: \.self) { label in
                 Text(label)
                     .font(.bpSans(BPType.caption, .semibold))
                     .foregroundStyle(BP.onInk)

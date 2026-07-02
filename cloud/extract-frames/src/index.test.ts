@@ -36,7 +36,7 @@ test("parseCapturePath supports canonical scenes capture layout", () => {
   assert.equal(parsed?.capturesPrefix, "scenes/scene-123/captures/capture-456");
 });
 
-test("validateIdentityMapping preserves missing upstream ids as hosted-review blockers", () => {
+test("validateIdentityMapping blocks missing required upstream ids by default", () => {
   const pathInfo = parseCapturePath(
     "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
     "0"
@@ -56,10 +56,13 @@ test("validateIdentityMapping preserves missing upstream ids as hosted-review bl
     pathInfo,
   });
 
-  assert.equal(validation.blockReasons.length, 0);
-  assert.ok(validation.warnings.includes("missing_site_submission_id"));
+  assert.deepEqual(validation.blockReasons, [
+    "missing_site_submission_id",
+    "missing_capture_job_id",
+  ]);
+  assert.ok(!validation.warnings.includes("missing_site_submission_id"));
   assert.ok(validation.warnings.includes("missing_buyer_request_id"));
-  assert.ok(validation.warnings.includes("missing_capture_job_id"));
+  assert.ok(!validation.warnings.includes("missing_capture_job_id"));
   assert.deepEqual(validation.identity.hosted_review_blockers, [
     "missing_site_submission_id",
     "missing_buyer_request_id",

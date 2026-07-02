@@ -1,18 +1,18 @@
 import SwiftUI
 
-// MARK: - Earnings & payouts (tab: Earnings)
+// MARK: - Wallet status (tab: Earnings)
 
 struct BPEarningsView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
-    private let payouts = BPSample.payouts
+    private let history = BPSample.history
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
-                BPLargeTitle(eyebrow: "Wallet", title: "Earnings")
-                balanceCard
+                BPLargeTitle(eyebrow: "Wallet", title: "Review status")
+                providerUnavailableCard
                 statRow
-                payoutsSection
+                reviewHistorySection
             }
             .padding(.horizontal, Space.l)
             .padding(.top, Space.s)
@@ -23,57 +23,52 @@ struct BPEarningsView: View {
         .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
     }
 
-    private var balanceCard: some View {
+    private var providerUnavailableCard: some View {
         BPDarkPanel {
-            Text("Available balance")
+            Text("Payout setup unavailable")
                 .bpEyebrow(BP.onInk.opacity(0.6))
-            Text(BPFormat.currency(312.00))
-                .font(.bpMono(40))
+            Text("No live balance")
+                .font(.bpDisplay(30))
                 .foregroundStyle(BP.onInk)
-            Button(action: {}) {
-                Text("Cash out")
-            }
-            .buttonStyle(BPPrimaryButtonStyle())
-            .padding(.top, Space.xs)
+            Text("This build tracks capture review history. Payout onboarding and cashout stay hidden until backend provider readiness is enabled for the cohort.")
+                .font(.bpSans(BPType.caption, .regular))
+                .foregroundStyle(BP.onInk.opacity(0.68))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Space.xs)
         }
     }
 
     private var statRow: some View {
         HStack(spacing: Space.m) {
-            BPMetricStat(value: BPFormat.currency(1240, fractionDigits: 0), label: "This month")
-            BPMetricStat(value: "27", label: "Captures")
+            BPMetricStat(value: "3", label: "Reviewed")
+            BPMetricStat(value: "1", label: "Needs fix")
         }
     }
 
-    private var payoutsSection: some View {
+    private var reviewHistorySection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Recent payouts")
+            Text("Recent reviews")
                 .font(.bpSans(BPType.title, .semibold))
                 .tracking(BPTracking.headline)
                 .foregroundStyle(BP.textStrong)
             BPCard(padding: Space.s) {
-                ForEach(Array(payouts.enumerated()), id: \.element.id) { idx, payout in
+                ForEach(Array(history.enumerated()), id: \.element.id) { idx, item in
                     HStack(spacing: Space.m) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(payout.site)
+                            Text(item.site)
                                 .font(.bpSans(BPType.body, .semibold))
                                 .foregroundStyle(BP.textStrong)
                                 .lineLimit(1)
-                            Text(payout.date)
+                            Text(item.meta)
                                 .font(.bpMono(BPType.caption))
                                 .foregroundStyle(BP.textMuted)
                         }
                         Spacer(minLength: Space.s)
-                        VStack(alignment: .trailing, spacing: Space.s) {
-                            Text(BPFormat.currency(payout.amount))
-                                .font(.bpMono(BPType.body))
-                                .foregroundStyle(BP.textStrong)
-                            BPStatusChip(payout.status.label, signal: payout.status.signal)
-                        }
+                        BPStatusChip(item.status.label, signal: item.status.signal)
                     }
                     .padding(.horizontal, Space.s)
                     .padding(.vertical, Space.m)
-                    if idx < payouts.count - 1 { BPDivider(color: BP.lineSoft) }
+                    if idx < history.count - 1 { BPDivider(color: BP.lineSoft) }
                 }
             }
         }

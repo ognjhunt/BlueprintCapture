@@ -120,9 +120,9 @@ struct BPTaskDetailView: View {
     private var bottomBar: some View {
         HStack(spacing: Space.l) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Est. payout")
+                Text(task.estPayout == nil ? "Payout" : "Quoted payout")
                     .bpEyebrow()
-                Text(BPFormat.currency(task.estPayout))
+                Text(task.estPayout.map { BPFormat.currency($0) } ?? "Review gated")
                     .font(.bpMono(BPType.title))
                     .foregroundStyle(BP.textStrong)
             }

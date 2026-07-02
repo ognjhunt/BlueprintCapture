@@ -27,6 +27,9 @@ fail_archive_gate() {
   exit 1
 }
 
+python3 "$ROOT/scripts/validate_storage_rules.py"
+python3 "$ROOT/scripts/validate_upload_resilience.py"
+
 if [[ ! -f "$RELEASE_XCCONFIG" ]]; then
   fail_archive_gate \
     "release_config_blocked" \

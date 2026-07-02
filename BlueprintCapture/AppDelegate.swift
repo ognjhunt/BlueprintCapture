@@ -50,6 +50,10 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         AppSessionService.shared.end(reasonCrash: false)
     }
 
+    func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
+        BackgroundFirebaseStorageUploader.shared.setBackgroundCompletionHandler(completionHandler)
+    }
+
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         pushManager.didRegisterForRemoteNotifications(deviceToken: deviceToken)
     }

@@ -39,7 +39,7 @@ struct BPCaptureTask: Identifiable, Hashable {
     var imageName: String
     var meta: [String]
     var requirements: [BPRequirement]
-    var estPayout: Double
+    var estPayout: Double?
 }
 
 struct BPQAGate: Identifiable, Hashable {
@@ -119,25 +119,25 @@ enum BPSample {
         id: "AS-7741",
         site: "Riverside Fulfillment Center",
         imageName: "pov-warehouse-tote",
-        payout: 48.00,
+        payout: nil,
         task: "Tote induction",
         aisle: "Aisle 7",
         distance: "0.4 mi",
-        status: BPChip(label: "Active assignment", signal: .proof)
+        status: BPChip(label: "Review gated", signal: .info)
     )
 
     static let nearby: [BPAssignment] = [
         BPAssignment(id: "AS-7752", site: "Delta Cold Storage", imageName: "pov-cold-storage",
                      payout: 62.00, task: "Freezer aisle", aisle: "Zone B", distance: "1.2 mi",
-                     status: BPChip(label: "Available", signal: .proof)),
+                     status: BPChip(label: "Quoted assignment", signal: .proof)),
         BPAssignment(id: "AS-7760", site: "Northgate Retail Backroom", imageName: "pov-retail-backroom",
                      payout: nil, task: "Backroom sweep", aisle: "Dock 2", distance: "2.0 mi",
                      status: BPChip(label: "Rights pending", signal: .caution)),
         BPAssignment(id: "AS-7766", site: "Hartwell Loading Dock", imageName: "pov-loading-dock",
-                     payout: 54.00, task: "Inbound staging", aisle: "Bay 4", distance: "2.6 mi",
-                     status: BPChip(label: "Available", signal: .proof)),
+                     payout: nil, task: "Inbound staging", aisle: "Bay 4", distance: "2.6 mi",
+                     status: BPChip(label: "Review gated", signal: .info)),
         BPAssignment(id: "AS-7771", site: "Meridian Packing Cell", imageName: "pov-packing-cell",
-                     payout: 40.00, task: "Pack station", aisle: "Line 3", distance: "3.1 mi",
+                     payout: nil, task: "Pack station", aisle: "Line 3", distance: "3.1 mi",
                      status: BPChip(label: "In review", signal: .info))
     ]
 
@@ -153,7 +153,7 @@ enum BPSample {
             BPRequirement(title: "Restricted zones", detail: "Do not record the staff break area or screens.", signal: .caution),
             BPRequirement(title: "Privacy", detail: "Faces are blurred on-device before upload.", signal: .info)
         ],
-        estPayout: 48.00
+        estPayout: nil
     )
 
     static let qaGates: [BPQAGate] = [
@@ -177,13 +177,6 @@ enum BPSample {
         ("eta", "00:42")
     ]
 
-    static let payouts: [BPPayout] = [
-        BPPayout(site: "Riverside Fulfillment Center", date: "Jun 24", amount: 48.00, status: BPChip(label: "Paid", signal: .proof)),
-        BPPayout(site: "Delta Cold Storage", date: "Jun 21", amount: 62.00, status: BPChip(label: "Paid", signal: .proof)),
-        BPPayout(site: "Meridian Packing Cell", date: "Jun 19", amount: 40.00, status: BPChip(label: "Processing", signal: .info)),
-        BPPayout(site: "Hartwell Loading Dock", date: "Jun 16", amount: 54.00, status: BPChip(label: "Paid", signal: .proof))
-    ]
-
     static let history: [BPHistoryItem] = [
         BPHistoryItem(site: "Riverside Fulfillment Center", imageName: "pov-warehouse-tote", meta: "Tote induction · Jun 24", status: BPChip(label: "Validated", signal: .proof)),
         BPHistoryItem(site: "Meridian Packing Cell", imageName: "pov-packing-cell", meta: "Pack station · Jun 19", status: BPChip(label: "In review", signal: .info)),
@@ -193,10 +186,10 @@ enum BPSample {
     ]
 
     static let notifications: [BPNotification] = [
-        BPNotification(icon: "checkmark.seal", signal: .proof, title: "Capture validated", body: "Riverside Fulfillment Center passed QA. Payout released.", time: "2h"),
+        BPNotification(icon: "checkmark.seal", signal: .proof, title: "Capture validated", body: "Riverside Fulfillment Center passed QA. Payout status is handled separately.", time: "2h"),
         BPNotification(icon: "mappin.and.ellipse", signal: .info, title: "New assignment nearby", body: "Delta Cold Storage — freezer aisle, 1.2 mi away.", time: "5h"),
         BPNotification(icon: "arrow.counterclockwise", signal: .caution, title: "Recapture requested", body: "Northgate backroom — far corner coverage was low.", time: "1d"),
-        BPNotification(icon: "dollarsign.circle", signal: .neutral, title: "Payout sent", body: "$62.00 is on the way to your bank account.", time: "2d", unread: false)
+        BPNotification(icon: "creditcard", signal: .neutral, title: "Payout setup unavailable", body: "Cashout stays hidden until provider readiness is enabled for this cohort.", time: "2d", unread: false)
     ]
 
     static let principles: [BPPrinciple] = [

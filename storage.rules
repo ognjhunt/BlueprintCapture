@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function rawCaptureMetadataMatches(sceneId, captureId) {
+      return request.resource != null
+        && request.resource.metadata.creatorId == request.auth.uid
+        && request.resource.metadata.sceneId == sceneId
+        && request.resource.metadata.captureId == captureId
+        && request.resource.metadata.sha256 != null
+        && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$');
+    }
+
+    function existingOwner() {
+      return resource != null
+        && resource.metadata.creatorId == request.auth.uid;
+    }
+
+    match /scenes/{sceneId}/captures/{captureId}/raw/{rawPath=**} {
+      allow create: if isSignedIn()
+        && rawCaptureMetadataMatches(sceneId, captureId);
+      allow read: if isSignedIn() && existingOwner();
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

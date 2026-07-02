@@ -131,9 +131,9 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
             }
             if let payout = entry.estimatedPayoutUsd,
                let formatted = currencyFormatter.string(from: NSNumber(value: payout)) {
-                content.body = "\(target.displayName). Estimated payout \(formatted)."
+                content.body = "\(target.displayName). Quoted payout \(formatted), pending review."
             } else {
-                content.body = "\(target.displayName). Start scanning to earn."
+                content.body = "\(target.displayName). Review-gated capture request nearby."
             }
             content.sound = .default
             content.categoryIdentifier = Self.categoryId
@@ -198,9 +198,9 @@ final class NotificationService: NSObject, NotificationServiceProtocol {
             content.title = entry.isReserved ? "Reserved scan job nearby" : "You're near a scan job"
 
             if let formatted = currencyFormatter.string(from: NSNumber(value: job.payoutDollars)) {
-                content.body = "\(job.title). Estimated payout \(formatted)."
+                content.body = "\(job.title). Quoted payout \(formatted), pending review."
             } else {
-                content.body = "\(job.title). Start scanning to earn."
+                content.body = "\(job.title). Review-gated capture request nearby."
             }
 
             content.sound = .default

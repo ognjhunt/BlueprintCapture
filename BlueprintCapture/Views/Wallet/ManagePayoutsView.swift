@@ -82,7 +82,7 @@ struct ManagePayoutsView: View {
             if method == .stripe {
                 showingStripe = true
             }
-            // Future: connect Venmo/PayPal/Crypto flows
+            // Future methods stay hidden until backend provider readiness is explicit.
         } label: {
             HStack(spacing: 14) {
                 // Icon

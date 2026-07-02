@@ -41,6 +41,8 @@ const pubsub = new PubSub();
 
 const PIPELINE_HANDOFF_TOPIC =
   process.env.BLUEPRINT_CAPTURE_PIPELINE_TOPIC ?? "blueprint-capture-pipeline-handoff";
+const ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS =
+  process.env.BLUEPRINT_ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS === "true";
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
@@ -756,16 +758,24 @@ export function validateIdentityMapping(input: {
     blockReasons.push("completion_raw_prefix_mismatch");
   }
   if (!safeSiteSubmissionId && invalidSiteSubmissionIdBlockers.length === 0) {
-    warnings.push("missing_site_submission_id");
     requiredUpstreamBlockers.push("missing_site_submission_id");
+    if (ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS) {
+      warnings.push("missing_site_submission_id");
+    } else {
+      blockReasons.push("missing_site_submission_id");
+    }
   }
   if (!safeBuyerRequestId && invalidBuyerRequestIdBlockers.length === 0) {
     warnings.push("missing_buyer_request_id");
     requiredUpstreamBlockers.push("missing_buyer_request_id");
   }
   if (!safeCaptureJobId && invalidCaptureJobIdBlockers.length === 0) {
-    warnings.push("missing_capture_job_id");
     requiredUpstreamBlockers.push("missing_capture_job_id");
+    if (ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS) {
+      warnings.push("missing_capture_job_id");
+    } else {
+      blockReasons.push("missing_capture_job_id");
+    }
   }
   blockReasons.push(...invalidUpstreamBlockers);
   if (!safeBuyerRequestId && !safeCaptureJobId) {
@@ -816,6 +826,74 @@ async function publishPipelineHandoff(payload: Record<string, unknown>): Promise
     },
   });
   return messageId;
+}
+
+async function loadExistingHandoffReceipt(
+  bucket: StorageBucket,
+  capturesPrefix: string
+): Promise<Record<string, unknown> | null> {
+  const receipt = await loadJsonObject(
+    bucket,
+    `${capturesPrefix}/pipeline_handoff_pubsub_receipt.json`,
+    tmpdir()
+  );
+  if (receipt?.status === "published" && typeof receipt.message_id === "string") {
+    return receipt;
+  }
+  return null;
+}
+
+async function savePipelineHandoffPublishReceipt(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  await bucket.file(`${capturesPrefix}/pipeline_handoff_pubsub_receipt.json`).save(
+    JSON.stringify(payload, null, 2),
+    {
+      contentType: "application/json",
+    }
+  );
+}
+
+async function publishPipelineHandoffOnce(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>
+): Promise<string> {
+  const existingReceipt = await loadExistingHandoffReceipt(bucket, capturesPrefix);
+  if (existingReceipt) {
+    return String(existingReceipt.message_id);
+  }
+
+  try {
+    const messageId = await publishPipelineHandoff(payload);
+    await savePipelineHandoffPublishReceipt(bucket, capturesPrefix, {
+      schema_version: "v1",
+      status: "published",
+      message_id: messageId,
+      topic: PIPELINE_HANDOFF_TOPIC,
+      published_at: new Date().toISOString(),
+      scene_id: payload.scene_id ?? null,
+      capture_id: payload.capture_id ?? null,
+      pipeline_handoff_uri: payload.pipeline_handoff_uri ?? null,
+    });
+    return messageId;
+  } catch (error) {
+    await savePipelineHandoffPublishReceipt(bucket, capturesPrefix, {
+      schema_version: "v1",
+      status: "publish_failed",
+      topic: PIPELINE_HANDOFF_TOPIC,
+      failed_at: new Date().toISOString(),
+      scene_id: payload.scene_id ?? null,
+      capture_id: payload.capture_id ?? null,
+      pipeline_handoff_uri: payload.pipeline_handoff_uri ?? null,
+      error: error instanceof Error ? error.message : String(error),
+      retry_policy:
+        "cloud_function_retry_must_republish_from_pipeline_handoff_json_without_reextracting_truth",
+    });
+    throw error;
+  }
 }
 
 function normalizedSceneMemoryCapture(manifest: Record<string, unknown> | null): Record<string, unknown> {
@@ -1226,6 +1304,26 @@ export const extractFrames = onObjectFinalized(
     const checkpointEventsObjectName = `${pathInfo.rawPrefix}/checkpoint_events.json`;
     const relocalizationEventsObjectName = `${pathInfo.rawPrefix}/relocalization_events.json`;
     const intrinsicsObjectName = `${pathInfo.rawPrefix}/arkit/intrinsics.json`;
+    const existingPipelineHandoff = await loadJsonObject(
+      bucket,
+      `${pathInfo.capturesPrefix}/pipeline_handoff.json`,
+      tmp
+    );
+    if (existingPipelineHandoff) {
+      const handoffMessageId = await publishPipelineHandoffOnce(
+        bucket,
+        pathInfo.capturesPrefix,
+        existingPipelineHandoff
+      );
+      logger.info("Republished existing pipeline handoff without re-extracting frames", {
+        captureId: pathInfo.captureId,
+        sceneId: pathInfo.sceneId,
+        handoffTopic: PIPELINE_HANDOFF_TOPIC,
+        handoffMessageId,
+      });
+      return;
+    }
+
     const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
     const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
     const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
@@ -1874,7 +1972,11 @@ export const extractFrames = onObjectFinalized(
         handoffTopic: PIPELINE_HANDOFF_TOPIC,
       });
 
-      handoffMessageId = await publishPipelineHandoff(pipelineHandoffPayload);
+      handoffMessageId = await publishPipelineHandoffOnce(
+        bucket,
+        pathInfo.capturesPrefix,
+        pipelineHandoffPayload
+      );
       logger.info("Published pipeline handoff payload", {
         captureId: pathInfo.captureId,
         sceneId: pathInfo.sceneId,

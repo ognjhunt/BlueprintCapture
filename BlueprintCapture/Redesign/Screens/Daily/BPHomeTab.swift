@@ -174,7 +174,7 @@ extension BPAssignment {
             imageName: imageName,
             meta: [task, aisle, distance],
             requirements: BPSample.captureTask.requirements,
-            estPayout: payout ?? 0
+            estPayout: payout
         )
     }
 }

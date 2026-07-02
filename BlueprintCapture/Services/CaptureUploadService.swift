@@ -1,5 +1,11 @@
 import Foundation
 import Combine
+#if canImport(CryptoKit)
+import CryptoKit
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
 #if canImport(FirebaseStorage)
 import FirebaseStorage
 #endif
@@ -38,6 +44,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case authenticationRequired
         case missingStructuredIntake
         case rawContractValidationFailed
+        case insufficientDiskSpace
         case captureLifecycleRegistrationFailed
         case submissionRegistrationFailed
         case invalidBundle(reasons: [String])
@@ -56,6 +63,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Structured intake is required before upload."
             case .rawContractValidationFailed:
                 return "Raw capture validation failed. Please retake and upload again."
+            case .insufficientDiskSpace:
+                return "Not enough free space to finalize this capture bundle safely. Free storage and try again before uploading."
             case .captureLifecycleRegistrationFailed:
                 return "Blueprint could not register this capture as in-progress before upload started. Check Firebase Auth and Firestore configuration before retrying."
             case .submissionRegistrationFailed:
@@ -79,6 +88,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "missing_structured_intake"
             case .rawContractValidationFailed:
                 return "raw_contract_v3_validation_failed"
+            case .insufficientDiskSpace:
+                return "insufficient_disk_space"
             case .captureLifecycleRegistrationFailed:
                 return "capture_lifecycle_registration_failed"
             case .submissionRegistrationFailed:
@@ -96,6 +107,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             switch self {
             case .rawContractValidationFailed, .invalidBundle:
                 return "raw_validation_failed"
+            case .insufficientDiskSpace:
+                return "local_preflight_failed"
             default:
                 return "upload_failed"
             }
@@ -105,6 +118,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             switch self {
             case .rawContractValidationFailed, .invalidBundle:
                 return "blocked_raw_validation"
+            case .insufficientDiskSpace:
+                return "blocked_local_storage"
             default:
                 return "not_started"
             }
@@ -209,6 +224,25 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             return
         }
 
+        #if canImport(UIKit)
+        let backgroundTask = await MainActor.run {
+            UIApplication.shared.beginBackgroundTask(withName: "BlueprintCaptureUpload-\(id.uuidString)") {
+                SessionEventManager.shared.logOperationalEvent(
+                    operation: "upload_background_task",
+                    status: "expired",
+                    metadata: ["capture_id": CaptureBundleContext.captureIdentifier(for: record.request)]
+                )
+            }
+        }
+        defer {
+            Task { @MainActor in
+                if backgroundTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(backgroundTask)
+                }
+            }
+        }
+        #endif
+
         #if canImport(FirebaseStorage)
         do {
             _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 10)
@@ -250,73 +284,20 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             await finalizeSuccessfulUpload(id: id, attempt: attempt)
             print("✅ [UploadService] Directory upload completed id=\(id)")
         } else {
-            // Upload single file (zip)
-            let path = makeStoragePath(for: record.request)
-            let ref = storage.reference(withPath: path)
-            print("📦 [UploadService] Uploading file → path=\(path)")
-
-            let metadata = StorageMetadata()
-            metadata.contentType = contentType(for: packageURL)
-            var custom: [String: String] = [:]
-            custom["jobId"] = record.request.metadata.jobId
-            custom["creatorId"] = record.request.metadata.creatorId
-            custom["capturedAt"] = ISO8601DateFormatter().string(from: record.request.metadata.capturedAt)
-            custom["captureSource"] = record.request.metadata.captureSource.rawValue
-            if let t = record.request.metadata.targetId { custom["targetId"] = t }
-            if let r = record.request.metadata.reservationId { custom["reservationId"] = r }
-            metadata.customMetadata = custom
-
-            var uploadError: Error?
-            var progressHandle: String?
-            var finishUpload: (() -> Void)?
-            let uploadTask = ref.putFile(from: packageURL, metadata: metadata) { _, error in
-                uploadError = error
-                finishUpload?()
-            }
-            setActiveTransferCancellationHandler(for: id, attempt: attempt) {
-                uploadTask.cancel()
-            }
-
-            // Observe progress
-            progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-                guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
-                let prog = Double(snapshot.progress?.fractionCompleted ?? 0)
-                self.subject.send(.progress(id: id, progress: min(max(prog, 0.0), 0.999)))
-            }
-
-            // Await completion using the upload completion callback. Firebase Storage can emit
-            // an "already finalized" failure after the object has already been committed.
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                var resumed = false
-                let resumeOnce = {
-                    guard !resumed else { return }
-                    resumed = true
-                    continuation.resume()
-                }
-                finishUpload = resumeOnce
-                if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
-                    resumeOnce()
-                }
-            }
-            if let progressHandle {
-                uploadTask.removeObserver(withHandle: progressHandle)
-            }
-            clearActiveTransferCancellationHandler(for: id, attempt: attempt)
-
-            guard isCurrentAttempt(id: id, attempt: attempt) else { return }
-            let uploadSucceeded: Bool
-            if let uploadError {
-                uploadSucceeded = await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
-            } else {
-                uploadSucceeded = true
-            }
-            if uploadSucceeded {
-                await finalizeSuccessfulUpload(id: id, attempt: attempt)
-                print("✅ [UploadService] Upload finished id=\(id)")
-            } else if !Task.isCancelled {
-                markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
-                print("❌ [UploadService] Upload failed id=\(id)")
-            }
+            SessionEventManager.shared.logError(
+                errorCode: "single_file_upload_unsupported",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: record.request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: record.request),
+                    "package_name": packageURL.lastPathComponent
+                ]
+            )
+            print("❌ [UploadService] Refusing non-directory upload package id=\(id) url=\(packageURL.path); external beta requires canonical raw bundle directories")
+            markUploadFailed(
+                id: id,
+                attempt: attempt,
+                error: .invalidBundle(reasons: ["canonical_raw_bundle_directory_required"])
+            )
         }
         #else
         // Fallback: simulate progress if FirebaseStorage is unavailable (e.g., in previews)
@@ -343,6 +324,18 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     // Upload all files under a directory, preserving relative paths beneath remoteBasePath
     private func uploadDirectory(storage: Storage, localDirectory: URL, remoteBasePath: String, id: UUID, attempt: UUID, request: CaptureUploadRequest) async -> Bool {
         print("📁 [UploadService] Preparing directory upload at \(localDirectory.path)")
+        guard hasUsableDiskSpace(for: localDirectory) else {
+            SessionEventManager.shared.logError(
+                errorCode: "insufficient_disk_space",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request)
+                ]
+            )
+            markUploadFailed(id: id, attempt: attempt, error: .insufficientDiskSpace)
+            return false
+        }
+
         let finalizedBundle: FinalizedCaptureBundle
         do {
             finalizedBundle = try finalizer.finalize(
@@ -393,6 +386,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         if !rawContractValidation.warnings.isEmpty {
             print("⚠️ [UploadService] Raw contract V3 warnings captureId=\(CaptureBundleContext.captureIdentifier(for: request)) warnings=\(rawContractValidation.warnings.joined(separator: ","))")
         }
+        let hashArtifacts = loadHashArtifacts(from: uploadRoot)
 
         // Gather files
         guard let uploadPlan = CaptureUploadFilePlan.make(for: uploadRoot) else {
@@ -426,41 +420,34 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             custom["captureSource"] = request.metadata.captureSource.rawValue
             custom["sceneId"] = CaptureBundleContext.sceneIdentifier(for: request)
             custom["captureId"] = CaptureBundleContext.captureIdentifier(for: request)
+            if let expectedSha256 = hashArtifacts[relPath] ?? sha256Hex(for: file) {
+                custom["sha256"] = expectedSha256
+            }
             if let t = request.metadata.targetId { custom["targetId"] = t }
             if let r = request.metadata.reservationId { custom["reservationId"] = r }
             md.customMetadata = custom
 
             var uploadError: Error?
-            var progressHandle: String?
-            var finishUpload: (() -> Void)?
-            let uploadTask = ref.putFile(from: file, metadata: md) { _, error in
+            do {
+                try await BackgroundFirebaseStorageUploader.shared.uploadFile(
+                    file,
+                    bucketURL: storageBucketURL,
+                    objectPath: remotePath,
+                    contentType: md.contentType ?? contentType(for: file),
+                    customMetadata: custom,
+                    onTaskStarted: { [weak self] uploadTask in
+                        self?.setActiveTransferCancellationHandler(for: id, attempt: attempt) {
+                            uploadTask.cancel()
+                        }
+                    },
+                    onProgress: { [weak self] completed, _ in
+                        guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
+                        let fraction = Double(uploadedBytes + completed) / Double(max(1, totalBytes))
+                        self.subject.send(.progress(id: id, progress: min(max(fraction, 0.0), 0.999)))
+                    }
+                )
+            } catch {
                 uploadError = error
-                finishUpload?()
-            }
-            setActiveTransferCancellationHandler(for: id, attempt: attempt) {
-                uploadTask.cancel()
-            }
-
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                progressHandle = uploadTask.observe(.progress) { [weak self] snapshot in
-                    guard let self, self.isCurrentAttempt(id: id, attempt: attempt) else { return }
-                    let completed = snapshot.progress?.completedUnitCount ?? 0
-                    let fraction = Double(uploadedBytes + completed) / Double(max(1, totalBytes))
-                    self.subject.send(.progress(id: id, progress: min(max(fraction, 0.0), 0.999)))
-                }
-                var resumed = false
-                let resumeOnce = {
-                    guard !resumed else { return }
-                    resumed = true
-                    continuation.resume()
-                }
-                finishUpload = resumeOnce
-                if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
-                    resumeOnce()
-                }
-            }
-            if let progressHandle {
-                uploadTask.removeObserver(withHandle: progressHandle)
             }
             clearActiveTransferCancellationHandler(for: id, attempt: attempt)
 
@@ -469,7 +456,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
 
             let fileUploaded: Bool
             if let uploadError {
-                fileUploaded = await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
+                fileUploaded = await shouldTreatUploadErrorAsSuccess(uploadError, for: ref, localFile: file, expectedSha256: hashArtifacts[relPath] ?? sha256Hex(for: file))
             } else {
                 fileUploaded = true
             }
@@ -497,7 +484,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 at: completionMarkerFile,
                 to: completionRef,
                 id: id,
-                attempt: attempt
+                attempt: attempt,
+                request: request,
+                expectedSha256: hashArtifacts[CaptureUploadFilePlan.completionMarkerFilename] ?? sha256Hex(for: completionMarkerFile)
             )
             guard completionUploaded else {
                 SessionEventManager.shared.logOperationalEvent(
@@ -1014,35 +1003,46 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return CaptureBundleContext.rawBasePath(for: request)
     }
 
-    private func uploadCompletionMarker(at file: URL, to ref: StorageReference, id: UUID, attempt: UUID) async -> Bool {
+    private func uploadCompletionMarker(
+        at file: URL,
+        to ref: StorageReference,
+        id: UUID,
+        attempt: UUID,
+        request: CaptureUploadRequest,
+        expectedSha256: String?
+    ) async -> Bool {
         guard let data = try? Data(contentsOf: file) else {
             return false
         }
 
         let metadata = StorageMetadata()
         metadata.contentType = "application/json"
+        metadata.customMetadata = [
+            "jobId": request.metadata.jobId,
+            "creatorId": request.metadata.creatorId,
+            "capturedAt": ISO8601DateFormatter().string(from: request.metadata.capturedAt),
+            "captureSource": request.metadata.captureSource.rawValue,
+            "sceneId": CaptureBundleContext.sceneIdentifier(for: request),
+            "captureId": CaptureBundleContext.captureIdentifier(for: request),
+            "sha256": expectedSha256 ?? sha256Hex(of: data)
+        ]
 
         var uploadError: Error?
-        var finishUpload: (() -> Void)?
-        let uploadTask = ref.putData(data, metadata: metadata) { _, error in
+        do {
+            try await BackgroundFirebaseStorageUploader.shared.uploadFile(
+                file,
+                bucketURL: storageBucketURL,
+                objectPath: ref.fullPath,
+                contentType: metadata.contentType ?? "application/json",
+                customMetadata: metadata.customMetadata ?? [:],
+                onTaskStarted: { [weak self] uploadTask in
+                    self?.setActiveTransferCancellationHandler(for: id, attempt: attempt) {
+                        uploadTask.cancel()
+                    }
+                }
+            )
+        } catch {
             uploadError = error
-            finishUpload?()
-        }
-        setActiveTransferCancellationHandler(for: id, attempt: attempt) {
-            uploadTask.cancel()
-        }
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            var resumed = false
-            let resumeOnce = {
-                guard !resumed else { return }
-                resumed = true
-                continuation.resume()
-            }
-            finishUpload = resumeOnce
-            if uploadTask.snapshot.status == .success || uploadTask.snapshot.status == .failure {
-                resumeOnce()
-            }
         }
         clearActiveTransferCancellationHandler(for: id, attempt: attempt)
 
@@ -1050,7 +1050,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             return false
         }
         if let uploadError {
-            return await shouldTreatUploadErrorAsSuccess(uploadError, for: ref)
+            return await shouldTreatUploadErrorAsSuccess(uploadError, for: ref, localFile: file, expectedSha256: expectedSha256 ?? sha256Hex(of: data))
         }
         return true
     }
@@ -1063,15 +1063,73 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
     }
 
-    private func shouldTreatUploadErrorAsSuccess(_ error: Error, for ref: StorageReference) async -> Bool {
-        guard CaptureUploadErrorClassifier.isAlreadyFinalized(error),
-              await fileExistsInStorage(ref) else {
+    private func shouldTreatUploadErrorAsSuccess(_ error: Error, for ref: StorageReference, localFile: URL? = nil, expectedSha256: String? = nil) async -> Bool {
+        guard CaptureUploadErrorClassifier.isAlreadyFinalized(error) else {
+            return false
+        }
+        guard await remoteObjectMatchesLocalTruth(ref: ref, localFile: localFile, expectedSha256: expectedSha256) else {
             return false
         }
         print("⚠️ [UploadService] Storage reported an already-finalized upload for \(ref.fullPath); treating as success")
         return true
     }
+
+    private func remoteObjectMatchesLocalTruth(ref: StorageReference, localFile: URL?, expectedSha256: String?) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            ref.getMetadata { metadata, error in
+                guard error == nil, let metadata else {
+                    cont.resume(returning: false)
+                    return
+                }
+                if let localFile,
+                   let localSize = (try? localFile.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
+                   metadata.size != Int64(localSize) {
+                    cont.resume(returning: false)
+                    return
+                }
+                if let expectedSha256,
+                   metadata.customMetadata?["sha256"] != expectedSha256 {
+                    cont.resume(returning: false)
+                    return
+                }
+                cont.resume(returning: true)
+            }
+        }
+    }
     #endif
+
+    private func hasUsableDiskSpace(for directory: URL) -> Bool {
+        guard let freeBytes = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage else {
+            return true
+        }
+        let plannedBytes = CaptureUploadFilePlan.make(for: directory)?.totalPayloadBytes ?? 0
+        let requiredHeadroom = max(250_000_000, plannedBytes / 5)
+        return freeBytes > requiredHeadroom
+    }
+
+    private func loadHashArtifacts(from rawDirectoryURL: URL) -> [String: String] {
+        let hashesURL = rawDirectoryURL.appendingPathComponent("hashes.json")
+        guard let data = try? Data(contentsOf: hashesURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let artifacts = json["artifacts"] as? [String: String] else {
+            return [:]
+        }
+        return artifacts
+    }
+
+    private func sha256Hex(for fileURL: URL) -> String? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        return sha256Hex(of: data)
+    }
+
+    private func sha256Hex(of data: Data) -> String {
+        #if canImport(CryptoKit)
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
+        #else
+        return ""
+        #endif
+    }
 
     private func isCurrentAttempt(id: UUID, attempt: UUID) -> Bool {
         queue.sync {
@@ -1116,6 +1174,273 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             self.subject.send(.failed(failingRecord.request, error))
             Task {
                 await self.recordUploadFailure(for: failingRecord.request, error: error)
+            }
+        }
+    }
+}
+
+final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
+    static let shared = BackgroundFirebaseStorageUploader()
+
+    private struct PendingUpload {
+        let continuation: CheckedContinuation<Void, Error>
+        let onProgress: (Int64, Int64) -> Void
+        var responseData = Data()
+        var response: HTTPURLResponse?
+    }
+
+    private enum UploadError: LocalizedError {
+        case invalidBucketURL(String)
+        case missingFirebaseUser
+        case missingUploadURL
+        case startFailed(status: Int, body: String)
+        case uploadFailed(status: Int, body: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidBucketURL(let url):
+                return "Invalid Firebase Storage bucket URL: \(url)"
+            case .missingFirebaseUser:
+                return "Firebase authentication is required before starting a background upload."
+            case .missingUploadURL:
+                return "Firebase Storage did not return a resumable upload URL."
+            case .startFailed(let status, let body):
+                return "Firebase Storage resumable upload start failed with status \(status): \(body)"
+            case .uploadFailed(let status, let body):
+                return "Firebase Storage background upload failed with status \(status): \(body)"
+            }
+        }
+    }
+
+    private let lock = NSLock()
+    private var pendingUploads: [Int: PendingUpload] = [:]
+    private var backgroundCompletionHandler: (() -> Void)?
+
+    private lazy var session: URLSession = {
+        let configuration = URLSessionConfiguration.background(
+            withIdentifier: "Public.BlueprintCapture.firebase-storage-background-upload"
+        )
+        configuration.sessionSendsLaunchEvents = true
+        configuration.isDiscretionary = false
+        configuration.waitsForConnectivity = true
+        return URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    }()
+
+    func setBackgroundCompletionHandler(_ completionHandler: @escaping () -> Void) {
+        lock.lock()
+        backgroundCompletionHandler = completionHandler
+        lock.unlock()
+    }
+
+    func uploadFile(
+        _ fileURL: URL,
+        bucketURL: String,
+        objectPath: String,
+        contentType: String,
+        customMetadata: [String: String],
+        onTaskStarted: @escaping (URLSessionUploadTask) -> Void = { _ in },
+        onProgress: @escaping (Int64, Int64) -> Void = { _, _ in }
+    ) async throws {
+        let bucketName = try Self.bucketName(from: bucketURL)
+        let fileSize = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        let token = try await firebaseIDToken()
+        let uploadURL = try await startResumableUpload(
+            bucketName: bucketName,
+            objectPath: objectPath,
+            contentType: contentType,
+            customMetadata: customMetadata,
+            fileSize: fileSize,
+            idToken: token
+        )
+
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
+        request.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+
+        var uploadTask: URLSessionUploadTask?
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let task = session.uploadTask(with: request, fromFile: fileURL)
+                uploadTask = task
+                lock.lock()
+                pendingUploads[task.taskIdentifier] = PendingUpload(
+                    continuation: continuation,
+                    onProgress: onProgress
+                )
+                lock.unlock()
+                onTaskStarted(task)
+                task.resume()
+            }
+        } onCancel: {
+            uploadTask?.cancel()
+        }
+    }
+
+    private static func bucketName(from bucketURL: String) throws -> String {
+        guard bucketURL.hasPrefix("gs://") else {
+            throw UploadError.invalidBucketURL(bucketURL)
+        }
+        let name = String(bucketURL.dropFirst("gs://".count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !name.isEmpty else {
+            throw UploadError.invalidBucketURL(bucketURL)
+        }
+        return name
+    }
+
+    private func firebaseIDToken() async throws -> String {
+        #if canImport(FirebaseAuth)
+        guard let user = Auth.auth().currentUser else {
+            throw UploadError.missingFirebaseUser
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            user.getIDToken { token, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let token, !token.isEmpty else {
+                    continuation.resume(throwing: UploadError.missingFirebaseUser)
+                    return
+                }
+                continuation.resume(returning: token)
+            }
+        }
+        #else
+        throw UploadError.missingFirebaseUser
+        #endif
+    }
+
+    private func startResumableUpload(
+        bucketName: String,
+        objectPath: String,
+        contentType: String,
+        customMetadata: [String: String],
+        fileSize: Int64,
+        idToken: String
+    ) async throws -> URL {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "firebasestorage.googleapis.com"
+        components.path = "/v0/b/\(bucketName)/o"
+        components.queryItems = [URLQueryItem(name: "name", value: objectPath)]
+        guard let url = components.url else {
+            throw UploadError.invalidBucketURL(bucketName)
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json; charset=UTF-8", forHTTPHeaderField: "Content-Type")
+        request.setValue("resumable", forHTTPHeaderField: "X-Goog-Upload-Protocol")
+        request.setValue("start", forHTTPHeaderField: "X-Goog-Upload-Command")
+        request.setValue(String(fileSize), forHTTPHeaderField: "X-Goog-Upload-Header-Content-Length")
+        request.setValue(contentType, forHTTPHeaderField: "X-Goog-Upload-Header-Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "name": objectPath,
+            "contentType": contentType,
+            "metadata": customMetadata,
+        ], options: [])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw UploadError.startFailed(status: status, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        guard let httpResponse = response as? HTTPURLResponse,
+              let uploadURLString = Self.headerValue("X-Goog-Upload-URL", in: httpResponse)
+                ?? Self.headerValue("Location", in: httpResponse),
+              let uploadURL = URL(string: uploadURLString) else {
+            throw UploadError.missingUploadURL
+        }
+        return uploadURL
+    }
+
+    private static func headerValue(_ name: String, in response: HTTPURLResponse) -> String? {
+        for (key, value) in response.allHeaderFields {
+            guard String(describing: key).caseInsensitiveCompare(name) == .orderedSame else {
+                continue
+            }
+            return String(describing: value)
+        }
+        return nil
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        lock.lock()
+        let progress = pendingUploads[task.taskIdentifier]?.onProgress
+        lock.unlock()
+        progress?(totalBytesSent, totalBytesExpectedToSend)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        if let httpResponse = response as? HTTPURLResponse {
+            lock.lock()
+            if var pending = pendingUploads[dataTask.taskIdentifier] {
+                pending.response = httpResponse
+                pendingUploads[dataTask.taskIdentifier] = pending
+            }
+            lock.unlock()
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.lock()
+        if var pending = pendingUploads[dataTask.taskIdentifier] {
+            pending.responseData.append(data)
+            pendingUploads[dataTask.taskIdentifier] = pending
+        }
+        lock.unlock()
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let pending = pendingUploads.removeValue(forKey: task.taskIdentifier)
+        lock.unlock()
+
+        guard let pending else {
+            return
+        }
+        if let error {
+            pending.continuation.resume(throwing: error)
+            return
+        }
+        let status = pending.response?.statusCode ?? 0
+        if (200..<300).contains(status) {
+            pending.continuation.resume()
+        } else {
+            pending.continuation.resume(
+                throwing: UploadError.uploadFailed(
+                    status: status,
+                    body: String(data: pending.responseData, encoding: .utf8) ?? ""
+                )
+            )
+        }
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        lock.lock()
+        let completionHandler = backgroundCompletionHandler
+        backgroundCompletionHandler = nil
+        lock.unlock()
+
+        if let completionHandler {
+            DispatchQueue.main.async {
+                completionHandler()
             }
         }
     }

@@ -198,8 +198,8 @@ struct SettingsView: View {
                 settingsNavRow(
                     icon: "creditcard.fill",
                     iconBg: BlueprintTheme.successGreen,
-                    title: "Manage Payouts",
-                    subtitle: "Venmo, PayPal, Crypto, Stripe"
+                    title: "Wallet Status",
+                    subtitle: "Review history; payout setup is provider-gated"
                 ) { showingManagePayouts = true }
 
                 kledRowDivider
@@ -207,8 +207,8 @@ struct SettingsView: View {
                 settingsNavRow(
                     icon: "building.columns.fill",
                     iconBg: BlueprintTheme.primary,
-                    title: "Connect Bank Account",
-                    subtitle: "Stripe payouts for approved scans"
+                    title: "Payout Setup",
+                    subtitle: "Unavailable unless backend provider readiness is enabled"
                 ) { showingStripeOnboarding = true }
 
                 kledRowDivider
