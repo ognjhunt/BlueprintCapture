@@ -8,6 +8,7 @@ import SwiftUI
 
 struct BPAppRoot: View {
     @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
+    @State private var guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
 
     var body: some View {
         Group {
@@ -19,6 +20,52 @@ struct BPAppRoot: View {
                     onHasAccount: { isOnboarded = true }
                 )
             }
+        }
+        .safeAreaInset(edge: .top) {
+            guestBootstrapBanner
+        }
+        .onAppear {
+            guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
+            UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .FirebaseGuestBootstrapStateDidChange)) { _ in
+            guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
+        }
+    }
+
+    @ViewBuilder
+    private var guestBootstrapBanner: some View {
+        switch guestBootstrapState {
+        case .idle, .ready:
+            EmptyView()
+        case .bootstrapping:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Starting guest session")
+                    .font(.footnote.weight(.semibold))
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+        case .failed(let message):
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(message)
+                    .font(.footnote.weight(.semibold))
+                    .lineLimit(3)
+                Spacer()
+                Button("Retry") {
+                    UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.orange.opacity(0.12))
         }
     }
 }

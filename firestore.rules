@@ -8,8 +8,50 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isSignedIn()
+        && (request.auth.token.admin == true
+          || request.auth.token.role in ['admin', 'ops']
+          || (request.auth.token.keys().hasAny(['roles'])
+            && request.auth.token.roles.hasAny(['admin', 'ops'])));
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function captureSubmissionClientKeys() {
+      return [
+        'capture_id',
+        'scene_id',
+        'creator_id',
+        'job_id',
+        'capture_source',
+        'status',
+        'requested_outputs',
+        'has_site_identity',
+        'has_capture_topology',
+        'created_at',
+        'submitted_at',
+        'capture_job_id',
+        'buyer_request_id',
+        'site_submission_id',
+        'region_id',
+        'estimated_payout_cents',
+        'rights_profile',
+        'target_address',
+        'site_identity',
+        'city_context',
+        'target_context',
+        'raw_prefix',
+        'operational_state',
+        'lifecycle',
+        'upload_error'
+      ];
+    }
+
+    function hasOnlyCaptureSubmissionClientKeys(data) {
+      return data.keys().hasOnly(captureSubmissionClientKeys());
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────
@@ -45,6 +87,79 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ─── WebApp server-owned control-plane records ─────────────────────────
+    match /contactRequests/{id} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /inboundRequests/{requestId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /notes/{noteId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    match /leadRoutingConfig/{ruleId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /waitlistTokens/{id} {
+      allow read, write: if false;
+    }
+
+    match /action_ledger/{id} {
+      allow read, write: if false;
+    }
+
+    match /hostedSessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /operatingGraphEvents/{id} {
+      allow read, write: if false;
+    }
+
+    match /operatingGraphState/{id} {
+      allow read, write: if false;
+    }
+
+    match /buyerOutcomes/{id} {
+      allow read, write: if false;
+    }
+
+    match /creatorPayouts/{id} {
+      allow read, write: if false;
+    }
+
+    match /buyerOrders/{id} {
+      allow read, write: if false;
+    }
+
+    match /publishedMarketplaceInventory/{id} {
+      allow read, write: if false;
+    }
+
+    match /humanBlockerThreads/{id} {
+      allow read, write: if false;
+    }
+
+    match /humanBlockerDispatches/{id} {
+      allow read, write: if false;
+    }
+
+    match /humanReplyEvents/{id} {
+      allow read, write: if false;
+    }
+
+    match /scenes/{id} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     // ─── Capture submissions ─────────────────────────────────────────────────
     // Clients may create their own submissions and read their own.
     // Status transitions (approved, paid, etc.) and payout fields are
@@ -53,10 +168,13 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && resource.data.creator_id == request.auth.uid;
       allow create: if isOwner(request.resource.data.creator_id)
-        && !request.resource.data.keys().hasAny([
-          'status', 'payout_cents', 'referralBonusProcessedAt'
-        ]);
-      allow update: if false; // backend only
+        && hasOnlyCaptureSubmissionClientKeys(request.resource.data);
+      allow update: if isOwner(resource.data.creator_id)
+        && request.resource.data.creator_id == resource.data.creator_id
+        && hasOnlyCaptureSubmissionClientKeys(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(captureSubmissionClientKeys());
+      allow delete: if false; // backend only
     }
 
     // ─── Reservations ───────────────────────────────────────────────────────

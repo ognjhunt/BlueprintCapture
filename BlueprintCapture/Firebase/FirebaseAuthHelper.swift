@@ -43,7 +43,8 @@ public class FirebaseAuthHelper {
         let currentUser = getCurrentUserUid2()
         FirestoreManager.getUser(currentUser) { (user) in
             guard let user = user else {
-                fatalError("Could not get current user")
+                print("ERROR - getCurrentUser: Could not load current user")
+                return
             }
             completion(user)
         }
@@ -91,7 +92,8 @@ public class FirebaseAuthHelper {
                 try auth.signOut()
                 completion()
             } catch let signOutError {
-                fatalError("Error signing out: \(signOutError.localizedDescription)")
+                print("ERROR - signOut: \(signOutError.localizedDescription)")
+                completion()
             }
             
         //}
