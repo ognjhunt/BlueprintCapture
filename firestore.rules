@@ -1,10 +1,37 @@
 rules_version = '2';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CANONICAL Firestore ruleset for Firebase project `blueprint-8c1ca`.
+//
+// This file is the SINGLE canonical ruleset deployed to the (default) Firestore
+// instance. It is a SUPERSET of what both clients need:
+//   • the iOS capturer app  (BlueprintCapture)  — via the Firebase client SDK
+//   • the Blueprint WebApp                       — via the Firebase client SDK
+//
+// It MUST be kept byte-identical in both repos:
+//   • BlueprintCapture/firestore.rules
+//   • Blueprint-WebApp/firestore.rules
+// because `firebase deploy --only firestore:rules` is last-writer-wins for the
+// whole project — whichever repo deploys, the deployed rules must still permit
+// every collection each client reads/writes. See beta blocker XR-01.
+//
+// Admin-SDK access (Cloud Functions / server routes) BYPASSES these rules and
+// needs no allow rule here. Only client-SDK (rule-governed) access is modeled.
+//
+// Parity is enforced by:
+//   Blueprint-WebApp/scripts/check-firestore-rules-parity.sh
+// ─────────────────────────────────────────────────────────────────────────────
+
 service cloud.firestore {
   match /databases/{database}/documents {
 
     // ─── Helpers ────────────────────────────────────────────────────────────
     function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Alias kept for parity with historical WebApp rules.
+    function isAuthenticated() {
       return request.auth != null;
     }
 
@@ -18,6 +45,20 @@ service cloud.firestore {
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isStringField(field) {
+      return field is string;
+    }
+
+    function hasValidSceneCreatePayload() {
+      return isStringField(request.resource.data.id)
+        && isStringField(request.resource.data.name)
+        && isStringField(request.resource.data.title)
+        && isStringField(request.resource.data.status)
+        && isStringField(request.resource.data.source)
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt is timestamp;
     }
 
     function captureSubmissionClientKeys() {
@@ -155,9 +196,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ─── Scenes ──────────────────────────────────────────────────────────────
+    // WebApp clients may create/update/delete scenes; iOS clients read them.
+    // (WebApp server writes go through the Admin SDK and bypass these rules.)
     match /scenes/{id} {
-      allow read: if isSignedIn();
-      allow write: if false;
+      allow create: if isAuthenticated() && hasValidSceneCreatePayload();
+      allow read: if isAuthenticated();
+      allow update, delete: if isAuthenticated();
     }
 
     // ─── Capture submissions ─────────────────────────────────────────────────
@@ -201,6 +246,13 @@ service cloud.firestore {
       allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn();
       allow update, delete: if false;
+    }
+
+    // ─── Default deny ────────────────────────────────────────────────────────
+    // Any collection not matched above is denied to client-SDK access.
+    // Admin-SDK (Cloud Functions / server routes) bypasses this.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

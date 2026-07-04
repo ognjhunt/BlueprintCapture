@@ -5,7 +5,6 @@ import SwiftUI
 struct BPSettingsView: View {
     @State private var depthDefault = true
     @State private var autoUpload = true
-    @State private var smartGlasses = false
     @State private var assignmentAlerts = true
     @State private var payoutUpdates = true
     @State private var qaRecapture = true
@@ -21,8 +20,10 @@ struct BPSettingsView: View {
                         toggleRow("Depth sensor default", "Use LiDAR depth whenever the device supports it.", $depthDefault)
                         BPDivider(color: BP.lineSoft)
                         toggleRow("Auto-upload on Wi-Fi", "Sync finished bundles only on Wi-Fi.", $autoUpload)
-                        BPDivider(color: BP.lineSoft)
-                        toggleRow("Smart glasses", "Meta smart-glasses capture (approved).", $smartGlasses)
+                        // CAP-09: the "Meta smart-glasses (approved)" toggle was dead local
+                        // @State that configured nothing — a false capability claim. iPhone is
+                        // the only external capture path for beta, so the row is hidden until the
+                        // glasses path is actually wired + gated on a real availability check.
                     }
                     group("Alerts") {
                         toggleRow("Assignment alerts", "New assignments near you.", $assignmentAlerts)

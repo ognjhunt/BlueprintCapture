@@ -3,33 +3,50 @@ import SwiftUI
 // MARK: - BPAppRoot
 //
 // The redesign is the shipping UI. Unauthenticated capturers see the dark sign-in
-// hero; once onboarded they land on the paper tab experience. The onboarding flag
-// reuses the app's existing AppStorage key so state is shared with the rest of the app.
+// hero; the capture/upload path only unlocks once a real (non-anonymous) Firebase
+// account exists. The anonymous-guest bootstrap still runs so pre-auth state (guest
+// session banner, discovery reads) works, but `BPRootView` is gated on
+// `UserDeviceService.hasRegisteredAccount()` — see beta-launch-audit CAP-02.
 
 struct BPAppRoot: View {
-    @AppStorage("com.blueprint.isOnboarded") private var isOnboarded: Bool = false
     @State private var guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
+    @State private var hasRegisteredAccount = UserDeviceService.hasRegisteredAccount()
+    @State private var showingAuth = false
 
     var body: some View {
         Group {
-            if isOnboarded {
+            if hasRegisteredAccount {
                 BPRootView()
             } else {
                 BPSignInView(
-                    onContinue: { isOnboarded = true },
-                    onHasAccount: { isOnboarded = true }
+                    onContinue: { showingAuth = true },
+                    onHasAccount: { showingAuth = true }
                 )
             }
         }
         .safeAreaInset(edge: .top) {
             guestBootstrapBanner
         }
+        // CAP-02: present the real email + Google auth flow. AuthView dismisses
+        // itself and posts `.AuthStateDidChange` on success; we re-read the
+        // registered-account state so the app advances to the paper tabs only for a
+        // non-anonymous Firebase user.
+        .sheet(isPresented: $showingAuth) {
+            AuthView()
+        }
         .onAppear {
             guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
+            hasRegisteredAccount = UserDeviceService.hasRegisteredAccount()
             UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .FirebaseGuestBootstrapStateDidChange)) { _ in
             guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
+            hasRegisteredAccount = UserDeviceService.hasRegisteredAccount()
+            if hasRegisteredAccount {
+                showingAuth = false
+            }
         }
     }
 

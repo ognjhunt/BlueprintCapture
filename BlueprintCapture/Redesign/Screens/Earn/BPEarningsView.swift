@@ -5,12 +5,22 @@ import SwiftUI
 struct BPEarningsView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
     private let history = BPSample.history
+    // CAP-11: payout onboarding is reachable from the shipping UI, gated on real
+    // backend provider readiness (BLUEPRINT_PAYOUT_PROVIDER_READY). When the flag is
+    // NO the honest "unavailable" card shows; when the backend flips it to YES the
+    // real Stripe Connect onboarding (StripeOnboardingView) is presented.
+    private let payoutReady = RuntimeConfig.current.payoutProviderReady
+    @State private var showingPayoutSetup = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 BPLargeTitle(eyebrow: "Wallet", title: "Review status")
-                providerUnavailableCard
+                if payoutReady {
+                    payoutSetupCard
+                } else {
+                    providerUnavailableCard
+                }
                 statRow
                 reviewHistorySection
             }
@@ -21,6 +31,28 @@ struct BPEarningsView: View {
         .scrollIndicators(.hidden)
         .background(BP.canvas.ignoresSafeArea())
         .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
+        .sheet(isPresented: $showingPayoutSetup) {
+            StripeOnboardingView()
+        }
+    }
+
+    private var payoutSetupCard: some View {
+        BPDarkPanel {
+            Text("Payouts")
+                .bpEyebrow(BP.onInk.opacity(0.6))
+            Text("Set up cashout")
+                .font(.bpDisplay(30))
+                .foregroundStyle(BP.onInk)
+            Text("Connect your payout account to receive earnings after captures pass review.")
+                .font(.bpSans(BPType.caption, .regular))
+                .foregroundStyle(BP.onInk.opacity(0.68))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Space.xs)
+            BPPrimaryButton(title: "Set up payouts", systemImage: "creditcard") {
+                showingPayoutSetup = true
+            }
+            .padding(.top, Space.m)
+        }
     }
 
     private var providerUnavailableCard: some View {

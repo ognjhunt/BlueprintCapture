@@ -820,7 +820,10 @@ final class GlassesUploadViewModel: ObservableObject {
             buyerRequestId: nil,
             siteSubmissionId: targetId,
             regionId: nil,
-            creatorId: UIDevice.current.identifierForVendor?.uuidString ?? "unknown_device",
+            // Must equal the Firebase auth uid (see beta-launch-audit CAP-03) —
+            // identifierForVendor never matches request.auth.uid, so Storage/Firestore
+            // rules would deny the glasses upload.
+            creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: artifacts.startedAt,
             uploadedAt: nil,
             captureSource: .metaGlasses,

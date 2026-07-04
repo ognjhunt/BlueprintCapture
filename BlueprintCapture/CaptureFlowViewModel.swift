@@ -625,7 +625,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             buyerRequestId: reviewSeed?.buyerRequestId,
             siteSubmissionId: metadataSiteSubmissionId,
             regionId: reviewSeed?.regionId,
-            creatorId: profile.id.uuidString,
+            // Must equal the Firebase auth uid or Storage/Firestore security rules
+            // (rawCaptureMetadataMatches / isOwner(creator_id)) deny every upload.
+            // resolvedUserId() returns the auth uid (registered or anonymous), never
+            // a random profile UUID. See beta-launch-audit CAP-03.
+            creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: Date(),
             uploadedAt: nil,
             captureSource: .iphoneVideo,

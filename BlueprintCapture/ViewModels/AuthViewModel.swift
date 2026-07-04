@@ -96,10 +96,26 @@ final class AuthViewModel: ObservableObject {
     }
 
     private func signUp(name: String, email: String, password: String) async throws {
-        let result = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AuthDataResult?, Error>) in
-            Auth.auth().createUser(withEmail: email, password: password) { result, err in
-                if let err = err { return cont.resume(throwing: err) }
-                cont.resume(returning: result)
+        // CAP-07: if the capturer is currently an anonymous guest, UPGRADE that user
+        // in place by linking the email credential instead of minting a new uid. Guest
+        // captures and earnings are keyed to request.auth.uid at capture time, so a
+        // fresh uid would orphan them. Falls back to createUser when there is no
+        // anonymous session to upgrade.
+        let result: AuthDataResult?
+        if let current = Auth.auth().currentUser, current.isAnonymous {
+            let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+            result = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AuthDataResult?, Error>) in
+                current.link(with: credential) { linkResult, err in
+                    if let err = err { return cont.resume(throwing: err) }
+                    cont.resume(returning: linkResult)
+                }
+            }
+        } else {
+            result = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<AuthDataResult?, Error>) in
+                Auth.auth().createUser(withEmail: email, password: password) { result, err in
+                    if let err = err { return cont.resume(throwing: err) }
+                    cont.resume(returning: result)
+                }
             }
         }
 

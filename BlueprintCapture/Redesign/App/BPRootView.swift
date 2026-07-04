@@ -18,9 +18,15 @@ struct BPRootView: View {
             tabContent
                 .environmentObject(coordinator)
         }
+        // CAP-01: the center capture FAB and job "Continue capture" launch the REAL
+        // capture engine (AnywhereCaptureFlowView → CaptureFlowViewModel →
+        // CaptureSessionView) which records a real video + ARKit bundle and enqueues
+        // it via CaptureUploadService with the reserved capture_job_id (from the seed)
+        // and the CAP-03 creatorId. The old sample-data BPCaptureFlow is retired from
+        // the shipping path.
         .fullScreenCover(item: $coordinator.captureLaunch) { launch in
-            BPCaptureFlow(task: launch.task)
-                .environmentObject(coordinator)
+            AnywhereCaptureFlowView(seed: launch.seed)
+                .onDisappear { coordinator.finishCapture() }
         }
         .tint(BP.brassDeep)
         .preferredColorScheme(.light)

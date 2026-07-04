@@ -10,6 +10,11 @@ import Combine
 struct CaptureLaunch: Identifiable {
     let id = UUID()
     var task: BPCaptureTask?
+    /// Real capture-job seed for a reserved/claimed job. When present, the redesign
+    /// presents the real `AnywhereCaptureFlowView(seed:)` so recording + upload run
+    /// against the reserved `capture_job_id` (CAP-01/CAP-04). Nil for an open capture
+    /// launched from the FAB with no reservation.
+    var seed: SpaceReviewSeed?
 }
 
 @MainActor
@@ -21,8 +26,8 @@ final class RedesignCoordinator: ObservableObject {
     @Published var capturerName: String = BPSample.capturerName
     @Published var capturerCity: String = BPSample.capturerCity
 
-    func startCapture(task: BPCaptureTask? = nil) {
-        captureLaunch = CaptureLaunch(task: task)
+    func startCapture(task: BPCaptureTask? = nil, seed: SpaceReviewSeed? = nil) {
+        captureLaunch = CaptureLaunch(task: task, seed: seed)
     }
 
     func finishCapture() {
