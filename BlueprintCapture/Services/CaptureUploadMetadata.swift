@@ -377,8 +377,14 @@ struct CaptureCapabilitiesMetadata: Equatable, Codable {
 }
 
 enum CaptureRequestedOutputs {
+    static let scaniverseAssistedCapture = "scaniverse_assisted_capture"
     static let reviewIntake = ["qualification", "review_intake"]
     static let robotEvaluation = ["qualification", "robot_eval_dataset", "task_evaluation_run"]
+    static let scaniverseAssistedRobotEvaluation = [
+        "qualification",
+        "robot_eval_dataset",
+        scaniverseAssistedCapture,
+    ]
 
     static func normalized(_ outputs: [String]) -> [String] {
         var normalized: [String] = []
@@ -404,6 +410,9 @@ enum CaptureRequestedOutputs {
         if normalized.contains("preview_simulation") && !normalized.contains("deeper_evaluation") {
             append("deeper_evaluation", to: &normalized)
         }
+        if normalized.contains(scaniverseAssistedCapture) {
+            append("robot_eval_dataset", to: &normalized)
+        }
         return normalized
     }
 
@@ -412,6 +421,40 @@ enum CaptureRequestedOutputs {
             values.append(output)
         }
     }
+}
+
+enum ScaniverseAssistedCaptureContract {
+    static let requestedOutput = CaptureRequestedOutputs.scaniverseAssistedCapture
+    static let workflowMarker = "scaniverse_external_asset_expected"
+    static let recommendedCaptureHardware = ["Insta360 X5", "Insta360 X4"]
+
+    static let acceptedExportExtensions = [
+        "usdz",
+        "ply",
+        "spz",
+        "glb",
+        "gltf",
+        "fbx",
+        "obj",
+        "usd",
+        "usda",
+        "usdc",
+    ]
+
+    static let captureChecklist = [
+        "Record the normal Blueprint raw evidence bundle for assignment, rights, and provenance.",
+        "Capture 360 video with supported hardware, preferably Insta360 X5 or X4 when available.",
+        "Upload and process the 360 video in Scaniverse Web from a desktop browser.",
+        "Export USDZ plus available PLY, SPZ, GLB/GLTF, FBX, OBJ, or USD assets for Pipeline import.",
+        "Keep Scaniverse exports labeled as derived support assets until Pipeline review accepts them.",
+    ]
+
+    static let proofBoundaryNotes = [
+        "Scaniverse exports do not replace raw Blueprint capture truth.",
+        "USDZ or mesh export does not prove Isaac import, physics contact, policy success, or deployment readiness.",
+        "Free or Plus Scaniverse access is not enough evidence for commercial rights or API support.",
+        "Pipeline must preserve checksums and run local preflight before any simulator handoff claim.",
+    ]
 }
 
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {

@@ -258,6 +258,22 @@ struct ScanJob: Identifiable, Codable, Equatable {
         return instructions
     }
 
+    var usesScaniverseAssistedCapture: Bool {
+        CaptureRequestedOutputs
+            .normalized(requestedOutputs)
+            .contains(ScaniverseAssistedCaptureContract.requestedOutput)
+    }
+
+    var scaniverseAssistedChecklist: [String] {
+        guard usesScaniverseAssistedCapture else { return [] }
+        return ScaniverseAssistedCaptureContract.captureChecklist
+    }
+
+    var scaniverseProofBoundaryNotes: [String] {
+        guard usesScaniverseAssistedCapture else { return [] }
+        return ScaniverseAssistedCaptureContract.proofBoundaryNotes
+    }
+
     var captureSpecialTaskType: CaptureUploadMetadata.SpecialTaskType {
         switch jobType {
         case .curatedNearby:
@@ -323,19 +339,25 @@ struct ScanJob: Identifiable, Codable, Equatable {
     }
 
     var defaultScaffoldingPacket: CaptureScaffoldingPacket {
-        let capturePlan = [
+        var capturePlan = [
             "Start with entry and egress routes.",
             "Pause at each workcell boundary for 2-3 seconds.",
             "Capture every benchmark station, dock turn, and narrow threshold.",
             "Record restricted-zone boundaries and handoff points from both approach directions.",
             "Capture at least one still photo for any critical handoff or scale reference."
         ]
-        let priors: [String: Double] = [
+        var scaffoldingUsed: [String] = []
+        var priors: [String: Double] = [
             "occlusion_risk": restrictedAreas.isEmpty ? 0.25 : 0.45,
             "traffic_variability": peopleTrafficNotes.isEmpty ? 0.2 : 0.5
         ]
+        if usesScaniverseAssistedCapture {
+            scaffoldingUsed.append(ScaniverseAssistedCaptureContract.workflowMarker)
+            capturePlan.append("Attach the Scaniverse export sidecar and derived assets during Pipeline import.")
+            priors["external_derived_geometry_review"] = 0.75
+        }
         return CaptureScaffoldingPacket(
-            scaffoldingUsed: [],
+            scaffoldingUsed: scaffoldingUsed,
             coveragePlan: capturePlan,
             calibrationAssets: [],
             scaleAnchorAssets: [],

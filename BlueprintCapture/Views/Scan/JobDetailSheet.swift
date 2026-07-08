@@ -98,6 +98,12 @@ struct JobDetailSheet: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
 
+                        if item.job.usesScaniverseAssistedCapture {
+                            scaniverseAssistedSection
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 20)
+                        }
+
                         // Restrictions (if any)
                         if !restrictedAreas.isEmpty {
                             detailSection(title: "Off-limits areas") {
@@ -331,6 +337,35 @@ struct JobDetailSheet: View {
             } else {
                 EmptyView()
             }
+        }
+    }
+
+    private var scaniverseAssistedSection: some View {
+        detailSection(title: "Scaniverse Export") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "shippingbox.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BlueprintTheme.brandTeal)
+                        .frame(width: 18)
+                    Text("Submit the Blueprint raw bundle first; Scaniverse exports are imported later as derived support assets.")
+                        .font(BlueprintTheme.body(14, weight: .medium))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(item.job.scaniverseAssistedChecklist, id: \.self) { line in
+                        requirementRow(line)
+                    }
+                }
+
+                Text("Expected exports: \(ScaniverseAssistedCaptureContract.acceptedExportExtensions.map { ".\($0)" }.joined(separator: ", "))")
+                    .font(BlueprintTheme.body(12, weight: .medium))
+                    .foregroundStyle(BlueprintTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityIdentifier("job-detail-scaniverse-assisted")
         }
     }
 

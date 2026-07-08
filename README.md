@@ -12,6 +12,16 @@ This repo sits on the capturer side of Blueprint's capture-to-evaluation/data-pa
 
 The app owns real-time capture coaching only. It does not make final readiness, payout, rights, or buyer-trust decisions in-app, and it does not run reconstruction, world models, or scene generation locally.
 
+Some assignments may request `scaniverse_assisted_capture`. In that workflow,
+BlueprintCapture still records and uploads the canonical raw evidence bundle,
+including assignment IDs, rights/consent, provenance, site/task metadata, and
+package upload state. The approved capturer/operator separately records 360
+video with supported hardware, preferably Insta360 X5/X4, uploads and processes
+it in desktop Scaniverse Web, and exports USDZ/PLY/SPZ/mesh assets for Pipeline
+import as derived support artifacts. Those exports do not replace raw capture
+truth and do not prove simulator execution, policy success, or deployment
+readiness.
+
 ## What This Repo Produces
 
 Canonical raw upload layout:

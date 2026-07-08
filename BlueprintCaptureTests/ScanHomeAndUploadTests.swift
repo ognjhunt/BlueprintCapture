@@ -52,6 +52,33 @@ struct ScanHomeAndUploadTests {
         #expect(ranked.first?.job.id == "ready")
     }
 
+    @Test @MainActor func scaniverseAssistedCaptureStaysExternalSupportWorkflow() async throws {
+        let job = makeJob(
+            id: "scaniverse",
+            title: "360 Scaniverse Site",
+            address: "S",
+            lat: 0,
+            lng: 0,
+            updatedAt: Date(),
+            requestedOutputs: ["qualification", CaptureRequestedOutputs.scaniverseAssistedCapture]
+        )
+
+        let normalized = CaptureRequestedOutputs.normalized(job.requestedOutputs)
+
+        #expect(job.usesScaniverseAssistedCapture == true)
+        #expect(normalized.contains(CaptureRequestedOutputs.scaniverseAssistedCapture))
+        #expect(normalized.contains("robot_eval_dataset"))
+        #expect(!normalized.contains("task_evaluation_run"))
+        #expect(job.scaniverseAssistedChecklist.contains { $0.contains("raw evidence bundle") })
+        #expect(job.scaniverseAssistedChecklist.contains { $0.contains("Insta360 X5") })
+        #expect(job.scaniverseAssistedChecklist.contains { $0.contains("Scaniverse Web") })
+        #expect(job.scaniverseProofBoundaryNotes.contains { $0.contains("do not replace raw Blueprint capture truth") })
+        #expect(job.scaniverseProofBoundaryNotes.contains { $0.contains("commercial rights") })
+        #expect(job.defaultScaffoldingPacket.scaffoldingUsed == [ScaniverseAssistedCaptureContract.workflowMarker])
+        #expect(job.defaultScaffoldingPacket.coveragePlan.contains { $0.contains("Scaniverse export sidecar") })
+        #expect(job.defaultScaffoldingPacket.uncertaintyPriors["external_derived_geometry_review"] == 0.75)
+    }
+
     @Test @MainActor func scanHome_prefersHigherOpportunityScoreAfterReadyAndSpecial() async throws {
         let user = CLLocation(latitude: 0, longitude: 0)
         let now = Date()
@@ -651,7 +678,8 @@ private func makeJob(
     jobType: ScanJob.JobType = .buyerRequestedSpecialTask,
     approvalRequirements: [String] = ["ops_review"],
     rightsProfile: String? = "documented_permission",
-    rightsChecklist: [String] = ["permission doc"]
+    rightsChecklist: [String] = ["permission doc"],
+    requestedOutputs: [String] = ["qualification", "preview_simulation"]
 ) -> ScanJob {
     ScanJob(
         id: id,
@@ -684,7 +712,7 @@ private func makeJob(
         recaptureReason: nil,
         rightsChecklist: rightsChecklist,
         rightsProfile: rightsProfile,
-        requestedOutputs: ["qualification", "preview_simulation"],
+        requestedOutputs: requestedOutputs,
         workflowName: nil,
         workflowSteps: [],
         targetKPI: nil,

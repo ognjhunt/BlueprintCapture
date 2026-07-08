@@ -190,12 +190,29 @@ Required fields:
 pre-publication Site/Task/Scenario/Eval Card package, task thresholds, and
 publication readiness gate. It may include `task_evaluation_run` when the
 capture should also be routed toward a robot-team Task Evaluation Run request.
+It may include `scaniverse_assisted_capture` when the assignment expects a
+separate Scaniverse 360/Web export to be imported later as a derived support
+asset. That marker does not change the raw bundle modality and does not make
+Scaniverse output raw capture truth.
 The bridge carries those outputs through `pipeline_handoff.json` and includes
 `robot_eval_dataset` / `task_evaluation_run` routing labels. `BlueprintCapturePipeline`
 treats those labels as aliases for the current executable stages:
 `robot_eval_dataset` resolves through `qualification -> evaluation_prep`, and
 `task_evaluation_run` resolves through
 `qualification -> evaluation_prep -> simulation_automation`.
+
+`scaniverse_assisted_capture` resolves only to support-asset packaging unless a
+downstream Pipeline import manifest exists. Expected external exports include
+USDZ, PLY, SPZ, GLB/GLTF, FBX, OBJ, USD, USDA, or USDC, plus a Blueprint
+Scaniverse sidecar manifest tying the export to assignment, capture, rights,
+provenance, source-video, operator, and metric-scale notes. Approved capturers
+should use supported 360 hardware, preferably Insta360 X5/X4, and desktop
+Scaniverse Web for upload, processing, and download unless a separate Enterprise
+API contract is proven. Pipeline must import those through
+`pipeline/scaniverse_assets/scaniverse_import_manifest.json` and label them as
+external derived support assets. They cannot prove Isaac import,
+collision/contact behavior, robot policy success, deployment readiness, or
+buyer-facing task success without separate owner-system evidence.
 
 Optional advisory fields may seed Pipeline CPU/pre-GPU review:
 
