@@ -369,6 +369,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     override init() {
         super.init()
         arSession.delegate = self
+        qualityMonitor.onDeviceHealthHardLimit = { [weak self] in
+            self?.handleDeviceHealthHardLimit()
+        }
+    }
+
+    /// True once a device-health hard limit has finalized the current recording, so the
+    /// periodic monitor does not request stop repeatedly. Reset per recording.
+    private var didTriggerHealthStop = false
+
+    /// Called (on the main actor) when the quality monitor reports a hard device-health
+    /// limit (critical thermal, memory pressure, or critically low disk). Gracefully stops
+    /// the in-progress recording so the capture-so-far is finalized rather than lost.
+    private func handleDeviceHealthHardLimit() {
+        guard !didTriggerHealthStop else { return }
+        guard case .recording = captureState else { return }
+        didTriggerHealthStop = true
+        print("⚠️ [Capture] Device-health hard limit reached — finalizing recording to preserve capture-so-far.")
+        stopRecording()
     }
 
 
@@ -548,6 +566,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         pendingAnchorObservationExpirations = [:]
         latestUploadPayload = nil
         exposureSamples = []
+        didTriggerHealthStop = false
         Task { @MainActor in qualityMonitor.start() }
         if shouldUseScreenRecorder {
             currentCameraIntrinsics = makeScreenIntrinsics()
@@ -567,6 +586,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         prepareMotionLog(for: artifacts)
         guard motionLogFileHandle != nil else {
             currentArtifacts = nil
+            Task { @MainActor in qualityMonitor.stop() }
             return
         }
         prepareARKitLoggingIfNeeded(for: artifacts)
@@ -1960,6 +1980,10 @@ private final class ARSessionVideoRecorder {
 private extension VideoCaptureManager {
     func cleanupAfterRecording() {
         print("🧹 [Capture] cleanupAfterRecording")
+        // Guarantee device-health observers are torn down on every terminal path
+        // (success and all error paths route through here). stop() is idempotent.
+        qualityMonitor.stop()
+        didTriggerHealthStop = false
         currentArtifacts = nil
         currentARKitArtifacts = nil
         currentCameraIntrinsics = nil

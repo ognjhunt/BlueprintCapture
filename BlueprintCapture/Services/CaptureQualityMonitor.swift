@@ -2,6 +2,15 @@ import Foundation
 import ARKit
 import CoreMotion
 import Combine
+import UIKit
+
+/// Free-space thresholds (bytes) for mid-recording disk monitoring. The critical stop
+/// floor stays above CaptureUploadService's 250 MB upload headroom (see
+/// `hasUsableDiskSpace`) so the finalized bundle still has room to be written and uploaded.
+private enum CaptureDeviceHealthThresholds {
+    static let lowDiskWarningBytes = 1_000_000_000   // 1 GB — soft warning
+    static let criticalDiskStopBytes = 300_000_000   // 300 MB — hard stop
+}
 
 @MainActor
 final class CaptureQualityMonitor: ObservableObject {
@@ -53,6 +62,44 @@ final class CaptureQualityMonitor: ObservableObject {
         }
     }
 
+    /// Live device-health signal surfaced during recording so a long ARKit/LiDAR walk does
+    /// not silently fail on thermal throttle, memory pressure, or storage exhaustion.
+    /// Mirrors the glasses thermal handling in `GlassesCaptureManager.handleDeviceState`.
+    /// Nested value type is not @MainActor-isolated, so it is safe to build off-actor.
+    enum DeviceHealthWarning: Equatable {
+        case elevatedThermal
+        case criticalThermal
+        case memoryPressure
+        case lowDisk
+        case criticalDisk
+
+        /// User-facing banner copy.
+        var message: String {
+            switch self {
+            case .elevatedThermal:
+                return "Device is getting hot — find shade or slow down to avoid throttling."
+            case .criticalThermal:
+                return "Device too hot — saving your capture and stopping to prevent data loss."
+            case .memoryPressure:
+                return "Low memory — saving your capture and stopping to prevent data loss."
+            case .lowDisk:
+                return "Storage is running low — wrap up this capture soon."
+            case .criticalDisk:
+                return "Storage almost full — saving your capture and stopping to prevent data loss."
+            }
+        }
+
+        /// When true, recording must be finalized immediately to preserve capture-so-far.
+        var isHardLimit: Bool {
+            switch self {
+            case .criticalThermal, .memoryPressure, .criticalDisk:
+                return true
+            case .elevatedThermal, .lowDisk:
+                return false
+            }
+        }
+    }
+
     @Published private(set) var trackingQuality: TrackingQuality = .notAvailable
     @Published private(set) var meshAnchorCount: Int = 0
     @Published private(set) var steadiness: SteadinessLevel = .good
@@ -65,9 +112,20 @@ final class CaptureQualityMonitor: ObservableObject {
     @Published private(set) var limitedTrackingSeconds: TimeInterval = 0
     @Published private(set) var weakSignalEventCount: Int = 0
     @Published private(set) var recoveryPrompt: String?
+    /// Active device-health warning while recording (thermal / memory / disk). Read by the
+    /// capture overlay. Nil when the device is healthy.
+    @Published private(set) var deviceHealthWarning: DeviceHealthWarning?
+
+    /// Invoked when a hard device-health limit is reached so the owning capture manager can
+    /// gracefully finalize the current recording (save capture-so-far). Set by
+    /// `VideoCaptureManager`. Runs on the main actor.
+    var onDeviceHealthHardLimit: (() -> Void)?
 
     private var startDate: Date?
     private var timer: Timer?
+    private var deviceHealthTimer: Timer?
+    private var thermalObserverToken: NSObjectProtocol?
+    private var memoryWarningObserverToken: NSObjectProtocol?
     private var gyroSamples: [Double] = []
     private let gyroWindowSize = 100 // ~1 second at 100Hz
     private let motionManager = CMMotionManager()
@@ -98,6 +156,7 @@ final class CaptureQualityMonitor: ObservableObject {
         limitedTrackingSeconds = 0
         weakSignalEventCount = 0
         recoveryPrompt = nil
+        deviceHealthWarning = nil
         gyroSamples = []
         steadiness = .good
         trackingQuality = .notAvailable
@@ -114,12 +173,120 @@ final class CaptureQualityMonitor: ObservableObject {
         }
 
         startMotionUpdates()
+        startDeviceHealthMonitoring()
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
         motionManager.stopGyroUpdates()
+        stopDeviceHealthMonitoring()
+        deviceHealthWarning = nil
+    }
+
+    // MARK: - Device Health (thermal / memory / disk)
+
+    /// Starts observing thermal-state and memory-warning notifications and begins periodic
+    /// disk polling. Active only while recording. Idempotent — safe to call repeatedly.
+    private func startDeviceHealthMonitoring() {
+        // Clear any stale observers before registering so we never double-subscribe.
+        stopDeviceHealthMonitoring()
+
+        thermalObserverToken = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshDeviceHealth(memoryWarningActive: false)
+            }
+        }
+
+        memoryWarningObserverToken = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshDeviceHealth(memoryWarningActive: true)
+            }
+        }
+
+        deviceHealthTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshDeviceHealth(memoryWarningActive: false)
+            }
+        }
+
+        // Evaluate immediately so an already-hot or already-full device warns right away.
+        refreshDeviceHealth(memoryWarningActive: false)
+    }
+
+    /// Removes device-health observers and stops disk polling. Idempotent (no leaks on
+    /// repeated calls or when never started).
+    private func stopDeviceHealthMonitoring() {
+        deviceHealthTimer?.invalidate()
+        deviceHealthTimer = nil
+        if let token = thermalObserverToken {
+            NotificationCenter.default.removeObserver(token)
+            thermalObserverToken = nil
+        }
+        if let token = memoryWarningObserverToken {
+            NotificationCenter.default.removeObserver(token)
+            memoryWarningObserverToken = nil
+        }
+    }
+
+    private func refreshDeviceHealth(memoryWarningActive: Bool) {
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let availableBytes = Self.availableCaptureDiskBytes()
+        let warning = Self.evaluateDeviceHealth(
+            thermalState: thermalState,
+            memoryWarningActive: memoryWarningActive,
+            availableDiskBytes: availableBytes
+        )
+        if warning != deviceHealthWarning {
+            deviceHealthWarning = warning
+        }
+        if let warning = warning, warning.isHardLimit {
+            onDeviceHealthHardLimit?()
+        }
+    }
+
+    /// Pure evaluation of device-health signals into a user-facing warning. Kept free of
+    /// AVFoundation/ARKit runtime so it is unit-testable off the main actor.
+    nonisolated static func evaluateDeviceHealth(
+        thermalState: ProcessInfo.ThermalState,
+        memoryWarningActive: Bool,
+        availableDiskBytes: Int?
+    ) -> DeviceHealthWarning? {
+        // Hard limits first — finalize to preserve capture-so-far.
+        if let bytes = availableDiskBytes, bytes < CaptureDeviceHealthThresholds.criticalDiskStopBytes {
+            return .criticalDisk
+        }
+        if thermalState == .critical {
+            return .criticalThermal
+        }
+        if memoryWarningActive {
+            return .memoryPressure
+        }
+        // Soft warnings.
+        if let bytes = availableDiskBytes, bytes < CaptureDeviceHealthThresholds.lowDiskWarningBytes {
+            return .lowDisk
+        }
+        if thermalState == .serious {
+            return .elevatedThermal
+        }
+        return nil
+    }
+
+    /// Available space (bytes) on the capture volume, using the exact API already used by
+    /// `CaptureUploadService.hasUsableDiskSpace` (`volumeAvailableCapacityForImportantUsage`).
+    nonisolated static func availableCaptureDiskBytes() -> Int? {
+        let directory = FileManager.default.temporaryDirectory
+        return try? directory.resourceValues(
+            forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+        ).volumeAvailableCapacityForImportantUsage
     }
 
     // MARK: - ARSession Updates

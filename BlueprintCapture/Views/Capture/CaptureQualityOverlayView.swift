@@ -12,6 +12,11 @@ struct CaptureQualityOverlayView: View {
             if let warning = monitor.trackingQuality.warningMessage {
                 trackingWarningBanner(warning)
             }
+
+            // Device-health warning banner (thermal / memory / disk).
+            if let health = monitor.deviceHealthWarning {
+                deviceHealthBanner(health)
+            }
         }
     }
 
@@ -111,6 +116,28 @@ struct CaptureQualityOverlayView: View {
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.yellow.opacity(0.9))
+        )
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    // MARK: - Device Health Warning Banner
+
+    private func deviceHealthBanner(_ warning: CaptureQualityMonitor.DeviceHealthWarning) -> some View {
+        let isHardLimit = warning.isHardLimit
+        return HStack(spacing: 8) {
+            Image(systemName: isHardLimit ? "exclamationmark.octagon.fill" : "thermometer.high")
+                .font(.caption)
+                .foregroundStyle(.white)
+            Text(warning.message)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill((isHardLimit ? Color.red : Color.orange).opacity(0.92))
         )
         .transition(.move(edge: .top).combined(with: .opacity))
     }
