@@ -17,9 +17,6 @@ struct CaptureSessionView: View {
     let targetId: String?
     let reservationId: String?
 
-    // Venue permission for this capture (would be set when user selects a location)
-    @State private var venuePermission: VenuePermission? = .demo
-
     private let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
     init(viewModel: CaptureFlowViewModel, targetId: String?, reservationId: String?) {
@@ -44,7 +41,10 @@ struct CaptureSessionView: View {
                 // Top bar with permission badge and quality overlay
                 HStack {
                     Spacer()
-                    VenuePermissionBadge(permission: venuePermission)
+                    VenuePermissionBadge(
+                        permission: viewModel.capturedVenuePermission,
+                        onSave: { viewModel.capturedVenuePermission = $0 }
+                    )
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)

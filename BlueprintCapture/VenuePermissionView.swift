@@ -1,19 +1,35 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Permission Data Model
 
-/// Represents a signed venue capture permission/authorization
-struct VenuePermission: Identifiable {
+/// The provenance of a `VenuePermission` record.
+enum VenuePermissionSource: String, Codable, CaseIterable {
+    /// Captured in-app by the operator via the authorization form.
+    case capturedInApp = "captured_in_app"
+    /// Imported from an existing signed-document reference.
+    case importedDocument = "imported_document"
+    /// Sample data for SwiftUI previews and tests only — never used for a real capture.
+    case demo
+}
+
+/// Represents a signed venue capture permission/authorization.
+///
+/// `Codable` so a captured authorization can be persisted and threaded into the capture
+/// bundle's rights metadata (`rights_consent.json`), which the pipeline reads to satisfy
+/// the site-operator authorization rights gate.
+struct VenuePermission: Identifiable, Codable, Equatable {
     let id: UUID
     let venueName: String
     let venueAddress: String
-    let authorizedBy: String       // Name of person who signed
-    let authorizedTitle: String    // Their role (e.g., "Store Manager")
-    let signedAt: Date
-    let validUntil: Date?          // nil = no expiration
-    let captureAreas: [String]     // e.g., ["Sales floor", "Aisles", "Entrance"]
-    let restrictions: [String]     // e.g., ["No back office", "No registers"]
-    let documentURL: URL?          // Link to actual signed PDF if available
+    let authorizedBy: String       // Authorizer name (site-operator representative)
+    let authorizedTitle: String    // Their role (e.g., "Plant Manager", "Store Manager")
+    let signedAt: Date             // Date the authorization was signed
+    let validUntil: Date?          // Expiry; nil = no expiration
+    let captureAreas: [String]     // Allowed areas (e.g., ["Receiving dock", "Pick module"])
+    let restrictions: [String]     // Restrictions (e.g., ["PPE required", "LOTO zones off-limits"])
+    let documentURL: URL?          // Attachment reference to the signed PDF/photo, if any
+    let source: VenuePermissionSource
 
     var isValid: Bool {
         if let validUntil {
@@ -22,7 +38,7 @@ struct VenuePermission: Identifiable {
         return true
     }
 
-    // Demo permission for testing
+    // Sample permission for SwiftUI previews and tests only — never defaulted into a real capture.
     static let demo = VenuePermission(
         id: UUID(),
         venueName: "Fresh Market Grocery",
@@ -33,7 +49,8 @@ struct VenuePermission: Identifiable {
         validUntil: Date().addingTimeInterval(86400 * 30), // 30 days from now
         captureAreas: ["Sales floor", "All aisles", "Entrance area"],
         restrictions: ["No employee areas", "No cash registers", "No restrooms"],
-        documentURL: nil
+        documentURL: nil,
+        source: .demo
     )
 }
 
@@ -43,6 +60,8 @@ struct VenuePermission: Identifiable {
 /// Designed to be so simple a 5 year old could understand it
 struct VenuePermissionBadge: View {
     let permission: VenuePermission?
+    /// Called when the operator creates an authorization from the "Add authorization" flow.
+    var onSave: ((VenuePermission) -> Void)? = nil
     @State private var showingPermission = false
 
     var body: some View {
@@ -66,7 +85,7 @@ struct VenuePermissionBadge: View {
             )
         }
         .sheet(isPresented: $showingPermission) {
-            VenuePermissionSheet(permission: permission)
+            VenuePermissionSheet(permission: permission, onSave: onSave)
         }
     }
 }
@@ -77,7 +96,10 @@ struct VenuePermissionBadge: View {
 /// Big, clear, easy to show to anyone who asks
 struct VenuePermissionSheet: View {
     let permission: VenuePermission?
+    /// Called when the operator creates an authorization from the no-permission flow.
+    var onSave: ((VenuePermission) -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
+    @State private var showingForm = false
 
     var body: some View {
         NavigationStack {
@@ -101,6 +123,15 @@ struct VenuePermissionSheet: View {
                     }
                     .fontWeight(.semibold)
                 }
+            }
+        }
+        .sheet(isPresented: $showingForm) {
+            VenuePermissionFormView(
+                venueName: permission?.venueName ?? "",
+                venueAddress: permission?.venueAddress ?? ""
+            ) { newPermission in
+                onSave?(newPermission)
+                dismiss()
             }
         }
     }
@@ -293,8 +324,263 @@ struct VenuePermissionSheet: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
 
+            if onSave != nil {
+                Button {
+                    showingForm = true
+                } label: {
+                    Label("Add authorization", systemImage: "plus.circle.fill")
+                }
+                .buttonStyle(BlueprintPrimaryButtonStyle())
+                .padding(.horizontal, 40)
+            }
+
             Spacer()
         }
+    }
+}
+
+// MARK: - Add Authorization Form
+
+/// Creation flow for a real, capturable site-operator authorization.
+///
+/// Collects the authorizer, dates, allowed areas, and restrictions — with an industrial
+/// vocabulary preset — plus an optional signed-document attachment. The resulting
+/// `VenuePermission` is handed back via `onSave` so it can be threaded into the capture
+/// bundle's rights metadata.
+struct VenuePermissionFormView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var venueName: String
+    @State private var venueAddress: String
+    @State private var authorizedBy = ""
+    @State private var authorizedTitle = ""
+    @State private var signedAt = Date()
+    @State private var hasExpiry = false
+    @State private var validUntil = Date().addingTimeInterval(86400 * 30)
+    @State private var captureAreas: [String] = []
+    @State private var restrictions: [String] = []
+    @State private var documentURL: URL?
+    @State private var documentName: String?
+    @State private var isImportingDocument = false
+
+    let onSave: (VenuePermission) -> Void
+
+    /// Industrial-site allowed-area vocabulary presets.
+    private let areaPresets = [
+        "Receiving dock",
+        "Pick module",
+        "Staging",
+        "Shipping dock",
+        "Main aisle",
+        "Cross-dock",
+    ]
+
+    /// Industrial-site restriction vocabulary presets.
+    private let restrictionPresets = [
+        "No production line access",
+        "Escort required",
+        "PPE required",
+        "No employee break areas",
+        "LOTO zones off-limits",
+    ]
+
+    init(
+        venueName: String = "",
+        venueAddress: String = "",
+        onSave: @escaping (VenuePermission) -> Void
+    ) {
+        self._venueName = State(initialValue: venueName)
+        self._venueAddress = State(initialValue: venueAddress)
+        self.onSave = onSave
+    }
+
+    private var canSave: Bool {
+        !authorizedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Authorized by") {
+                    TextField("Name", text: $authorizedBy)
+                        .textContentType(.name)
+                    TextField("Title (e.g., Plant Manager)", text: $authorizedTitle)
+                }
+
+                Section("Venue") {
+                    TextField("Venue name", text: $venueName)
+                    TextField("Address", text: $venueAddress)
+                }
+
+                Section("Dates") {
+                    DatePicker("Signed", selection: $signedAt, displayedComponents: .date)
+                    Toggle("Has expiry date", isOn: $hasExpiry.animation())
+                    if hasExpiry {
+                        DatePicker("Valid until", selection: $validUntil, displayedComponents: .date)
+                    }
+                }
+
+                Section("Allowed areas") {
+                    VenuePermissionScopeEditor(
+                        presets: areaPresets,
+                        selected: $captureAreas,
+                        addPlaceholder: "Add allowed area"
+                    )
+                }
+
+                Section("Restrictions") {
+                    VenuePermissionScopeEditor(
+                        presets: restrictionPresets,
+                        selected: $restrictions,
+                        addPlaceholder: "Add restriction"
+                    )
+                }
+
+                Section("Signed document (optional)") {
+                    if let documentName {
+                        HStack {
+                            Label(documentName, systemImage: "doc.fill")
+                                .lineLimit(1)
+                            Spacer()
+                            Button(role: .destructive) {
+                                documentURL = nil
+                                documentName = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    } else {
+                        Button {
+                            isImportingDocument = true
+                        } label: {
+                            Label("Attach PDF or photo", systemImage: "paperclip")
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Add Authorization")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") {
+                        onSave(makePermission())
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!canSave)
+                }
+            }
+            .fileImporter(
+                isPresented: $isImportingDocument,
+                allowedContentTypes: [.pdf, .image],
+                allowsMultipleSelection: false
+            ) { result in
+                if case .success(let urls) = result, let url = urls.first {
+                    documentURL = url
+                    documentName = url.lastPathComponent
+                }
+            }
+        }
+    }
+
+    private func makePermission() -> VenuePermission {
+        VenuePermission(
+            id: UUID(),
+            venueName: venueName.trimmingCharacters(in: .whitespacesAndNewlines),
+            venueAddress: venueAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            authorizedBy: authorizedBy.trimmingCharacters(in: .whitespacesAndNewlines),
+            authorizedTitle: authorizedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            signedAt: signedAt,
+            validUntil: hasExpiry ? validUntil : nil,
+            captureAreas: captureAreas,
+            restrictions: restrictions,
+            documentURL: documentURL,
+            source: .capturedInApp
+        )
+    }
+}
+
+/// Multi-select editor over a preset vocabulary plus free-form custom entries.
+private struct VenuePermissionScopeEditor: View {
+    let presets: [String]
+    @Binding var selected: [String]
+    let addPlaceholder: String
+
+    @State private var customEntry = ""
+
+    private var customSelections: [String] {
+        selected.filter { !presets.contains($0) }
+    }
+
+    var body: some View {
+        ForEach(presets, id: \.self) { preset in
+            Button {
+                toggle(preset)
+            } label: {
+                HStack {
+                    Image(systemName: selected.contains(preset) ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected.contains(preset) ? Color.green : Color.secondary)
+                    Text(preset)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+        }
+
+        ForEach(customSelections, id: \.self) { entry in
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text(entry)
+                Spacer()
+                Button(role: .destructive) {
+                    remove(entry)
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+
+        HStack {
+            TextField(addPlaceholder, text: $customEntry)
+            Button {
+                addCustom()
+            } label: {
+                Image(systemName: "plus.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .disabled(customEntry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+    }
+
+    private func toggle(_ value: String) {
+        if let index = selected.firstIndex(of: value) {
+            selected.remove(at: index)
+        } else {
+            selected.append(value)
+        }
+    }
+
+    private func remove(_ value: String) {
+        selected.removeAll { $0 == value }
+    }
+
+    private func addCustom() {
+        let trimmed = customEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !selected.contains(trimmed) else {
+            customEntry = ""
+            return
+        }
+        selected.append(trimmed)
+        customEntry = ""
     }
 }
 
@@ -319,5 +605,9 @@ struct VenuePermissionSheet: View {
 }
 
 #Preview("Sheet - No Permission") {
-    VenuePermissionSheet(permission: nil)
+    VenuePermissionSheet(permission: nil) { _ in }
+}
+
+#Preview("Add Authorization Form") {
+    VenuePermissionFormView { _ in }
 }

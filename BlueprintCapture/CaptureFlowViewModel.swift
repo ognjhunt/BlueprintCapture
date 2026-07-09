@@ -50,6 +50,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var shareSheetItem: ShareSheetItem?
     @Published var spaceContextNotes: String = ""
     @Published var confirmedCaptureGuidelines = false
+    /// Site-operator authorization captured for the active session. When set, it is threaded
+    /// into the capture bundle's rights metadata (`rights_consent.json`) at finalization.
+    /// Defaults to `nil` so an unauthorized capture is correctly treated as needing authorization.
+    @Published var capturedVenuePermission: VenuePermission?
     @Published var siteWorldSiteScale: SiteWorldSiteScale = .medium
     /// Capturer-declared site type, written into the raw manifest's `intended_space_type`.
     /// Defaults to `.unknown` so it never hard-blocks capture (explicit fallback, not a guess).
@@ -475,6 +479,36 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         ActivationFunnelStore.shared.record(.captureStarted, metadata: ["capture_source": "iphone_video"])
     }
 
+    /// Threads a captured site-operator authorization into the capture rights metadata the
+    /// pipeline reads. A captured authorization records `consent_status: documented` — which the
+    /// bundle writer maps to `capture_basis: site_operator_permission` — and carries the signed
+    /// permission's document reference (`permission_document_uri`), allowed areas
+    /// (`consent_scope`), and restrictions (`consent_notes`) into `rights_consent.json` so a
+    /// captured authorization satisfies the downstream rights gate.
+    private func deriveCaptureRights(
+        applying permission: VenuePermission,
+        to base: CaptureRightsMetadata
+    ) -> CaptureRightsMetadata {
+        var notes = base.consentNotes
+        let authorizer = permission.authorizedTitle.isEmpty
+            ? permission.authorizedBy
+            : "\(permission.authorizedBy), \(permission.authorizedTitle)"
+        notes.append("Authorized by \(authorizer) on \(permission.signedAt.formatted(date: .abbreviated, time: .omitted))")
+        if let validUntil = permission.validUntil {
+            notes.append("Authorization valid until \(validUntil.formatted(date: .abbreviated, time: .omitted))")
+        }
+        notes.append(contentsOf: permission.restrictions.map { "Restriction: \($0)" })
+        return CaptureRightsMetadata(
+            derivedSceneGenerationAllowed: base.derivedSceneGenerationAllowed,
+            dataLicensingAllowed: base.dataLicensingAllowed,
+            payoutEligible: base.payoutEligible,
+            consentStatus: .documented,
+            permissionDocumentURI: permission.documentURL?.absoluteString,
+            consentScope: permission.captureAreas,
+            consentNotes: notes
+        )
+    }
+
     func handleRecordingFinished(artifacts: VideoCaptureManager.RecordingArtifacts, targetId: String?, reservationId: String?) {
         print("📦 [CaptureFlowViewModel] handleRecordingFinished targetId=\(targetId ?? "nil") reservationId=\(reservationId ?? "nil") package=\(artifacts.packageURL.lastPathComponent)")
         let reviewSeed: SpaceReviewSeed? = {
@@ -500,7 +534,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 CaptureTaskHypothesis(packet: packet, metadata: metadata, status: .accepted)
             }
         }
-        let defaultCaptureRights = CaptureRightsMetadata(
+        let baseCaptureRights = CaptureRightsMetadata(
             derivedSceneGenerationAllowed: !isSpaceReviewMode,
             dataLicensingAllowed: !isSpaceReviewMode,
             payoutEligible: explicitPayoutRange != nil,
@@ -509,6 +543,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             consentScope: [],
             consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
         )
+        // A captured site-operator authorization upgrades the rights basis and threads the
+        // signed permission (document reference, allowed areas, restrictions) into the bundle.
+        let defaultCaptureRights = capturedVenuePermission.map { permission in
+            deriveCaptureRights(applying: permission, to: baseCaptureRights)
+        } ?? baseCaptureRights
         let captureRights = reviewSeed?.captureRights ?? defaultCaptureRights
 
         // Derive stable site identity. Priority: buyer target > reservation > session-stable UUID.
