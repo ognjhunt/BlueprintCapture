@@ -309,6 +309,7 @@ struct CaptureRightsMetadata: Equatable, Codable {
     let permissionDocumentURI: String?
     let consentScope: [String]
     let consentNotes: [String]
+    let venuePermission: VenuePermission?
 
     init(
         derivedSceneGenerationAllowed: Bool = false,
@@ -317,7 +318,8 @@ struct CaptureRightsMetadata: Equatable, Codable {
         consentStatus: CaptureConsentStatus = .unknown,
         permissionDocumentURI: String? = nil,
         consentScope: [String] = [],
-        consentNotes: [String] = []
+        consentNotes: [String] = [],
+        venuePermission: VenuePermission? = nil
     ) {
         self.derivedSceneGenerationAllowed = derivedSceneGenerationAllowed
         self.dataLicensingAllowed = dataLicensingAllowed
@@ -326,6 +328,7 @@ struct CaptureRightsMetadata: Equatable, Codable {
         self.permissionDocumentURI = permissionDocumentURI
         self.consentScope = consentScope
         self.consentNotes = consentNotes
+        self.venuePermission = venuePermission
     }
 }
 

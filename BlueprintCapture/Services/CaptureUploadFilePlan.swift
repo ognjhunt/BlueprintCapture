@@ -47,3 +47,43 @@ struct CaptureUploadFilePlan: Equatable {
         )
     }
 }
+
+struct CaptureUploadLimitDecision: Equatable {
+    let allowed: Bool
+    let reasons: [String]
+    let totalPayloadBytes: Int64
+    let maxFileSizeBytes: Int64
+    let durationSeconds: Double?
+    let maxDurationSeconds: Double
+}
+
+struct CaptureUploadLimitPolicy: Equatable {
+    static let betaMaxFileSizeBytes: Int64 = 20 * 1024 * 1024 * 1024
+    static let betaMaxDurationSeconds: Double = 45 * 60
+    static let betaDefault = CaptureUploadLimitPolicy(
+        maxFileSizeBytes: betaMaxFileSizeBytes,
+        maxDurationSeconds: betaMaxDurationSeconds
+    )
+
+    let maxFileSizeBytes: Int64
+    let maxDurationSeconds: Double
+
+    func evaluate(plan: CaptureUploadFilePlan, durationSeconds: Double?) -> CaptureUploadLimitDecision {
+        var reasons: [String] = []
+        if plan.totalPayloadBytes > maxFileSizeBytes {
+            reasons.append("capture_upload_size_exceeds_beta_limit")
+        }
+        if let durationSeconds,
+           durationSeconds > maxDurationSeconds {
+            reasons.append("capture_duration_exceeds_beta_limit")
+        }
+        return CaptureUploadLimitDecision(
+            allowed: reasons.isEmpty,
+            reasons: reasons,
+            totalPayloadBytes: plan.totalPayloadBytes,
+            maxFileSizeBytes: maxFileSizeBytes,
+            durationSeconds: durationSeconds,
+            maxDurationSeconds: maxDurationSeconds
+        )
+    }
+}

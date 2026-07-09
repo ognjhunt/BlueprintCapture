@@ -65,6 +65,7 @@ def main() -> None:
             "request.resource.metadata.sha256.matches('^[a-f0-9]{64}$')",
             "lowercase sha256 format check",
         ),
+        ("boundedUpload(20 * 1024 * 1024 * 1024)", "raw capture upload size cap"),
         ("allow create: if isSignedIn()", "create-only authenticated raw upload rule"),
         ("allow update, delete: if false;", "raw update/delete deny rule"),
         ("match /{allPaths=**} { allow read, write: if false;", "catch-all deny rule"),
@@ -82,7 +83,7 @@ def main() -> None:
         if re.search(pattern, rules):
             fail(f"unsafe broad rule matched {pattern}")
 
-    print("Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, and catch-all deny.")
+    print("Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, size cap, and catch-all deny.")
 
 
 if __name__ == "__main__":

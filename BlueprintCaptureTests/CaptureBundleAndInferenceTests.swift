@@ -69,6 +69,40 @@ struct CaptureBundleAndInferenceTests {
     }
 
     @Test
+    func captureUploadLimitPolicyBlocksOversizedAndOverDurationCaptures() throws {
+        let policy = CaptureUploadLimitPolicy(maxFileSizeBytes: 100, maxDurationSeconds: 60)
+        let allowedPlan = CaptureUploadFilePlan(
+            payloadFiles: [],
+            completionMarkerFile: nil,
+            totalPayloadBytes: 100
+        )
+        let allowed = policy.evaluate(plan: allowedPlan, durationSeconds: 60)
+        #expect(allowed.allowed)
+        #expect(allowed.reasons.isEmpty)
+
+        let oversizedPlan = CaptureUploadFilePlan(
+            payloadFiles: [],
+            completionMarkerFile: nil,
+            totalPayloadBytes: 101
+        )
+        let oversized = policy.evaluate(plan: oversizedPlan, durationSeconds: 30)
+        #expect(!oversized.allowed)
+        #expect(oversized.reasons == ["capture_upload_size_exceeds_beta_limit"])
+        #expect(oversized.maxFileSizeBytes == 100)
+
+        let tooLong = policy.evaluate(plan: allowedPlan, durationSeconds: 60.001)
+        #expect(!tooLong.allowed)
+        #expect(tooLong.reasons == ["capture_duration_exceeds_beta_limit"])
+        #expect(tooLong.maxDurationSeconds == 60)
+
+        let both = policy.evaluate(plan: oversizedPlan, durationSeconds: 61)
+        #expect(both.reasons == [
+            "capture_upload_size_exceeds_beta_limit",
+            "capture_duration_exceeds_beta_limit",
+        ])
+    }
+
+    @Test
     func finalizerAndExportProducePipelineReadyBundle() async throws {
         let fileManager = FileManager.default
         let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-bundle-\(UUID().uuidString)", isDirectory: true)

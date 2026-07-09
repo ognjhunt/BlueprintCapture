@@ -43,10 +43,18 @@ const PIPELINE_HANDOFF_TOPIC =
   process.env.BLUEPRINT_CAPTURE_PIPELINE_TOPIC ?? "blueprint-capture-pipeline-handoff";
 const ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS =
   process.env.BLUEPRINT_ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS === "true";
+export const DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES = 1_500_000_000;
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
 type PoseMatchType = "frame_id" | "time";
+type InlineFrameExtractionSizeGate = {
+  inlineAllowed: boolean;
+  blockCode: string | null;
+  reasons: string[];
+  rawVideoSizeBytes: number | null;
+  maxInlineVideoBytes: number;
+};
 
 function zeroPad(n: number, width: number): string {
   const s = String(n);
@@ -276,6 +284,157 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     return undefined;
   }
   return value as Record<string, unknown>;
+}
+
+export function maxInlineExtractFramesVideoBytes(): number {
+  const raw = process.env.BLUEPRINT_EXTRACT_FRAMES_MAX_INLINE_VIDEO_BYTES;
+  if (!raw) return DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES;
+  }
+  return parsed;
+}
+
+export function parseStorageObjectSize(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!/^[0-9]+$/.test(trimmed)) return null;
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+}
+
+export function inlineFrameExtractionSizeGate(
+  rawVideoSizeBytes: number | null,
+  maxInlineVideoBytes: number = maxInlineExtractFramesVideoBytes()
+): InlineFrameExtractionSizeGate {
+  if (!Number.isSafeInteger(maxInlineVideoBytes) || maxInlineVideoBytes <= 0) {
+    maxInlineVideoBytes = DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES;
+  }
+  if (rawVideoSizeBytes === null) {
+    return {
+      inlineAllowed: false,
+      blockCode: "blocked_raw_walkthrough_video_size_unavailable",
+      reasons: ["raw_walkthrough_video_size_unavailable"],
+      rawVideoSizeBytes: null,
+      maxInlineVideoBytes,
+    };
+  }
+  if (rawVideoSizeBytes > maxInlineVideoBytes) {
+    return {
+      inlineAllowed: false,
+      blockCode: "blocked_large_video_requires_segmented_ingest",
+      reasons: ["raw_walkthrough_video_exceeds_extract_frames_inline_limit"],
+      rawVideoSizeBytes,
+      maxInlineVideoBytes,
+    };
+  }
+  return {
+    inlineAllowed: true,
+    blockCode: null,
+    reasons: [],
+    rawVideoSizeBytes,
+    maxInlineVideoBytes,
+  };
+}
+
+export function buildLargeVideoIngestBlockedArtifacts(input: {
+  bucketName: string;
+  pathInfo: CapturePathInfo;
+  objectName: string;
+  objectKind: string;
+  walkthroughObjectName: string;
+  manifestExists: boolean;
+  walkthroughExists: boolean;
+  manifestValidation: {
+    valid: boolean;
+    missingRequired: string[];
+    warnings: string[];
+  };
+  sizeGate: InlineFrameExtractionSizeGate;
+  generatedAt?: string;
+}): {
+  blockReport: Record<string, unknown>;
+  qaReport: Record<string, unknown>;
+  pipelineStatusEvent: Record<string, unknown>;
+} {
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const blockReportUri = gsUri(
+    input.bucketName,
+    `${input.pathInfo.capturesPrefix}/large_video_ingest_blocked.json`
+  );
+  const qaReportUri = gsUri(input.bucketName, `${input.pathInfo.capturesPrefix}/qa_report.json`);
+  const rawVideoUri = gsUri(input.bucketName, input.walkthroughObjectName);
+  const blockCode = input.sizeGate.blockCode ?? "blocked_large_video_requires_segmented_ingest";
+  const base = {
+    scene_id: input.pathInfo.sceneId,
+    capture_id: input.pathInfo.captureId,
+    raw_prefix: input.pathInfo.rawPrefix,
+    raw_prefix_uri: gsUri(input.bucketName, input.pathInfo.rawPrefix),
+    trigger_object: input.objectName,
+    trigger_kind: input.objectKind,
+    raw_video_uri: rawVideoUri,
+    raw_video_object: input.walkthroughObjectName,
+    raw_video_size_bytes: input.sizeGate.rawVideoSizeBytes,
+    max_inline_video_bytes: input.sizeGate.maxInlineVideoBytes,
+    block_code: blockCode,
+    reasons: input.sizeGate.reasons,
+    generated_at: generatedAt,
+  };
+  const blockReport = {
+    schema_version: "extract_frames_large_video_block.v1",
+    status: "blocked",
+    stage: "extract_frames.pre_download_size_gate",
+    ...base,
+    inline_frame_extraction_attempted: false,
+    ffmpeg_attempted: false,
+    required_action: "route_capture_to_segmented_or_cloud_run_video_ingest",
+    recommended_next_stage: "large_video_cloud_run_ingest",
+    qa_report_uri: qaReportUri,
+    claim_boundary:
+      "blocked_report_only_no_frames_descriptor_pipeline_handoff_or_policy_success_were_generated",
+  };
+  const qaReport = {
+    schema_version: "v1",
+    status: "blocked",
+    ...base,
+    block_report_uri: blockReportUri,
+    required_files: {
+      walkthrough: input.walkthroughExists,
+      manifest: input.manifestExists,
+    },
+    manifest_validation: {
+      valid: input.manifestValidation.valid,
+      missing_required: input.manifestValidation.missingRequired,
+      warnings: input.manifestValidation.warnings,
+    },
+    quality: {
+      frame_count: 0,
+      pose_matches: 0,
+      pose_match_rate: 0,
+      p95_pose_delta_sec: null,
+    },
+    warnings: [
+      ...input.manifestValidation.warnings,
+      "extract_frames_inline_video_guard_blocked_download",
+    ],
+    recommended_next_stage: "large_video_cloud_run_ingest",
+    claim_boundary:
+      "qa_report_describes_pre_download_block_only_and_does_not_validate_task_or_scene_success",
+  };
+  const pipelineStatusEvent = {
+    event_type: "capture.raw_video_ingest_blocked.v1",
+    qa_status: "blocked",
+    block_report_uri: blockReportUri,
+    qa_report_uri: qaReportUri,
+    ...base,
+  };
+  return { blockReport, qaReport, pipelineStatusEvent };
 }
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
@@ -1383,6 +1542,54 @@ export const extractFrames = onObjectFinalized(
       ),
     };
     const file = bucket.file(walkthroughObjectName);
+    if (walkthroughExists) {
+      let rawVideoSizeBytes: number | null = null;
+      try {
+        const [metadata] = await file.getMetadata();
+        rawVideoSizeBytes = parseStorageObjectSize(metadata.size);
+      } catch (error) {
+        logger.warn("Failed to inspect raw walkthrough video size before download", {
+          walkthroughObjectName,
+          error,
+        });
+      }
+      const sizeGate = inlineFrameExtractionSizeGate(rawVideoSizeBytes);
+      if (!sizeGate.inlineAllowed) {
+        const { blockReport, qaReport, pipelineStatusEvent } = buildLargeVideoIngestBlockedArtifacts({
+          bucketName,
+          pathInfo,
+          objectName,
+          objectKind,
+          walkthroughObjectName,
+          manifestExists,
+          walkthroughExists,
+          manifestValidation,
+          sizeGate,
+        });
+        await Promise.all([
+          bucket
+            .file(`${pathInfo.capturesPrefix}/large_video_ingest_blocked.json`)
+            .save(JSON.stringify(blockReport, null, 2), { contentType: "application/json" }),
+          bucket
+            .file(`${pathInfo.capturesPrefix}/qa_report.json`)
+            .save(JSON.stringify(qaReport, null, 2), { contentType: "application/json" }),
+          bucket
+            .file(`${pathInfo.capturesPrefix}/pipeline_status_event.json`)
+            .save(JSON.stringify(pipelineStatusEvent, null, 2), {
+              contentType: "application/json",
+            }),
+        ]);
+        logger.warn("Blocked inline frame extraction before downloading raw walkthrough video", {
+          captureId: pathInfo.captureId,
+          sceneId: pathInfo.sceneId,
+          walkthroughObjectName,
+          blockCode: sizeGate.blockCode,
+          rawVideoSizeBytes: sizeGate.rawVideoSizeBytes,
+          maxInlineVideoBytes: sizeGate.maxInlineVideoBytes,
+        });
+        return;
+      }
+    }
 
     await file.download({ destination: localVideo });
     logger.info("Downloaded video to temp", { localVideo });

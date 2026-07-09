@@ -51,17 +51,29 @@ service cloud.firestore {
       return field is string;
     }
 
-    function hasValidSceneCreatePayload() {
-      return isStringField(request.resource.data.id)
-        && isStringField(request.resource.data.name)
-        && isStringField(request.resource.data.title)
-        && isStringField(request.resource.data.status)
-        && isStringField(request.resource.data.source)
-        && request.resource.data.createdAt is timestamp
-        && request.resource.data.updatedAt is timestamp;
+    function hasValidScenePayload(data) {
+      return isStringField(data.id)
+        && isStringField(data.name)
+        && isStringField(data.title)
+        && isStringField(data.status)
+        && isStringField(data.source)
+        && isStringField(data.ownerUid)
+        && (!('orgId' in data) || data.orgId is string)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
     }
 
-    function captureSubmissionClientKeys() {
+    function isSceneOwner() {
+      return isSignedIn()
+        && resource.data.ownerUid == request.auth.uid;
+    }
+
+    function sceneOwnershipUnchanged() {
+      return !request.resource.data.diff(resource.data).affectedKeys()
+        .hasAny(['ownerUid', 'orgId']);
+    }
+
+    function captureSubmissionClientCreateKeys() {
       return [
         'capture_id',
         'scene_id',
@@ -91,8 +103,137 @@ service cloud.firestore {
       ];
     }
 
-    function hasOnlyCaptureSubmissionClientKeys(data) {
-      return data.keys().hasOnly(captureSubmissionClientKeys());
+    function captureSubmissionClientUpdateKeys() {
+      return [
+        'created_at',
+        'submitted_at',
+        'status',
+        'operational_state',
+        'lifecycle',
+        'upload_error'
+      ];
+    }
+
+    function captureSubmissionClientStatuses() {
+      return [
+        'submitted',
+        'upload_failed',
+        'raw_validation_failed',
+        'local_preflight_failed'
+      ];
+    }
+
+    function captureSubmissionClientAssignmentStates() {
+      return [
+        'unassigned_or_open_capture',
+        'assigned_capture_job'
+      ];
+    }
+
+    function captureSubmissionClientUploadStates() {
+      return [
+        'uploading',
+        'uploaded',
+        'failed'
+      ];
+    }
+
+    function captureSubmissionClientQaStates() {
+      return [
+        'queued',
+        'not_started',
+        'blocked_raw_validation',
+        'blocked_local_storage'
+      ];
+    }
+
+    function optionalString(data, field) {
+      return !(field in data) || data[field] is string;
+    }
+
+    function optionalTimestamp(data, field) {
+      return !(field in data) || data[field] is timestamp;
+    }
+
+    function optionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function captureSubmissionRequestStatusIsClientWritable(data) {
+      return ('status' in data)
+        && data.status in captureSubmissionClientStatuses();
+    }
+
+    function captureSubmissionExistingStatusAllowsClientUpdate(data) {
+      return !('status' in data)
+        || data.status in captureSubmissionClientStatuses();
+    }
+
+    function hasValidCaptureSubmissionOperationalState(data) {
+      return !('operational_state' in data)
+        || (
+          data.operational_state is map
+          && data.operational_state.keys().hasOnly([
+            'assignment_state',
+            'upload_state',
+            'qa_state',
+            'qa_outcome',
+            'repeat_ready'
+          ])
+          && (!('assignment_state' in data.operational_state)
+            || data.operational_state.assignment_state in captureSubmissionClientAssignmentStates())
+          && (!('upload_state' in data.operational_state)
+            || data.operational_state.upload_state in captureSubmissionClientUploadStates())
+          && (!('qa_state' in data.operational_state)
+            || data.operational_state.qa_state in captureSubmissionClientQaStates())
+          && (!('qa_outcome' in data.operational_state)
+            || data.operational_state.qa_outcome == null)
+          && optionalBool(data.operational_state, 'repeat_ready')
+        );
+    }
+
+    function hasValidCaptureSubmissionLifecycle(data) {
+      return !('lifecycle' in data)
+        || (
+          data.lifecycle is map
+          && data.lifecycle.keys().hasOnly([
+            'capture_started_at',
+            'upload_started_at',
+            'capture_uploaded_at',
+            'upload_failed_at'
+          ])
+          && optionalTimestamp(data.lifecycle, 'capture_started_at')
+          && optionalTimestamp(data.lifecycle, 'upload_started_at')
+          && optionalTimestamp(data.lifecycle, 'capture_uploaded_at')
+          && optionalTimestamp(data.lifecycle, 'upload_failed_at')
+        );
+    }
+
+    function hasValidCaptureSubmissionUploadError(data) {
+      return !('upload_error' in data)
+        || (
+          data.upload_error is map
+          && data.upload_error.keys().hasOnly([
+            'code',
+            'message',
+            'recorded_at'
+          ])
+          && optionalString(data.upload_error, 'code')
+          && optionalString(data.upload_error, 'message')
+          && optionalTimestamp(data.upload_error, 'recorded_at')
+        );
+    }
+
+    function hasOnlyCaptureSubmissionClientCreateKeys(data) {
+      return data.keys().hasOnly(captureSubmissionClientCreateKeys());
+    }
+
+    function hasValidClientCaptureSubmissionPayload(data) {
+      return hasOnlyCaptureSubmissionClientCreateKeys(data)
+        && captureSubmissionRequestStatusIsClientWritable(data)
+        && hasValidCaptureSubmissionOperationalState(data)
+        && hasValidCaptureSubmissionLifecycle(data)
+        && hasValidCaptureSubmissionUploadError(data);
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────
@@ -197,12 +338,17 @@ service cloud.firestore {
     }
 
     // ─── Scenes ──────────────────────────────────────────────────────────────
-    // WebApp clients may create/update/delete scenes; iOS clients read them.
+    // Client-SDK scene access is owner/admin scoped. Server routes use Admin SDK.
     // (WebApp server writes go through the Admin SDK and bypass these rules.)
     match /scenes/{id} {
-      allow create: if isAuthenticated() && hasValidSceneCreatePayload();
-      allow read: if isAuthenticated();
-      allow update, delete: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && hasValidScenePayload(request.resource.data)
+        && (isAdmin() || request.resource.data.ownerUid == request.auth.uid);
+      allow read: if isAdmin() || isSceneOwner();
+      allow update: if isAuthenticated()
+        && hasValidScenePayload(request.resource.data)
+        && (isAdmin() || (isSceneOwner() && sceneOwnershipUnchanged()));
+      allow delete: if isAdmin() || isSceneOwner();
     }
 
     // ─── Capture submissions ─────────────────────────────────────────────────
@@ -213,12 +359,13 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && resource.data.creator_id == request.auth.uid;
       allow create: if isOwner(request.resource.data.creator_id)
-        && hasOnlyCaptureSubmissionClientKeys(request.resource.data);
+        && hasValidClientCaptureSubmissionPayload(request.resource.data);
       allow update: if isOwner(resource.data.creator_id)
         && request.resource.data.creator_id == resource.data.creator_id
-        && hasOnlyCaptureSubmissionClientKeys(request.resource.data)
+        && captureSubmissionExistingStatusAllowsClientUpdate(resource.data)
+        && hasValidClientCaptureSubmissionPayload(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(captureSubmissionClientKeys());
+          .hasOnly(captureSubmissionClientUpdateKeys());
       allow delete: if false; // backend only
     }
 

@@ -5,6 +5,7 @@ process.env.FIREBASE_CONFIG = JSON.stringify({ storageBucket: "test-bucket" });
 process.env.GCLOUD_PROJECT = "test-project";
 
 const {
+  buildLargeVideoIngestBlockedArtifacts,
   buildRawCaptureLineageFields,
   buildPipelineHandoffPayload,
   buildPipelineStatusEvent,
@@ -14,12 +15,94 @@ const {
   canonicalWorldModelCandidate,
   captureObjectKind,
   deriveRequestedRouting,
+  inlineFrameExtractionSizeGate,
   mergeManifestWithSidecars,
   parseCapturePath,
+  parseStorageObjectSize,
   resolveWalkthroughObjectName,
   validateIdentityMapping,
   validateManifest,
 } = await import("./index.js");
+
+test("inlineFrameExtractionSizeGate blocks unsafe walkthrough video downloads", () => {
+  assert.equal(parseStorageObjectSize("1500000001"), 1500000001);
+  assert.equal(parseStorageObjectSize("not-a-number"), null);
+  assert.equal(parseStorageObjectSize(undefined), null);
+
+  const allowed = inlineFrameExtractionSizeGate(100, 100);
+  assert.equal(allowed.inlineAllowed, true);
+  assert.equal(allowed.blockCode, null);
+  assert.deepEqual(allowed.reasons, []);
+
+  const blocked = inlineFrameExtractionSizeGate(101, 100);
+  assert.equal(blocked.inlineAllowed, false);
+  assert.equal(blocked.blockCode, "blocked_large_video_requires_segmented_ingest");
+  assert.deepEqual(blocked.reasons, [
+    "raw_walkthrough_video_exceeds_extract_frames_inline_limit",
+  ]);
+  assert.equal(blocked.rawVideoSizeBytes, 101);
+  assert.equal(blocked.maxInlineVideoBytes, 100);
+
+  const unavailable = inlineFrameExtractionSizeGate(null, 100);
+  assert.equal(unavailable.inlineAllowed, false);
+  assert.equal(unavailable.blockCode, "blocked_raw_walkthrough_video_size_unavailable");
+  assert.deepEqual(unavailable.reasons, ["raw_walkthrough_video_size_unavailable"]);
+});
+
+test("buildLargeVideoIngestBlockedArtifacts emits actionable pre-download blocker payloads", () => {
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "9"
+  );
+  assert.ok(pathInfo);
+
+  const sizeGate = inlineFrameExtractionSizeGate(5_000, 4_000);
+  const { blockReport, qaReport, pipelineStatusEvent } = buildLargeVideoIngestBlockedArtifacts({
+    bucketName: "test-bucket",
+    pathInfo,
+    objectName: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    objectKind: "completion_marker",
+    walkthroughObjectName: "scenes/scene-123/captures/capture-456/raw/walkthrough.mov",
+    manifestExists: true,
+    walkthroughExists: true,
+    manifestValidation: {
+      valid: true,
+      missingRequired: [],
+      warnings: ["manifest_warning"],
+    },
+    sizeGate,
+    generatedAt: "2026-07-08T12:00:00.000Z",
+  });
+
+  assert.equal(blockReport.schema_version, "extract_frames_large_video_block.v1");
+  assert.equal(blockReport.status, "blocked");
+  assert.equal(blockReport.stage, "extract_frames.pre_download_size_gate");
+  assert.equal(blockReport.inline_frame_extraction_attempted, false);
+  assert.equal(blockReport.ffmpeg_attempted, false);
+  assert.equal(blockReport.block_code, "blocked_large_video_requires_segmented_ingest");
+  assert.equal(blockReport.recommended_next_stage, "large_video_cloud_run_ingest");
+  assert.equal(
+    blockReport.raw_video_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov"
+  );
+
+  assert.equal(qaReport.status, "blocked");
+  assert.equal(qaReport.block_code, "blocked_large_video_requires_segmented_ingest");
+  assert.deepEqual(qaReport.required_files, { walkthrough: true, manifest: true });
+  assert.deepEqual(qaReport.quality, {
+    frame_count: 0,
+    pose_matches: 0,
+    pose_match_rate: 0,
+    p95_pose_delta_sec: null,
+  });
+
+  assert.equal(pipelineStatusEvent.event_type, "capture.raw_video_ingest_blocked.v1");
+  assert.equal(pipelineStatusEvent.qa_status, "blocked");
+  assert.equal(
+    pipelineStatusEvent.block_report_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/large_video_ingest_blocked.json"
+  );
+});
 
 test("parseCapturePath supports canonical scenes capture layout", () => {
   const parsed = parseCapturePath(

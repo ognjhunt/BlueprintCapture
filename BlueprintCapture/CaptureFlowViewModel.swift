@@ -9,6 +9,108 @@ private func normalizeRequestedOutputs(_ outputs: [String]) -> [String] {
     CaptureRequestedOutputs.normalized(outputs)
 }
 
+private struct PersistentOpenCaptureIdentity: Codable, Equatable {
+    let siteId: String
+    let siteVisitId: String
+    let routeId: String
+    let identityKey: String
+    let updatedAtUnix: TimeInterval
+
+    static func fallback(siteId: String, siteVisitId: String, routeId: String) -> PersistentOpenCaptureIdentity {
+        PersistentOpenCaptureIdentity(
+            siteId: siteId,
+            siteVisitId: siteVisitId,
+            routeId: routeId,
+            identityKey: "session_fallback",
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
+    }
+}
+
+private final class OpenCaptureSiteIdentityStore {
+    static let shared = OpenCaptureSiteIdentityStore()
+
+    private let defaults: UserDefaults
+    private let keyPrefix = "com.blueprint.openCaptureSiteIdentity."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func identity(
+        placeId: String?,
+        address: String?,
+        fallbackSiteId: String,
+        fallbackSiteVisitId: String,
+        fallbackRouteId: String
+    ) -> PersistentOpenCaptureIdentity {
+        guard let identityKey = Self.identityKey(placeId: placeId, address: address) else {
+            return .fallback(
+                siteId: fallbackSiteId,
+                siteVisitId: fallbackSiteVisitId,
+                routeId: fallbackRouteId
+            )
+        }
+
+        let defaultsKey = storageKey(for: identityKey)
+        if let data = defaults.data(forKey: defaultsKey),
+           let existing = try? JSONDecoder().decode(PersistentOpenCaptureIdentity.self, from: data),
+           !existing.siteId.isEmpty,
+           !existing.siteVisitId.isEmpty,
+           !existing.routeId.isEmpty {
+            let refreshed = PersistentOpenCaptureIdentity(
+                siteId: existing.siteId,
+                siteVisitId: existing.siteVisitId,
+                routeId: existing.routeId,
+                identityKey: identityKey,
+                updatedAtUnix: Date().timeIntervalSince1970
+            )
+            persist(refreshed, defaultsKey: defaultsKey)
+            return refreshed
+        }
+
+        let created = PersistentOpenCaptureIdentity(
+            siteId: "open_site_\(UUID().uuidString)",
+            siteVisitId: "open_visit_\(UUID().uuidString)",
+            routeId: "open_route_\(UUID().uuidString)",
+            identityKey: identityKey,
+            updatedAtUnix: Date().timeIntervalSince1970
+        )
+        persist(created, defaultsKey: defaultsKey)
+        return created
+    }
+
+    private func persist(_ identity: PersistentOpenCaptureIdentity, defaultsKey: String) {
+        if let data = try? JSONEncoder().encode(identity) {
+            defaults.set(data, forKey: defaultsKey)
+        }
+    }
+
+    private func storageKey(for identityKey: String) -> String {
+        let safeKey = identityKey.map { character in
+            character.isLetter || character.isNumber ? character : "_"
+        }
+        return keyPrefix + String(safeKey).prefix(160)
+    }
+
+    private static func identityKey(placeId: String?, address: String?) -> String? {
+        let trimmedPlaceId = placeId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmedPlaceId.isEmpty {
+            return "place:\(trimmedPlaceId.lowercased())"
+        }
+
+        let normalizedAddress = (address ?? "")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        guard normalizedAddress.count >= 8 else {
+            return nil
+        }
+        return "address:\(normalizedAddress)"
+    }
+}
+
 @MainActor
 final class CaptureFlowViewModel: NSObject, ObservableObject {
     enum Step {
@@ -72,14 +174,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private var hasRequestedPermissions = false
     private let onboardingKey = "com.blueprint.isOnboarded"
 
-    /// Stable site ID for open captures within this app session. Allows repeated captures
-    /// of the same facility to share a site_id even without a targetId or reservationId.
+    /// Fallback site ID for open captures without a stable place or address key.
     private let openCaptureSiteId: String = UUID().uuidString
 
-    /// Shared across all recordings in a single app session (multiple passes at one facility visit).
+    /// Fallback visit ID for open captures without a stable place or address key.
     private let siteVisitId: String = UUID().uuidString
 
-    /// Stable route ID for this session. Shared across passes of the same intended path.
+    /// Fallback route ID for open captures without a stable place or address key.
     private let captureRouteId: String = UUID().uuidString
 
     /// Tracks how many recording attempts have been made in this session.
@@ -91,6 +192,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     private let exportService: CaptureExportServiceProtocol
     private let abandonedRecoveryStore: AbandonedCaptureRecoveryStore
     private let creatorAPIService: APIService
+    private let openCaptureIdentityStore = OpenCaptureSiteIdentityStore.shared
     private var uploadStatusMap: [UUID: UploadStatus] = [:]
     private var cancellables: Set<AnyCancellable> = []
     private var searchDebounceTask: Task<Void, Never>?
@@ -202,7 +304,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         var rules = [
             "Entrance lock: hold still at the entry for 3 seconds before walking.",
             "Shared checkpoints: stop at doorway, intersection, dock turn, or other topology changes.",
-            "Weak signal recovery: if tracking degrades, stop and reacquire fixed structure before continuing."
+            "Weak signal recovery: if tracking degrades, stop and reacquire fixed structure before continuing.",
+            "LiDAR range: depth is close-range support. Walk closer to tall racks, high shelving, and long aisles instead of relying on far geometry."
         ]
         switch siteWorldSiteScale {
         case .smallSimple:
@@ -508,18 +611,33 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         )
         let captureRights = reviewSeed?.captureRights ?? defaultCaptureRights
 
-        // Derive stable site identity. Priority: buyer target > reservation > session-stable UUID.
+        // Derive stable site identity. Priority: buyer target > reservation > persisted open-capture identity.
         let siteId: String
         let siteIdSource: String
+        let topologySiteVisitId: String
+        let topologyRouteId: String
         if let targetId = targetId?.trimmingCharacters(in: .whitespacesAndNewlines), !targetId.isEmpty {
             siteId = targetId
             siteIdSource = "buyer_request"
+            topologySiteVisitId = siteVisitId
+            topologyRouteId = captureRouteId
         } else if let reservationId = reservationId?.trimmingCharacters(in: .whitespacesAndNewlines), !reservationId.isEmpty {
             siteId = reservationId
             siteIdSource = "site_submission"
+            topologySiteVisitId = siteVisitId
+            topologyRouteId = captureRouteId
         } else {
-            siteId = openCaptureSiteId
+            let openIdentity = openCaptureIdentityStore.identity(
+                placeId: selectedAddressResult?.placeId,
+                address: currentAddress,
+                fallbackSiteId: openCaptureSiteId,
+                fallbackSiteVisitId: siteVisitId,
+                fallbackRouteId: captureRouteId
+            )
+            siteId = openIdentity.siteId
             siteIdSource = "open_capture"
+            topologySiteVisitId = openIdentity.siteVisitId
+            topologyRouteId = openIdentity.routeId
         }
         let siteIdentity = SiteIdentity(
             siteId: siteId,
@@ -581,8 +699,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             completedWorkflowPassCount = min(completedRequiredPasses, totalRequiredPasses)
         }
         let captureTopology = CaptureTopologyMetadata(
-            captureSessionId: siteVisitId,
-            routeId: captureRouteId,
+            captureSessionId: topologySiteVisitId,
+            routeId: topologyRouteId,
             passId: UUID().uuidString,
             passIndex: capturePassAttemptIndex,
             intendedPassRole: passRole,
@@ -590,7 +708,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             returnAnchorId: passRole == "loop_closure" && captureManager.semanticAnchorEvents.contains(where: { $0.anchorType == .entrance || $0.anchorType == .exitPoint }) ? "semantic_entrance" : nil,
             entryAnchorTCaptureSec: hold?.tCaptureSec,
             entryAnchorHoldDurationSec: hold?.durationSec,
-            siteVisitId: siteVisitId,
+            siteVisitId: topologySiteVisitId,
             coordinateFrameSessionId: coordinateFrameSessionId,
             arkitSessionId: coordinateFrameSessionId
         )
@@ -768,6 +886,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     func liveSupportPrompts(for monitor: CaptureQualityMonitor, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
         var prompts = ["Prefer fixed building structure. Avoid following people, forklifts, carts, or temporary pallets."]
+        if let lowLightWarning = monitor.lowLightWarning {
+            prompts.append(lowLightWarning)
+        }
         if !selectedCriticalZoneAnchors.isEmpty {
             let remainingCritical = selectedCriticalZoneAnchors.subtracting(Set(anchorEvents.map(\.anchorType)))
             if !remainingCritical.isEmpty {
@@ -789,6 +910,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         chips.append("Checkpoints \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
         if monitor.hasWeakSignalConcern {
             chips.append("Weak signal \(Int(monitor.limitedTrackingSeconds))s")
+        }
+        if monitor.lowLightWarning != nil {
+            chips.append("Low light")
         }
         if !selectedCriticalZoneAnchors.isEmpty {
             let matched = selectedCriticalZoneAnchors.intersection(Set(anchorEvents.map(\.anchorType))).count

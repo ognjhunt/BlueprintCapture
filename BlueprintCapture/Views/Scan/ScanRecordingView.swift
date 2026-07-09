@@ -18,6 +18,8 @@ struct ScanRecordingView: View {
     @State private var errorMessage: String?
     @State private var guidanceTip: String? = nil
     @State private var isLoadingGuidance = false
+    @State private var selectedSiteType: CaptureSiteType?
+    @State private var siteExtentForm = CaptureSiteExtentFormState()
 
     enum Phase: Equatable {
         case preparing(String)
@@ -83,6 +85,14 @@ struct ScanRecordingView: View {
             Text("Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand downstream qualification, privacy, and rights checks may block use.")
         }
         .onAppear {
+            if isUITesting && selectedSiteType == nil {
+                selectedSiteType = .warehouse
+            }
+            Task { await beginIfPossible() }
+        }
+        .onChange(of: selectedSiteType) { _, newValue in
+            guard newValue != nil else { return }
+            guard case .preparing = phase else { return }
             Task { await beginIfPossible() }
         }
         .onChange(of: phase) { _, newPhase in
@@ -148,6 +158,10 @@ struct ScanRecordingView: View {
                 Text(text)
                     .font(.headline)
                     .foregroundStyle(.white)
+                CaptureSiteTypePicker(selection: $selectedSiteType)
+                    .frame(maxWidth: 360)
+                CaptureSiteExtentEditor(form: $siteExtentForm, compact: true)
+                    .frame(maxWidth: 360)
                 Text("Keep your glasses on. We’ll start automatically.")
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.6))
@@ -279,7 +293,13 @@ struct ScanRecordingView: View {
             }
 
         default:
-            EmptyView()
+            Button {
+                Task { await beginIfPossible() }
+            } label: {
+                Text(selectedSiteType == nil ? "Select site type" : "Start capture")
+            }
+            .buttonStyle(BlueprintPrimaryButtonStyle())
+            .disabled(selectedSiteType == nil)
         }
     }
 
@@ -320,6 +340,11 @@ struct ScanRecordingView: View {
     }
 
     private func beginIfPossible() async {
+        guard let selectedSiteType else {
+            phase = .preparing("Select site type")
+            return
+        }
+
         if isUITesting {
             guidanceTip = "Walk entry to exit and pause briefly at each boundary."
             phase = .recording
@@ -399,7 +424,11 @@ struct ScanRecordingView: View {
 
         // Start recording
         phase = .preparing("Starting recording…")
-        glassesManager.startCapture(job: job)
+        glassesManager.startCapture(
+            job: job,
+            siteType: selectedSiteType,
+            siteExtent: siteExtentForm.makeExtent(siteScaleClass: nil)
+        )
     }
 
     private func advisoryHintForCurrentRecording() -> MetaDisplayAdvisoryHint {

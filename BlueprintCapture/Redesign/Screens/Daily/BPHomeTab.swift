@@ -270,7 +270,8 @@ struct BPHomeTab: View {
             consentStatus: item.job.captureConsentStatus,
             permissionDocumentURI: item.job.permissionDocURL?.absoluteString,
             consentScope: item.job.allowedAreas,
-            consentNotes: item.job.rightsChecklist + item.job.approvalRequirements + item.job.captureRestrictions
+            consentNotes: item.job.rightsChecklist + item.job.approvalRequirements + item.job.captureRestrictions,
+            venuePermission: VenuePermission.from(job: item.job)
         ) : nil
         let requestedCaptureMode = approvedIntakePacket == nil ? nil : "site_world_candidate"
 

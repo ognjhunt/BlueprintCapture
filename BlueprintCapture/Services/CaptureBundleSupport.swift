@@ -577,15 +577,29 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     }
 
     private func manifestCaptureRights(_ rights: CaptureRightsMetadata) -> [String: Any] {
-        [
+        let permissionDocumentURI = rights.permissionDocumentURI ?? rights.venuePermission?.documentURL?.absoluteString
+        var payload: [String: Any] = [
             "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
             "data_licensing_allowed": rights.dataLicensingAllowed,
             "capture_contributor_payout_eligible": rights.payoutEligible,
             "consent_status": rights.consentStatus.rawValue,
-            "permission_document_uri": rights.permissionDocumentURI as Any,
+            "permission_document_uri": permissionDocumentURI as Any,
             "consent_scope": rights.consentScope,
             "consent_notes": rights.consentNotes,
         ]
+        if let venuePermission = rights.venuePermission {
+            payload["venue_permission"] = venuePermission.provenancePayload
+            payload["site_operator_authorization"] = [
+                "status": venuePermission.isValid ? "valid" : "expired",
+                "venue_name": venuePermission.venueName,
+                "authorized_by": venuePermission.authorizedBy,
+                "authorized_title": venuePermission.authorizedTitle,
+                "capture_areas": venuePermission.captureAreas,
+                "restricted_areas": venuePermission.restrictions,
+                "document_uri": venuePermission.documentURL?.absoluteString ?? NSNull(),
+            ]
+        }
+        return payload
     }
 
     private func normalizedUpstreamId(
@@ -1061,35 +1075,45 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let sceneId = CaptureBundleContext.sceneIdentifier(for: request)
         let captureId = CaptureBundleContext.captureIdentifier(for: request)
 
-        let rightsConsent: [String: Any] = [
+        let permissionDocumentURI = rights.permissionDocumentURI ?? rights.venuePermission?.documentURL?.absoluteString
+        var rightsConsent: [String: Any] = [
             "schema_version": "v1",
             "scene_id": sceneId,
             "capture_id": captureId,
             "consent_status": rights.consentStatus.rawValue,
-            "capture_basis": rights.consentStatus == .documented ? "site_operator_permission" : "unknown",
+            "capture_basis": rights.venuePermission != nil
+                ? "site_operator_permission"
+                : (rights.consentStatus == .documented ? "site_operator_permission" : "unknown"),
             "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
             "data_licensing_allowed": rights.dataLicensingAllowed,
             "capture_contributor_payout_eligible": rights.payoutEligible,
-            "permission_document_uri": rights.permissionDocumentURI ?? NSNull(),
-            "permission_document_sha256": rights.permissionDocumentURI.map { _ in "unverified_external_reference" } ?? NSNull(),
+            "permission_document_uri": permissionDocumentURI ?? NSNull(),
+            "permission_document_sha256": permissionDocumentURI.map { _ in "unverified_external_reference" } ?? NSNull(),
             "consent_scope": rights.consentScope,
             "consent_notes": rights.consentNotes,
             "redaction_required": true,
             "retention_policy": "standard_blueprint_site_capture",
         ]
+        if let venuePermission = rights.venuePermission {
+            rightsConsent["venue_permission"] = venuePermission.provenancePayload
+            rightsConsent["operator_authorization_status"] = venuePermission.isValid ? "valid" : "expired"
+            rightsConsent["authorized_capture_areas"] = venuePermission.captureAreas
+            rightsConsent["restricted_capture_areas"] = venuePermission.restrictions
+        }
         let rightsConsentURL = directory.appendingPathComponent("rights_consent.json")
         let rightsConsentData = try JSONSerialization.data(withJSONObject: rightsConsent, options: [.prettyPrinted, .withoutEscapingSlashes])
         try rightsConsentData.write(to: rightsConsentURL, options: .atomic)
 
         let semanticObservationsURL = directory.appendingPathComponent("semantic_anchor_observations.jsonl")
         let semanticLines = request.metadata.semanticAnchors.map { event -> String in
+            let coordinateFrameSessionId = event.coordinateFrameSessionId ?? topology.coordinateFrameSessionId
             var payload: [String: Any] = [
                 "anchor_instance_id": event.id,
                 "anchor_type": event.anchorType.rawValue,
                 "label": event.label ?? NSNull(),
                 "frame_id": event.frameId ?? NSNull(),
                 "t_capture_sec": event.tCaptureSec ?? NSNull(),
-                "coordinate_frame_session_id": event.coordinateFrameSessionId ?? topology.coordinateFrameSessionId ?? NSNull(),
+                "coordinate_frame_session_id": coordinateFrameSessionId ?? NSNull(),
                 "observation_method": "manual_tap",
                 "confidence": 1.0,
                 "notes": event.notes ?? NSNull(),

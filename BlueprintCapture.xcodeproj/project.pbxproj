@@ -13,6 +13,7 @@
 		89BA640C2EA885A10038ECD0 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA640B2EA885A10038ECD0 /* FirebaseFirestore */; };
 		89BA640E2EA885A10038ECD0 /* FirebaseStorage in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA640D2EA885A10038ECD0 /* FirebaseStorage */; };
 		89BA64102EA885A10038ECD0 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA640F2EA885A10038ECD0 /* FirebaseMessaging */; };
+		89BA64122EA885A10038ECD0 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64112EA885A10038ECD0 /* FirebaseCrashlytics */; };
 		89BA64392EA972510038ECD0 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64382EA972510038ECD0 /* Alamofire */; };
 		89BA645C2EAD35DB0038ECD0 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA645B2EAD35DB0038ECD0 /* GoogleSignIn */; };
 		89BA645E2EAD35DB0038ECD0 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA645D2EAD35DB0038ECD0 /* GoogleSignInSwift */; };
@@ -87,6 +88,7 @@
 				89ED659D2EE4DCB700E460D5 /* MWDATCore in Frameworks */,
 				89ED65A22EE4DCB700E460D5 /* MWDATDisplay in Frameworks */,
 				89ED659F2EE4DCB700E460D5 /* MWDATMockDevice in Frameworks */,
+				89BA64122EA885A10038ECD0 /* FirebaseCrashlytics in Frameworks */,
 				89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */,
 				89BA64102EA885A10038ECD0 /* FirebaseMessaging in Frameworks */,
 				89BA645E2EAD35DB0038ECD0 /* GoogleSignInSwift in Frameworks */,
@@ -161,6 +163,7 @@
 				89BA640B2EA885A10038ECD0 /* FirebaseFirestore */,
 				89BA640D2EA885A10038ECD0 /* FirebaseStorage */,
 				89BA640F2EA885A10038ECD0 /* FirebaseMessaging */,
+				89BA64112EA885A10038ECD0 /* FirebaseCrashlytics */,
 				89BA64382EA972510038ECD0 /* Alamofire */,
 				89BA645B2EAD35DB0038ECD0 /* GoogleSignIn */,
 				89BA645D2EAD35DB0038ECD0 /* GoogleSignInSwift */,
@@ -784,6 +787,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseMessaging;
+		};
+		89BA64112EA885A10038ECD0 /* FirebaseCrashlytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCrashlytics;
 		};
 		89BA64382EA972510038ECD0 /* Alamofire */ = {
 			isa = XCSwiftPackageProductDependency;

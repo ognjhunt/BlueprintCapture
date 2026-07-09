@@ -20,6 +20,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        CaptureCrashTelemetryService.shared.configure()
         // Present notifications while app is foregrounded
         UNUserNotificationCenter.current().delegate = self
         notificationService.registerCategories()
@@ -43,10 +44,20 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "application_will_terminate",
+            status: "ending",
+            metadata: nil
+        )
         AppSessionService.shared.end(reasonCrash: false)
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "application_did_enter_background",
+            status: "background",
+            metadata: nil
+        )
         AppSessionService.shared.end(reasonCrash: false)
     }
 

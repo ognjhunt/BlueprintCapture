@@ -13,12 +13,15 @@ struct CaptureSessionView: View {
     @State private var dismissCaptureFlowAfterUploadStarts = false
     @State private var queuedWorkflowPassStart = false
     @State private var captureNotes = ""
+    @State private var selectedSiteType: CaptureSiteType?
+    @State private var siteExtentForm = CaptureSiteExtentFormState()
+    @State private var siteTypeError: String?
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
 
-    // Venue permission for this capture (would be set when user selects a location)
-    @State private var venuePermission: VenuePermission? = .demo
+    // Venue permission is capture truth. Open captures must not display demo approval.
+    @State private var venuePermission: VenuePermission?
 
     private let hapticFeedback = UIImpactFeedbackGenerator(style: .medium)
 
@@ -27,6 +30,10 @@ struct CaptureSessionView: View {
         self._captureManager = ObservedObject(initialValue: viewModel.captureManager)
         self.targetId = targetId
         self.reservationId = reservationId
+    }
+
+    private var currentVenuePermission: VenuePermission? {
+        viewModel.pendingCaptureRequest?.metadata.captureRights?.venuePermission ?? venuePermission
     }
 
     var body: some View {
@@ -44,7 +51,7 @@ struct CaptureSessionView: View {
                 // Top bar with permission badge and quality overlay
                 HStack {
                     Spacer()
-                    VenuePermissionBadge(permission: venuePermission)
+                    VenuePermissionBadge(permission: currentVenuePermission)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -54,7 +61,7 @@ struct CaptureSessionView: View {
                     CaptureQualityOverlayView(monitor: captureManager.qualityMonitor)
                         .padding(.horizontal)
 
-                    CaptureInfoBadgesView(monitor: captureManager.qualityMonitor)
+                    CaptureInfoBadgesView(monitor: captureManager.qualityMonitor, siteScale: viewModel.siteWorldSiteScale)
                         .padding(.horizontal)
 
                     SiteWorldLiveGuidanceView(
@@ -93,6 +100,17 @@ struct CaptureSessionView: View {
                 }
 
                 if shouldShowWorkflowBriefing {
+                    VStack(alignment: .leading, spacing: 8) {
+                        CaptureSiteTypePicker(selection: $selectedSiteType)
+                        CaptureSiteExtentEditor(form: $siteExtentForm, compact: true)
+                        if let siteTypeError {
+                            Text(siteTypeError)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .padding(.horizontal)
+
                     SiteWorldPreflightCard(
                         scale: $viewModel.siteWorldSiteScale,
                         criticalZoneOptions: viewModel.siteWorldCriticalZoneOptions,
@@ -104,6 +122,7 @@ struct CaptureSessionView: View {
                         onToggleCriticalZone: { anchorType in
                             viewModel.setCriticalZone(anchorType, enabled: !viewModel.selectedCriticalZoneAnchors.contains(anchorType))
                         },
+                        startEnabled: selectedSiteType != nil,
                         onStart: {
                             startCurrentPass()
                         }
@@ -306,13 +325,19 @@ struct CaptureSessionView: View {
 
     private func startCurrentPass() {
         guard !captureManager.captureState.isRecording else { return }
+        guard let selectedSiteType else {
+            siteTypeError = "Choose the site type so the raw manifest records capture truth."
+            return
+        }
+        siteTypeError = nil
         viewModel.configureSiteWorldWorkflow()
         prepareSessionIfNeeded()
         if !captureManager.session.isRunning {
             captureManager.startSession()
         }
+        let siteExtent = siteExtentForm.makeExtent(siteScaleClass: viewModel.siteWorldSiteScale.rawValue)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            captureManager.startRecording()
+            captureManager.startRecording(siteType: selectedSiteType, siteExtent: siteExtent)
         }
     }
 
@@ -530,10 +555,11 @@ private struct CaptureGuidanceView: View {
 
     private let tips = [
         CaptureGuidanceTip(icon: "arrow.left.and.right", text: "Move slowly and steadily"),
-        CaptureGuidanceTip(icon: "cube.transparent", text: "Scan corners and edges"),
-        CaptureGuidanceTip(icon: "lightbulb", text: "Ensure good lighting"),
+        CaptureGuidanceTip(icon: "cube.transparent", text: "Capture rack uprights, dock turns, and thresholds"),
+        CaptureGuidanceTip(icon: "lightbulb", text: "Add light or slow down in dim aisles"),
         CaptureGuidanceTip(icon: "hand.raised", text: "Keep phone upright"),
-        CaptureGuidanceTip(icon: "arrow.triangle.2.circlepath", text: "Overlap scanned areas")
+        CaptureGuidanceTip(icon: "scope", text: "Move closer for LiDAR depth beyond tall racks"),
+        CaptureGuidanceTip(icon: "arrow.triangle.2.circlepath", text: "Revisit shared checkpoints")
     ]
 
     var body: some View {
@@ -610,6 +636,7 @@ private struct SiteWorldPreflightCard: View {
     let optionalRules: [String]
     let passBrief: SiteWorldPassBrief
     let onToggleCriticalZone: (CaptureSemanticAnchorType) -> Void
+    let startEnabled: Bool
     let onStart: () -> Void
 
     var body: some View {
@@ -715,6 +742,8 @@ private struct SiteWorldPreflightCard: View {
                         .fill(Color.white)
                 )
             }
+            .disabled(!startEnabled)
+            .opacity(startEnabled ? 1.0 : 0.55)
         }
         .padding(18)
         .background(

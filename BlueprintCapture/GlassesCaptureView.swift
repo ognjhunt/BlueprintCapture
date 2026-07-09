@@ -7,6 +7,8 @@ struct GlassesCaptureView: View {
     @StateObject private var captureManager = GlassesCaptureManager()
     @StateObject private var uploadViewModel = GlassesUploadViewModel()
     @State private var locationId: String = ""
+    @State private var selectedSiteType: CaptureSiteType?
+    @State private var siteExtentForm = CaptureSiteExtentFormState()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -373,6 +375,8 @@ struct GlassesCaptureView: View {
 
             // Tips
             VStack(alignment: .leading, spacing: 12) {
+                CaptureSiteTypePicker(selection: $selectedSiteType)
+                CaptureSiteExtentEditor(form: $siteExtentForm, compact: true)
                 Label("Walk slowly and cover all angles", systemImage: "figure.walk")
                 Label("Include doorways for scale reference", systemImage: "door.left.hand.open")
             }
@@ -384,11 +388,15 @@ struct GlassesCaptureView: View {
 
             // Start button
             Button {
-                captureManager.startCapture()
+                captureManager.startCapture(
+                    siteType: selectedSiteType ?? .unknown,
+                    siteExtent: siteExtentForm.makeExtent(siteScaleClass: nil)
+                )
             } label: {
-                Text("Start Recording")
+                Text(selectedSiteType == nil ? "Select Site Type" : "Start Recording")
             }
             .buttonStyle(BlueprintSuccessButtonStyle())
+            .disabled(selectedSiteType == nil)
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
@@ -699,11 +707,15 @@ struct GlassesCaptureView: View {
             Spacer()
 
             Button {
-                captureManager.startCapture()
+                captureManager.startCapture(
+                    siteType: selectedSiteType ?? .unknown,
+                    siteExtent: siteExtentForm.makeExtent(siteScaleClass: nil)
+                )
             } label: {
                 Text("Try Again")
             }
             .buttonStyle(BlueprintPrimaryButtonStyle())
+            .disabled(selectedSiteType == nil)
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }

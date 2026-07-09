@@ -26,6 +26,14 @@ import MWDATMockDevice
 final class GlassesCaptureManager: NSObject, ObservableObject {
     private static let logPrefix = "[BlueprintGlasses]"
     private static let unsupportedRealWearablesMessage = "Meta glasses require a physical iPhone build. Use MockDeviceKit in the simulator."
+    private var currentSiteType: CaptureSiteType = .unknown
+    private var currentSiteExtent = CaptureSiteExtent(
+        approximateFloorAreaM2: nil,
+        ceilingHeightM: nil,
+        floorCount: nil,
+        dominantAisleWidthM: nil,
+        siteScaleClass: nil
+    )
 
     nonisolated static var supportsRealWearables: Bool {
         #if canImport(MWDATCore) && canImport(MWDATCamera) && canImport(MWDATDisplay) && !targetEnvironment(simulator)
@@ -1150,7 +1158,17 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
     /// Starts a capture for a specific scan job. This does not change upload behavior; it only
     /// helps keep local artifact directories organized by jobId.
-    func startCapture(job: ScanJob) {
+    func startCapture(
+        job: ScanJob,
+        siteType: CaptureSiteType = .unknown,
+        siteExtent: CaptureSiteExtent = CaptureSiteExtent(
+            approximateFloorAreaM2: nil,
+            ceilingHeightM: nil,
+            floorCount: nil,
+            dominantAisleWidthM: nil,
+            siteScaleClass: nil
+        )
+    ) {
         displayTargetMetadata = MetaDisplayTargetMetadata(
             name: job.title,
             address: job.address,
@@ -1163,10 +1181,20 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         displayDeviceWarning = nil
         displayAdvisoryHint = nil
         refreshDisplayHUD(stateOverride: .ready)
-        startCapture(jobId: job.id)
+        startCapture(jobId: job.id, siteType: siteType, siteExtent: siteExtent)
     }
 
-    func startCapture(jobId: String) {
+    func startCapture(
+        jobId: String,
+        siteType: CaptureSiteType = .unknown,
+        siteExtent: CaptureSiteExtent = CaptureSiteExtent(
+            approximateFloorAreaM2: nil,
+            ceilingHeightM: nil,
+            floorCount: nil,
+            dominantAisleWidthM: nil,
+            siteScaleClass: nil
+        )
+    ) {
         currentJobId = jobId
         if displayTargetMetadata == nil {
             displayTargetMetadata = MetaDisplayTargetMetadata(
@@ -1176,10 +1204,19 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             )
         }
         refreshDisplayHUD(stateOverride: .ready)
-        startCapture()
+        startCapture(siteType: siteType, siteExtent: siteExtent)
     }
 
-    func startCapture() {
+    func startCapture(
+        siteType: CaptureSiteType = .unknown,
+        siteExtent: CaptureSiteExtent = CaptureSiteExtent(
+            approximateFloorAreaM2: nil,
+            ceilingHeightM: nil,
+            floorCount: nil,
+            dominantAisleWidthM: nil,
+            siteScaleClass: nil
+        )
+    ) {
         guard case .connected = connectionState else {
             captureState = .error("Not connected to a device")
             return
@@ -1191,6 +1228,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         }
 
         captureState = .preparing
+        currentSiteType = siteType
+        currentSiteExtent = siteExtent
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "glasses_capture_start_requested",
+            status: "requested",
+            metadata: [
+                "capture_job_id": currentJobId ?? "open_capture",
+                "site_type": siteType.manifestValue
+            ]
+        )
         refreshDisplayHUD(stateOverride: .ready)
         print("⏺️ [GlassesCapture] Starting capture...")
 
@@ -1219,12 +1266,27 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
                         fps: 30.0,
                         durationSeconds: 0
                     ))
+                    CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                        name: "glasses_capture_started",
+                        status: "streaming",
+                        metadata: [
+                            "capture_id": artifacts.baseFilename,
+                            "capture_job_id": self.currentJobId ?? "open_capture"
+                        ]
+                    )
                     self.refreshDisplayHUD(stateOverride: .recording)
                     print("✅ [GlassesCapture] Capture started")
                 }
             } catch {
                 await MainActor.run {
                     self.captureState = .error("Failed to start capture: \(error.localizedDescription)")
+                    CaptureCrashTelemetryService.shared.recordErrorCode(
+                        "glasses_capture_start_failed",
+                        metadata: [
+                            "capture_job_id": self.currentJobId ?? "open_capture",
+                            "message": error.localizedDescription
+                        ]
+                    )
                     self.refreshDisplayHUD(stateOverride: .error)
                 }
             }
@@ -1644,6 +1706,14 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         guard captureState.isActive else { return }
 
         print("⏹️ [GlassesCapture] Stopping capture...")
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "glasses_capture_stop_requested",
+            status: "requested",
+            metadata: [
+                "capture_id": currentArtifacts?.baseFilename ?? "unknown",
+                "capture_job_id": currentJobId ?? "open_capture"
+            ]
+        )
 
         // Stop camera stream
         #if canImport(MWDATCore) && canImport(MWDATCamera) && !targetEnvironment(simulator)
@@ -1723,6 +1793,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
             await MainActor.run {
                 self.currentArtifacts = finalArtifacts
                 self.captureState = .finished(finalArtifacts)
+                CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                    name: "glasses_capture_finished",
+                    status: "packaged",
+                    metadata: [
+                        "capture_id": finalArtifacts.baseFilename,
+                        "duration_seconds": finalArtifacts.durationSeconds,
+                        "frame_count": finalArtifacts.frameCount
+                    ]
+                )
                 self.refreshDisplayHUD(stateOverride: .done)
                 self.videoWriter = nil
                 self.videoWriterInput = nil
@@ -1739,7 +1818,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         // Raw capture manifest.
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
         let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
-        let manifest: [String: Any] = [
+        var manifest: [String: Any] = [
             // These are patched by CaptureUploadService during directory upload with actual values.
             "scene_id": "",  // Patched with targetId/reservationId during upload
             "capture_id": "",
@@ -1765,13 +1844,16 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
-            "intended_space_type": "industrial_unknown",
+            "site_type": currentSiteType.manifestValue,
+            "site_type_source": "capturer_selected",
+            "intended_space_type": currentSiteType.manifestValue,
 
             // Additional metadata (not required by pipeline but useful)
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),
             "duration_seconds": artifacts.durationSeconds,
             "frame_count": artifacts.frameCount
         ]
+        currentSiteExtent.apply(to: &manifest)
 
         if let data = try? JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes]) {
             try? data.write(to: artifacts.manifestURL, options: .atomic)

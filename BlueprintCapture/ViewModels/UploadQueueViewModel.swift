@@ -91,7 +91,8 @@ final class UploadQueueViewModel: ObservableObject {
                 consentStatus: job.captureConsentStatus,
                 permissionDocumentURI: job.permissionDocURL?.absoluteString,
                 consentScope: job.allowedAreas,
-                consentNotes: []
+                consentNotes: [],
+                venuePermission: VenuePermission.from(job: job)
             ),
             siteIdentity: nil,
             captureTopology: nil,
@@ -154,7 +155,8 @@ final class UploadQueueViewModel: ObservableObject {
                 consentStatus: .policyOnly,
                 permissionDocumentURI: job.permissionDocURL?.absoluteString,
                 consentScope: job.allowedAreas,
-                consentNotes: ["UI test simulated upload"]
+                consentNotes: ["UI test simulated upload"],
+                venuePermission: VenuePermission.from(job: job)
             ),
             siteIdentity: nil,
             captureTopology: nil,

@@ -8,29 +8,34 @@ struct CaptureTutorialView: View {
     let onContinue: () -> Void
 
     @State private var currentStep = 0
-    /// 0 = walkthrough (portrait 720×1296), 1 = interior (landscape 3840×2160)
+    /// 0 = walkthrough (portrait 720x1296), 1 = interior alternate (landscape 3840x2160)
     @State private var videoVariant = 0
 
     private let steps: [TutorialStep] = [
         TutorialStep(
             icon: "iphone.gen3",
             title: "Hold your phone upright",
-            detail: "Walk naturally with your phone in front of you, like you're taking a video."
+            detail: "Keep fixed structure, rack uprights, dock edges, and thresholds in frame as you walk."
         ),
         TutorialStep(
             icon: "figure.walk",
-            title: "Move slowly and steadily",
-            detail: "Cover all areas of the space. Walk at a calm, even pace for the best results."
+            title: "Follow the route plan",
+            detail: "Start at the entry, pause at shared checkpoints, and return through the main spine."
         ),
         TutorialStep(
             icon: "lightbulb.fill",
-            title: "Good lighting helps",
-            detail: "Well-lit spaces produce higher quality captures and cleaner review evidence."
+            title: "Watch dim aisles",
+            detail: "Add light, slow down, or revisit a checkpoint when the capture warns that the scene is too dark."
+        ),
+        TutorialStep(
+            icon: "viewfinder",
+            title: "Depth is close range",
+            detail: "LiDAR depth supports nearby geometry. Walk closer to tall racks, high shelving, and long aisles."
         ),
         TutorialStep(
             icon: "clock.fill",
-            title: "15–30 minutes",
-            detail: "A complete capture usually takes 15–30 minutes. Thorough coverage improves review quality."
+            title: "Finish in segments",
+            detail: "End long passes at checkpoints. Separate segments protect large facility captures from data loss."
         ),
     ]
 
@@ -162,8 +167,8 @@ private struct TutorialStepCard: View {
 // MARK: - Video background
 
 /// Plays a looping muted video behind the tutorial.
-/// - Variant 0: `tutorial_bg_walkthrough.mp4` — portrait 720×1296, man walking (A)
-/// - Variant 1: `tutorial_bg_interior.mp4`    — landscape 3840×2160, house pan (B)
+/// - Variant 0: `tutorial_bg_walkthrough.mp4` - portrait 720x1296 walkthrough (A)
+/// - Variant 1: `tutorial_bg_interior.mp4`    - landscape 3840x2160 interior alternate (B)
 ///
 /// Both files live at BlueprintCapture/Resources/Videos/ and must be added to the
 /// Xcode target (drag in, tick "Add to targets"). `.resizeAspectFill` crops the

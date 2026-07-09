@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Permission Data Model
 
 /// Represents a signed venue capture permission/authorization
-struct VenuePermission: Identifiable {
+struct VenuePermission: Identifiable, Equatable, Codable {
     let id: UUID
     let venueName: String
     let venueAddress: String
@@ -22,6 +22,26 @@ struct VenuePermission: Identifiable {
         return true
     }
 
+    var provenancePayload: [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        return [
+            "schema_version": "venue_permission.v1",
+            "permission_id": id.uuidString,
+            "venue_name": venueName,
+            "venue_address": venueAddress,
+            "authorized_by": authorizedBy,
+            "authorized_title": authorizedTitle,
+            "signed_at": formatter.string(from: signedAt),
+            "valid_until": validUntil.map { formatter.string(from: $0) } ?? NSNull(),
+            "capture_areas": captureAreas,
+            "restricted_areas": restrictions,
+            "document_uri": documentURL?.absoluteString ?? NSNull(),
+            "authorization_status": isValid ? "valid" : "expired",
+            "source": "capture_client",
+            "claim_boundary": "venue_permission_records_declared_operator_authorization_and_restrictions_but_does_not_replace_downstream_rights_review",
+        ]
+    }
+
     // Demo permission for testing
     static let demo = VenuePermission(
         id: UUID(),
@@ -35,6 +55,39 @@ struct VenuePermission: Identifiable {
         restrictions: ["No employee areas", "No cash registers", "No restrooms"],
         documentURL: nil
     )
+
+    static func from(job: ScanJob) -> VenuePermission? {
+        let rightsProfile = job.rightsProfile?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasPermissionEvidence = job.permissionDocURL != nil
+            || rightsProfile == "documented_permission"
+            || !job.allowedAreas.isEmpty
+            || !job.restrictedAreas.isEmpty
+            || !job.approvalRequirements.isEmpty
+        guard hasPermissionEvidence else { return nil }
+
+        var restrictions = job.restrictedAreas
+        for item in job.privacyRestrictions + job.securityRestrictions + job.captureRestrictions {
+            if !restrictions.contains(item) {
+                restrictions.append(item)
+            }
+        }
+
+        let owner = job.owner?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let authorizedBy = (owner?.isEmpty == false) ? owner! : "Site operator"
+
+        return VenuePermission(
+            id: UUID(uuidString: job.id) ?? UUID(),
+            venueName: job.title,
+            venueAddress: job.address,
+            authorizedBy: authorizedBy,
+            authorizedTitle: job.owner == nil ? "Operator approval on file" : "Site owner / operator",
+            signedAt: job.updatedAt,
+            validUntil: nil,
+            captureAreas: job.allowedAreas,
+            restrictions: restrictions,
+            documentURL: job.permissionDocURL
+        )
+    }
 }
 
 // MARK: - Permission Badge (The button you tap)

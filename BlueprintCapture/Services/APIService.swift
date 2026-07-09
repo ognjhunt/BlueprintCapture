@@ -233,6 +233,12 @@ final class APIService {
         _ = try await perform(request: request, expecting: 201)
     }
 
+    func submitClientTelemetry(_ payload: CaptureClientTelemetrySubmission) async throws {
+        var request = try makeRequest(path: "v1/creator/client-telemetry", method: "POST")
+        request.httpBody = try encoder.encode(payload)
+        _ = try await perform(request: request, expecting: 202)
+    }
+
     func fetchCityLaunchReviewCandidates(lat: Double, lng: Double, radiusMeters: Int, limit: Int) async throws -> CityLaunchReviewCandidatesResponse {
         var components = URLComponents(url: try baseURL().appendingPathComponent("v1/creator/city-launch/review-candidates"), resolvingAgainstBaseURL: false)!
         components.queryItems = [

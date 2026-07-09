@@ -2,6 +2,7 @@ import Foundation
 import ARKit
 import CoreMotion
 import Combine
+import UIKit
 
 @MainActor
 final class CaptureQualityMonitor: ObservableObject {
@@ -65,9 +66,18 @@ final class CaptureQualityMonitor: ObservableObject {
     @Published private(set) var limitedTrackingSeconds: TimeInterval = 0
     @Published private(set) var weakSignalEventCount: Int = 0
     @Published private(set) var recoveryPrompt: String?
+    @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    @Published private(set) var availableStorageBytes: Int64?
+    @Published private(set) var memoryWarningCount: Int = 0
+    @Published private(set) var deviceHealthWarning: String?
+    @Published private(set) var durationSafeguardWarning: String?
+    @Published private(set) var lowLightWarning: String?
+    @Published private(set) var shouldFinalizeCurrentSegment: Bool = false
+    let maxSegmentDurationSeconds: TimeInterval = 20 * 60
 
     private var startDate: Date?
     private var timer: Timer?
+    private var notificationTokens: [NSObjectProtocol] = []
     private var gyroSamples: [Double] = []
     private let gyroWindowSize = 100 // ~1 second at 100Hz
     private let motionManager = CMMotionManager()
@@ -82,6 +92,8 @@ final class CaptureQualityMonitor: ObservableObject {
     private var lastARFrameTimestamp: TimeInterval?
     private var wasPreviouslyLimited = false
     private var wasPreviouslyRelocalizing = false
+    private let segmentDurationWarningLeadSeconds: TimeInterval = 5 * 60
+    private var consecutiveLowLightSamples = 0
 
     init() {
         self.hasLiDAR = DeviceCapabilityService.shared.hasLiDAR
@@ -98,6 +110,14 @@ final class CaptureQualityMonitor: ObservableObject {
         limitedTrackingSeconds = 0
         weakSignalEventCount = 0
         recoveryPrompt = nil
+        thermalState = ProcessInfo.processInfo.thermalState
+        availableStorageBytes = Self.readAvailableStorageBytes()
+        memoryWarningCount = 0
+        deviceHealthWarning = nil
+        durationSafeguardWarning = nil
+        lowLightWarning = nil
+        shouldFinalizeCurrentSegment = false
+        consecutiveLowLightSamples = 0
         gyroSamples = []
         steadiness = .good
         trackingQuality = .notAvailable
@@ -106,10 +126,15 @@ final class CaptureQualityMonitor: ObservableObject {
         wasPreviouslyLimited = false
         wasPreviouslyRelocalizing = false
 
+        installDeviceHealthObservers()
+        updateDeviceHealth()
+
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, let start = self.startDate else { return }
                 self.elapsedSeconds = Date().timeIntervalSince(start)
+                self.updateDeviceHealth()
+                self.updateDurationSafeguard()
             }
         }
 
@@ -119,7 +144,30 @@ final class CaptureQualityMonitor: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        uninstallDeviceHealthObservers()
         motionManager.stopGyroUpdates()
+    }
+
+    func updateExposureSample(
+        iso: Double?,
+        exposureDurationSeconds: Double?,
+        exposureTargetBias: Double?
+    ) {
+        let isoValue = iso ?? 0
+        let duration = exposureDurationSeconds ?? 0
+        let bias = exposureTargetBias ?? 0
+        let lowLightSample = isoValue >= 1_000 || duration >= (1.0 / 24.0) || bias <= -1.0
+        if lowLightSample {
+            consecutiveLowLightSamples += 1
+        } else {
+            consecutiveLowLightSamples = max(0, consecutiveLowLightSamples - 1)
+        }
+
+        if consecutiveLowLightSamples >= 3 {
+            lowLightWarning = "Low light detected. Add light, slow down, or revisit this checkpoint before moving deeper into the site."
+        } else if consecutiveLowLightSamples == 0 {
+            lowLightWarning = nil
+        }
     }
 
     // MARK: - ARSession Updates
@@ -249,6 +297,104 @@ final class CaptureQualityMonitor: ObservableObject {
 
     var hasWeakSignalConcern: Bool {
         limitedTrackingSeconds >= 6 || relocalizationCount >= 2
+    }
+
+    private func installDeviceHealthObservers() {
+        uninstallDeviceHealthObservers()
+        let center = NotificationCenter.default
+        notificationTokens.append(
+            center.addObserver(
+                forName: ProcessInfo.thermalStateDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.updateDeviceHealth()
+                }
+            }
+        )
+        notificationTokens.append(
+            center.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.memoryWarningCount += 1
+                    self.shouldFinalizeCurrentSegment = true
+                    self.deviceHealthWarning = "iPhone memory pressure detected. Finalizing this segment before data loss."
+                }
+            }
+        )
+    }
+
+    private func uninstallDeviceHealthObservers() {
+        let center = NotificationCenter.default
+        notificationTokens.forEach { center.removeObserver($0) }
+        notificationTokens.removeAll()
+    }
+
+    private func updateDeviceHealth() {
+        thermalState = ProcessInfo.processInfo.thermalState
+        availableStorageBytes = Self.readAvailableStorageBytes()
+
+        let storageWarningBytes: Int64 = 2_000_000_000
+        let storageCriticalBytes: Int64 = 750_000_000
+        if let availableStorageBytes, availableStorageBytes < storageCriticalBytes {
+            shouldFinalizeCurrentSegment = true
+            deviceHealthWarning = "Low device storage. Finalizing this segment before the capture is lost."
+            return
+        }
+        switch thermalState {
+        case .critical:
+            shouldFinalizeCurrentSegment = true
+            deviceHealthWarning = "iPhone is critically hot. Finalizing this segment so it can be saved."
+        case .serious:
+            deviceHealthWarning = "iPhone is hot. Pause at a checkpoint or end this segment soon."
+        case .fair:
+            if let availableStorageBytes, availableStorageBytes < storageWarningBytes {
+                deviceHealthWarning = "Device storage is getting low. End this segment soon."
+            } else {
+                deviceHealthWarning = nil
+            }
+        case .nominal:
+            if let availableStorageBytes, availableStorageBytes < storageWarningBytes {
+                deviceHealthWarning = "Device storage is getting low. End this segment soon."
+            } else if memoryWarningCount == 0 {
+                deviceHealthWarning = nil
+            }
+        @unknown default:
+            deviceHealthWarning = nil
+        }
+    }
+
+    private func updateDurationSafeguard() {
+        let warningAt = max(0, maxSegmentDurationSeconds - segmentDurationWarningLeadSeconds)
+        if elapsedSeconds >= maxSegmentDurationSeconds {
+            let message = "This recording segment reached 20 minutes. Finalizing at the current checkpoint before the file becomes fragile."
+            shouldFinalizeCurrentSegment = true
+            durationSafeguardWarning = message
+            deviceHealthWarning = message
+        } else if elapsedSeconds >= warningAt {
+            let message = "This segment is getting long. Pause at the next checkpoint and end the segment soon."
+            durationSafeguardWarning = message
+            if deviceHealthWarning == nil {
+                deviceHealthWarning = message
+            }
+        } else {
+            durationSafeguardWarning = nil
+        }
+    }
+
+    private static func readAvailableStorageBytes() -> Int64? {
+        guard let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        guard let values = try? documentsURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]) else {
+            return nil
+        }
+        return values.volumeAvailableCapacityForImportantUsage
     }
 
     private static func recoveryPrompt(for tracking: TrackingQuality) -> String? {

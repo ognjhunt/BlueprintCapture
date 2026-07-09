@@ -27,7 +27,7 @@ protocol CaptureUploadServiceProtocol: AnyObject {
 }
 
 final class CaptureUploadService: CaptureUploadServiceProtocol {
-    nonisolated(unsafe) static let shared = CaptureUploadService()
+    nonisolated static let shared = CaptureUploadService()
 
     /// Firebase-backed upload pipeline that emits progress/completion events
     enum Event {
@@ -45,6 +45,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case missingStructuredIntake
         case rawContractValidationFailed
         case insufficientDiskSpace
+        case uploadLimitExceeded(reasons: [String])
         case captureLifecycleRegistrationFailed
         case submissionRegistrationFailed
         case invalidBundle(reasons: [String])
@@ -65,6 +66,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Raw capture validation failed. Please retake and upload again."
             case .insufficientDiskSpace:
                 return "Not enough free space to finalize this capture bundle safely. Free storage and try again before uploading."
+            case .uploadLimitExceeded(let reasons):
+                return "Capture exceeds beta upload limits and was not uploaded: \(reasons.joined(separator: ", ")). Shorten the walkthrough or split the site into smaller captures."
             case .captureLifecycleRegistrationFailed:
                 return "Blueprint could not register this capture as in-progress before upload started. Check Firebase Auth and Firestore configuration before retrying."
             case .submissionRegistrationFailed:
@@ -90,6 +93,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "raw_contract_v3_validation_failed"
             case .insufficientDiskSpace:
                 return "insufficient_disk_space"
+            case .uploadLimitExceeded:
+                return "capture_upload_limit_exceeded"
             case .captureLifecycleRegistrationFailed:
                 return "capture_lifecycle_registration_failed"
             case .submissionRegistrationFailed:
@@ -107,7 +112,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             switch self {
             case .rawContractValidationFailed, .invalidBundle:
                 return "raw_validation_failed"
-            case .insufficientDiskSpace:
+            case .insufficientDiskSpace, .uploadLimitExceeded:
                 return "local_preflight_failed"
             default:
                 return "upload_failed"
@@ -120,6 +125,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "blocked_raw_validation"
             case .insufficientDiskSpace:
                 return "blocked_local_storage"
+            case .uploadLimitExceeded:
+                return "blocked_local_capture_limits"
             default:
                 return "not_started"
             }
@@ -402,6 +409,28 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             markUploadFailed(id: id, attempt: attempt, error: .uploadFailed)
             return false
         }
+        let limitDecision = CaptureUploadLimitPolicy.betaDefault.evaluate(
+            plan: uploadPlan,
+            durationSeconds: manifestDurationSeconds(from: uploadRoot)
+        )
+        guard limitDecision.allowed else {
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "capture_upload_limit_preflight",
+                status: "blocked",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                    "reasons": limitDecision.reasons.joined(separator: ","),
+                    "total_payload_bytes": String(limitDecision.totalPayloadBytes),
+                    "max_file_size_bytes": String(limitDecision.maxFileSizeBytes),
+                    "duration_seconds": limitDecision.durationSeconds.map { String(format: "%.3f", $0) } ?? "unknown",
+                    "max_duration_seconds": String(format: "%.3f", limitDecision.maxDurationSeconds)
+                ]
+            )
+            print("❌ [UploadService] Capture exceeds beta upload limits id=\(id) reasons=\(limitDecision.reasons.joined(separator: ",")) bytes=\(limitDecision.totalPayloadBytes)")
+            markUploadFailed(id: id, attempt: attempt, error: .uploadLimitExceeded(reasons: limitDecision.reasons))
+            return false
+        }
 
         var uploadedBytes: Int64 = 0
         print("📁 [UploadService] Uploading \(files.count + (completionMarkerFile == nil ? 0 : 1)) files (\(totalBytes) bytes + completion marker) to basePath=\(remoteBasePath)")
@@ -503,6 +532,27 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         return true
+    }
+
+    private func manifestDurationSeconds(from uploadRoot: URL) -> Double? {
+        let manifestURL = uploadRoot.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let value = json["duration_seconds"] as? Double {
+            return value
+        }
+        if let value = json["duration_seconds"] as? Int {
+            return Double(value)
+        }
+        if let value = json["duration"] as? Double {
+            return value
+        }
+        if let value = json["duration"] as? Int {
+            return Double(value)
+        }
+        return nil
     }
 
     private func slugifyCity(_ value: String) -> String {
@@ -1185,9 +1235,40 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
     private struct PendingUpload {
         let continuation: CheckedContinuation<Void, Error>
         let onProgress: (Int64, Int64) -> Void
+        let temporaryFileURL: URL?
         var responseData = Data()
         var response: HTTPURLResponse?
     }
+
+    private struct PersistedUploadSession: Codable {
+        let bucketName: String
+        let objectPath: String
+        let localFilePath: String
+        let fileSize: Int64
+        let contentType: String
+        let uploadURLString: String
+        var lastKnownOffset: Int64
+        var updatedAt: Date
+    }
+
+    private final class CancellableUploadTaskBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: URLSessionUploadTask?
+
+        func set(_ task: URLSessionUploadTask) {
+            lock.lock()
+            self.task = task
+            lock.unlock()
+        }
+
+        func cancel() {
+            lock.lock()
+            let task = self.task
+            lock.unlock()
+            task?.cancel()
+        }
+    }
+
 
     private enum UploadError: LocalizedError {
         case invalidBucketURL(String)
@@ -1215,6 +1296,7 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
     private let lock = NSLock()
     private var pendingUploads: [Int: PendingUpload] = [:]
     private var backgroundCompletionHandler: (() -> Void)?
+    private let uploadChunkSize: Int64 = 8 * 1024 * 1024
 
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.background(
@@ -1244,39 +1326,270 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
         let bucketName = try Self.bucketName(from: bucketURL)
         let fileSize = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         let token = try await firebaseIDToken()
-        let uploadURL = try await startResumableUpload(
+        let uploadSession = try await prepareResumableUploadSession(
             bucketName: bucketName,
             objectPath: objectPath,
+            fileURL: fileURL,
             contentType: contentType,
             customMetadata: customMetadata,
             fileSize: fileSize,
             idToken: token
         )
 
+        if uploadSession.offset >= fileSize {
+            clearPersistedUploadSession(key: uploadSession.key)
+            onProgress(fileSize, fileSize)
+            return
+        }
+
+        var offset = uploadSession.offset
+        if offset > 0 {
+            onProgress(offset, fileSize)
+        }
+
+        if fileSize == 0 {
+            try await uploadChunk(
+                fileURL,
+                uploadURL: uploadSession.uploadURL,
+                idToken: token,
+                contentType: contentType,
+                offset: 0,
+                totalFileSize: fileSize,
+                command: "upload, finalize",
+                temporaryFileURL: nil,
+                onTaskStarted: onTaskStarted,
+                onProgress: onProgress
+            )
+            clearPersistedUploadSession(key: uploadSession.key)
+            return
+        }
+
+        while offset < fileSize {
+            try Task.checkCancellation()
+            let length = min(uploadChunkSize, fileSize - offset)
+            let isFinalChunk = offset + length >= fileSize
+            let chunkURL = try makeChunkFile(from: fileURL, offset: offset, length: length)
+            try await uploadChunk(
+                chunkURL,
+                uploadURL: uploadSession.uploadURL,
+                idToken: token,
+                contentType: contentType,
+                offset: offset,
+                totalFileSize: fileSize,
+                command: isFinalChunk ? "upload, finalize" : "upload",
+                temporaryFileURL: chunkURL,
+                onTaskStarted: onTaskStarted,
+                onProgress: { [offset] completed, _ in
+                    onProgress(min(fileSize, offset + completed), fileSize)
+                }
+            )
+            offset += length
+            persistUploadSessionOffset(key: uploadSession.key, offset: offset)
+        }
+        clearPersistedUploadSession(key: uploadSession.key)
+    }
+
+    private func uploadChunk(
+        _ fileURL: URL,
+        uploadURL: URL,
+        idToken: String,
+        contentType: String,
+        offset: Int64,
+        totalFileSize: Int64,
+        command: String,
+        temporaryFileURL: URL?,
+        onTaskStarted: @escaping (URLSessionUploadTask) -> Void,
+        onProgress: @escaping (Int64, Int64) -> Void
+    ) async throws {
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "PUT"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        request.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
-        request.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+        request.setValue(command, forHTTPHeaderField: "X-Goog-Upload-Command")
+        request.setValue(String(offset), forHTTPHeaderField: "X-Goog-Upload-Offset")
 
-        var uploadTask: URLSessionUploadTask?
+        let uploadTaskBox = CancellableUploadTaskBox()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 let task = session.uploadTask(with: request, fromFile: fileURL)
-                uploadTask = task
+                uploadTaskBox.set(task)
                 lock.lock()
                 pendingUploads[task.taskIdentifier] = PendingUpload(
                     continuation: continuation,
-                    onProgress: onProgress
+                    onProgress: onProgress,
+                    temporaryFileURL: temporaryFileURL
                 )
                 lock.unlock()
                 onTaskStarted(task)
                 task.resume()
             }
         } onCancel: {
-            uploadTask?.cancel()
+            uploadTaskBox.cancel()
         }
+    }
+
+    private func makeChunkFile(from fileURL: URL, offset: Int64, length: Int64) throws -> URL {
+        let chunkDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("BlueprintCaptureUploadChunks", isDirectory: true)
+        try FileManager.default.createDirectory(at: chunkDirectory, withIntermediateDirectories: true)
+        let chunkURL = chunkDirectory.appendingPathComponent("\(UUID().uuidString).part")
+        let input = try FileHandle(forReadingFrom: fileURL)
+        defer {
+            try? input.close()
+        }
+        try input.seek(toOffset: UInt64(offset))
+        let data = try input.read(upToCount: Int(length)) ?? Data()
+        try data.write(to: chunkURL, options: .atomic)
+        return chunkURL
+    }
+
+    private func prepareResumableUploadSession(
+        bucketName: String,
+        objectPath: String,
+        fileURL: URL,
+        contentType: String,
+        customMetadata: [String: String],
+        fileSize: Int64,
+        idToken: String
+    ) async throws -> (key: String, uploadURL: URL, offset: Int64) {
+        let key = uploadSessionKey(
+            bucketName: bucketName,
+            objectPath: objectPath,
+            localFilePath: fileURL.path,
+            fileSize: fileSize
+        )
+        if let persisted = loadPersistedUploadSession(key: key),
+           persisted.bucketName == bucketName,
+           persisted.objectPath == objectPath,
+           persisted.localFilePath == fileURL.path,
+           persisted.fileSize == fileSize,
+           let persistedURL = URL(string: persisted.uploadURLString) {
+            do {
+                let serverOffset = try await queryResumableUploadOffset(
+                    uploadURL: persistedURL,
+                    idToken: idToken,
+                    fileSize: fileSize
+                )
+                persistUploadSessionOffset(key: key, offset: serverOffset)
+                return (key, persistedURL, serverOffset)
+            } catch {
+                clearPersistedUploadSession(key: key)
+            }
+        }
+
+        let uploadURL = try await startResumableUpload(
+            bucketName: bucketName,
+            objectPath: objectPath,
+            contentType: contentType,
+            customMetadata: customMetadata,
+            fileSize: fileSize,
+            idToken: idToken
+        )
+        persistUploadSession(
+            key: key,
+            session: PersistedUploadSession(
+                bucketName: bucketName,
+                objectPath: objectPath,
+                localFilePath: fileURL.path,
+                fileSize: fileSize,
+                contentType: contentType,
+                uploadURLString: uploadURL.absoluteString,
+                lastKnownOffset: 0,
+                updatedAt: Date()
+            )
+        )
+        return (key, uploadURL, 0)
+    }
+
+    private func queryResumableUploadOffset(uploadURL: URL, idToken: String, fileSize: Int64) async throws -> Int64 {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("query", forHTTPHeaderField: "X-Goog-Upload-Command")
+        request.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<400).contains(status), let httpResponse = response as? HTTPURLResponse else {
+            throw UploadError.uploadFailed(status: status, body: String(data: data, encoding: .utf8) ?? "")
+        }
+        if let uploadStatus = Self.headerValue("X-Goog-Upload-Status", in: httpResponse),
+           uploadStatus.lowercased() == "final" {
+            return fileSize
+        }
+        if let received = Self.headerValue("X-Goog-Upload-Size-Received", in: httpResponse) ?? Self.headerValue("X-Goog-Upload-Offset", in: httpResponse),
+           let parsed = Int64(received.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            return min(max(0, parsed), fileSize)
+        }
+        return 0
+    }
+
+    private func uploadSessionKey(bucketName: String, objectPath: String, localFilePath: String, fileSize: Int64) -> String {
+        let raw = "\(bucketName)\n\(objectPath)\n\(localFilePath)\n\(fileSize)"
+        #if canImport(CryptoKit)
+        let digest = SHA256.hash(data: Data(raw.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+        #else
+        return Data(raw.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        #endif
+    }
+
+    private func uploadSessionDirectory() -> URL? {
+        guard let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first else {
+            return nil
+        }
+        let directory = applicationSupport
+            .appendingPathComponent("BlueprintCapture", isDirectory: true)
+            .appendingPathComponent("ResumableUploads", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return directory
+        } catch {
+            return nil
+        }
+    }
+
+    private func uploadSessionFileURL(key: String) -> URL? {
+        uploadSessionDirectory()?.appendingPathComponent("\(key).json")
+    }
+
+    private func loadPersistedUploadSession(key: String) -> PersistedUploadSession? {
+        guard let url = uploadSessionFileURL(key: key),
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PersistedUploadSession.self, from: data)
+    }
+
+    private func persistUploadSession(key: String, session: PersistedUploadSession) {
+        guard let url = uploadSessionFileURL(key: key),
+              let data = try? JSONEncoder().encode(session) else {
+            return
+        }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func persistUploadSessionOffset(key: String, offset: Int64) {
+        guard var session = loadPersistedUploadSession(key: key) else {
+            return
+        }
+        session.lastKnownOffset = offset
+        session.updatedAt = Date()
+        persistUploadSession(key: key, session: session)
+    }
+
+    private func clearPersistedUploadSession(key: String) {
+        guard let url = uploadSessionFileURL(key: key) else {
+            return
+        }
+        try? FileManager.default.removeItem(at: url)
     }
 
     private static func bucketName(from bucketURL: String) throws -> String {
@@ -1414,6 +1727,9 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
 
         guard let pending else {
             return
+        }
+        if let temporaryFileURL = pending.temporaryFileURL {
+            try? FileManager.default.removeItem(at: temporaryFileURL)
         }
         if let error {
             pending.continuation.resume(throwing: error)

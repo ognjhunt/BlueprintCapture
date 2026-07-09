@@ -362,10 +362,29 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var usingCustomARSessionRecorder = false
     private var awaitingFirstARVideoFrame = false
     private var arSessionRecorder: AnyObject?
+    private var currentSiteType: CaptureSiteType = .unknown
+    private var monitorCancellables = Set<AnyCancellable>()
+    private var deviceHealthFinalizeRequested = false
+    private var currentSiteExtent = CaptureSiteExtent(
+        approximateFloorAreaM2: nil,
+        ceilingHeightM: nil,
+        floorCount: nil,
+        dominantAisleWidthM: nil,
+        siteScaleClass: nil
+    )
 
     override init() {
         super.init()
         arSession.delegate = self
+        qualityMonitor.$shouldFinalizeCurrentSegment
+            .removeDuplicates()
+            .sink { [weak self] shouldFinalize in
+                guard shouldFinalize else { return }
+                Task { @MainActor [weak self] in
+                    self?.finalizeCurrentSegmentForDeviceHealth()
+                }
+            }
+            .store(in: &monitorCancellables)
     }
 
 
@@ -505,13 +524,25 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
-    func startRecording() {
+    func startRecording(
+        siteType: CaptureSiteType = .unknown,
+        siteExtent: CaptureSiteExtent = CaptureSiteExtent(
+            approximateFloorAreaM2: nil,
+            ceilingHeightM: nil,
+            floorCount: nil,
+            dominantAisleWidthM: nil,
+            siteScaleClass: nil
+        )
+    ) {
         if shouldUseScreenRecorder {
             guard !usingScreenRecorder else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
         } else {
             guard !movieOutput.isRecording else { print("ℹ️ [Capture] startRecording ignored — already recording"); return }
         }
         print("⏺️ [Capture] startRecording begin")
+        currentSiteType = siteType
+        currentSiteExtent = siteExtent
+        deviceHealthFinalizeRequested = false
         let baseName = "walkthrough-\(UUID().uuidString)"
         let includeARKit = !shouldSkipARKitOnNextRecording && !shouldUseScreenRecorder
         let artifacts: RecordingArtifacts
@@ -527,6 +558,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         currentARKitArtifacts = artifacts.arKit
         let recordingSessionId = UUID().uuidString
         currentRecordingSessionId = recordingSessionId
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "capture_recording_start_requested",
+            status: "requested",
+            metadata: [
+                "capture_id": artifacts.baseFilename,
+                "capture_modality": shouldUseScreenRecorder ? "screen_recorder" : (canUseARSessionRecorder ? "shared_arkit_session" : "av_capture"),
+                "site_type": siteType.manifestValue,
+                "thermal_state": "\(qualityMonitor.thermalState)"
+            ]
+        )
         latestRecordingSession = RecordingSessionMetadata(
             coordinateFrameSessionId: recordingSessionId,
             startedAt: artifacts.startedAt
@@ -584,6 +625,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 print("⚠️ [AR] AR session startup skipped due to previous camera conflict; manifest will omit AR data.")
             }
             captureState = .recording(artifacts)
+            CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                name: "capture_recording_started",
+                status: "av_capture",
+                metadata: [
+                    "capture_id": artifacts.baseFilename,
+                    "thermal_state": "\(qualityMonitor.thermalState)"
+                ]
+            )
             print("⏺️ [Capture] startRecording started → file=\(artifacts.videoURL.lastPathComponent)")
         }
     }
@@ -597,6 +646,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             guard movieOutput.isRecording else { print("ℹ️ [Capture] stopRecording ignored — not recording"); return }
         }
         print("⏹️ [Capture] stopRecording begin")
+        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+            name: "capture_recording_stop_requested",
+            status: "requested",
+            metadata: [
+                "capture_id": currentArtifacts?.baseFilename ?? "unknown",
+                "thermal_state": "\(qualityMonitor.thermalState)"
+            ]
+        )
         Task { @MainActor in qualityMonitor.stop() }
         if shouldUseScreenRecorder {
             stopScreenRecording()
@@ -606,6 +663,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             movieOutput.stopRecording()
         }
         print("⏹️ [Capture] stopRecording requested")
+    }
+
+    private func finalizeCurrentSegmentForDeviceHealth() {
+        guard !deviceHealthFinalizeRequested else { return }
+        guard case .recording = captureState else { return }
+        deviceHealthFinalizeRequested = true
+        print("⚠️ [Capture] Device health requested segment finalization: \(qualityMonitor.deviceHealthWarning ?? "unspecified")")
+        stopRecording()
     }
 
     private func startScreenRecording(for artifacts: RecordingArtifacts) {
@@ -665,6 +730,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     if let artifacts = self.currentArtifacts {
                         self.captureState = .recording(artifacts)
+                        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                            name: "capture_recording_started",
+                            status: "screen_recorder",
+                            metadata: [
+                                "capture_id": artifacts.baseFilename,
+                                "thermal_state": "\(self.qualityMonitor.thermalState)"
+                            ]
+                        )
                         print("⏺️ [Capture] screen recording started → file=\(artifacts.videoURL.lastPathComponent)")
                     }
                 }
@@ -731,6 +804,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             startARSessionForRecording()
 
             captureState = .recording(artifacts)
+            CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                name: "capture_recording_started",
+                status: "shared_arkit_session",
+                metadata: [
+                    "capture_id": artifacts.baseFilename,
+                    "thermal_state": "\(qualityMonitor.thermalState)"
+                ]
+            )
             print("⏺️ [Capture] startRecording started via shared ARSession → file=\(artifacts.videoURL.lastPathComponent)")
         } catch {
             print("❌ [Capture] Failed to start shared ARSession recorder: \(error.localizedDescription)")
@@ -863,6 +944,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 }
 
                 print("❌ [Capture] Recording failed: \(nsError.localizedDescription)")
+                CaptureCrashTelemetryService.shared.recordErrorCode(
+                    "capture_recording_failed",
+                    metadata: [
+                        "capture_id": self.currentArtifacts?.baseFilename ?? "unknown",
+                        "message": nsError.localizedDescription,
+                        "domain": nsError.domain,
+                        "code": nsError.code
+                    ]
+                )
                 self.latestUploadPayload = nil
                 self.captureState = .error(friendlyMessage)
                 self.cleanupAfterRecording()
@@ -898,6 +988,14 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         self.latestUploadPayload = artifactsToPackage.uploadPayload
                         self.captureState = .finished(artifactsToPackage)
+                        CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                            name: "capture_recording_finished",
+                            status: "packaged",
+                            metadata: [
+                                "capture_id": artifactsToPackage.baseFilename,
+                                "duration_seconds": durationSeconds.map { String(format: "%.3f", $0) } ?? "unknown"
+                            ]
+                        )
                         print("✅ [Capture] Packaging complete → \(artifactsToPackage.packageURL.lastPathComponent)")
                         self.cleanupAfterRecording()
                     }
@@ -905,6 +1003,13 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                     DispatchQueue.main.async {
                         self.latestUploadPayload = nil
                         self.captureState = .error(error.localizedDescription)
+                        CaptureCrashTelemetryService.shared.recordErrorCode(
+                            "capture_packaging_failed",
+                            metadata: [
+                                "capture_id": artifactsToPackage.baseFilename,
+                                "message": error.localizedDescription
+                            ]
+                        )
                         print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
                         self.cleanupAfterRecording()
                     }
@@ -1383,6 +1488,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 blue: device.deviceWhiteBalanceGains.blueGain
             )
         }
+        if isoValue != nil || exposureDurationS != nil || exposureTargetBias != nil {
+            Task { @MainActor [weak self] in
+                self?.qualityMonitor.updateExposureSample(
+                    iso: isoValue,
+                    exposureDurationSeconds: exposureDurationS,
+                    exposureTargetBias: exposureTargetBias.map(Double.init)
+                )
+            }
+        }
         latestARFrameId = frameId
         latestARFrameTCaptureSec = tDeviceSec
 
@@ -1592,6 +1706,13 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             )
         )
         exposureSamples.append(sample)
+        Task { @MainActor [weak self] in
+            self?.qualityMonitor.updateExposureSample(
+                iso: Double(sample.iso),
+                exposureDurationSeconds: sample.exposureDurationSeconds,
+                exposureTargetBias: Double(sample.exposureTargetBias)
+            )
+        }
         persistManifest(duration: nil)
     }
 
@@ -2022,6 +2143,18 @@ private extension VideoCaptureManager {
         }
 
         let writeBlock = { [self] in
+            var deviceHealth: [String: Any] = [
+                "thermal_state": "\(qualityMonitor.thermalState)",
+                "memory_warning_count": qualityMonitor.memoryWarningCount,
+                "finalize_current_segment_requested": qualityMonitor.shouldFinalizeCurrentSegment,
+                "max_segment_duration_seconds": qualityMonitor.maxSegmentDurationSeconds,
+                "claim_boundary": "device_health_snapshot_is_capture_client_runtime_context"
+            ]
+            deviceHealth["available_storage_bytes"] = qualityMonitor.availableStorageBytes ?? NSNull()
+            deviceHealth["warning"] = qualityMonitor.deviceHealthWarning ?? NSNull()
+            deviceHealth["duration_safeguard_warning"] = qualityMonitor.durationSafeguardWarning ?? NSNull()
+            deviceHealth["low_light_warning"] = qualityMonitor.lowLightWarning ?? NSNull()
+
             var dict: [String: Any] = [
                 // Required raw capture fields.
                 "schema_version": "v3",
@@ -2048,8 +2181,13 @@ private extension VideoCaptureManager {
                 "coordinate_frame_session_id": recordingSessionId as Any,
                 // Optional fields that help downstream scene-memory derivation.
                 "scale_hint_m_per_unit": 1.0,
-                "intended_space_type": "industrial_unknown"
+                "site_type": currentSiteType.manifestValue,
+                "site_type_source": "capturer_selected",
+                "intended_space_type": currentSiteType.manifestValue,
+                "device_health": deviceHealth
             ]
+
+            currentSiteExtent.apply(to: &dict)
 
             // Exposure samples stay in the raw bundle for downstream use.
             if !pipelineExposureSamples.isEmpty {

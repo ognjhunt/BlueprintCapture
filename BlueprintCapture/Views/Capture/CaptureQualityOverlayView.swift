@@ -12,6 +12,9 @@ struct CaptureQualityOverlayView: View {
             if let warning = monitor.trackingQuality.warningMessage {
                 trackingWarningBanner(warning)
             }
+            if let warning = monitor.deviceHealthWarning {
+                deviceHealthWarningBanner(warning)
+            }
         }
     }
 
@@ -114,12 +117,32 @@ struct CaptureQualityOverlayView: View {
         )
         .transition(.move(edge: .top).combined(with: .opacity))
     }
+
+    private func deviceHealthWarningBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "iphone.radiowaves.left.and.right")
+                .font(.caption)
+                .foregroundStyle(.white)
+            Text(message)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.red.opacity(0.9))
+        )
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
 }
 
 // MARK: - LiDAR + Coverage Badge (optional bottom strip)
 
 struct CaptureInfoBadgesView: View {
     @ObservedObject var monitor: CaptureQualityMonitor
+    var siteScale: SiteWorldSiteScale? = nil
 
     var body: some View {
         HStack(spacing: 12) {
@@ -145,7 +168,7 @@ struct CaptureInfoBadgesView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "square.grid.3x3.fill")
                         .font(.caption2)
-                    Text("\(Int(monitor.estimatedCoveragePercent))% coverage")
+                    Text(coverageLabel)
                         .font(.caption2.weight(.medium))
                 }
                 .foregroundStyle(.white.opacity(0.9))
@@ -178,6 +201,13 @@ struct CaptureInfoBadgesView: View {
 
             Spacer()
         }
+    }
+
+    private var coverageLabel: String {
+        if siteScale == nil || siteScale == .smallSimple {
+            return "\(Int(monitor.estimatedCoveragePercent))% coverage"
+        }
+        return "\(monitor.meshAnchorCount) mesh anchors"
     }
 }
 
