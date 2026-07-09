@@ -8,8 +8,8 @@ import UIKit
 /// floor stays above CaptureUploadService's 250 MB upload headroom (see
 /// `hasUsableDiskSpace`) so the finalized bundle still has room to be written and uploaded.
 private enum CaptureDeviceHealthThresholds {
-    static let lowDiskWarningBytes = 1_000_000_000   // 1 GB — soft warning
-    static let criticalDiskStopBytes = 300_000_000   // 300 MB — hard stop
+    static let lowDiskWarningBytes: Int64 = 1_000_000_000   // 1 GB — soft warning
+    static let criticalDiskStopBytes: Int64 = 300_000_000   // 300 MB — hard stop
 }
 
 @MainActor
@@ -258,7 +258,7 @@ final class CaptureQualityMonitor: ObservableObject {
     nonisolated static func evaluateDeviceHealth(
         thermalState: ProcessInfo.ThermalState,
         memoryWarningActive: Bool,
-        availableDiskBytes: Int?
+        availableDiskBytes: Int64?
     ) -> DeviceHealthWarning? {
         // Hard limits first — finalize to preserve capture-so-far.
         if let bytes = availableDiskBytes, bytes < CaptureDeviceHealthThresholds.criticalDiskStopBytes {
@@ -282,7 +282,7 @@ final class CaptureQualityMonitor: ObservableObject {
 
     /// Available space (bytes) on the capture volume, using the exact API already used by
     /// `CaptureUploadService.hasUsableDiskSpace` (`volumeAvailableCapacityForImportantUsage`).
-    nonisolated static func availableCaptureDiskBytes() -> Int? {
+    nonisolated static func availableCaptureDiskBytes() -> Int64? {
         let directory = FileManager.default.temporaryDirectory
         return try? directory.resourceValues(
             forKeys: [.volumeAvailableCapacityForImportantUsageKey]

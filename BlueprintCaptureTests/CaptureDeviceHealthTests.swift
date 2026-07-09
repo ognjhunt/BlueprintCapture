@@ -9,9 +9,9 @@ import Testing
 @MainActor
 struct CaptureDeviceHealthTests {
 
-    private let plentyOfDisk = 5_000_000_000        // 5 GB
-    private let lowDisk = 700_000_000               // 700 MB (< 1 GB warn, >= 300 MB stop)
-    private let criticalDisk = 100_000_000          // 100 MB (< 300 MB stop)
+    private let plentyOfDisk: Int64 = 5_000_000_000        // 5 GB
+    private let lowDisk: Int64 = 700_000_000               // 700 MB (< 1 GB warn, >= 300 MB stop)
+    private let criticalDisk: Int64 = 100_000_000          // 100 MB (< 300 MB stop)
 
     @Test
     func healthyDeviceProducesNoWarning() {
