@@ -437,9 +437,9 @@ struct VenuePermissionFormView: View {
                 }
 
                 Section("Signed document (optional)") {
-                    if let documentName {
+                    if let attachedName = documentName {
                         HStack {
-                            Label(documentName, systemImage: "doc.fill")
+                            Label(attachedName, systemImage: "doc.fill")
                                 .lineLimit(1)
                             Spacer()
                             Button(role: .destructive) {
