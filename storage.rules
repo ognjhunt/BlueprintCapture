@@ -1,11 +1,89 @@
 rules_version = '2';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CANONICAL Cloud Storage ruleset for Firebase project `blueprint-8c1ca`.
+//
+// This file is the SINGLE canonical ruleset deployed to the project's Storage
+// bucket. It is a SUPERSET of what both clients need:
+//   • the iOS capturer app  (BlueprintCapture)  — raw capture bundle uploads
+//   • the Blueprint WebApp                       — blueprint/account/marketplace
+//
+// It MUST be kept byte-identical in both repos:
+//   • BlueprintCapture/storage.rules
+//   • Blueprint-WebApp/storage.rules
+// because `firebase deploy --only storage` is last-writer-wins for the whole
+// project — whichever repo deploys, the deployed rules must still permit every
+// prefix each client reads/writes. (Beta blocker: storage-rules parity.)
+//
+// Admin-SDK access (Cloud Functions / server routes) BYPASSES these rules.
+//
+// Parity is enforced by:
+//   Blueprint-WebApp/scripts/check-storage-rules-parity.sh
+//   BlueprintCapture/scripts/validate_storage_rules.py
+// ─────────────────────────────────────────────────────────────────────────────
+
 service firebase.storage {
   match /b/{bucket}/o {
     function isSignedIn() {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isSignedIn()
+        && (
+          request.auth.token.admin == true
+          || request.auth.token.role == "admin"
+          || (request.auth.token.roles is list && request.auth.token.roles.hasAny(["admin"]))
+        );
+    }
+
+    function ownsUserPath(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function blueprintDocExists(blueprintId) {
+      return firestore.exists(/databases/(default)/documents/blueprints/$(blueprintId));
+    }
+
+    function blueprintDoc(blueprintId) {
+      return firestore.get(/databases/(default)/documents/blueprints/$(blueprintId));
+    }
+
+    function ownsBlueprint(blueprintId) {
+      return isSignedIn()
+        && blueprintDocExists(blueprintId)
+        && (
+          blueprintDoc(blueprintId).data.host == request.auth.uid
+          || blueprintDoc(blueprintId).data.ownerId == request.auth.uid
+          || blueprintDoc(blueprintId).data.createdBy == request.auth.uid
+          || blueprintDoc(blueprintId).data.userId == request.auth.uid
+        );
+    }
+
+    function marketplaceEntitlementDocExists(entitlementId) {
+      return firestore.exists(/databases/(default)/documents/marketplaceEntitlements/$(entitlementId));
+    }
+
+    function marketplaceEntitlementDoc(entitlementId) {
+      return firestore.get(/databases/(default)/documents/marketplaceEntitlements/$(entitlementId));
+    }
+
+    function hasProvisionedMarketplaceEntitlement(entitlementId) {
+      return isSignedIn()
+        && marketplaceEntitlementDocExists(entitlementId)
+        && marketplaceEntitlementDoc(entitlementId).data.buyer_user_id == request.auth.uid
+        && marketplaceEntitlementDoc(entitlementId).data.access_state == "provisioned";
+    }
+
+    function boundedUpload(maxBytes) {
+      return request.resource != null && request.resource.size <= maxBytes;
+    }
+
+    // Canonical raw-capture bundle path written by the iOS capturer app.
+    // Ownership + integrity are stamped in object metadata by the client; the
+    // size bound blocks abusive/oversized objects while still permitting large
+    // industrial (warehouse/factory) walkthrough captures. Frames + metadata
+    // are far smaller; the cap is generous for the walkthrough video object.
     function rawCaptureMetadataMatches(sceneId, captureId) {
       return request.resource != null
         && request.resource.metadata.creatorId == request.auth.uid
@@ -15,18 +93,84 @@ service firebase.storage {
         && request.resource.metadata.sha256.matches('^[a-f0-9]{64}$');
     }
 
-    function existingOwner() {
+    function ownsRawCaptureObject() {
       return resource != null
         && resource.metadata.creatorId == request.auth.uid;
     }
 
+    // Owner-scoped raw capture bundle. 12 GiB per-object cap bounds abuse without
+    // breaking large industrial captures.
     match /scenes/{sceneId}/captures/{captureId}/raw/{rawPath=**} {
       allow create: if isSignedIn()
-        && rawCaptureMetadataMatches(sceneId, captureId);
-      allow read: if isSignedIn() && existingOwner();
+        && rawCaptureMetadataMatches(sceneId, captureId)
+        && boundedUpload(12 * 1024 * 1024 * 1024);
+      allow read: if isAdmin() || (isSignedIn() && ownsRawCaptureObject());
       allow update, delete: if false;
     }
 
+    // Current signup/config flows write under blueprints/{blueprintId}/...
+    // Access follows the owning Firestore blueprint record.
+    match /blueprints/{blueprintId}/{filePath=**} {
+      allow read: if isAdmin() || ownsBlueprint(blueprintId);
+      allow create, update: if (isAdmin() || ownsBlueprint(blueprintId))
+        && boundedUpload(100 * 1024 * 1024);
+      allow delete: if isAdmin() || ownsBlueprint(blueprintId);
+    }
+
+    // Owner-scoped app artifact buckets for capture, onboarding, and account
+    // uploads. Unknown users cannot read or write another user's subtree.
+    match /users/{userId}/{filePath=**} {
+      allow read, write: if isAdmin() || ownsUserPath(userId);
+    }
+
+    match /accounts/{userId}/{filePath=**} {
+      allow read, write: if isAdmin() || ownsUserPath(userId);
+    }
+
+    match /captures/{userId}/{filePath=**} {
+      allow read: if isAdmin() || ownsUserPath(userId);
+      allow create, update: if (isAdmin() || ownsUserPath(userId))
+        && boundedUpload(500 * 1024 * 1024);
+      allow delete: if isAdmin() || ownsUserPath(userId);
+    }
+
+    match /capture-artifacts/{userId}/{filePath=**} {
+      allow read: if isAdmin() || ownsUserPath(userId);
+      allow create, update: if (isAdmin() || ownsUserPath(userId))
+        && boundedUpload(500 * 1024 * 1024);
+      allow delete: if isAdmin() || ownsUserPath(userId);
+    }
+
+    // Buyer-facing private marketplace delivery artifacts. Direct client reads
+    // require a provisioned entitlement scoped by the path segment; server-side
+    // signed URLs still perform the same Firestore entitlement check before
+    // minting a short-lived URL.
+    match /marketplace-artifacts/{entitlementId}/{filePath=**} {
+      allow read: if isAdmin() || hasProvisionedMarketplaceEntitlement(entitlementId);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // WEB-08: owner-scoped by object metadata so one signed-in user cannot read or
+    // overwrite another user's menu upload. The flat namespace has no owner path
+    // segment, so ownership is enforced via the `owner` custom metadata (stamped by
+    // the server signed-URL upload). Legacy objects without `owner` metadata are no
+    // longer readable/updatable by non-admins — fail closed.
+    match /menus/{fileName} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.metadata.owner == request.auth.uid);
+      allow create: if isSignedIn()
+        && request.resource.metadata.owner == request.auth.uid
+        && boundedUpload(10 * 1024 * 1024);
+      allow update: if isAdmin()
+        || (isSignedIn()
+            && resource.metadata.owner == request.auth.uid
+            && request.resource.metadata.owner == request.auth.uid);
+      allow delete: if isAdmin()
+        || (isSignedIn() && resource.metadata.owner == request.auth.uid);
+    }
+
+    // No public catch-all. New Storage prefixes must choose an owner/proof
+    // model before they become client-writable.
     match /{allPaths=**} {
       allow read, write: if false;
     }

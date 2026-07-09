@@ -95,6 +95,19 @@ service cloud.firestore {
       return data.keys().hasOnly(captureSubmissionClientKeys());
     }
 
+    // Status values a capturer client may set via the client SDK. Privileged
+    // transitions (approved, paid, rejected, qualified, ...) are written ONLY by
+    // backend services via the Admin SDK, which bypasses these rules. Keeping the
+    // client confined to its own lifecycle states prevents self-approval.
+    function captureSubmissionClientStatuses() {
+      return [
+        'submitted',
+        'raw_validation_failed',
+        'local_preflight_failed',
+        'upload_failed'
+      ];
+    }
+
     // ─── Users ──────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow read: if isOwner(userId);
@@ -197,12 +210,15 @@ service cloud.firestore {
     }
 
     // ─── Scenes ──────────────────────────────────────────────────────────────
-    // WebApp clients may create/update/delete scenes; iOS clients read them.
-    // (WebApp server writes go through the Admin SDK and bypass these rules.)
+    // Scenes are created and managed exclusively by the WebApp server via the
+    // Admin SDK (which bypasses these rules) and carry contact PII (name, email,
+    // company, message). No client SDK path creates/updates/deletes or reads
+    // scenes, so client-SDK access is backend-gated: previously ANY signed-in
+    // user could read/update/delete ANY scene (object-level authz + PII
+    // enumeration + supply-tamper risk). Locked to admin/backend only.
     match /scenes/{id} {
-      allow create: if isAuthenticated() && hasValidSceneCreatePayload();
-      allow read: if isAuthenticated();
-      allow update, delete: if isAuthenticated();
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // ─── Capture submissions ─────────────────────────────────────────────────
@@ -213,12 +229,19 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && resource.data.creator_id == request.auth.uid;
       allow create: if isOwner(request.resource.data.creator_id)
-        && hasOnlyCaptureSubmissionClientKeys(request.resource.data);
+        && hasOnlyCaptureSubmissionClientKeys(request.resource.data)
+        && request.resource.data.status in captureSubmissionClientStatuses();
+      // The client may only transition among its OWN lifecycle states. Once a
+      // backend service (Admin SDK) sets a privileged status such as approved or
+      // paid, the old status is no longer in the client set, so the client can
+      // neither self-approve nor revert a backend decision.
       allow update: if isOwner(resource.data.creator_id)
         && request.resource.data.creator_id == resource.data.creator_id
         && hasOnlyCaptureSubmissionClientKeys(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(captureSubmissionClientKeys());
+          .hasOnly(captureSubmissionClientKeys())
+        && resource.data.status in captureSubmissionClientStatuses()
+        && request.resource.data.status in captureSubmissionClientStatuses();
       allow delete: if false; // backend only
     }
 
