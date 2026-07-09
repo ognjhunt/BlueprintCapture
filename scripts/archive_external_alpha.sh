@@ -28,6 +28,7 @@ fail_archive_gate() {
 }
 
 python3 "$ROOT/scripts/validate_storage_rules.py"
+python3 "$ROOT/scripts/validate_storage_lifecycle.py"
 python3 "$ROOT/scripts/validate_upload_resilience.py"
 
 if [[ ! -f "$RELEASE_XCCONFIG" ]]; then
