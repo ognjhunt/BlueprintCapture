@@ -187,6 +187,11 @@ final class SessionEventManager {
     }
 
     func logError(errorCode: String, metadata: [String: Any]? = nil) {
+        // R051: route every error event (errorCode + sanitized metadata, no PII / raw
+        // capture content) to the operator-visible crash/error telemetry sink. This runs
+        // regardless of session/auth state and is best-effort — it never throws or blocks.
+        CrashTelemetryService.shared.recordError(errorCode: errorCode, metadata: metadata)
+
         guard let sessionId = currentSessionId else { return }
         guard remoteWritesEnabled else { return }
         var doc = baseEventPayload(sessionId: sessionId, eventType: "error")

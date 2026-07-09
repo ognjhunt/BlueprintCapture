@@ -271,6 +271,26 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ─── Client crash / error telemetry (R051) ───────────────────────────────
+    // The capture clients persist a crash breadcrumb locally in a crash handler and
+    // ship it on the next launch; SessionEventManager also routes sanitized error
+    // events here. Clients may only CREATE their own telemetry (no PII / raw capture
+    // bytes are written by the client). Records are immutable to the client and read
+    // access is owner/admin-gated; ops triage happens via the Admin SDK.
+    match /clientCrashReports/{reportId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    match /clientErrorTelemetry/{eventId} {
+      allow read: if isAdmin()
+        || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
     // ─── Default deny ────────────────────────────────────────────────────────
     // Any collection not matched above is denied to client-SDK access.
     // Admin-SDK (Cloud Functions / server routes) bypasses this.

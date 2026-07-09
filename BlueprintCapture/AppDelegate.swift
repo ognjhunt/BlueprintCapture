@@ -20,6 +20,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         FirebaseApp.configure()
+        // Install crash/error telemetry as early as possible so uncaught exceptions and
+        // fatal signals during the rest of launch are captured (audit finding R051).
+        CrashTelemetryService.shared.install()
         // Present notifications while app is foregrounded
         UNUserNotificationCenter.current().delegate = self
         notificationService.registerCategories()
@@ -38,6 +41,9 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // satisfy auth-based security rules before the app session starts.
         UserDeviceService.ensureAnonymousFirebaseUserIfNeeded {
             AppSessionService.shared.startIfNeeded()
+            // A Firebase identity now exists: ship any crash breadcrumb persisted by a
+            // prior run's crash handler to the operator-visible telemetry sink (R051).
+            CrashTelemetryService.shared.flushPendingCrashReports()
         }
         return true
     }
