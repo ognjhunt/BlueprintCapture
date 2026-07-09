@@ -1235,6 +1235,253 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
 }
 
 /**
+ * R009 (location-generalization): explicit reason recorded when a walkthrough is
+ * too large for the in-instance extractFrames path. Downstream reads this from the
+ * capture's qa_report.json / capture_descriptor.json instead of seeing a silent OOM.
+ */
+export const VIDEO_TOO_LARGE_REASON = "video_too_large_for_extract_frames";
+
+/**
+ * Default maximum raw walkthrough size (bytes) the in-instance extractFrames path
+ * will download before ffmpeg. gen2 mounts /tmp as an in-memory tmpfs counted
+ * against the function's memory allocation, so the downloaded walkthrough.mov, the
+ * extracted JPEG frames (also written under /tmp), and the ffmpeg/Node working set
+ * must all fit inside that budget simultaneously. 1.5 GiB sits safely below even
+ * the previous 2 GiB allocation and leaves large headroom at the current 4 GiB;
+ * it is intentionally conservative. Raise it via EXTRACT_FRAMES_MAX_VIDEO_BYTES
+ * after increasing the function memory, and route captures above any single-instance
+ * budget to a disk-backed / higher-memory extraction path (e.g. a Cloud Run job that
+ * streams the video to a persistent volume) rather than this event function.
+ */
+export const DEFAULT_MAX_VIDEO_BYTES = 1_610_612_736; // 1.5 * 1024^3
+
+/**
+ * Resolves the configured maximum walkthrough size. Honors the
+ * EXTRACT_FRAMES_MAX_VIDEO_BYTES env override (positive integer bytes); falls back
+ * to DEFAULT_MAX_VIDEO_BYTES for missing/invalid values.
+ */
+export function resolveMaxVideoBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.EXTRACT_FRAMES_MAX_VIDEO_BYTES;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+    logger.warn("Ignoring invalid EXTRACT_FRAMES_MAX_VIDEO_BYTES; using default", {
+      raw,
+      default_max_video_bytes: DEFAULT_MAX_VIDEO_BYTES,
+    });
+  }
+  return DEFAULT_MAX_VIDEO_BYTES;
+}
+
+export interface WalkthroughSizeGuardResult {
+  withinBudget: boolean;
+  sizeBytes: number | null;
+  maxBytes: number;
+  reason: string | null;
+  guidance: string | null;
+}
+
+interface SizeGuardFile {
+  getMetadata(): Promise<[{ size?: string | number | null } | undefined, ...unknown[]]>;
+}
+
+interface DownloadableFile extends SizeGuardFile {
+  download(options: { destination: string }): Promise<unknown>;
+}
+
+/**
+ * R009: pre-download size guard. Reads the object's size via getMetadata (a cheap
+ * HEAD, not a download) and decides whether the walkthrough fits the in-instance
+ * budget. A metadata read failure does NOT block ingest: we fall back to the
+ * existing download path (which still surfaces ffmpeg/OOM errors) rather than
+ * rejecting a capture we could not measure.
+ */
+export async function evaluateWalkthroughSizeGuard(
+  file: SizeGuardFile,
+  maxBytes: number
+): Promise<WalkthroughSizeGuardResult> {
+  let sizeBytes: number | null = null;
+  try {
+    const [metadata] = await file.getMetadata();
+    const parsed = Number(metadata?.size ?? NaN);
+    sizeBytes = Number.isFinite(parsed) ? parsed : null;
+  } catch (error) {
+    logger.warn("Failed to read walkthrough size before download; proceeding without size guard", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { withinBudget: true, sizeBytes: null, maxBytes, reason: null, guidance: null };
+  }
+
+  if (sizeBytes !== null && sizeBytes > maxBytes) {
+    return {
+      withinBudget: false,
+      sizeBytes,
+      maxBytes,
+      reason: VIDEO_TOO_LARGE_REASON,
+      guidance:
+        `Walkthrough video is ${sizeBytes} bytes, which exceeds the extractFrames ` +
+        `in-instance budget of ${maxBytes} bytes. Route this capture to a higher-memory / ` +
+        `longer-timeout disk-backed extraction path (e.g. a Cloud Run job that streams the ` +
+        `video to a persistent volume), or raise EXTRACT_FRAMES_MAX_VIDEO_BYTES after ` +
+        `increasing the function memory allocation.`,
+    };
+  }
+  return { withinBudget: true, sizeBytes, maxBytes, reason: null, guidance: null };
+}
+
+/**
+ * R009: guarded download. Evaluates the size guard first and only calls
+ * file.download when the walkthrough is within budget. Returns downloaded=false
+ * (with the guard result) instead of pulling an oversized video into tmpfs.
+ */
+export async function downloadWalkthroughWithinBudget(
+  file: DownloadableFile,
+  destination: string,
+  maxBytes: number
+): Promise<{ downloaded: boolean; guard: WalkthroughSizeGuardResult }> {
+  const guard = await evaluateWalkthroughSizeGuard(file, maxBytes);
+  if (!guard.withinBudget) {
+    return { downloaded: false, guard };
+  }
+  await file.download({ destination });
+  return { downloaded: true, guard };
+}
+
+/**
+ * R009: records an oversized-walkthrough failure using the function's existing
+ * persisted failure-reporting mechanism (qa_report.json + capture_descriptor.json)
+ * and publishes the pipeline handoff/status event, so the capture is explicitly
+ * marked qa_status="blocked" with reason `video_too_large_for_extract_frames`
+ * instead of the function silently OOM-ing on download. We do NOT re-throw on a
+ * publish failure: the durable failure artifacts are already written, and throwing
+ * would trigger a retry that re-attempts the same doomed download.
+ */
+async function recordWalkthroughTooLargeFailure(input: {
+  bucket: StorageBucket;
+  bucketName: string;
+  pathInfo: CapturePathInfo;
+  objectName: string;
+  objectKind: string;
+  walkthroughObjectName: string;
+  guard: WalkthroughSizeGuardResult;
+}): Promise<void> {
+  const {
+    bucket,
+    bucketName,
+    pathInfo,
+    objectName,
+    objectKind,
+    walkthroughObjectName,
+    guard,
+  } = input;
+  const qaStatus = "blocked";
+  const reason = guard.reason ?? VIDEO_TOO_LARGE_REASON;
+  const generatedAt = new Date().toISOString();
+  const qaReportUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/qa_report.json`);
+  const pipelineHandoffUri = gsUri(bucketName, `${pathInfo.capturesPrefix}/pipeline_handoff.json`);
+
+  const videoSizeGuard = {
+    reason,
+    video_size_bytes: guard.sizeBytes,
+    max_video_bytes: guard.maxBytes,
+    max_video_bytes_env: "EXTRACT_FRAMES_MAX_VIDEO_BYTES",
+    walkthrough_uri: gsUri(bucketName, walkthroughObjectName),
+    guidance: guard.guidance,
+  };
+
+  const pipelineStatusEvent = buildPipelineStatusEvent({
+    bucketName,
+    pathInfo,
+    objectName,
+    objectKind,
+    qaStatus,
+    pipelineHandoffUri,
+  });
+
+  const qaReport: Record<string, unknown> = {
+    schema_version: "v1",
+    scene_id: pathInfo.sceneId,
+    capture_id: pathInfo.captureId,
+    status: qaStatus,
+    reasons: [reason],
+    warnings: [],
+    video_size_guard: videoSizeGuard,
+    generated_at: generatedAt,
+  };
+
+  const captureDescriptor: Record<string, unknown> = {
+    schema_version: "v1",
+    scene_id: pathInfo.sceneId,
+    capture_id: pathInfo.captureId,
+    qa_status: qaStatus,
+    qa_report_uri: qaReportUri,
+    pipeline_handoff_uri: pipelineHandoffUri,
+    reasons: [reason],
+    video_size_guard: videoSizeGuard,
+    pipeline_status_event: pipelineStatusEvent,
+    generated_at: generatedAt,
+  };
+
+  await bucket
+    .file(`${pathInfo.capturesPrefix}/capture_descriptor.json`)
+    .save(JSON.stringify(captureDescriptor, null, 2), { contentType: "application/json" });
+  await bucket
+    .file(`${pathInfo.capturesPrefix}/qa_report.json`)
+    .save(JSON.stringify(qaReport, null, 2), { contentType: "application/json" });
+
+  const handoffPayload: Record<string, unknown> = {
+    schema_version: "v1",
+    handoff_source: "BlueprintCapture.extractFrames",
+    handoff_topic: PIPELINE_HANDOFF_TOPIC,
+    handoff_trigger_object: objectName,
+    handoff_trigger_kind: objectKind,
+    scene_id: pathInfo.sceneId,
+    capture_id: pathInfo.captureId,
+    qa_status: qaStatus,
+    reasons: [reason],
+    raw_prefix_uri: gsUri(bucketName, pathInfo.rawPrefix),
+    qa_report_uri: qaReportUri,
+    capture_descriptor_uri: gsUri(
+      bucketName,
+      `${pathInfo.capturesPrefix}/capture_descriptor.json`
+    ),
+    pipeline_handoff_uri: pipelineHandoffUri,
+    pipeline_status_event: pipelineStatusEvent,
+    video_size_guard: videoSizeGuard,
+    generated_at: generatedAt,
+  };
+
+  await bucket
+    .file(`${pathInfo.capturesPrefix}/pipeline_handoff.json`)
+    .save(JSON.stringify(handoffPayload, null, 2), { contentType: "application/json" });
+
+  try {
+    const handoffMessageId = await publishPipelineHandoffOnce(
+      bucket,
+      pathInfo.capturesPrefix,
+      handoffPayload
+    );
+    logger.info("Recorded oversized-walkthrough failure and published handoff", {
+      sceneId: pathInfo.sceneId,
+      captureId: pathInfo.captureId,
+      reason,
+      qaStatus,
+      handoffTopic: PIPELINE_HANDOFF_TOPIC,
+      handoffMessageId,
+    });
+  } catch (error) {
+    logger.error("Failed to publish oversized-walkthrough handoff", {
+      sceneId: pathInfo.sceneId,
+      captureId: pathInfo.captureId,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/**
  * extractFrames
  * - Trigger: scenes/<scene>/captures/<capture_id>/raw/walkthrough.mov (canonical iOS uploader format)
  *   OR: scenes/<scene>/<source>/<capture_id>/raw/walkthrough.mov (legacy scenes format)
@@ -1246,7 +1493,15 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
 export const extractFrames = onObjectFinalized(
   {
     region: "us-central1",
-    memory: "2GiB",
+    // R009: gen2 mounts /tmp as an in-memory tmpfs that is billed against this
+    // allocation, and the whole walkthrough.mov is downloaded there before ffmpeg
+    // runs (plus the extracted JPEG frames, which are also written under /tmp).
+    // Raised 2GiB -> 4GiB for extra headroom on larger captures. This is only a
+    // margin bump, NOT the fix: no single-instance allocation can hold arbitrarily
+    // large industrial walkthroughs, so the pre-download size guard below
+    // (resolveMaxVideoBytes / downloadWalkthroughWithinBudget) is the real contract.
+    memory: "4GiB",
+    // 540s is the gen2 event-driven maximum, so it is already as high as it can go.
     timeoutSeconds: 540,
     cpu: 2,
   },
@@ -1384,7 +1639,37 @@ export const extractFrames = onObjectFinalized(
     };
     const file = bucket.file(walkthroughObjectName);
 
-    await file.download({ destination: localVideo });
+    // R009: fail fast BEFORE pulling the full walkthrough into the in-memory tmpfs.
+    // Large industrial (warehouse/factory) walkthroughs can exceed the instance
+    // memory budget; a size check via getMetadata (cheap HEAD, no download) lets us
+    // record an actionable, explicit failure instead of silently OOM-ing on download.
+    const maxVideoBytes = resolveMaxVideoBytes();
+    const walkthroughDownload = await downloadWalkthroughWithinBudget(
+      file,
+      localVideo,
+      maxVideoBytes
+    );
+    if (!walkthroughDownload.downloaded) {
+      const guard = walkthroughDownload.guard;
+      logger.error("Walkthrough exceeds extractFrames size budget; skipping download", {
+        objectName: walkthroughObjectName,
+        sceneId: pathInfo.sceneId,
+        captureId: pathInfo.captureId,
+        sizeBytes: guard.sizeBytes,
+        maxBytes: guard.maxBytes,
+        reason: guard.reason,
+      });
+      await recordWalkthroughTooLargeFailure({
+        bucket,
+        bucketName,
+        pathInfo,
+        objectName,
+        objectKind,
+        walkthroughObjectName,
+        guard,
+      });
+      return;
+    }
     logger.info("Downloaded video to temp", { localVideo });
 
     const outputPattern = join(framesDir, "%06d.jpg");

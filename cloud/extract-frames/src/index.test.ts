@@ -19,6 +19,11 @@ const {
   resolveWalkthroughObjectName,
   validateIdentityMapping,
   validateManifest,
+  DEFAULT_MAX_VIDEO_BYTES,
+  VIDEO_TOO_LARGE_REASON,
+  resolveMaxVideoBytes,
+  evaluateWalkthroughSizeGuard,
+  downloadWalkthroughWithinBudget,
 } = await import("./index.js");
 
 test("parseCapturePath supports canonical scenes capture layout", () => {
@@ -831,6 +836,98 @@ test("canonicalWorldModelCandidate requires stable site identity for iPhone capt
 
   assert.equal(result.candidate, false);
   assert.ok(result.reasoning.includes("site_id_present:false"));
+});
+
+// R009: pre-download size guard for the in-instance extractFrames path.
+
+test("resolveMaxVideoBytes falls back to the documented default", () => {
+  assert.equal(resolveMaxVideoBytes({}), DEFAULT_MAX_VIDEO_BYTES);
+  // Default is 1.5 GiB, safely below the tmpfs/memory budget.
+  assert.equal(DEFAULT_MAX_VIDEO_BYTES, 1.5 * 1024 * 1024 * 1024);
+});
+
+test("resolveMaxVideoBytes honors EXTRACT_FRAMES_MAX_VIDEO_BYTES override", () => {
+  assert.equal(
+    resolveMaxVideoBytes({ EXTRACT_FRAMES_MAX_VIDEO_BYTES: "1024" }),
+    1024
+  );
+});
+
+test("resolveMaxVideoBytes ignores invalid override and uses default", () => {
+  assert.equal(
+    resolveMaxVideoBytes({ EXTRACT_FRAMES_MAX_VIDEO_BYTES: "not-a-number" }),
+    DEFAULT_MAX_VIDEO_BYTES
+  );
+  assert.equal(
+    resolveMaxVideoBytes({ EXTRACT_FRAMES_MAX_VIDEO_BYTES: "-5" }),
+    DEFAULT_MAX_VIDEO_BYTES
+  );
+});
+
+test("downloadWalkthroughWithinBudget rejects an oversized video before downloading", async () => {
+  let downloadCalls = 0;
+  const oversizedBytes = DEFAULT_MAX_VIDEO_BYTES + 1;
+  const file = {
+    getMetadata: async () => [{ size: String(oversizedBytes) }] as [{ size: string }],
+    download: async (_opts: { destination: string }) => {
+      downloadCalls += 1;
+      return [];
+    },
+  };
+
+  const result = await downloadWalkthroughWithinBudget(
+    file,
+    "/tmp/video.mov",
+    DEFAULT_MAX_VIDEO_BYTES
+  );
+
+  assert.equal(result.downloaded, false);
+  assert.equal(result.guard.withinBudget, false);
+  assert.equal(result.guard.reason, VIDEO_TOO_LARGE_REASON);
+  assert.equal(result.guard.sizeBytes, oversizedBytes);
+  assert.equal(result.guard.maxBytes, DEFAULT_MAX_VIDEO_BYTES);
+  assert.ok(typeof result.guard.guidance === "string" && result.guard.guidance.length > 0);
+  // The core guarantee: the full walkthrough is never pulled into tmpfs.
+  assert.equal(downloadCalls, 0);
+});
+
+test("downloadWalkthroughWithinBudget downloads a normal-sized video", async () => {
+  let downloadCalls = 0;
+  let downloadedTo: string | null = null;
+  const file = {
+    getMetadata: async () => [{ size: "1048576" }] as [{ size: string }],
+    download: async (opts: { destination: string }) => {
+      downloadCalls += 1;
+      downloadedTo = opts.destination;
+      return [];
+    },
+  };
+
+  const result = await downloadWalkthroughWithinBudget(
+    file,
+    "/tmp/video.mov",
+    DEFAULT_MAX_VIDEO_BYTES
+  );
+
+  assert.equal(result.downloaded, true);
+  assert.equal(result.guard.withinBudget, true);
+  assert.equal(result.guard.reason, null);
+  assert.equal(downloadCalls, 1);
+  assert.equal(downloadedTo, "/tmp/video.mov");
+});
+
+test("evaluateWalkthroughSizeGuard does not block when metadata cannot be read", async () => {
+  const file = {
+    getMetadata: async (): Promise<[{ size?: string }]> => {
+      throw new Error("metadata unavailable");
+    },
+  };
+
+  const guard = await evaluateWalkthroughSizeGuard(file, DEFAULT_MAX_VIDEO_BYTES);
+
+  assert.equal(guard.withinBudget, true);
+  assert.equal(guard.sizeBytes, null);
+  assert.equal(guard.reason, null);
 });
 
 test("canonicalWorldModelCandidate defers non-ARKit world model promotion until geometry stage", () => {
