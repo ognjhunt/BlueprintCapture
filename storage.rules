@@ -120,11 +120,17 @@ service firebase.storage {
     // Owner-scoped app artifact buckets for capture, onboarding, and account
     // uploads. Unknown users cannot read or write another user's subtree.
     match /users/{userId}/{filePath=**} {
-      allow read, write: if isAdmin() || ownsUserPath(userId);
+      allow read: if isAdmin() || ownsUserPath(userId);
+      allow create, update: if (isAdmin() || ownsUserPath(userId))
+        && boundedUpload(500 * 1024 * 1024);
+      allow delete: if isAdmin() || ownsUserPath(userId);
     }
 
     match /accounts/{userId}/{filePath=**} {
-      allow read, write: if isAdmin() || ownsUserPath(userId);
+      allow read: if isAdmin() || ownsUserPath(userId);
+      allow create, update: if (isAdmin() || ownsUserPath(userId))
+        && boundedUpload(500 * 1024 * 1024);
+      allow delete: if isAdmin() || ownsUserPath(userId);
     }
 
     match /captures/{userId}/{filePath=**} {
@@ -164,7 +170,8 @@ service firebase.storage {
       allow update: if isAdmin()
         || (isSignedIn()
             && resource.metadata.owner == request.auth.uid
-            && request.resource.metadata.owner == request.auth.uid);
+            && request.resource.metadata.owner == request.auth.uid
+            && boundedUpload(10 * 1024 * 1024));
       allow delete: if isAdmin()
         || (isSignedIn() && resource.metadata.owner == request.auth.uid);
     }
