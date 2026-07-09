@@ -55,7 +55,7 @@ struct CaptureTutorialView: View {
 
                 // Swipeable step cards
                 TabView(selection: $currentStep) {
-                    ForEach(indexedSteps, id: \.offset) { item in
+                    SwiftUI.ForEach(indexedSteps, id: \.offset) { item in
                         TutorialStepCard(step: item.element)
                             .tag(item.offset)
                     }
@@ -67,7 +67,7 @@ struct CaptureTutorialView: View {
 
                 // Dot indicators (tappable to jump)
                 HStack(spacing: 10) {
-                    ForEach(indexedSteps, id: \.offset) { item in
+                    SwiftUI.ForEach(indexedSteps, id: \.offset) { item in
                         Capsule()
                             .fill(item.offset == currentStep ? Color.white : Color.white.opacity(0.3))
                             .frame(width: item.offset == currentStep ? 20 : 8, height: 8)
