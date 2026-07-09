@@ -80,6 +80,58 @@ enum SiteWorldSiteScale: String, CaseIterable, Identifiable {
     }
 }
 
+/// Capture-declared site type, mirroring the pipeline's canonical site-type taxonomy
+/// (`blueprint_pipeline.site_taxonomy` / `scene_semantics`). Each `rawValue` is the
+/// exact `site_type` token the pipeline recognizes; the selected case's `rawValue` is
+/// written into the raw manifest's `intended_space_type` field as capture truth.
+/// `.unknown` is the explicit, non-blocking fallback when the capturer has not
+/// declared a site type (it resolves to the pipeline's `UNKNOWN_SITE_CATEGORY`).
+enum SiteType: String, CaseIterable, Identifiable {
+    case warehouse
+    case manufacturing
+    case fulfillment
+    case coldStorage = "cold_storage"
+    case stockroom
+    case kitchen
+    case lab
+    case hospital
+    case retail
+    case office
+    case residential
+    case unknown
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .warehouse:
+            return "Warehouse"
+        case .manufacturing:
+            return "Manufacturing"
+        case .fulfillment:
+            return "Fulfillment"
+        case .coldStorage:
+            return "Cold Storage"
+        case .stockroom:
+            return "Stockroom"
+        case .kitchen:
+            return "Kitchen"
+        case .lab:
+            return "Lab"
+        case .hospital:
+            return "Hospital"
+        case .retail:
+            return "Retail"
+        case .office:
+            return "Office"
+        case .residential:
+            return "Residential"
+        case .unknown:
+            return "Not sure / Other"
+        }
+    }
+}
+
 enum SiteWorldReviewTone: String, Equatable {
     case ready
     case caution

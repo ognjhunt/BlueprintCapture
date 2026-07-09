@@ -51,6 +51,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     @Published var spaceContextNotes: String = ""
     @Published var confirmedCaptureGuidelines = false
     @Published var siteWorldSiteScale: SiteWorldSiteScale = .medium
+    /// Capturer-declared site type, written into the raw manifest's `intended_space_type`.
+    /// Defaults to `.unknown` so it never hard-blocks capture (explicit fallback, not a guess).
+    @Published var siteType: SiteType = .unknown
     @Published var selectedCriticalZoneAnchors: Set<CaptureSemanticAnchorType> = []
     @Published private(set) var siteWorldWorkflowConfigured = false
     @Published private(set) var pendingSiteWorldPassReview: SiteWorldPassReview?

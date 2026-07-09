@@ -267,6 +267,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
+    /// Capturer-declared site type, set by the capture flow before recording. Written into
+    /// the raw manifest's `intended_space_type` as capture truth. Defaults to `.unknown`.
+    var intendedSiteType: SiteType = .unknown
     let qualityMonitor = CaptureQualityMonitor()
 
     let session = AVCaptureSession()
@@ -2009,6 +2012,7 @@ private extension VideoCaptureManager {
         let epochMs = Int64(artifacts.startedAt.timeIntervalSince1970 * 1000.0)
         let captureStartTime = artifacts.startedAt
         let recordingSessionId = currentRecordingSessionId ?? latestRecordingSession?.coordinateFrameSessionId
+        let intendedSpaceType = intendedSiteType.rawValue
 
         // Convert exposure samples into raw evidence timing relative to capture start.
         let pipelineExposureSamples: [[String: Any]] = self.exposureSamples.map { sample in
@@ -2048,7 +2052,7 @@ private extension VideoCaptureManager {
                 "coordinate_frame_session_id": recordingSessionId as Any,
                 // Optional fields that help downstream scene-memory derivation.
                 "scale_hint_m_per_unit": 1.0,
-                "intended_space_type": "industrial_unknown"
+                "intended_space_type": intendedSpaceType
             ]
 
             // Exposure samples stay in the raw bundle for downstream use.

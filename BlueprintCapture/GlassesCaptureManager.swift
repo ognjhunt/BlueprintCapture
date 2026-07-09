@@ -231,6 +231,10 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     // The curated jobId we are currently capturing for (used for local organization only).
     private var currentJobId: String?
 
+    // Capturer/job-declared site type, written into the raw manifest's `intended_space_type`
+    // as capture truth. Defaults to `.unknown` (explicit fallback, never a guess).
+    var intendedSiteType: SiteType = .unknown
+
     // Persist last connected device to make reconnect 1-tap.
     private let lastDeviceIdKey = "com.blueprint.glasses.lastDeviceId"
     private let lastDeviceNameKey = "com.blueprint.glasses.lastDeviceName"
@@ -1151,6 +1155,12 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     /// Starts a capture for a specific scan job. This does not change upload behavior; it only
     /// helps keep local artifact directories organized by jobId.
     func startCapture(job: ScanJob) {
+        // Adopt the job's declared site type when it maps to a canonical token; otherwise
+        // leave the explicit `.unknown` fallback rather than guessing.
+        if let declaredSiteType = job.siteType,
+           let mappedSiteType = SiteType(rawValue: declaredSiteType) {
+            intendedSiteType = mappedSiteType
+        }
         displayTargetMetadata = MetaDisplayTargetMetadata(
             name: job.title,
             address: job.address,
@@ -1765,7 +1775,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
 
             // Optional fields that enhance processing
             "scale_hint_m_per_unit": 1.0,
-            "intended_space_type": "industrial_unknown",
+            "intended_space_type": intendedSiteType.rawValue,
 
             // Additional metadata (not required by pipeline but useful)
             "capture_end_epoch_ms": Int64(artifacts.endedAt.timeIntervalSince1970 * 1000),
@@ -1842,6 +1852,7 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
         displayDeviceWarning = nil
         displayUploadStatus = nil
         displayDebugState.lastDisplaySendError = nil
+        intendedSiteType = .unknown
         captureState = .idle
     }
 }

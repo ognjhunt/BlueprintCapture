@@ -95,6 +95,7 @@ struct CaptureSessionView: View {
                 if shouldShowWorkflowBriefing {
                     SiteWorldPreflightCard(
                         scale: $viewModel.siteWorldSiteScale,
+                        siteType: $viewModel.siteType,
                         criticalZoneOptions: viewModel.siteWorldCriticalZoneOptions,
                         selectedCriticalZones: viewModel.selectedCriticalZoneAnchors,
                         routePlan: viewModel.siteWorldRoutePlanSummary,
@@ -307,6 +308,8 @@ struct CaptureSessionView: View {
     private func startCurrentPass() {
         guard !captureManager.captureState.isRecording else { return }
         viewModel.configureSiteWorldWorkflow()
+        // Thread the capturer's declared site type into the manifest as capture truth.
+        captureManager.intendedSiteType = viewModel.siteType
         prepareSessionIfNeeded()
         if !captureManager.session.isRunning {
             captureManager.startSession()
@@ -603,6 +606,7 @@ private struct CaptureGuidanceTip {
 
 private struct SiteWorldPreflightCard: View {
     @Binding var scale: SiteWorldSiteScale
+    @Binding var siteType: SiteType
     let criticalZoneOptions: [CaptureSemanticAnchorType]
     let selectedCriticalZones: Set<CaptureSemanticAnchorType>
     let routePlan: [String]
@@ -649,6 +653,32 @@ private struct SiteWorldPreflightCard: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .fill(scale == option ? BlueprintTheme.brandTeal.opacity(0.32) : Color.white.opacity(0.10))
                             )
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Site type")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(SiteType.allCases) { option in
+                            let isSelected = siteType == option
+                            Button {
+                                siteType = option
+                            } label: {
+                                Text(option.displayName)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule(style: .continuous)
+                                            .fill(isSelected ? BlueprintTheme.brandTeal.opacity(0.35) : Color.white.opacity(0.12))
+                                    )
+                            }
                         }
                     }
                 }
