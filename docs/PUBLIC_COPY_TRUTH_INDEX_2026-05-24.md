@@ -74,7 +74,9 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `docs/NEXT_SESSION_ANDROID_XR_MASTER_PROMPT_2026-03-25.md` | Historical/internal | Android XR continuation prompt; not current hardware, public launch, provider, or Catalyst proof. |
 | `docs/NEXT_SESSION_TRUE_ERROR_SPECS_2026-03-18.md` | Historical/internal | Next-session prompt/spec; not current public copy. |
 | `docs/PRIVATE_ALPHA_READINESS.md` | Current source-of-truth | Current alpha readiness and fail-closed release posture. |
+| `docs/PUBLIC_BETA_CLOSURE_2026-07-16.md` | Current source-of-truth | Post-#52 closure record: contract/CI/telemetry fixes and decisions; not launch, provider, payout, store, or buyer proof. |
 | `docs/PUBLIC_BETA_READINESS_2026-07-16.md` | Current source-of-truth | Audit-backed public-beta gap map; blocker states are point-in-time findings, not launch, provider, payout, or buyer proof. |
+| `docs/STORAGE_RETENTION_POLICY_2026-07-09.md` | Current source-of-truth | Committed, deployable storage lifecycle policy; applying it to the bucket is an external ops step, not retention proof. |
 | `docs/architecture/ai-onboarding-map.md` | Current source-of-truth | Agent onboarding map; generated/support surfaces are not authority. |
 | `docs/architecture/command-safety-matrix.md` | Current source-of-truth | Command safety; validators can be blocked by missing local config. |
 | `docs/architecture/refactor-hotspots.md` | Current source-of-truth | Internal architecture risk map; not public readiness copy. |
