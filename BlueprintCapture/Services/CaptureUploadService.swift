@@ -1269,7 +1269,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                     ]
                 )
                 print("🔁 [UploadService] Scheduling in-session auto-retry #\(retryNumber) in \(delaySeconds)s for id=\(id)")
+                let failedRequest = failingRecord.request
                 let retryTask = Task { [weak self] in
+                    // Persist the documented failure transition BEFORE the
+                    // backoff sleep: if iOS suspends/kills the process while
+                    // the retry is parked, the submission must not stay
+                    // "uploading" forever. The write completes before the
+                    // retry begins, and a successful retry then re-asserts
+                    // submitted/uploaded (the rules allow failed -> retry).
+                    await self?.recordUploadFailure(for: failedRequest, error: error)
                     try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
                     guard let self, !Task.isCancelled else { return }
                     await self.performUpload(for: id, attempt: retryAttempt)
