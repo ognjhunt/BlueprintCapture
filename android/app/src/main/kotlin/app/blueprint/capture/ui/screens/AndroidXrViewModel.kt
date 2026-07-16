@@ -3,6 +3,7 @@ package app.blueprint.capture.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -59,23 +60,35 @@ class AndroidXrViewModel @Inject constructor(
 ) : ViewModel() {
     private companion object {
         const val TAG = "AndroidXrViewModel"
+
+        // androidx.xr projected APIs are platform-gated: device-connection
+        // detection needs API 36, projected activity options need API 35.
+        const val PROJECTED_DETECTION_MIN_SDK = 36
+        const val PROJECTED_LAUNCH_MIN_SDK = 35
     }
 
     private val _uiState = MutableStateFlow(AndroidXrUiState())
     val uiState: StateFlow<AndroidXrUiState> = _uiState.asStateFlow()
 
     init {
-        viewModelScope.launch {
-            ProjectedContext.isProjectedDeviceConnected(context, coroutineContext).collect { connected ->
-                _uiState.value = _uiState.value.copy(
-                    isProjectedDeviceConnected = connected,
-                    launchMessage = if (connected) {
-                        "Connected Android XR glasses detected. Runtime display state will determine whether the session uses audio-only guidance or display-glasses UI."
-                    } else {
-                        "No Android XR projected device is connected yet. Use paired audio glasses, display glasses, or a projected-glasses emulator."
-                    },
-                )
+        if (Build.VERSION.SDK_INT >= PROJECTED_DETECTION_MIN_SDK) {
+            viewModelScope.launch {
+                ProjectedContext.isProjectedDeviceConnected(context, coroutineContext).collect { connected ->
+                    _uiState.value = _uiState.value.copy(
+                        isProjectedDeviceConnected = connected,
+                        launchMessage = if (connected) {
+                            "Connected Android XR glasses detected. Runtime display state will determine whether the session uses audio-only guidance or display-glasses UI."
+                        } else {
+                            "No Android XR projected device is connected yet. Use paired audio glasses, display glasses, or a projected-glasses emulator."
+                        },
+                    )
+                }
             }
+        } else {
+            _uiState.value = _uiState.value.copy(
+                isProjectedDeviceConnected = false,
+                launchMessage = "Android XR projected-device detection requires a newer Android version than this device runs.",
+            )
         }
         viewModelScope.launch {
             capabilityRepository.capabilities.collect { capabilities ->
@@ -105,6 +118,12 @@ class AndroidXrViewModel @Inject constructor(
         if (activity == null) {
             _uiState.value = _uiState.value.copy(
                 launchError = "An Activity context is required to launch the Android XR projected activity.",
+            )
+            return
+        }
+        if (Build.VERSION.SDK_INT < PROJECTED_LAUNCH_MIN_SDK) {
+            _uiState.value = _uiState.value.copy(
+                launchError = "Android XR projected launch requires a newer Android version than this device runs.",
             )
             return
         }

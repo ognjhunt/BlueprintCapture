@@ -84,6 +84,13 @@ class GeofenceManager @Inject constructor(
             .addGeofences(geofences)
             .build()
 
+        // Re-checked inline (not only via the helper above) so the permission
+        // requirement is explicit at the call site.
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
         runCatching { client.addGeofences(request, pendingIntent) }
     }
 

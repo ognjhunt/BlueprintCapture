@@ -3,6 +3,7 @@ package app.blueprint.capture
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.annotation.RequiresApi
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.viewModels
@@ -60,6 +61,11 @@ import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 @OptIn(ExperimentalProjectedApi::class)
+// The Android XR projected runtime (ProjectedDeviceController/-Display
+// controllers) requires API 34+. This activity is only launched through
+// AndroidXrViewModel.launchProjectedExperience, which version-gates the
+// projected launch options before starting it.
+@RequiresApi(34)
 class GlassesProjectedActivity : ComponentActivity() {
     private val viewModel: AndroidXrViewModel by viewModels()
 

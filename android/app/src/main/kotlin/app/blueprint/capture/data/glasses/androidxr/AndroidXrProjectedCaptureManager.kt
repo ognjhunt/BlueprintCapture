@@ -1,5 +1,7 @@
 package app.blueprint.capture.data.glasses.androidxr
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -63,6 +65,14 @@ class AndroidXrProjectedCaptureManager(
             FileOutputOptions.Builder(outputFile).build(),
         )
         if (withAudio) {
+            val audioPermissionGranted = ContextCompat.checkSelfPermission(
+                activity,
+                Manifest.permission.RECORD_AUDIO,
+            ) == PackageManager.PERMISSION_GRANTED
+            check(audioPermissionGranted) {
+                "Audio capture requested without RECORD_AUDIO permission. " +
+                    "Request the permission first or start the recording without audio."
+            }
             pendingRecording = pendingRecording.withAudioEnabled()
         }
         pendingRecording.start(ContextCompat.getMainExecutor(activity), onEvent)

@@ -6,6 +6,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Explicit hardware declarations for the permissions above. A camera is
+         genuinely required for evidence capture; a microphone is optional
+         (captures degrade to video-only if audio is unavailable). -->
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -73,12 +79,16 @@
             android:name="app.blueprint.capture.data.notification.GeofenceBroadcastReceiver"
             android:exported="false" />
 
+        <!-- Android XR projected activity: only launched via
+             AndroidXrViewModel.launchProjectedExperience, which version-gates
+             the projected launch options (API 35+) before starting it. -->
         <activity
             android:name=".GlassesProjectedActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:requiredDisplayCategory="xr_projected"
-            android:theme="@style/Theme.BlueprintCapture" />
+            android:theme="@style/Theme.BlueprintCapture"
+            tools:targetApi="34" />
 
         <activity
             android:name=".MainActivity"

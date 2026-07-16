@@ -1,0 +1,27 @@
+{
+  "rule": [
+    {
+      "action": { "type": "SetStorageClass", "storageClass": "NEARLINE" },
+      "condition": {
+        "age": 90,
+        "matchesPrefix": ["scenes/"],
+        "matchesStorageClass": ["STANDARD"]
+      }
+    },
+    {
+      "action": { "type": "SetStorageClass", "storageClass": "COLDLINE" },
+      "condition": {
+        "age": 365,
+        "matchesPrefix": ["scenes/"],
+        "matchesStorageClass": ["STANDARD", "NEARLINE"]
+      }
+    },
+    {
+      "action": { "type": "Delete" },
+      "condition": {
+        "age": 3650,
+        "matchesPrefix": ["scenes/"]
+      }
+    }
+  ]
+}

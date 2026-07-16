@@ -93,6 +93,7 @@ private data class DeviceCapability(
 )
 
 @Composable
+@androidx.annotation.OptIn(UnstableApi::class)
 fun OnboardingWalkthroughScreen(
     onContinue: () -> Unit,
 ) {

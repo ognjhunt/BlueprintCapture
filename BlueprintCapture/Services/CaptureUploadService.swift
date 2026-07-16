@@ -142,6 +142,34 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         var task: Task<Void, Never>?
         var cancelActiveTransfer: (() -> Void)?
         var attempt: UUID
+        var autoRetriesRemaining: Int = CaptureUploadService.maxInSessionAutoRetries
+    }
+
+    /// Bounded in-session automatic retry policy. The locally preserved
+    /// bundle is never touched by a retry — it only re-runs the upload.
+    static let maxInSessionAutoRetries = 2
+
+    static func shouldAutoRetry(error: UploadError, retriesRemaining: Int) -> Bool {
+        guard retriesRemaining > 0 else { return false }
+        switch error {
+        case .uploadFailed, .submissionRegistrationFailed:
+            // Transient transport/registration failures: storage uploads
+            // resume from verified chunks and the registration write is
+            // idempotent under the capture_submissions rules contract.
+            return true
+        case .fileMissing, .cancelled, .authenticationRequired,
+             .missingStructuredIntake, .rawContractValidationFailed,
+             .insufficientDiskSpace, .uploadLimitExceeded,
+             .captureLifecycleRegistrationFailed, .invalidBundle:
+            // Requires user action or a real precondition change; retrying
+            // in-session would just repeat the same deterministic failure.
+            return false
+        }
+    }
+
+    static func autoRetryDelaySeconds(forRetryNumber retryNumber: Int) -> Double {
+        // 4s, 16s, ... capped well below the background-task budget.
+        min(pow(4.0, Double(max(retryNumber, 1))), 60.0)
     }
 
     private let queue = DispatchQueue(label: "com.blueprint.captureUploadService")
@@ -208,6 +236,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         record.task = nil
         record.cancelActiveTransfer = nil
         record.attempt = attempt
+        // A fresh enqueue (or explicit manual retry) replenishes the bounded
+        // in-session auto-retry budget.
+        record.autoRetriesRemaining = Self.maxInSessionAutoRetries
         uploads[id] = record
         subject.send(.queued(request))
 
@@ -675,7 +706,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return nil
     }
 
-    private func captureSubmissionPayload(
+    func captureSubmissionPayload(
         for request: CaptureUploadRequest,
         recordedAt: Date,
         uploadState: String,
@@ -908,7 +939,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             : "assigned_capture_job"
     }
 
-    private func uploadFailurePayload(
+    func uploadFailurePayload(
         for request: CaptureUploadRequest,
         error: UploadError,
         recordedAt: Date
@@ -1220,6 +1251,42 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             guard var failingRecord = self.uploads[id], failingRecord.attempt == attempt else { return }
             failingRecord.task = nil
             failingRecord.cancelActiveTransfer = nil
+
+            if Self.shouldAutoRetry(error: error, retriesRemaining: failingRecord.autoRetriesRemaining) {
+                failingRecord.autoRetriesRemaining -= 1
+                let retryNumber = Self.maxInSessionAutoRetries - failingRecord.autoRetriesRemaining
+                let delaySeconds = Self.autoRetryDelaySeconds(forRetryNumber: retryNumber)
+                let retryAttempt = UUID()
+                failingRecord.attempt = retryAttempt
+                SessionEventManager.shared.logOperationalEvent(
+                    operation: "upload_in_session_auto_retry",
+                    status: "scheduled",
+                    metadata: [
+                        "capture_id": CaptureBundleContext.captureIdentifier(for: failingRecord.request),
+                        "failure_code": error.lifecycleFailureCode,
+                        "retry_number": "\(retryNumber)",
+                        "delay_seconds": "\(delaySeconds)"
+                    ]
+                )
+                print("🔁 [UploadService] Scheduling in-session auto-retry #\(retryNumber) in \(delaySeconds)s for id=\(id)")
+                let failedRequest = failingRecord.request
+                let retryTask = Task { [weak self] in
+                    // Persist the documented failure transition BEFORE the
+                    // backoff sleep: if iOS suspends/kills the process while
+                    // the retry is parked, the submission must not stay
+                    // "uploading" forever. The write completes before the
+                    // retry begins, and a successful retry then re-asserts
+                    // submitted/uploaded (the rules allow failed -> retry).
+                    await self?.recordUploadFailure(for: failedRequest, error: error)
+                    try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+                    guard let self, !Task.isCancelled else { return }
+                    await self.performUpload(for: id, attempt: retryAttempt)
+                }
+                failingRecord.task = retryTask
+                self.uploads[id] = failingRecord
+                return
+            }
+
             self.uploads[id] = failingRecord
             self.subject.send(.failed(failingRecord.request, error))
             Task {
