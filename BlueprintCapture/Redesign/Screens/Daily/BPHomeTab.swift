@@ -20,12 +20,13 @@ struct BPHomeTab: View {
 
     private let targetStateService: TargetStateServiceProtocol = TargetStateService()
 
-    init() {
-        // The real discovery view model requires a NearbyAlertsManager. The app
-        // injects a single shared instance as an environment object; SwiftUI can't
-        // read environment objects at init time, so we seed the StateObject with a
-        // fresh manager and re-point discovery at the injected one in `.task`.
-        _viewModel = StateObject(wrappedValue: ScanHomeViewModel(alertsManager: NearbyAlertsManager()))
+    init(alertsManager: NearbyAlertsManager) {
+        // The real discovery view model requires a NearbyAlertsManager. BPRootView
+        // passes the app-level shared instance in explicitly so geofenced nearby
+        // alerts and the discovery feed operate on one manager (beta-launch-audit
+        // M-3: the previous throwaway `NearbyAlertsManager()` split alert state
+        // across two instances).
+        _viewModel = StateObject(wrappedValue: ScanHomeViewModel(alertsManager: alertsManager))
     }
 
     // MARK: Live → presentation mapping
@@ -87,8 +88,10 @@ struct BPHomeTab: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: Space.xs) {
-                BPEyebrow(coordinator.capturerCity, color: BP.brassDeep)
-                Text("\(greeting), \(coordinator.capturerName)")
+                BPEyebrow("Capture", color: BP.brassDeep)
+                Text(coordinator.capturerFirstName.isEmpty
+                     ? greeting
+                     : "\(greeting), \(coordinator.capturerFirstName)")
                     .font(.bpSans(BPType.largeTitle, .bold))
                     .tracking(BPTracking.headlineLarge)
                     .foregroundStyle(BP.textStrong)
@@ -101,9 +104,6 @@ struct BPHomeTab: View {
                     .font(.system(size: 18, weight: .regular))
                     .foregroundStyle(BP.textStrong)
                     .frame(width: 44, height: 44)
-                    .overlay(alignment: .topTrailing) {
-                        Circle().fill(BP.blockFg).frame(width: 8, height: 8).offset(x: -10, y: 12)
-                    }
                     .contentShape(Rectangle())
             }
             .offset(x: 8)
@@ -362,10 +362,11 @@ struct BPJobRow: View {
 
 #if DEBUG
 #Preview {
-    BPHomeTab()
+    let alertsManager = NearbyAlertsManager()
+    return BPHomeTab(alertsManager: alertsManager)
         .environmentObject(RedesignCoordinator())
         .environmentObject(GlassesCaptureManager())
         .environmentObject(UploadQueueViewModel())
-        .environmentObject(NearbyAlertsManager())
+        .environmentObject(alertsManager)
 }
 #endif

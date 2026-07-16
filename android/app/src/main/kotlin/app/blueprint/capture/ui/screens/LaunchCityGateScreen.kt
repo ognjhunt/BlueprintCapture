@@ -4,7 +4,12 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Geocoder
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Build
+import android.os.Bundle
+import android.os.CancellationSignal
+import android.os.Looper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,12 +66,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
 import javax.inject.Inject
+import kotlin.coroutines.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 enum class LaunchCityGateStatus {
     Checking,
@@ -115,11 +123,11 @@ class LaunchCityGateViewModel @Inject constructor(
                 message = "Checking launch access.",
             )
 
-            val location = lastKnownLocation()
+            val location = currentLocation()
             if (location == null) {
                 _uiState.value = LaunchCityGateUiState(
                     status = LaunchCityGateStatus.Failed,
-                    message = "Blueprint could not read a current location on this device. Try again after location updates.",
+                    message = "Blueprint could not get a location fix. Make sure location services are on, then check again — a first fix can take a moment outdoors.",
                 )
                 return@launch
             }
@@ -158,6 +166,60 @@ class LaunchCityGateViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Last-known fix when available, otherwise an active one-shot location
+     * request. Fresh installs and new devices commonly have NO cached fix, so
+     * relying on `getLastKnownLocation` alone dead-ends first-run users at the
+     * gate with no way forward.
+     */
+    @SuppressLint("MissingPermission")
+    private suspend fun currentLocation(): Location? {
+        lastKnownLocation()?.let { return it }
+
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+        val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+            .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+            ?: return null
+
+        return withTimeoutOrNull(FRESH_LOCATION_TIMEOUT_MS) {
+            suspendCancellableCoroutine { continuation ->
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val cancellationSignal = CancellationSignal()
+                    continuation.invokeOnCancellation { cancellationSignal.cancel() }
+                    runCatching {
+                        manager.getCurrentLocation(provider, cancellationSignal, context.mainExecutor) { location ->
+                            if (continuation.isActive) continuation.resume(location)
+                        }
+                    }.onFailure {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+                } else {
+                    // Explicit object (not a SAM lambda): on API 29 the platform
+                    // interface still has abstract status/provider callbacks.
+                    val listener = object : LocationListener {
+                        override fun onLocationChanged(location: Location) {
+                            if (continuation.isActive) continuation.resume(location)
+                        }
+
+                        @Deprecated("Deprecated in Java")
+                        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+
+                        override fun onProviderEnabled(provider: String) = Unit
+
+                        override fun onProviderDisabled(provider: String) = Unit
+                    }
+                    continuation.invokeOnCancellation { manager.removeUpdates(listener) }
+                    runCatching {
+                        @Suppress("DEPRECATION")
+                        manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                    }.onFailure {
+                        if (continuation.isActive) continuation.resume(null)
+                    }
+                }
+            }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     private fun lastKnownLocation(): Location? {
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
@@ -165,6 +227,10 @@ class LaunchCityGateViewModel @Inject constructor(
             manager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
                 ?: manager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
         }.getOrNull()
+    }
+
+    private companion object {
+        const val FRESH_LOCATION_TIMEOUT_MS = 15_000L
     }
 
     private suspend fun resolveCity(location: Location): ResolvedLaunchCity? = withContext(Dispatchers.IO) {

@@ -14,6 +14,7 @@ const {
   buildWorldlabsPreviewFields,
   canonicalWorldModelCandidate,
   captureObjectKind,
+  decideHandoffReceiptAction,
   deriveRequestedRouting,
   inlineFrameExtractionSizeGate,
   mergeManifestWithSidecars,
@@ -726,6 +727,77 @@ test("validateManifest accepts Android V3.1 without iOS-only build fields", () =
 
   assert.equal(validation.valid, true);
   assert.deepEqual(validation.missingRequired, []);
+});
+
+test("decideHandoffReceiptAction claims when no receipt exists", () => {
+  assert.deepEqual(decideHandoffReceiptAction(null, null, 1_000), { kind: "claim_new" });
+});
+
+test("decideHandoffReceiptAction returns the published message id", () => {
+  assert.deepEqual(
+    decideHandoffReceiptAction({ status: "published", message_id: "m-1" }, "42", 1_000),
+    { kind: "return_published", messageId: "m-1" },
+  );
+});
+
+test("decideHandoffReceiptAction waits on a fresh publishing claim", () => {
+  const now = Date.parse("2026-07-16T12:00:00Z");
+  assert.deepEqual(
+    decideHandoffReceiptAction(
+      { status: "publishing", claimed_at: "2026-07-16T11:59:00Z" },
+      "42",
+      now,
+    ),
+    { kind: "wait" },
+  );
+});
+
+test("decideHandoffReceiptAction takes over a stale publishing claim by generation", () => {
+  const now = Date.parse("2026-07-16T12:00:00Z");
+  assert.deepEqual(
+    decideHandoffReceiptAction(
+      { status: "publishing", claimed_at: "2026-07-16T11:00:00Z" },
+      "42",
+      now,
+    ),
+    { kind: "takeover", ifGenerationMatch: "42" },
+  );
+});
+
+test("decideHandoffReceiptAction treats published-without-id as terminal, never republishing", () => {
+  assert.deepEqual(
+    decideHandoffReceiptAction({ status: "published" }, "42", 1_000),
+    { kind: "return_published", messageId: "unknown_prior_publish" },
+  );
+});
+
+test("decideHandoffReceiptAction takes over publish_failed and corrupt receipts", () => {
+  assert.deepEqual(
+    decideHandoffReceiptAction({ status: "publish_failed" }, "7", 1_000),
+    { kind: "takeover", ifGenerationMatch: "7" },
+  );
+  assert.deepEqual(
+    decideHandoffReceiptAction({ status: "corrupt" }, "9", 1_000),
+    { kind: "takeover", ifGenerationMatch: "9" },
+  );
+});
+
+test("deriveRequestedRouting does not route unknown client-supplied outputs into lanes", () => {
+  const routing = deriveRequestedRouting({
+    requested_outputs: ["qualification", "totally_made_up_lane"],
+  });
+
+  assert.deepEqual(routing.requestedOutputs, ["qualification", "totally_made_up_lane"]);
+  assert.deepEqual(routing.requestedLanes, ["qualification"]);
+});
+
+test("deriveRequestedRouting keeps canonical scaniverse/deeper-evaluation lanes", () => {
+  const routing = deriveRequestedRouting({
+    requested_outputs: ["qualification", "deeper_evaluation", "scaniverse_assisted_capture"],
+  });
+
+  assert.ok(routing.requestedLanes.includes("deeper_evaluation"));
+  assert.ok(routing.requestedLanes.includes("scaniverse_assisted_capture"));
 });
 
 test("deriveRequestedRouting preserves outputs and expands preview simulation lane", () => {

@@ -2,6 +2,7 @@ package app.blueprint.capture.data.glasses
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.util.Log
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -194,6 +195,7 @@ class GlassesCaptureManager @Inject constructor(
             ?: emptyList()
         if (frameFiles.isNotEmpty()) {
             runCatching { encodeFramesToMp4(frameFiles, videoFile) }
+                .onFailure { Log.w(LOG_TAG, "walkthrough.mp4 encode failed; raw frames preserved", it) }
         }
 
         val metadataFile = File(outputDir, "capture_metadata.json").apply {
@@ -267,7 +269,19 @@ class GlassesCaptureManager @Inject constructor(
      */
     private fun encodeFramesToMp4(frameFiles: List<File>, outputFile: File) {
         val firstData = frameFiles.first().readBytes()
-        val firstBitmap = BitmapFactory.decodeByteArray(firstData, 0, firstData.size) ?: return
+        val firstBitmap = BitmapFactory.decodeByteArray(firstData, 0, firstData.size)
+        if (firstBitmap == null) {
+            // Not a bitmap-decodable payload (JPEG/PNG/HEIF). Log the leading
+            // bytes so hardware validation can identify the real stream format
+            // (e.g. H.264 NAL units or planar YUV) — see beta-launch-audit #5.
+            val prefix = firstData.take(16).joinToString(" ") { "%02x".format(it) }
+            Log.w(
+                LOG_TAG,
+                "First glasses frame is not bitmap-decodable (${firstData.size} bytes, " +
+                    "leading bytes: $prefix); skipping walkthrough.mp4 assembly. Raw frames preserved.",
+            )
+            return
+        }
         val videoWidth = firstBitmap.width
         val videoHeight = firstBitmap.height
         firstBitmap.recycle()
@@ -379,6 +393,8 @@ class GlassesCaptureManager @Inject constructor(
     )
 
     companion object {
+        private const val LOG_TAG = "GlassesCaptureManager"
+
         @VisibleForTesting
         internal fun writeCanonicalEvidence(
             outputDir: File,

@@ -1,21 +1,31 @@
 import SwiftUI
+import FirebaseAuth
 
 enum BPAccountRoute: Hashable { case settings, rights }
 
 // MARK: - Profile (tab: Profile)
+//
+// Identity comes from the authenticated Firebase user via RedesignCoordinator.
+// No sample personas, fabricated stats, or unearned certification chips —
+// capture-truth rules forbid presenting qualification/performance data that
+// the backend has not actually produced.
 
 struct BPProfileView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
+    @Environment(\.openURL) private var openURL
+    @State private var showingSignOutConfirmation = false
+    @State private var signOutErrorMessage: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    BPLargeTitle(eyebrow: "Capturer #214", title: "Profile")
+                    BPLargeTitle(eyebrow: "Account", title: "Profile")
                     identityCard
-                    statRow
                     menuCard
-                    BPGhostButton(title: "Sign out", tint: BP.blockFg, border: BP.blockBd) {}
+                    BPGhostButton(title: "Sign out", tint: BP.blockFg, border: BP.blockBd) {
+                        showingSignOutConfirmation = true
+                    }
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.top, Space.s)
@@ -31,6 +41,36 @@ struct BPProfileView: View {
                 case .rights: BPRightsTrainingView()
                 }
             }
+            .confirmationDialog(
+                "Sign out of Blueprint Capture?",
+                isPresented: $showingSignOutConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Sign out", role: .destructive) { signOut() }
+                Button("Cancel", role: .cancel) {}
+            }
+            .alert(
+                "Sign out failed",
+                isPresented: Binding(
+                    get: { signOutErrorMessage != nil },
+                    set: { if !$0 { signOutErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { signOutErrorMessage = nil }
+            } message: {
+                Text(signOutErrorMessage ?? "")
+            }
+        }
+    }
+
+    private func signOut() {
+        do {
+            try Auth.auth().signOut()
+            UserDeviceService.ensureAnonymousFirebaseUserIfNeeded()
+            NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
+            coordinator.refreshIdentity()
+        } catch {
+            signOutErrorMessage = error.localizedDescription
         }
     }
 
@@ -46,52 +86,52 @@ struct BPProfileView: View {
                 .frame(width: 56, height: 56)
 
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Text(coordinator.capturerName)
+                    Text(displayName)
                         .font(.bpSans(BPType.bodyL, .semibold))
                         .foregroundStyle(BP.textStrong)
-                    Text("Capturer #214 · \(coordinator.capturerCity)")
-                        .font(.bpMono(BPType.caption))
-                        .foregroundStyle(BP.textMuted)
+                    if !coordinator.capturerEmail.isEmpty {
+                        Text(coordinator.capturerEmail)
+                            .font(.bpMono(BPType.caption))
+                            .foregroundStyle(BP.textMuted)
+                    }
                 }
                 Spacer(minLength: Space.s)
-                BPStatusChip("Active", signal: .proof)
             }
         }
     }
 
-    private var initials: String {
-        let parts = coordinator.capturerName.split(separator: " ")
-        let letters = parts.prefix(2).compactMap { $0.first }
-        return String(letters).uppercased()
+    private var displayName: String {
+        coordinator.capturerName.isEmpty ? "Capturer" : coordinator.capturerName
     }
 
-    private var statRow: some View {
-        HStack(spacing: Space.m) {
-            BPMetricStat(value: "27", label: "Captures")
-            BPMetricStat(value: "4.9", label: "Rating")
-            BPMetricStat(value: "98%", label: "Pass rate", valueColor: BP.proofFg)
-        }
+    private var initials: String {
+        let parts = displayName.split(separator: " ")
+        let letters = parts.prefix(2).compactMap { $0.first }
+        return String(letters).uppercased()
     }
 
     private var menuCard: some View {
         BPCard(padding: 0) {
             NavigationLink(value: BPAccountRoute.rights) {
-                menuRow(icon: "checkmark.shield", title: "Rights & privacy",
-                        trailingChip: BPChip(label: "Certified", signal: .proof))
+                menuRow(icon: "checkmark.shield", title: "Rights & privacy")
             }
             .buttonStyle(.plain)
-            BPDivider(color: BP.lineSoft)
-
-            menuRow(icon: "iphone", title: "Capture device", trailingText: "iPhone 16 Pro · LiDAR", showsChevron: false)
             BPDivider(color: BP.lineSoft)
 
             NavigationLink(value: BPAccountRoute.settings) {
                 menuRow(icon: "gearshape", title: "Settings")
             }
             .buttonStyle(.plain)
-            BPDivider(color: BP.lineSoft)
 
-            menuRow(icon: "questionmark.circle", title: "Help")
+            if let helpURL = AppConfig.helpCenterURL() {
+                BPDivider(color: BP.lineSoft)
+                Button {
+                    openURL(helpURL)
+                } label: {
+                    menuRow(icon: "questionmark.circle", title: "Help")
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

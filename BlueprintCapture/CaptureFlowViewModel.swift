@@ -4,6 +4,12 @@ import CoreLocation
 import AVFoundation
 import CoreMotion
 import MapKit
+#if canImport(FirebaseCore)
+import FirebaseCore
+#endif
+#if canImport(FirebaseAuth)
+import FirebaseAuth
+#endif
 
 private func normalizeRequestedOutputs(_ outputs: [String]) -> [String] {
     CaptureRequestedOutputs.normalized(outputs)
@@ -237,13 +243,30 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     func loadProfile() async {
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        profile = .sample
-        
+        // Real identity only: the profile-review step must show the signed-in
+        // user's actual details (or "—" placeholders), never a sample persona.
+        profile = Self.authenticatedProfile()
+
         // If user is already onboarded, skip profile review and go to location confirmation
         if isOnboarded {
             step = .confirmLocation
         }
+    }
+
+    private static func authenticatedProfile() -> UserProfile {
+        #if canImport(FirebaseAuth) && canImport(FirebaseCore)
+        guard FirebaseApp.app() != nil, let user = Auth.auth().currentUser else {
+            return .placeholder
+        }
+        return UserProfile(
+            fullName: user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            email: user.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            phoneNumber: user.phoneNumber ?? "",
+            company: ""
+        )
+        #else
+        return .placeholder
+        #endif
     }
     
     func completeOnboarding() {

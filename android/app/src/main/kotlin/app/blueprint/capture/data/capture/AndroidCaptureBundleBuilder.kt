@@ -356,18 +356,6 @@ class AndroidCaptureBundleBuilder @Inject constructor() {
         )
     }
 
-    private fun captureModalityFor(request: AndroidCaptureBundleRequest): String {
-        val hasScaffolding = !request.scaffoldingPacket?.scaffoldingUsed.isNullOrEmpty()
-        return when (request.captureSource) {
-            AndroidCaptureSource.MetaGlasses ->
-                if (hasScaffolding) "glasses_plus_scaffolding" else "glasses_video_only"
-            AndroidCaptureSource.AndroidXrGlasses ->
-                if (hasScaffolding) "android_xr_plus_scaffolding" else "android_xr_video_only"
-            AndroidCaptureSource.AndroidPhone ->
-                if (hasScaffolding) "android_plus_scaffolding" else "android_video_only"
-        }
-    }
-
     private fun upstreamHandoffFor(request: AndroidCaptureBundleRequest): UpstreamHandoff {
         val siteSubmissionId = request.siteSubmissionId?.trim()?.takeIf { it.isNotEmpty() }
         val buyerRequestId = request.buyerRequestId?.trim()?.takeIf { it.isNotEmpty() }

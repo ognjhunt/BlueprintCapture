@@ -28,7 +28,15 @@ import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp, getApps } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
+import {
+  authorizeCaptureStatusRequest,
+  computeReferralOutcome,
+  normalizeReferralCode,
+  normalizeReferralStatus,
+  parseCaptureStatusUpdate,
+} from "./referral-core.js";
 import {
   buildDemandSignalsForWebResearchFindings,
   buildStrategicWeightsFromSignals,
@@ -60,15 +68,7 @@ if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();
 
-const COMMISSION_RATE = 0.1;        // 10 % ongoing commission to referrer
-const FIRST_CAPTURE_BONUS_RATE = 0.1; // 10 % one-time bonus to referred user
-
-type ReferralStatus = "invited" | "signedUp" | "firstCapture" | "active";
-
-function nextReferralStatus(current: ReferralStatus): ReferralStatus {
-  if (current === "signedUp") return "firstCapture";
-  return "active";
-}
+// Commission/bonus math lives in referral-core.ts so it stays unit-tested.
 
 function operationalStateForCaptureStatus(status: string) {
   switch (status) {
@@ -340,142 +340,339 @@ export const onCaptureApproved = onDocumentWritten(
 
     if (!isNowPaying || wasAlreadyPaying) return;
 
-    // Idempotency guard: skip if already processed
+    // Cheap pre-check outside the transaction; the authoritative idempotency
+    // guard is re-read inside the transaction below because Firestore triggers
+    // are at-least-once and can be delivered concurrently.
     if (after["referralBonusProcessedAt"] !== undefined) {
       logger.info("Referral bonus already processed, skipping", { captureId });
       return;
     }
 
-    const creatorId = after["creator_id"] as string | undefined;
-    const payoutCents = after["payout_cents"] as number | undefined;
+    const captureRef = db.collection("capture_submissions").doc(captureId);
 
-    if (!creatorId || !payoutCents || payoutCents <= 0) {
-      logger.info("Skipping: missing creator_id or payout_cents", {
-        captureId,
-        creatorId,
-        payoutCents,
+    const result = await db.runTransaction(async (tx) => {
+      const captureSnap = await tx.get(captureRef);
+      if (!captureSnap.exists) return { applied: false, reason: "capture_missing" };
+      const capture = captureSnap.data() ?? {};
+
+      if (capture["referralBonusProcessedAt"] !== undefined) {
+        return { applied: false, reason: "already_processed" };
+      }
+      const status = capture["status"];
+      if (status !== "approved" && status !== "paid") {
+        return { applied: false, reason: "status_not_paying" };
+      }
+
+      const creatorId = capture["creator_id"] as string | undefined;
+      if (!creatorId) {
+        return { applied: false, reason: "missing_creator" };
+      }
+
+      // ── 1. Load the capturer's user document to find their referrer ────────
+      const userRef = db.collection("users").doc(creatorId);
+      const userSnap = await tx.get(userRef);
+      if (!userSnap.exists) {
+        logger.warn("Creator user document not found", { creatorId, captureId });
+        return { applied: false, reason: "creator_user_missing" };
+      }
+
+      const referredBy = userSnap.data()?.["referredBy"] as string | undefined;
+      if (!referredBy) {
+        tx.update(captureRef, {
+          referralBonusProcessedAt: FieldValue.serverTimestamp(),
+          referralBonusSkippedReason: "no_referrer",
+        });
+        return { applied: false, reason: "no_referrer" };
+      }
+
+      // Server-side self-referral guard: never rely on the client for this.
+      if (referredBy === creatorId) {
+        tx.update(captureRef, {
+          referralBonusProcessedAt: FieldValue.serverTimestamp(),
+          referralBonusSkippedReason: "self_referral",
+        });
+        return { applied: false, reason: "self_referral" };
+      }
+
+      // ── 2. Load the referral record ─────────────────────────────────────────
+      const referralRef = db
+        .collection("users")
+        .doc(referredBy)
+        .collection("referrals")
+        .doc(creatorId);
+      const referralSnap = await tx.get(referralRef);
+      if (!referralSnap.exists) {
+        // `onUserProfileWritten` creates the record when it validates the
+        // attribution. If validation has not landed yet, error out (retryable
+        // at-least-once) rather than permanently stamping the commission away.
+        const attributionValidated =
+          userSnap.data()?.["referralAttributionProcessedAt"] !== undefined;
+        if (!attributionValidated) {
+          throw new Error(
+            `referral_attribution_pending: creator ${creatorId} has referredBy but ` +
+              "server validation has not completed; will retry",
+          );
+        }
+        // Validated referredBy with a missing record (e.g. legacy data) — heal
+        // it here so the commission is not silently dropped.
+        logger.warn("Referral record missing for validated attribution; healing", {
+          referrerId: referredBy,
+          referredUserId: creatorId,
+          captureId,
+        });
+        const creatorName =
+          [userSnap.data()?.["displayName"], userSnap.data()?.["name"]]
+            .map((value) => (typeof value === "string" ? value.trim() : ""))
+            .find((value) => value.length > 0) ?? "New capturer";
+        tx.set(referralRef, {
+          referredUserId: creatorId,
+          referredUserName: creatorName,
+          referredAt: FieldValue.serverTimestamp(),
+          status: "signedUp",
+          lifetimeEarningsCents: 0,
+        });
+      }
+
+      // ── 3. Calculate amounts (pure, unit-tested) ────────────────────────────
+      const currentReferralStatus = referralSnap.exists
+        ? normalizeReferralStatus(referralSnap.data()?.["status"])
+        : "signedUp";
+      const outcome = computeReferralOutcome({
+        payoutCents: capture["payout_cents"],
+        currentReferralStatus,
       });
-      return;
-    }
+      if (!outcome) {
+        logger.info("Skipping: payout_cents not a positive amount", {
+          captureId,
+          payoutCents: capture["payout_cents"],
+        });
+        return { applied: false, reason: "no_positive_payout" };
+      }
 
-    // ── 1. Load the capturer's user document to find their referrer ──────────
-    const userRef = db.collection("users").doc(creatorId);
-    const userSnap = await userRef.get();
-
-    if (!userSnap.exists) {
-      logger.warn("Creator user document not found", { creatorId, captureId });
-      return;
-    }
-
-    const referredBy = userSnap.data()?.["referredBy"] as string | undefined;
-
-    if (!referredBy) {
-      // Not a referred user — stamp the doc so we don't check again
-      await db.collection("capture_submissions").doc(captureId).update({
-        referralBonusProcessedAt: FieldValue.serverTimestamp(),
-        referralBonusSkippedReason: "no_referrer",
+      // ── 4. Apply all writes atomically within the transaction ──────────────
+      tx.update(referralRef, {
+        lifetimeEarningsCents: FieldValue.increment(outcome.referrerCommissionCents),
+        status: outcome.newReferralStatus,
+        lastEarningAt: FieldValue.serverTimestamp(),
       });
-      return;
-    }
 
-    // ── 2. Load the referral record ──────────────────────────────────────────
-    const referralRef = db
-      .collection("users")
-      .doc(referredBy)
-      .collection("referrals")
-      .doc(creatorId);
-
-    const referralSnap = await referralRef.get();
-
-    if (!referralSnap.exists) {
-      logger.warn("Referral record not found", {
-        referrerId: referredBy,
-        referredUserId: creatorId,
-        captureId,
-      });
-      // Still stamp so we don't retry forever
-      await db.collection("capture_submissions").doc(captureId).update({
-        referralBonusProcessedAt: FieldValue.serverTimestamp(),
-        referralBonusSkippedReason: "referral_record_missing",
-      });
-      return;
-    }
-
-    const currentReferralStatus =
-      (referralSnap.data()?.["status"] as ReferralStatus | undefined) ??
-      "signedUp";
-
-    const isFirstCapture = currentReferralStatus === "signedUp";
-
-    // ── 3. Calculate amounts ─────────────────────────────────────────────────
-    const referrerCommissionCents = Math.floor(payoutCents * COMMISSION_RATE);
-
-    // Referred user gets their bonus only on the very first approved capture
-    const referredUserBonusCents = isFirstCapture
-      ? Math.floor(payoutCents * FIRST_CAPTURE_BONUS_RATE)
-      : 0;
-
-    const newReferralStatus = nextReferralStatus(currentReferralStatus);
-
-    logger.info("Processing referral bonus", {
-      captureId,
-      creatorId,
-      referrerId: referredBy,
-      payoutCents,
-      referrerCommissionCents,
-      referredUserBonusCents,
-      currentReferralStatus,
-      newReferralStatus,
-    });
-
-    // ── 4. Apply all writes atomically ───────────────────────────────────────
-    const batch = db.batch();
-
-    // 4a. Update referral record: lifetime earnings + status
-    batch.update(referralRef, {
-      lifetimeEarningsCents: FieldValue.increment(referrerCommissionCents),
-      status: newReferralStatus,
-      lastEarningAt: FieldValue.serverTimestamp(),
-    });
-
-    // 4b. Credit referrer's referral earnings balance
-    //     `stats.referralEarningsCents` is the canonical field for unpaid
-    //     referral commissions; the payout system reads this to include it
-    //     in the next disbursement.
-    batch.update(db.collection("users").doc(referredBy), {
-      "stats.referralEarningsCents": FieldValue.increment(
-        referrerCommissionCents
-      ),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-
-    // 4c. Credit referred user's first-capture bonus (one-time only)
-    if (referredUserBonusCents > 0) {
-      batch.update(userRef, {
-        "stats.referralBonusCents": FieldValue.increment(referredUserBonusCents),
+      // `stats.referralEarningsCents` is the canonical field for unpaid
+      // referral commissions; the payout system reads this to include it
+      // in the next disbursement.
+      tx.update(db.collection("users").doc(referredBy), {
+        "stats.referralEarningsCents": FieldValue.increment(
+          outcome.referrerCommissionCents,
+        ),
         updatedAt: FieldValue.serverTimestamp(),
       });
+
+      if (outcome.referredUserBonusCents > 0) {
+        tx.update(userRef, {
+          "stats.referralBonusCents": FieldValue.increment(
+            outcome.referredUserBonusCents,
+          ),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      tx.update(captureRef, {
+        referralBonusProcessedAt: FieldValue.serverTimestamp(),
+        referralBonusReferrerId: referredBy,
+        referralBonusCommissionCents: outcome.referrerCommissionCents,
+        referralBonusUserBonusCents: outcome.referredUserBonusCents,
+      });
+
+      return {
+        applied: true,
+        creatorId,
+        referrerId: referredBy,
+        referrerCommissionCents: outcome.referrerCommissionCents,
+        referredUserBonusCents: outcome.referredUserBonusCents,
+        newReferralStatus: outcome.newReferralStatus,
+      };
+    });
+
+    if (result.applied) {
+      logger.info("Referral bonus applied successfully", { captureId, ...result });
+    } else {
+      logger.info("Referral bonus not applied", { captureId, reason: result.reason });
+    }
+  }
+);
+
+/**
+ * onUserProfileWritten — server-authoritative referral registration.
+ *
+ * Firestore rules intentionally block clients from writing to
+ * `referralCodes/{code}` and `users/{referrerId}/referrals/{uid}`, so this
+ * trigger performs both writes via the Admin SDK when a user updates their
+ * own document (which rules do allow):
+ *
+ *  1. When `referralCode` is set/changed, registers the O(1) lookup doc
+ *     `referralCodes/{code} → { ownerId }` (first writer wins on collisions).
+ *  2. When `referredBy` is newly set, validates the attribution — the
+ *     accompanying `referredByCode` must resolve to the claimed referrer and
+ *     self-referrals are rejected — then creates the referral record the
+ *     payout trigger reads. Invalid attributions are cleared so
+ *     `onCaptureApproved` can never pay an unverified referrer.
+ */
+export const onUserProfileWritten = onDocumentWritten(
+  {
+    document: "users/{userId}",
+    region: "us-central1",
+  },
+  async (event) => {
+    const userId = event.params.userId;
+    const before = event.data?.before?.data() as Record<string, unknown> | undefined;
+    const after = event.data?.after?.data() as Record<string, unknown> | undefined;
+    if (!after) return; // deleted
+
+    // ── 1. Referral-code lookup registration ────────────────────────────────
+    // Runs when the code changes OR when the registration stamp is missing, so
+    // codes that predate this trigger self-heal on the user's next doc write.
+    const afterCode = normalizeReferralCode(after["referralCode"]);
+    const beforeCode = normalizeReferralCode(before?.["referralCode"]);
+    const needsCodeRegistration =
+      afterCode !== null &&
+      (afterCode !== beforeCode || after["referralCodeRegisteredAt"] === undefined);
+    if (afterCode && needsCodeRegistration) {
+      const lookupRef = db.collection("referralCodes").doc(afterCode);
+      const ownerRef = db.collection("users").doc(userId);
+      await db.runTransaction(async (tx) => {
+        const lookupSnap = await tx.get(lookupRef);
+        if (!lookupSnap.exists) {
+          tx.set(lookupRef, {
+            ownerId: userId,
+            createdAt: FieldValue.serverTimestamp(),
+          });
+          tx.update(ownerRef, {
+            referralCodeRegisteredAt: FieldValue.serverTimestamp(),
+          });
+          return;
+        }
+        const ownerId = lookupSnap.data()?.["ownerId"];
+        if (ownerId === userId) {
+          tx.update(ownerRef, {
+            referralCodeRegisteredAt: FieldValue.serverTimestamp(),
+          });
+        } else {
+          logger.warn("Referral code collision; keeping original owner", {
+            code: afterCode,
+            ownerId,
+            claimantId: userId,
+          });
+          // Stamp anyway (with the collision marker) so this user's future
+          // doc writes stop re-running the registration transaction.
+          tx.update(ownerRef, {
+            referralCodeRegisteredAt: FieldValue.serverTimestamp(),
+            referralCodeCollision: true,
+          });
+        }
+      });
     }
 
-    // 4d. Stamp the capture so this function never runs for it again
-    batch.update(db.collection("capture_submissions").doc(captureId), {
-      referralBonusProcessedAt: FieldValue.serverTimestamp(),
-      referralBonusReferrerId: referredBy,
-      referralBonusCommissionCents: referrerCommissionCents,
-      referralBonusUserBonusCents: referredUserBonusCents,
+    // ── 2. Referral attribution ──────────────────────────────────────────────
+    const referredBy = typeof after["referredBy"] === "string" ? after["referredBy"].trim() : "";
+    const beforeReferredBy =
+      typeof before?.["referredBy"] === "string" ? (before["referredBy"] as string).trim() : "";
+    if (!referredBy || referredBy === beforeReferredBy) return;
+    if (after["referralAttributionProcessedAt"] !== undefined) return;
+
+    const userRef = db.collection("users").doc(userId);
+
+    const invalidate = (reason: string) =>
+      db.runTransaction(async (tx) => {
+        const snap = await tx.get(userRef);
+        if (!snap.exists) return;
+        if ((snap.data()?.["referredBy"] as string | undefined)?.trim() !== referredBy) return;
+        tx.update(userRef, {
+          referredBy: FieldValue.delete(),
+          referredByCode: FieldValue.delete(),
+          referralAttributionProcessedAt: FieldValue.serverTimestamp(),
+          referralAttributionInvalidReason: reason,
+        });
+        logger.warn("Cleared invalid referral attribution", { userId, referredBy, reason });
+      });
+
+    if (referredBy === userId) {
+      await invalidate("self_referral");
+      return;
+    }
+
+    const claimedCode = normalizeReferralCode(after["referredByCode"]);
+    if (!claimedCode) {
+      await invalidate("missing_or_invalid_code");
+      return;
+    }
+
+    await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+      const user = userSnap.data() ?? {};
+      const currentReferredBy =
+        typeof user["referredBy"] === "string" ? (user["referredBy"] as string).trim() : "";
+      if (currentReferredBy !== referredBy) return; // changed since event fired
+      if (user["referralAttributionProcessedAt"] !== undefined) return;
+
+      // All transaction reads must complete before the first write.
+      const referrerRef = db.collection("users").doc(referredBy);
+      const lookupRef = db.collection("referralCodes").doc(claimedCode);
+      const referralRef = referrerRef.collection("referrals").doc(userId);
+      const referrerSnap = await tx.get(referrerRef);
+      const lookupSnap = await tx.get(lookupRef);
+      const referralSnap = await tx.get(referralRef);
+
+      const clearInvalidAttribution = (reason: string) =>
+        tx.update(userRef, {
+          referredBy: FieldValue.delete(),
+          referredByCode: FieldValue.delete(),
+          referralAttributionProcessedAt: FieldValue.serverTimestamp(),
+          referralAttributionInvalidReason: reason,
+        });
+
+      if (!referrerSnap.exists) {
+        clearInvalidAttribution("referrer_missing");
+        return;
+      }
+
+      const lookupOwner = lookupSnap.exists ? lookupSnap.data()?.["ownerId"] : undefined;
+      const referrerOwnCode = normalizeReferralCode(referrerSnap.data()?.["referralCode"]);
+      const codeResolvesToReferrer =
+        lookupOwner === referredBy || (!lookupSnap.exists && referrerOwnCode === claimedCode);
+
+      if (!codeResolvesToReferrer) {
+        clearInvalidAttribution("code_owner_mismatch");
+        return;
+      }
+
+      // Backfill the lookup doc when the code predates lookup registration.
+      if (!lookupSnap.exists) {
+        tx.set(lookupRef, {
+          ownerId: referredBy,
+          createdAt: FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (!referralSnap.exists) {
+        const displayName =
+          [user["displayName"], user["name"], user["fullName"]]
+            .map((value) => (typeof value === "string" ? value.trim() : ""))
+            .find((value) => value.length > 0) ?? "New capturer";
+        tx.set(referralRef, {
+          referredUserId: userId,
+          referredUserName: displayName,
+          referredAt: FieldValue.serverTimestamp(),
+          status: "signedUp",
+          lifetimeEarningsCents: 0,
+        });
+      }
+
+      tx.update(userRef, {
+        referralAttributionProcessedAt: FieldValue.serverTimestamp(),
+      });
     });
 
-    await batch.commit();
-
-    logger.info("Referral bonus applied successfully", {
-      captureId,
-      creatorId,
-      referrerId: referredBy,
-      referrerCommissionCents,
-      referredUserBonusCents,
-      newReferralStatus,
-    });
-  }
+    logger.info("Referral attribution processed", { userId, referredBy });
+  },
 );
 
 export const syncCaptureLifecycleToOperatingGraph = onDocumentWritten(
@@ -505,13 +702,19 @@ export const syncCaptureLifecycleToOperatingGraph = onDocumentWritten(
  * document, which automatically triggers `onCaptureApproved` above.
  *
  * POST /updateCaptureStatus
- * Headers: Authorization: Bearer <FIREBASE_APP_CHECK_TOKEN or Admin token>
+ * Headers: Authorization: Bearer <shared service secret OR Firebase ID token with admin/ops claims>
  * Body: {
  *   captureId:  string,   // Firestore document ID (= CaptureBundleContext.captureIdentifier)
  *   creatorId:  string,   // Firebase UID of the capturer
  *   status:     "submitted" | "under_review" | "approved" | "paid" | "rejected" | "needs_fix",
  *   payoutCents: number,  // final payout amount in cents (0 for non-paying statuses)
  * }
+ *
+ * AUTH IS MANDATORY AND FAIL-CLOSED. This endpoint mutates payout state and
+ * triggers referral commissions, so unauthenticated access would let anyone
+ * fabricate payouts. Configure the shared secret via the
+ * CAPTURE_STATUS_UPDATE_SECRET environment variable (Functions secret/env),
+ * or call with an admin-claimed Firebase ID token.
  */
 export const updateCaptureStatus = onRequest(
   { region: "us-central1" },
@@ -521,27 +724,27 @@ export const updateCaptureStatus = onRequest(
       return;
     }
 
-    const { captureId, creatorId, status, payoutCents } = req.body as {
-      captureId?: string;
-      creatorId?: string;
-      status?: string;
-      payoutCents?: number;
-    };
+    const decision = await authorizeCaptureStatusRequest({
+      authorizationHeader: req.headers.authorization,
+      sharedSecret: process.env.CAPTURE_STATUS_UPDATE_SECRET ?? null,
+      verifyIdToken: async (token) => {
+        const decoded = await getAuth().verifyIdToken(token);
+        return decoded as Record<string, unknown>;
+      },
+    });
+    if (!decision.allowed) {
+      logger.warn("updateCaptureStatus rejected", { reason: decision.reason });
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
 
-    if (!captureId || typeof captureId !== "string") {
-      res.status(400).json({ error: "captureId is required" });
+    const parsed = parseCaptureStatusUpdate(req.body);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error });
       return;
     }
-    if (!creatorId || typeof creatorId !== "string") {
-      res.status(400).json({ error: "creatorId is required" });
-      return;
-    }
-    const validStatuses = ["submitted", "under_review", "approved", "paid", "needs_fix", "rejected"];
-    if (!status || !validStatuses.includes(status)) {
-      res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
-      return;
-    }
-    const cents = typeof payoutCents === "number" ? Math.max(0, Math.floor(payoutCents)) : 0;
+    const { captureId, creatorId, status } = parsed.value;
+    const cents = parsed.value.payoutCents;
 
     const docRef = db.collection("capture_submissions").doc(captureId);
     const update: Record<string, unknown> = {

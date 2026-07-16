@@ -8,6 +8,7 @@ import SwiftUI
 
 struct BPRootView: View {
     @StateObject private var coordinator = RedesignCoordinator()
+    @EnvironmentObject private var alertsManager: NearbyAlertsManager
 
     var body: some View {
         ZStack {
@@ -35,7 +36,7 @@ struct BPRootView: View {
     @ViewBuilder
     private var tabContent: some View {
         switch coordinator.selectedTab {
-        case .home:     BPHomeTab()
+        case .home:     BPHomeTab(alertsManager: alertsManager)
         case .history:  BPHistoryView()
         case .earnings: BPEarningsView()
         case .profile:  BPProfileView()
@@ -46,5 +47,6 @@ struct BPRootView: View {
 #if DEBUG
 #Preview {
     BPRootView()
+        .environmentObject(NearbyAlertsManager())
 }
 #endif

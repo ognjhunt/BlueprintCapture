@@ -4,7 +4,7 @@ import SwiftUI
 
 struct BPEarningsView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
-    private let history = BPSample.history
+    @StateObject private var store = BPCaptureHistoryStore()
     // CAP-11: payout onboarding is reachable from the shipping UI, gated on real
     // backend provider readiness (BLUEPRINT_PAYOUT_PROVIDER_READY). When the flag is
     // NO the honest "unavailable" card shows; when the backend flips it to YES the
@@ -34,6 +34,8 @@ struct BPEarningsView: View {
         .sheet(isPresented: $showingPayoutSetup) {
             StripeOnboardingView()
         }
+        .task { await store.refresh() }
+        .refreshable { await store.refresh() }
     }
 
     private var payoutSetupCard: some View {
@@ -72,9 +74,15 @@ struct BPEarningsView: View {
 
     private var statRow: some View {
         HStack(spacing: Space.m) {
-            BPMetricStat(value: "3", label: "Reviewed")
-            BPMetricStat(value: "1", label: "Needs fix")
+            BPMetricStat(value: "\(store.reviewedCount)", label: "Reviewed")
+            BPMetricStat(value: "\(store.needsFixCount)", label: "Needs fix")
         }
+    }
+
+    /// Reviewed captures only — a capture appears here once the backend has
+    /// actually produced a verdict (approved / paid / rejected / needs fix).
+    private var reviewedEntries: [BPCaptureHistoryEntry] {
+        store.entries.filter(\.isReviewed)
     }
 
     private var reviewHistorySection: some View {
@@ -83,24 +91,41 @@ struct BPEarningsView: View {
                 .font(.bpSans(BPType.title, .semibold))
                 .tracking(BPTracking.headline)
                 .foregroundStyle(BP.textStrong)
-            BPCard(padding: Space.s) {
-                ForEach(Array(history.enumerated()), id: \.element.id) { idx, item in
-                    HStack(spacing: Space.m) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.site)
-                                .font(.bpSans(BPType.body, .semibold))
-                                .foregroundStyle(BP.textStrong)
-                                .lineLimit(1)
-                            Text(item.meta)
-                                .font(.bpMono(BPType.caption))
-                                .foregroundStyle(BP.textMuted)
+            if reviewedEntries.isEmpty {
+                VStack(spacing: Space.s) {
+                    Text("No reviews yet")
+                        .font(.bpSans(BPType.body, .semibold))
+                        .foregroundStyle(BP.textStrong)
+                    Text("Captures appear here after the review team issues a verdict.")
+                        .font(.bpSans(BPType.caption, .regular))
+                        .foregroundStyle(BP.textMuted)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(Space.xl)
+                .bpCard()
+            } else {
+                BPCard(padding: Space.s) {
+                    ForEach(Array(reviewedEntries.prefix(10).enumerated()), id: \.element.id) { idx, entry in
+                        HStack(spacing: Space.m) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.site)
+                                    .font(.bpSans(BPType.body, .semibold))
+                                    .foregroundStyle(BP.textStrong)
+                                    .lineLimit(1)
+                                if !entry.meta.isEmpty {
+                                    Text(entry.meta)
+                                        .font(.bpMono(BPType.caption))
+                                        .foregroundStyle(BP.textMuted)
+                                }
+                            }
+                            Spacer(minLength: Space.s)
+                            BPStatusChip(entry.chip.label, signal: entry.chip.signal)
                         }
-                        Spacer(minLength: Space.s)
-                        BPStatusChip(item.status.label, signal: item.status.signal)
+                        .padding(.horizontal, Space.s)
+                        .padding(.vertical, Space.m)
+                        if idx < min(reviewedEntries.count, 10) - 1 { BPDivider(color: BP.lineSoft) }
                     }
-                    .padding(.horizontal, Space.s)
-                    .padding(.vertical, Space.m)
-                    if idx < history.count - 1 { BPDivider(color: BP.lineSoft) }
                 }
             }
         }

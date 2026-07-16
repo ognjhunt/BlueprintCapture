@@ -1,18 +1,39 @@
 import SwiftUI
 
 // MARK: - Capture history (tab: History)
+//
+// Renders the signed-in user's real `capture_submissions`. Empty and error
+// states are honest — no sample captures or fabricated review verdicts.
 
 struct BPHistoryView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
-    private let items = BPSample.history
+    @StateObject private var store = BPCaptureHistoryStore()
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
-                BPLargeTitle(eyebrow: "\(items.count) captures", title: "History")
+                BPLargeTitle(eyebrow: eyebrow, title: "History")
                     .padding(.bottom, Space.xs)
-                ForEach(items) { item in
-                    row(item)
+
+                switch store.state {
+                case .loading:
+                    loadingCard
+                case .unavailable(let message):
+                    emptyCard(
+                        icon: "exclamationmark.triangle",
+                        title: "History unavailable",
+                        message: message
+                    )
+                case .loaded where store.entries.isEmpty:
+                    emptyCard(
+                        icon: "camera.metering.matrix",
+                        title: "No captures yet",
+                        message: "Your uploads will appear here with their real review status once you complete a capture."
+                    )
+                case .loaded:
+                    ForEach(store.entries) { entry in
+                        row(entry)
+                    }
                 }
             }
             .padding(.horizontal, Space.l)
@@ -22,24 +43,65 @@ struct BPHistoryView: View {
         .scrollIndicators(.hidden)
         .background(BP.canvas.ignoresSafeArea())
         .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
+        .task { await store.refresh() }
+        .refreshable { await store.refresh() }
     }
 
-    private func row(_ item: BPHistoryItem) -> some View {
+    private var eyebrow: String {
+        switch store.state {
+        case .loaded where !store.entries.isEmpty:
+            return "\(store.entries.count) capture\(store.entries.count == 1 ? "" : "s")"
+        default:
+            return "Captures"
+        }
+    }
+
+    private var loadingCard: some View {
         HStack(spacing: Space.m) {
-            BPFacilityImage(name: item.imageName, height: 56, corner: Radius.sm)
-                .frame(width: 56)
+            ProgressView()
+            Text("Loading captures…")
+                .font(.bpSans(BPType.body, .regular))
+                .foregroundStyle(BP.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Space.xl)
+        .bpCard()
+    }
+
+    private func emptyCard(icon: String, title: String, message: String) -> some View {
+        VStack(spacing: Space.m) {
+            Image(systemName: icon)
+                .font(.system(size: 28, weight: .regular))
+                .foregroundStyle(BP.textMuted)
+            Text(title)
+                .font(.bpSans(BPType.body, .semibold))
+                .foregroundStyle(BP.textStrong)
+            Text(message)
+                .font(.bpSans(BPType.caption, .regular))
+                .foregroundStyle(BP.textMuted)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Space.xl)
+        .bpCard()
+    }
+
+    private func row(_ entry: BPCaptureHistoryEntry) -> some View {
+        HStack(spacing: Space.m) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.site)
+                Text(entry.site)
                     .font(.bpSans(BPType.body, .semibold))
                     .foregroundStyle(BP.textStrong)
                     .lineLimit(1)
-                Text(item.meta)
-                    .font(.bpMono(BPType.caption))
-                    .foregroundStyle(BP.textMuted)
-                    .lineLimit(1)
+                if !entry.meta.isEmpty {
+                    Text(entry.meta)
+                        .font(.bpMono(BPType.caption))
+                        .foregroundStyle(BP.textMuted)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: Space.s)
-            BPStatusChip(item.status.label, signal: item.status.signal)
+            BPStatusChip(entry.chip.label, signal: entry.chip.signal)
         }
         .padding(Space.m)
         .bpCard()
