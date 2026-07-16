@@ -37,8 +37,12 @@ Compatibility:
 
 The inline Cloud Function path is bounded before downloading `walkthrough.mov` or
 `walkthrough.mp4` into `/tmp`. The default max inline video size is
-`1_500_000_000` bytes and can be lowered or raised with
-`BLUEPRINT_EXTRACT_FRAMES_MAX_INLINE_VIDEO_BYTES`.
+`1_000_000_000` bytes — sized so video + extracted frames + node heap fit the
+function's 4GiB memory limit, since `/tmp` is RAM-backed tmpfs on Cloud Run —
+and can be lowered or raised with
+`BLUEPRINT_EXTRACT_FRAMES_MAX_INLINE_VIDEO_BYTES`. Captures over the limit are
+blocked with a documented artifact trail and require the segmented/Cloud Run
+ingest path to be picked up separately.
 
 If object metadata is unavailable or the raw video exceeds the inline limit, the
 function returns before `file.download()` and before ffmpeg. It writes:

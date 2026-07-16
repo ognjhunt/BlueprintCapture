@@ -52,6 +52,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `STRIPE_IMPLEMENTATION_SUMMARY.txt` | Unsafe/stale archive | Historical Stripe implementation summary; warning required. |
 | `STRIPE_ISSUE_SUMMARY.md` | Unsafe/stale archive | Historical Stripe issue summary; warning required. |
 | `STRIPE_QUICK_SETUP.md` | Unsafe/stale archive | Historical quick setup; warning required. |
+| `VISION.md` | Current source-of-truth | Cross-repo strategic doctrine; aspirational scope is not launch, provider, payout, buyer, or readiness proof. |
 | `android/AGENTS.md` | Current source-of-truth | Android agent rules; Android remains internal-only until gates pass. |
 | `android/IMPLEMENTATION_SPEC.md` | Current source-of-truth | Android implementation spec; not public launch proof. |
 | `android/README.md` | Current source-of-truth | Android local setup/readiness context; no public Android/Meta/XR claims without release proof. |
@@ -73,6 +74,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `docs/NEXT_SESSION_ANDROID_XR_MASTER_PROMPT_2026-03-25.md` | Historical/internal | Android XR continuation prompt; not current hardware, public launch, provider, or Catalyst proof. |
 | `docs/NEXT_SESSION_TRUE_ERROR_SPECS_2026-03-18.md` | Historical/internal | Next-session prompt/spec; not current public copy. |
 | `docs/PRIVATE_ALPHA_READINESS.md` | Current source-of-truth | Current alpha readiness and fail-closed release posture. |
+| `docs/PUBLIC_BETA_READINESS_2026-07-16.md` | Current source-of-truth | Audit-backed public-beta gap map; blocker states are point-in-time findings, not launch, provider, payout, or buyer proof. |
 | `docs/architecture/ai-onboarding-map.md` | Current source-of-truth | Agent onboarding map; generated/support surfaces are not authority. |
 | `docs/architecture/command-safety-matrix.md` | Current source-of-truth | Command safety; validators can be blocked by missing local config. |
 | `docs/architecture/refactor-hotspots.md` | Current source-of-truth | Internal architecture risk map; not public readiness copy. |

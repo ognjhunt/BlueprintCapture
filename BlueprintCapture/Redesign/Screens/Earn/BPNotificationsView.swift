@@ -1,22 +1,19 @@
 import SwiftUI
 
-// MARK: - Notifications (NavBar "Notifications" + "Mark read")
+// MARK: - Notifications (NavBar "Notifications")
+//
+// There is no client-side notification feed yet — real capture/QA events are
+// delivered by the backend via push. Until an in-app feed source exists this
+// screen shows an honest empty state; it must never render fabricated QA or
+// validation events (capture-truth rule).
 
 struct BPNotificationsView: View {
-    @State private var items = BPSample.notifications
-
     var body: some View {
         VStack(spacing: 0) {
-            BPNavBar(title: "Notifications") {
-                BPTextAction(title: "Mark read") {
-                    for i in items.indices { items[i].unread = false }
-                }
-            }
+            BPNavBar(title: "Notifications") {}
             ScrollView {
                 VStack(spacing: Space.m) {
-                    ForEach(items) { item in
-                        row(item)
-                    }
+                    emptyState
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.top, Space.l)
@@ -30,35 +27,28 @@ struct BPNotificationsView: View {
         .preferredColorScheme(.light)
     }
 
-    private func row(_ item: BPNotification) -> some View {
-        HStack(alignment: .top, spacing: Space.m) {
+    private var emptyState: some View {
+        VStack(spacing: Space.m) {
             ZStack {
-                Circle().fill(item.signal.bg)
-                Image(systemName: item.icon)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(item.signal.fg)
+                Circle().fill(BP.infoBg)
+                Image(systemName: "bell")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(BP.infoFg)
             }
-            .frame(width: 38, height: 38)
+            .frame(width: 52, height: 52)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(item.title)
-                        .font(.bpSans(BPType.body, .semibold))
-                        .foregroundStyle(BP.textStrong)
-                    Spacer(minLength: Space.s)
-                    Text(item.time)
-                        .font(.bpMono(BPType.caption))
-                        .foregroundStyle(BP.textFaint)
-                }
-                Text(item.body)
-                    .font(.bpSans(BPType.caption, .regular))
-                    .foregroundStyle(BP.textMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("No notifications")
+                .font(.bpSans(BPType.body, .semibold))
+                .foregroundStyle(BP.textStrong)
+            Text("Capture review results and nearby assignment alerts will appear here as they happen.")
+                .font(.bpSans(BPType.caption, .regular))
+                .foregroundStyle(BP.textMuted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(Space.l)
+        .frame(maxWidth: .infinity)
+        .padding(Space.xl)
         .bpCard()
-        .opacity(item.unread ? 1 : 0.7)
     }
 }
 

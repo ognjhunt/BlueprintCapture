@@ -398,7 +398,9 @@ class GlassesViewModel @Inject constructor(
         artifacts: GlassesCaptureArtifacts,
     ): String {
         require(artifacts.videoFile.exists() && artifacts.videoFile.length() > 0L) {
-            "Glasses capture finished without a walkthrough video. Nothing was queued."
+            "Glasses capture couldn't be assembled into a walkthrough video, so nothing was queued. " +
+                "The raw frames are preserved on this device at ${artifacts.framesDirectory.path} " +
+                "for diagnosis — please report this so we can validate the glasses stream format."
         }
 
         val creatorId = authRepository.currentUserId()

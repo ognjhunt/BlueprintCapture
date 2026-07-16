@@ -94,3 +94,12 @@ builds/
 # Cloud Functions
 cloud/**/node_modules/
 cloud/**/dist/
+
+# Local tooling artifacts
+node_modules/
+firebase-debug*.log
+*.log
+
+# Local device screenshots / scratch captures
+/android-*.png
+/android-*.jpg

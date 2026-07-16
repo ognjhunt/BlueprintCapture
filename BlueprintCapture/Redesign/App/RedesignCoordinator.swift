@@ -1,5 +1,7 @@
 import SwiftUI
 import Combine
+import FirebaseAuth
+import FirebaseCore
 
 // MARK: - RedesignCoordinator
 //
@@ -22,9 +24,49 @@ final class RedesignCoordinator: ObservableObject {
     @Published var selectedTab: BPTab = .home
     @Published var captureLaunch: CaptureLaunch?
 
-    /// Real capturer identity, bound from auth where available.
-    @Published var capturerName: String = BPSample.capturerName
-    @Published var capturerCity: String = BPSample.capturerCity
+    /// Real capturer identity bound from the authenticated Firebase user.
+    /// Empty when unknown — screens show neutral fallbacks, never sample data.
+    @Published var capturerName: String = ""
+    @Published var capturerEmail: String = ""
+
+    private var authObserver: NSObjectProtocol?
+
+    init() {
+        refreshIdentity()
+        authObserver = NotificationCenter.default.addObserver(
+            forName: .AuthStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshIdentity() }
+        }
+    }
+
+    deinit {
+        if let authObserver {
+            NotificationCenter.default.removeObserver(authObserver)
+        }
+    }
+
+    /// Reads identity from the signed-in Firebase user. Anonymous/guest
+    /// sessions get no name — the UI must not present a persona that does
+    /// not exist.
+    func refreshIdentity() {
+        guard FirebaseApp.app() != nil, let user = Auth.auth().currentUser, !user.isAnonymous else {
+            capturerName = ""
+            capturerEmail = ""
+            return
+        }
+        let displayName = user.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let email = user.email?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        capturerName = displayName.isEmpty ? String(email.split(separator: "@").first ?? "") : displayName
+        capturerEmail = email
+    }
+
+    /// First name (or full fallback) for greetings; empty when unknown.
+    var capturerFirstName: String {
+        String(capturerName.split(separator: " ").first ?? "")
+    }
 
     func startCapture(task: BPCaptureTask? = nil, seed: SpaceReviewSeed? = nil) {
         captureLaunch = CaptureLaunch(task: task, seed: seed)

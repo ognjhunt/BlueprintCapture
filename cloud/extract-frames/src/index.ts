@@ -43,7 +43,14 @@ const PIPELINE_HANDOFF_TOPIC =
   process.env.BLUEPRINT_CAPTURE_PIPELINE_TOPIC ?? "blueprint-capture-pipeline-handoff";
 const ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS =
   process.env.BLUEPRINT_ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS === "true";
-export const DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES = 1_500_000_000;
+// Cloud Functions v2 runs on Cloud Run where /tmp is an in-memory tmpfs that
+// counts against the instance memory limit. The inline ceiling must leave room
+// for the downloaded video + extracted JPEG frames + node heap inside the
+// function's memory setting (4GiB): 1GB video + ~1.5GB frames + heap fits with
+// margin. Larger captures are BLOCKED by the size gate with a documented
+// artifact trail (required_action: segmented/Cloud Run ingest) instead of
+// OOM-crash-looping mid-extraction; the segmented path must pick them up.
+export const DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES = 1_000_000_000;
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
@@ -542,8 +549,16 @@ export function deriveRequestedRouting(manifest: Record<string, unknown> | null)
         requestedLanes.add("robot_eval_dataset");
         requestedLanes.add("task_evaluation_run");
         break;
-      default:
+      // Remaining canonical client outputs (see iOS CaptureRequestedOutputs)
+      // pass through as their own lanes so the pipeline contract is unchanged.
+      case "deeper_evaluation":
+      case "scaniverse_assisted_capture":
         requestedLanes.add(output);
+        break;
+      default:
+        // Non-canonical client-supplied outputs must not become downstream
+        // lane labels; keep them in requestedOutputs (recorded truth) but do
+        // not route on them.
         break;
     }
   }
@@ -1015,16 +1030,183 @@ async function savePipelineHandoffPublishReceipt(
   );
 }
 
+export type HandoffReceiptAction =
+  | { kind: "return_published"; messageId: string }
+  | { kind: "claim_new" }
+  | { kind: "takeover"; ifGenerationMatch: string }
+  | { kind: "wait" };
+
+export const HANDOFF_PUBLISHING_CLAIM_STALE_MS = 15 * 60 * 1000;
+
+/**
+ * Pure decision for the atomic handoff-publish claim. The receipt object in
+ * GCS doubles as the lock: "publishing" is an in-flight claim, "published" is
+ * terminal, and anything else (publish_failed, corrupt) may be taken over via
+ * a generation-preconditioned overwrite so retries can republish without
+ * racing a concurrent first run into duplicate Pub/Sub messages.
+ */
+export function decideHandoffReceiptAction(
+  receipt: Record<string, unknown> | null,
+  receiptGeneration: string | null,
+  nowMs: number,
+  staleMs: number = HANDOFF_PUBLISHING_CLAIM_STALE_MS
+): HandoffReceiptAction {
+  if (!receipt) return { kind: "claim_new" };
+  if (receipt.status === "published") {
+    // A published receipt is terminal even if message_id was lost to a
+    // partial write — republishing would duplicate the downstream handoff.
+    return {
+      kind: "return_published",
+      messageId:
+        typeof receipt.message_id === "string" && receipt.message_id.length > 0
+          ? receipt.message_id
+          : "unknown_prior_publish",
+    };
+  }
+  if (receipt.status === "publishing") {
+    const claimedAt =
+      typeof receipt.claimed_at === "string" ? Date.parse(receipt.claimed_at) : Number.NaN;
+    const isStale = !Number.isFinite(claimedAt) || nowMs - claimedAt > staleMs;
+    if (isStale && receiptGeneration) {
+      return { kind: "takeover", ifGenerationMatch: receiptGeneration };
+    }
+    return isStale ? { kind: "claim_new" } : { kind: "wait" };
+  }
+  return receiptGeneration
+    ? { kind: "takeover", ifGenerationMatch: receiptGeneration }
+    : { kind: "claim_new" };
+}
+
+async function readHandoffReceiptWithGeneration(
+  bucket: StorageBucket,
+  capturesPrefix: string
+): Promise<{ receipt: Record<string, unknown> | null; generation: string | null }> {
+  const objectName = `${capturesPrefix}/pipeline_handoff_pubsub_receipt.json`;
+  const file = bucket.file(objectName);
+
+  // Read the generation FIRST, then download content pinned to that exact
+  // generation. Downloading and reading metadata separately would let a
+  // concurrent overwrite pair stale content with a newer generation, and a
+  // takeover conditioned on that generation would clobber the live claim.
+  let generation: string | null = null;
+  try {
+    const [metadata] = await file.getMetadata();
+    generation =
+      metadata.generation !== undefined && metadata.generation !== null
+        ? String(metadata.generation)
+        : null;
+  } catch (error) {
+    if ((error as { code?: number }).code === 404) {
+      return { receipt: null, generation: null };
+    }
+    throw error;
+  }
+
+  try {
+    const pinned = generation
+      ? bucket.file(objectName, { generation: Number(generation) })
+      : file;
+    const [contents] = await pinned.download();
+    let receipt: Record<string, unknown>;
+    try {
+      receipt = JSON.parse(contents.toString("utf8")) as Record<string, unknown>;
+    } catch {
+      receipt = { status: "corrupt" };
+    }
+    return { receipt, generation };
+  } catch (error) {
+    const code = (error as { code?: number }).code;
+    if (code === 404 || code === 412) {
+      // The pinned generation vanished — another invocation overwrote the
+      // receipt between our reads. Surface a fresh in-flight claim so the
+      // caller waits and re-reads instead of taking over on stale state.
+      return {
+        receipt: { status: "publishing", claimed_at: new Date().toISOString() },
+        generation: null,
+      };
+    }
+    throw error;
+  }
+}
+
+async function tryWriteHandoffReceiptWithPrecondition(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>,
+  ifGenerationMatch: number
+): Promise<boolean> {
+  try {
+    await bucket.file(`${capturesPrefix}/pipeline_handoff_pubsub_receipt.json`).save(
+      JSON.stringify(payload, null, 2),
+      {
+        contentType: "application/json",
+        preconditionOpts: { ifGenerationMatch },
+      }
+    );
+    return true;
+  } catch (error) {
+    if ((error as { code?: number }).code === 412) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function publishPipelineHandoffOnce(
   bucket: StorageBucket,
   capturesPrefix: string,
   payload: Record<string, unknown>
 ): Promise<string> {
-  const existingReceipt = await loadExistingHandoffReceipt(bucket, capturesPrefix);
-  if (existingReceipt) {
-    return String(existingReceipt.message_id);
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const { receipt, generation } = await readHandoffReceiptWithGeneration(
+      bucket,
+      capturesPrefix
+    );
+    const action = decideHandoffReceiptAction(receipt, generation, Date.now());
+
+    if (action.kind === "return_published") {
+      return action.messageId;
+    }
+    if (action.kind === "wait") {
+      await sleepMs(2000);
+      continue;
+    }
+
+    const claimed = await tryWriteHandoffReceiptWithPrecondition(
+      bucket,
+      capturesPrefix,
+      {
+        schema_version: "v1",
+        status: "publishing",
+        claimed_at: new Date().toISOString(),
+        topic: PIPELINE_HANDOFF_TOPIC,
+        scene_id: payload.scene_id ?? null,
+        capture_id: payload.capture_id ?? null,
+      },
+      action.kind === "takeover" ? Number(action.ifGenerationMatch) : 0
+    );
+    if (!claimed) {
+      // Lost the race; re-read to observe the winner's state.
+      continue;
+    }
+
+    return await publishClaimedPipelineHandoff(bucket, capturesPrefix, payload);
   }
 
+  throw new Error(
+    "pipeline_handoff_publish_contended: another invocation holds the publish claim; retry later"
+  );
+}
+
+async function publishClaimedPipelineHandoff(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>
+): Promise<string> {
   try {
     const messageId = await publishPipelineHandoff(payload);
     await savePipelineHandoffPublishReceipt(bucket, capturesPrefix, {
@@ -1405,7 +1587,10 @@ export function validateManifest(manifest: Record<string, unknown> | null): {
 export const extractFrames = onObjectFinalized(
   {
     region: "us-central1",
-    memory: "2GiB",
+    // /tmp is tmpfs on Cloud Run and counts against this limit — sized so the
+    // inline video ceiling (see DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES)
+    // plus extracted frames plus node heap cannot OOM the instance.
+    memory: "4GiB",
     timeoutSeconds: 540,
     cpu: 2,
   },

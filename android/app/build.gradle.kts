@@ -81,6 +81,32 @@ android {
         buildConfigField("boolean", "MWDAT_USE_DEV_APP_ID", useMwdatDevAppId.toString())
     }
 
+    // Release signing is sourced from untracked properties/CI secrets:
+    //   BLUEPRINT_RELEASE_STORE_FILE / _STORE_PASSWORD / _KEY_ALIAS / _KEY_PASSWORD
+    // (gradle.properties -P flags or environment variables). When absent, the
+    // release build stays unsigned so no placeholder keystore can ever ship —
+    // android_alpha_readiness.sh gates the real distribution path.
+    val releaseSigningConfig = run {
+        fun signingValue(name: String): String =
+            (project.findProperty(name) as String?)?.trim().orEmpty()
+                .ifEmpty { System.getenv(name).orEmpty().trim() }
+
+        val storeFilePath = signingValue("BLUEPRINT_RELEASE_STORE_FILE")
+        val storePassword = signingValue("BLUEPRINT_RELEASE_STORE_PASSWORD")
+        val keyAlias = signingValue("BLUEPRINT_RELEASE_KEY_ALIAS")
+        val keyPassword = signingValue("BLUEPRINT_RELEASE_KEY_PASSWORD")
+        if (storeFilePath.isNotEmpty() && storePassword.isNotEmpty() && keyAlias.isNotEmpty() && keyPassword.isNotEmpty()) {
+            signingConfigs.create("release") {
+                storeFile = file(storeFilePath)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        } else {
+            null
+        }
+    }
+
     buildTypes {
         debug {
             versionNameSuffix = "-debug"
@@ -93,6 +119,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            releaseSigningConfig?.let { signingConfig = it }
         }
     }
 

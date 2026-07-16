@@ -20,29 +20,23 @@ final class ReferralService {
     // MARK: - Referral Code
 
     /// Generates a referral code if the user doesn't have one.
-    /// Also writes to the `referralCodes/{code}` lookup collection for O(1) validation.
+    ///
+    /// Security rules make `referralCodes/{code}` server-write-only, so this
+    /// only writes the code to the user's own document; the
+    /// `onUserProfileWritten` Cloud Function registers the O(1) lookup entry.
     func ensureReferralCode(userId: String) async throws -> String {
         let userRef = db.collection("users").document(userId)
         let snapshot = try await userRef.getDocument()
 
         if let existing = snapshot.data()?["referralCode"] as? String, !existing.isEmpty {
-            // Backfill lookup entry if missing (handles existing users pre-migration)
-            let lookupRef = db.collection("referralCodes").document(existing)
-            let lookupSnap = try await lookupRef.getDocument()
-            if !lookupSnap.exists {
-                try await lookupRef.setData(["ownerId": userId])
-            }
             return existing
         }
 
         let code = generateCode()
-        let batch = db.batch()
-        batch.setData([
+        try await userRef.setData([
             "referralCode": code,
             "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: userRef, merge: true)
-        batch.setData(["ownerId": userId], forDocument: db.collection("referralCodes").document(code))
-        try await batch.commit()
+        ], merge: true)
         return code
     }
 
@@ -103,25 +97,16 @@ final class ReferralService {
         )
     }
 
-    // MARK: - Create Referral Record
+    // MARK: - Referral Attribution
 
-    /// Called when a new user signs up with a referral code. Creates a record in the referrer's subcollection.
-    func createReferral(referrerId: String, referredUserId: String, referredUserName: String) async throws {
-        let data: [String: Any] = [
-            "referredUserId": referredUserId,
-            "referredUserName": referredUserName,
-            "referredAt": Timestamp(date: Date()),
-            "status": ReferralStatus.signedUp.rawValue,
-            "lifetimeEarningsCents": 0
-        ]
-
-        try await db.collection("users")
-            .document(referrerId)
-            .collection("referrals")
-            .document(referredUserId)
-            .setData(data)
-    }
-
+    /// Attributes a new user to the referrer who owns `rawCode`.
+    ///
+    /// Security rules only allow a client to write its OWN user document, so
+    /// this records `referredBy` + `referredByCode` there and the
+    /// `onUserProfileWritten` Cloud Function validates the code and creates
+    /// the referral record in the referrer's subcollection server-side.
+    /// Invalid attributions are cleared by the server, so nothing here can
+    /// fabricate a commission.
     func attributeReferral(
         code rawCode: String,
         newUserId: String,
@@ -144,47 +129,24 @@ final class ReferralService {
             return .selfReferral
         }
 
-        let batch = db.batch()
-        batch.setData([
+        var payload: [String: Any] = [
             "referredBy": referrerId,
+            "referredByCode": code,
             "updatedAt": FieldValue.serverTimestamp()
-        ], forDocument: newUserRef, merge: true)
-        batch.setData([
-            "referredUserId": newUserId,
-            "referredUserName": newUserName,
-            "referredAt": Timestamp(date: Date()),
-            "status": ReferralStatus.signedUp.rawValue,
-            "lifetimeEarningsCents": 0
-        ], forDocument: db.collection("users")
-            .document(referrerId)
-            .collection("referrals")
-            .document(newUserId), merge: true)
-        try await batch.commit()
+        ]
+        let trimmedName = newUserName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            payload["displayName"] = trimmedName
+        }
+        try await newUserRef.setData(payload, merge: true)
         return .attributed(referrerId: referrerId)
     }
 
-    /// Looks up which user owns a given referral code.
-    /// Uses the `referralCodes/{code}` lookup collection for O(1) direct reads.
-    /// Falls back to a users query for codes created before the lookup collection was introduced.
+    /// Looks up which user owns a given referral code via the server-maintained
+    /// `referralCodes/{code}` lookup collection (any signed-in user may read it).
     func findUserByReferralCode(_ code: String) async throws -> String? {
         let lookupSnap = try await db.collection("referralCodes").document(code).getDocument()
-        if let ownerId = lookupSnap.data()?["ownerId"] as? String {
-            return ownerId
-        }
-
-        // Fallback: query users collection (handles pre-migration codes)
-        let snapshot = try await db.collection("users")
-            .whereField("referralCode", isEqualTo: code)
-            .limit(to: 1)
-            .getDocuments()
-
-        if let userId = snapshot.documents.first?.documentID {
-            // Backfill the lookup entry so future lookups are fast
-            try? await db.collection("referralCodes").document(code).setData(["ownerId": userId])
-            return userId
-        }
-
-        return nil
+        return lookupSnap.data()?["ownerId"] as? String
     }
 
     // MARK: - Private

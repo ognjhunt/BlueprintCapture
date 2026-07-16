@@ -128,7 +128,10 @@ class AuthRepository @Inject constructor(
 
     /**
      * Generates and stores a 6-character referral code if the user doesn't already have one.
-     * Also writes to `referralCodes/{code}` for O(1) lookup validation.
+     *
+     * Security rules make `referralCodes/{code}` server-write-only, so only the
+     * user's own document is written here; the `onUserProfileWritten` Cloud
+     * Function registers the O(1) lookup entry (iOS ReferralService parity).
      */
     suspend fun ensureReferralCode(userId: String): String? = runCatching {
         val userRef = firestore.collection("users").document(userId)
@@ -136,30 +139,17 @@ class AuthRepository @Inject constructor(
 
         val existing = snapshot.data?.get("referralCode") as? String
         if (!existing.isNullOrBlank()) {
-            // Backfill lookup entry if missing (handles pre-migration users)
-            val lookupRef = firestore.collection("referralCodes").document(existing)
-            val lookupSnap = lookupRef.get().awaitResult()
-            if (!lookupSnap.exists()) {
-                lookupRef.set(mapOf("ownerId" to userId)).awaitResult()
-            }
             return@runCatching existing
         }
 
         val code = generateReferralCode()
-        val batch = firestore.batch()
-        batch.set(
-            userRef,
+        userRef.set(
             mapOf(
                 "referralCode" to code,
                 "updatedAt" to FieldValue.serverTimestamp(),
             ),
             SetOptions.merge(),
-        )
-        batch.set(
-            firestore.collection("referralCodes").document(code),
-            mapOf("ownerId" to userId),
-        )
-        batch.commit().awaitResult()
+        ).awaitResult()
         code
     }.getOrNull()
 
@@ -185,28 +175,19 @@ class AuthRepository @Inject constructor(
             val referrerId = lookupSnap.data?.get("ownerId") as? String ?: return@runCatching
             if (referrerId == newUserId) return@runCatching // self-referral guard
 
-            val batch = firestore.batch()
-            batch.set(
-                firestore.collection("users").document(newUserId),
-                mapOf(
-                    "referredBy" to referrerId,
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                ),
-                SetOptions.merge(),
-            )
-            batch.set(
-                firestore.collection("users").document(referrerId)
-                    .collection("referrals").document(newUserId),
-                mapOf(
-                    "referredUserId" to newUserId,
-                    "referredUserName" to newUserName,
-                    "referredAt" to FieldValue.serverTimestamp(),
-                    "status" to "signed_up",
-                    "lifetimeEarningsCents" to 0,
-                ),
-                SetOptions.merge(),
-            )
-            batch.commit().awaitResult()
+            // Rules only allow writing our OWN user document. The
+            // `onUserProfileWritten` Cloud Function validates `referredByCode`
+            // against the claimed referrer and creates the referral record
+            // server-side, so commissions can never be attributed client-side.
+            val payload = buildMap<String, Any> {
+                put("referredBy", referrerId)
+                put("referredByCode", code)
+                put("updatedAt", FieldValue.serverTimestamp())
+                if (newUserName.isNotBlank()) put("displayName", newUserName.trim())
+            }
+            firestore.collection("users").document(newUserId)
+                .set(payload, SetOptions.merge())
+                .awaitResult()
         }
     }
 
