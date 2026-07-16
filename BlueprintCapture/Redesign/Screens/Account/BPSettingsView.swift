@@ -123,6 +123,13 @@ struct BPSettingsView: View {
         .disabled(isDeletingAccount)
     }
 
+    private func group<Content: View>(_ title: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            BPEyebrow(title)
+            BPCard(padding: 0) { content() }
+        }
+    }
+
     private func actionRow(
         icon: String,
         title: String,

@@ -402,20 +402,37 @@ export const onCaptureApproved = onDocumentWritten(
         .doc(creatorId);
       const referralSnap = await tx.get(referralRef);
       if (!referralSnap.exists) {
-        // `onUserProfileWritten` creates the record when it validates the
-        // attribution. If validation has not landed yet, error out (retryable
-        // at-least-once) rather than permanently stamping the commission away.
-        const attributionValidated =
-          userSnap.data()?.["referralAttributionProcessedAt"] !== undefined;
-        if (!attributionValidated) {
-          throw new Error(
-            `referral_attribution_pending: creator ${creatorId} has referredBy but ` +
-              "server validation has not completed; will retry",
-          );
+        // Do NOT trust any field on the creator's own user document as proof
+        // that `onUserProfileWritten` already validated this attribution —
+        // firestore.rules only blocks client writes to `stats`, so a capturer
+        // can self-write `referredBy` + any other field (including a forged
+        // "already validated" marker) on their own doc. The only trustworthy
+        // signal is the server-owned `referralCodes/{code}` lookup, which
+        // clients cannot write at all (rules: `allow write: if false`). Heal
+        // the missing record ONLY when that lookup independently confirms
+        // `referredByCode` really does resolve to `referredBy`.
+        const referredByCode = normalizeReferralCode(userSnap.data()?.["referredByCode"]);
+        const codeLookupSnap = referredByCode
+          ? await tx.get(db.collection("referralCodes").doc(referredByCode))
+          : null;
+        const codeOwnerId = codeLookupSnap?.exists ? codeLookupSnap.data()?.["ownerId"] : undefined;
+
+        if (!referredByCode || codeOwnerId !== referredBy) {
+          logger.warn("Referral record missing and attribution unverifiable via referralCodes", {
+            referrerId: referredBy,
+            referredUserId: creatorId,
+            captureId,
+            hasCode: Boolean(referredByCode),
+          });
+          tx.update(captureRef, {
+            referralBonusProcessedAt: FieldValue.serverTimestamp(),
+            referralBonusSkippedReason: "referral_record_missing",
+          });
+          return { applied: false, reason: "referral_record_missing" };
         }
-        // Validated referredBy with a missing record (e.g. legacy data) — heal
-        // it here so the commission is not silently dropped.
-        logger.warn("Referral record missing for validated attribution; healing", {
+
+        // Verified against server-owned data: safe to heal.
+        logger.warn("Referral record missing for a code-verified attribution; healing", {
           referrerId: referredBy,
           referredUserId: creatorId,
           captureId,
