@@ -340,33 +340,6 @@ struct CaptureClientTelemetrySubmission: Codable, Equatable, Sendable {
         case breadcrumbs
     }
 
-    var firestorePayload: [String: Any] {
-        [
-            "event_id": eventId,
-            "event_type": eventType,
-            "severity": severity,
-            "operation": operation,
-            "status": status,
-            "occurred_at": occurredAt,
-            "session_id": sessionId as Any,
-            "capture_id": captureId as Any,
-            "app_version": appVersion,
-            "app_build": appBuild,
-            "os_version": osVersion,
-            "device_model": deviceModel,
-            "metadata": metadata,
-            "breadcrumbs": breadcrumbs.map { breadcrumb in
-                [
-                    "name": breadcrumb.name,
-                    "status": breadcrumb.status,
-                    "occurred_at": breadcrumb.occurredAt,
-                    "metadata": breadcrumb.metadata
-                ]
-            },
-            "source": "blueprint_capture_ios",
-            "beta_alert_candidate": true
-        ]
-    }
 }
 
 struct CapturePendingCrashReport: Codable, Equatable, Sendable {
@@ -433,7 +406,7 @@ final class CaptureCrashTelemetryService {
         recordBreadcrumb(
             name: "client_telemetry_configured",
             status: Self.crashlyticsLinked ? "crashlytics_linked" : "crashlytics_not_linked",
-            metadata: ["transport": "firebase_crashlytics_firestore_backend"]
+            metadata: ["transport": "firebase_crashlytics_backend_route"]
         )
     }
 
@@ -529,7 +502,6 @@ final class CaptureCrashTelemetryService {
             appBuild: appBuildOverride ?? (Bundle.main.infoDictionary?[kCFBundleVersionKey as String] as? String ?? "unknown")
         )
         writeToCrashlytics(payload)
-        writeToFirestore(payload)
         forwardToBackendAlerting(payload)
     }
 
@@ -597,17 +569,12 @@ final class CaptureCrashTelemetryService {
         #endif
     }
 
-    private func writeToFirestore(_ payload: CaptureClientTelemetrySubmission) {
-        #if canImport(FirebaseFirestore)
-        var firestorePayload = payload.firestorePayload
-        firestorePayload["created_at"] = FieldValue.serverTimestamp()
-        Firestore.firestore()
-            .collection("captureClientTelemetry")
-            .document(payload.eventId)
-            .setData(firestorePayload, merge: true)
-        #endif
-    }
-
+    // NOTE: There is deliberately no direct client Firestore telemetry sink.
+    // firestore.rules default-denies client writes to any telemetry
+    // collection, so such writes silently failed and duplicated the
+    // authoritative sinks: Crashlytics (baseline) and the WebApp
+    // `/v1/creator/client-telemetry` route, which persists server-side to
+    // `creatorClientTelemetry` with retention/ownership enforced there.
     private func forwardToBackendAlerting(_ payload: CaptureClientTelemetrySubmission) {
         Task(priority: .utility) {
             do {
