@@ -143,7 +143,8 @@ service cloud.firestore {
         'queued',
         'not_started',
         'blocked_raw_validation',
-        'blocked_local_storage'
+        'blocked_local_storage',
+        'blocked_local_capture_limits'
       ];
     }
 
@@ -226,6 +227,24 @@ service cloud.firestore {
 
     function hasOnlyCaptureSubmissionClientCreateKeys(data) {
       return data.keys().hasOnly(captureSubmissionClientCreateKeys());
+    }
+
+    function captureSubmissionIsClientUploaded(data) {
+      return ('operational_state' in data)
+        && data.operational_state is map
+        && ('upload_state' in data.operational_state)
+        && data.operational_state.upload_state == 'uploaded';
+    }
+
+    // Client upload transitions are monotonic: once the client has reported
+    // the raw upload as fully uploaded, the record belongs to the backend.
+    // The only client write still permitted is an idempotent re-assertion of
+    // the uploaded/submitted terminal state (a replayed completion write) —
+    // never a regression to uploading/failed or to a failure status.
+    function captureSubmissionUploadTransitionIsMonotonic(existing, incoming) {
+      return !captureSubmissionIsClientUploaded(existing)
+        || (captureSubmissionIsClientUploaded(incoming)
+          && incoming.status == 'submitted');
     }
 
     function hasValidClientCaptureSubmissionPayload(data) {
@@ -364,6 +383,7 @@ service cloud.firestore {
         && request.resource.data.creator_id == resource.data.creator_id
         && captureSubmissionExistingStatusAllowsClientUpdate(resource.data)
         && hasValidClientCaptureSubmissionPayload(request.resource.data)
+        && captureSubmissionUploadTransitionIsMonotonic(resource.data, request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(captureSubmissionClientUpdateKeys());
       allow delete: if false; // backend only
