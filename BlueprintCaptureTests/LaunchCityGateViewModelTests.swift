@@ -26,9 +26,19 @@ struct LaunchCityGateViewModelTests {
         )
 
         viewModel.start()
-        try await Task.sleep(for: .milliseconds(50))
 
-        guard case .failed(let message) = viewModel.state else {
+        // The gate resolves asynchronously (reverse-geocode + creator-launch fetch),
+        // so poll for the terminal state with a generous timeout instead of assuming a
+        // fixed delay. A fixed 50ms sleep is flaky on a loaded CI runner where the
+        // evaluation task may not have completed yet.
+        var currentState = viewModel.state
+        for _ in 0..<200 {
+            if case .failed = currentState { break }
+            try await Task.sleep(for: .milliseconds(10))
+            currentState = viewModel.state
+        }
+
+        guard case .failed(let message) = currentState else {
             Issue.record("Expected launch city gate to fail when creator backend base URL is missing.")
             return
         }
