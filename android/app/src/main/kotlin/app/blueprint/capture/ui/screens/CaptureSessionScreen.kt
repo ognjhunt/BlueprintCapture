@@ -1,7 +1,9 @@
 package app.blueprint.capture.ui.screens
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -339,7 +341,17 @@ fun CaptureSessionScreen(
                     context,
                     FileOutputOptions.Builder(outputFile).build(),
                 )
-                pendingRecording = pendingRecording.withAudioEnabled()
+                // CapturePermissionGate requests RECORD_AUDIO before this
+                // screen renders; re-checked explicitly at the call site. If
+                // it were ever revoked mid-session, keep the video evidence
+                // and record without audio instead of failing the capture.
+                if (androidx.core.content.ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO,
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    pendingRecording = pendingRecording.withAudioEnabled()
+                }
 
                 recording = pendingRecording.start(mainExecutor) { event ->
                     when (event) {

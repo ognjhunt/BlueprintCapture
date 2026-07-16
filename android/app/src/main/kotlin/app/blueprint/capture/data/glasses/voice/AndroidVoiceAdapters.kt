@@ -8,7 +8,14 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import androidx.annotation.RequiresApi
 
+/**
+ * On-device speech recognition requires Android 12 (API 31). The only caller
+ * is the Android XR projected experience, which itself requires a newer
+ * platform; phone-side code must not construct this below API 31.
+ */
+@RequiresApi(31)
 class AndroidOnDeviceSpeechInput(
     context: Context,
     private val onResults: (List<String>, FloatArray?) -> Unit,
