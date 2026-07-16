@@ -853,7 +853,10 @@ struct CaptureBundleAndInferenceTests {
             viewModel.startPendingCaptureUpload()
         }
 
-        for _ in 0..<20 {
+        // Bounded eventual assertion with a generous deadline so loaded CI
+        // runners don't flake.
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
             let draft = await MainActor.run { viewModel.manualIntakeDraft }
             if draft != nil { break }
             try await Task.sleep(nanoseconds: 25_000_000)

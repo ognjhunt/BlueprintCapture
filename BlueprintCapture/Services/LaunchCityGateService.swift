@@ -147,6 +147,13 @@ final class LaunchCityGateViewModel {
         syncWithAuthorizationStatus()
     }
 
+    /// Deterministic synchronization point: suspends until the in-flight
+    /// launch-status evaluation (if any) has finished applying its result.
+    /// Tests await this instead of sleeping for a fixed duration.
+    func awaitEvaluationCompletion() async {
+        await evaluationTask?.value
+    }
+
     func refresh() {
         syncWithAuthorizationStatus(forceRefresh: true)
     }

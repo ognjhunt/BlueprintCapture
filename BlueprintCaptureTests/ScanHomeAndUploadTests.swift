@@ -587,9 +587,10 @@ struct ScanHomeAndUploadTests {
             upload.subject.send(.completed(req))
         }
 
-        // Wait briefly for the async complete() Task to run.
-        for _ in 0..<20 {
-            if targets.completedTargetIds.contains("job_123") { break }
+        // Bounded eventual assertion: poll until the async complete() Task has
+        // run, with a generous deadline so loaded CI runners don't flake.
+        let deadline = Date().addingTimeInterval(10)
+        while !targets.completedTargetIds.contains("job_123"), Date() < deadline {
             try await Task.sleep(nanoseconds: 25_000_000)
         }
 

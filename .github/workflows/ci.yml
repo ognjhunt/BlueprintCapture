@@ -1,9 +1,16 @@
 name: CI
 
+# Pull requests are validated by the pull_request events; pushes are validated
+# only on main so a PR head is not built twice for the same commit. Main-branch
+# runs are never cancelled by newer pushes.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # ── Cloud Functions: TypeScript build + test ──
@@ -33,7 +40,91 @@ jobs:
         working-directory: cloud/extract-frames
         run: npm test
 
-  # ── Swift unit tests ──
+  cloud-referral-test:
+    name: Cloud referral-earnings (Node.js)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloud/referral-earnings/package-lock.json
+
+      - name: Install dependencies
+        working-directory: cloud/referral-earnings
+        run: npm ci
+
+      - name: Build
+        working-directory: cloud/referral-earnings
+        run: npm run build --if-present
+
+      - name: Test
+        working-directory: cloud/referral-earnings
+        run: npm test
+
+  # ── Firestore security-rules contract (Firebase emulator) ──
+  firestore-rules-test:
+    name: Firestore rules contract (emulator)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloud/firestore-rules-tests/package-lock.json
+
+      - name: Set up JDK 21 (Firestore emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        working-directory: cloud/firestore-rules-tests
+        run: npm ci
+
+      - name: Run rules contract tests
+        working-directory: cloud/firestore-rules-tests
+        run: npm test
+
+  # ── Release-gate validators (fail-closed scripts) ──
+  validators:
+    name: Release gate validators (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Launch readiness validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_launch_readiness_tests.py
+
+      - name: Android XR release readiness validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/android_xr_release_readiness_tests.py
+
+      - name: Android XR hardware packet validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/android_xr_hardware_packet_validator_tests.py
+
+      - name: Storage rules validator
+        run: python3 scripts/validate_storage_rules.py
+
+      - name: Upload resilience validator
+        run: python3 scripts/validate_upload_resilience.py
+
+      - name: Storage lifecycle validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_storage_lifecycle_tests.py
+
+      - name: Storage lifecycle validator
+        run: python3 scripts/validate_storage_lifecycle.py
+
+  # ── Swift unit + UI tests ──
   swift-test:
     name: Swift tests (macOS)
     runs-on: macos-latest
@@ -85,16 +176,31 @@ jobs:
             -allowProvisioningUpdates \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Run tests
+      # Unit tests and UI tests run as separate xcodebuild invocations so UI
+      # test app launches do not contend with unit tests on the same simulator
+      # (that contention inflated sub-second unit tests to 30-50 s and flaked
+      # timing-sensitive assertions).
+      - name: Run unit tests
         run: |
           xcodebuild test-without-building \
             -project BlueprintCapture.xcodeproj \
             -scheme BlueprintCapture \
             -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
             -configuration Debug \
-            -skipPackageUpdates
+            -skipPackageUpdates \
+            -only-testing:BlueprintCaptureTests
 
-  # ── Android: build + lint test ──
+      - name: Run UI tests
+        run: |
+          xcodebuild test-without-building \
+            -project BlueprintCapture.xcodeproj \
+            -scheme BlueprintCapture \
+            -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" \
+            -configuration Debug \
+            -skipPackageUpdates \
+            -only-testing:BlueprintCaptureUITests
+
+  # ── Android: unit tests + blocking lint + release assembly ──
   android-test:
     name: Android build + test
     runs-on: ubuntu-latest
@@ -116,9 +222,20 @@ jobs:
 
       - name: Run unit tests
         working-directory: android
-        run: ./gradlew test --no-daemon --parallel
+        run: ./gradlew testDebugUnitTest --no-daemon --parallel
 
-      - name: Run lint (warnings only, non-blocking)
+      - name: Run lint (blocking)
         working-directory: android
-        run: ./gradlew lint --no-daemon --parallel || true
-        continue-on-error: true
+        run: ./gradlew lintDebug --no-daemon --parallel
+
+      - name: Assemble release (unsigned without release secrets)
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --parallel
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report
+          path: android/app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore

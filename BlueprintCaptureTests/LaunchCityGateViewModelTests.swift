@@ -26,7 +26,9 @@ struct LaunchCityGateViewModelTests {
         )
 
         viewModel.start()
-        try await Task.sleep(for: .milliseconds(50))
+        // Deterministic: await the evaluation task the stubs drive; no fixed
+        // sleeps (a 50 ms sleep here flaked under CI simulator contention).
+        await viewModel.awaitEvaluationCompletion()
 
         guard case .failed(let message) = viewModel.state else {
             Issue.record("Expected launch city gate to fail when creator backend base URL is missing.")
