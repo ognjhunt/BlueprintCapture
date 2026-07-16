@@ -31,7 +31,7 @@ provider, payout, store, device, or buyer proof — those remain governed by
    `upload_error` + `lifecycle.upload_failed_at`) on permanent failure,
    mirroring iOS, best-effort and never masking the locally preserved bundle.
 5. **Contract test coverage:**
-   - `cloud/firestore-rules-tests` — Firebase-emulator suite (23 tests)
+   - `cloud/firestore-rules-tests` — Firebase-emulator suite (24 tests)
      exercising the deployed ruleset with iOS-shaped and Android-shaped
      payloads: unauthenticated/wrong-owner denial, valid creates, upload
      start/completion/failure transitions, retry, replay idempotency,
