@@ -25,22 +25,15 @@ struct LaunchCityGateView: View {
     @Bindable var viewModel: LaunchCityGateViewModel
     @Environment(\.openURL) private var openURL
 
-    private var launchRequestURL: URL? {
-        if let websiteURL = AppConfig.mainWebsiteURL() {
-            var components = URLComponents(
-                url: websiteURL.appendingPathComponent("capture-app/launch-access"),
-                resolvingAgainstBaseURL: false
-            )
-            var queryItems = [URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")]
-            if let resolvedCity = viewModel.resolvedCity?.displayName {
-                queryItems.append(URLQueryItem(name: "city", value: resolvedCity))
-            }
-            components?.queryItems = queryItems
-            return components?.url
-        }
-
-        return AppConfig.helpCenterURL()
-            ?? AppConfig.supportEmailURL(subject: "Request launch access")
+    // R019: Always resolves to a non-optional URL so the recovery affordance can
+    // never disappear, even when RuntimeConfig URLs are all unset.
+    private var launchRequestURL: URL {
+        LaunchAccessURLResolver.resolve(
+            websiteURL: AppConfig.mainWebsiteURL(),
+            helpCenterURL: AppConfig.helpCenterURL(),
+            supportEmailURL: AppConfig.supportEmailURL(subject: "Request launch access"),
+            resolvedCityDisplayName: viewModel.resolvedCity?.displayName
+        )
     }
 
     var body: some View {
@@ -239,14 +232,14 @@ struct LaunchCityGateView: View {
             }
 
         case .unsupported, .failed:
-            if let launchRequestURL {
-                Button {
-                    openURL(launchRequestURL)
-                } label: {
-                    primaryLabel("Request launch access")
-                }
-                .buttonStyle(.plain)
+            // R019: launchRequestURL is now non-optional, so this recovery
+            // affordance always renders — no dead-end at off-launch-city sites.
+            Button {
+                openURL(launchRequestURL)
+            } label: {
+                primaryLabel("Request launch access")
             }
+            .buttonStyle(.plain)
 
         case .checking, .supported:
             EmptyView()

@@ -53,6 +53,53 @@ enum LaunchCityMatcher {
     }
 }
 
+/// Resolves the launch-access / support recovery URL for the launch-city gate.
+///
+/// R019: The gate must never present a dead-end. The runtime-config URLs
+/// (`websiteURL`, `helpCenterURL`, `supportEmailURL`) are all optional and can
+/// be `nil` when RuntimeConfig is unpopulated, which previously made the only
+/// recovery button silently disappear. This resolver always returns a
+/// non-optional URL by falling back to a hard-coded launch-access endpoint that
+/// does not depend on RuntimeConfig being populated.
+enum LaunchAccessURLResolver {
+    /// Hard-coded base that never depends on RuntimeConfig. Mirrors the
+    /// `blueprintcapture.app` domain already used by `ReferralService`.
+    static let fallbackBaseURL = URL(string: "https://blueprintcapture.app")!
+
+    static func resolve(
+        websiteURL: URL?,
+        helpCenterURL: URL?,
+        supportEmailURL: URL?,
+        resolvedCityDisplayName: String?
+    ) -> URL {
+        if let websiteURL,
+           let url = launchAccessURL(base: websiteURL, resolvedCityDisplayName: resolvedCityDisplayName) {
+            return url
+        }
+        if let helpCenterURL {
+            return helpCenterURL
+        }
+        if let supportEmailURL {
+            return supportEmailURL
+        }
+        return launchAccessURL(base: fallbackBaseURL, resolvedCityDisplayName: resolvedCityDisplayName)
+            ?? fallbackBaseURL
+    }
+
+    private static func launchAccessURL(base: URL, resolvedCityDisplayName: String?) -> URL? {
+        var components = URLComponents(
+            url: base.appendingPathComponent("capture-app/launch-access"),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")]
+        if let resolvedCityDisplayName {
+            queryItems.append(URLQueryItem(name: "city", value: resolvedCityDisplayName))
+        }
+        components?.queryItems = queryItems
+        return components?.url
+    }
+}
+
 protocol LaunchCityResolving {
     func resolveCity(for location: CLLocation) async throws -> ResolvedLaunchCity?
 }

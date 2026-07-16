@@ -1179,6 +1179,52 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 }
 
+/// Pure retry / offset policy for resumable Firebase Storage uploads (R021).
+///
+/// Extracted as pure logic so it can be unit-tested without a simulator or the
+/// network. All byte counts are `Int64` to match `URLSessionTask` byte
+/// semantics, `fileSizeKey`-derived sizes elsewhere in this file, and Firebase
+/// Storage's `X-Goog-Upload-*` offset headers.
+enum ResumableUploadPolicy {
+    /// Total attempts (initial send + retries) for a single file transfer.
+    static let maxAttempts = 5
+
+    /// Exponential backoff (seconds) for the Nth retry (1-based), capped.
+    static func backoffDelay(forRetry retry: Int, baseSeconds: Double = 0.5, maxSeconds: Double = 30.0) -> Double {
+        guard retry > 0 else { return 0 }
+        let exponential = baseSeconds * pow(2.0, Double(retry - 1))
+        return min(exponential, maxSeconds)
+    }
+
+    /// Retry transient HTTP failures only (request timeout, rate limiting, 5xx).
+    static func isRetryable(httpStatus: Int) -> Bool {
+        switch httpStatus {
+        case 408, 429:
+            return true
+        case 500...599:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Bytes still to send given the server-committed offset and total size.
+    static func remainingBytes(committedOffset: Int64, totalBytes: Int64) -> Int64 {
+        guard totalBytes > committedOffset else { return 0 }
+        return totalBytes - committedOffset
+    }
+
+    /// Whether the server already holds the whole object.
+    static func isComplete(committedOffset: Int64, totalBytes: Int64) -> Bool {
+        committedOffset >= totalBytes
+    }
+
+    /// Clamp a queried offset into the valid `0...totalBytes` range.
+    static func clampOffset(_ offset: Int64, totalBytes: Int64) -> Int64 {
+        min(max(offset, 0), totalBytes)
+    }
+}
+
 final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
     static let shared = BackgroundFirebaseStorageUploader()
 
@@ -1244,7 +1290,13 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
         let bucketName = try Self.bucketName(from: bucketURL)
         let fileSize = Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
         let token = try await firebaseIDToken()
-        let uploadURL = try await startResumableUpload(
+
+        // R021: Obtain a resumable session URI, then transfer with retry/backoff.
+        // On a transient interruption we query the server-committed byte offset
+        // and resume from there — sending only the remaining bytes — instead of
+        // restarting the whole file at byte 0. The first attempt uploads the file
+        // directly from `fileURL`, so the happy path is byte-for-byte unchanged.
+        var uploadURL = try await startResumableUpload(
             bucketName: bucketName,
             objectPath: objectPath,
             contentType: contentType,
@@ -1253,22 +1305,134 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
             idToken: token
         )
 
+        var lastError: Error?
+        for attempt in 1...ResumableUploadPolicy.maxAttempts {
+            if Task.isCancelled { throw CancellationError() }
+
+            if attempt > 1 {
+                let delaySeconds = ResumableUploadPolicy.backoffDelay(forRetry: attempt - 1)
+                try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            }
+
+            var offset: Int64 = 0
+            if attempt > 1 {
+                if let queryResult = try? await queryCommittedOffset(uploadURL: uploadURL, token: token) {
+                    if queryResult.isFinal {
+                        // Server already holds and finalized the object.
+                        return
+                    }
+                    if let received = queryResult.offset {
+                        offset = ResumableUploadPolicy.clampOffset(received, totalBytes: fileSize)
+                    } else {
+                        // Offset unknown — restart a clean resumable session.
+                        uploadURL = try await startResumableUpload(
+                            bucketName: bucketName,
+                            objectPath: objectPath,
+                            contentType: contentType,
+                            customMetadata: customMetadata,
+                            fileSize: fileSize,
+                            idToken: token
+                        )
+                        offset = 0
+                    }
+                } else {
+                    // Query failed — restart a clean resumable session.
+                    uploadURL = try await startResumableUpload(
+                        bucketName: bucketName,
+                        objectPath: objectPath,
+                        contentType: contentType,
+                        customMetadata: customMetadata,
+                        fileSize: fileSize,
+                        idToken: token
+                    )
+                    offset = 0
+                }
+            }
+
+            do {
+                try await performSingleTransfer(
+                    uploadURL: uploadURL,
+                    fileURL: fileURL,
+                    fileSize: fileSize,
+                    offset: offset,
+                    token: token,
+                    contentType: contentType,
+                    onTaskStarted: onTaskStarted,
+                    onProgress: onProgress
+                )
+                return
+            } catch {
+                if error is CancellationError { throw error }
+                if let urlError = error as? URLError, urlError.code == .cancelled { throw error }
+                lastError = error
+                if !Self.isRetryable(error) || attempt == ResumableUploadPolicy.maxAttempts {
+                    throw error
+                }
+            }
+        }
+
+        throw lastError ?? UploadError.uploadFailed(status: 0, body: "resumable upload retry exhausted")
+    }
+
+    private struct ResumableUploadQueryResult {
+        let isFinal: Bool
+        let offset: Int64?
+    }
+
+    /// Uploads bytes `[offset, fileSize)` to the resumable session URI, finalizing
+    /// on completion. `offset == 0` streams the original file directly (the common
+    /// path). For a resumed transfer the remaining bytes are streamed into a
+    /// bounded-memory temporary file so the background `URLSession` can upload it.
+    private func performSingleTransfer(
+        uploadURL: URL,
+        fileURL: URL,
+        fileSize: Int64,
+        offset: Int64,
+        token: String,
+        contentType: String,
+        onTaskStarted: @escaping (URLSessionUploadTask) -> Void,
+        onProgress: @escaping (Int64, Int64) -> Void
+    ) async throws {
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "PUT"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
-        request.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
+        request.setValue(String(offset), forHTTPHeaderField: "X-Goog-Upload-Offset")
+
+        let sourceURL: URL
+        let temporaryTailURL: URL?
+        if offset > 0 {
+            let tailURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("blueprint-resume-\(UUID().uuidString).part")
+            try Self.writeTail(of: fileURL, from: offset, to: tailURL)
+            sourceURL = tailURL
+            temporaryTailURL = tailURL
+        } else {
+            sourceURL = fileURL
+            temporaryTailURL = nil
+        }
+        defer {
+            if let temporaryTailURL {
+                try? FileManager.default.removeItem(at: temporaryTailURL)
+            }
+        }
+
+        // Report progress in absolute file bytes so resumed transfers stay
+        // monotonic for the outer aggregate-progress calculation.
+        let progressReporter: (Int64, Int64) -> Void = { sentInTail, _ in
+            onProgress(offset + sentInTail, fileSize)
+        }
 
         var uploadTask: URLSessionUploadTask?
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let task = session.uploadTask(with: request, fromFile: fileURL)
+                let task = session.uploadTask(with: request, fromFile: sourceURL)
                 uploadTask = task
                 lock.lock()
                 pendingUploads[task.taskIdentifier] = PendingUpload(
                     continuation: continuation,
-                    onProgress: onProgress
+                    onProgress: progressReporter
                 )
                 lock.unlock()
                 onTaskStarted(task)
@@ -1277,6 +1441,64 @@ final class BackgroundFirebaseStorageUploader: NSObject, URLSessionTaskDelegate,
         } onCancel: {
             uploadTask?.cancel()
         }
+    }
+
+    /// Asks the resumable session how many bytes it has already committed so an
+    /// interrupted upload can resume from that offset.
+    private func queryCommittedOffset(uploadURL: URL, token: String) async throws -> ResumableUploadQueryResult {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("query", forHTTPHeaderField: "X-Goog-Upload-Command")
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            return ResumableUploadQueryResult(isFinal: false, offset: nil)
+        }
+        let status = Self.headerValue("X-Goog-Upload-Status", in: httpResponse)?.lowercased()
+        let received = Self.headerValue("X-Goog-Upload-Size-Received", in: httpResponse).flatMap { Int64($0) }
+        return ResumableUploadQueryResult(isFinal: status == "final", offset: received)
+    }
+
+    /// Streams bytes `[offset, EOF)` of `fileURL` into `destinationURL` in bounded
+    /// 1 MiB blocks so large industrial captures never load the tail into memory.
+    private static func writeTail(of fileURL: URL, from offset: Int64, to destinationURL: URL) throws {
+        let fileManager = FileManager.default
+        fileManager.createFile(atPath: destinationURL.path, contents: nil)
+        let input = try FileHandle(forReadingFrom: fileURL)
+        defer { try? input.close() }
+        let output = try FileHandle(forWritingTo: destinationURL)
+        defer { try? output.close() }
+        try input.seek(toOffset: UInt64(offset))
+        let chunkSize = 1_048_576
+        while true {
+            let chunk = try input.read(upToCount: chunkSize) ?? Data()
+            if chunk.isEmpty { break }
+            try output.write(contentsOf: chunk)
+        }
+    }
+
+    private static func isRetryable(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .dataNotAllowed, .internationalRoamingOff, .secureConnectionFailed,
+                 .badServerResponse, .resourceUnavailable:
+                return true
+            default:
+                return false
+            }
+        }
+        if let uploadError = error as? UploadError {
+            switch uploadError {
+            case .uploadFailed(let status, _), .startFailed(let status, _):
+                return ResumableUploadPolicy.isRetryable(httpStatus: status)
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     private static func bucketName(from bucketURL: String) throws -> String {
