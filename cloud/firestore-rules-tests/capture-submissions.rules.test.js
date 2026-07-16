@@ -336,6 +336,41 @@ describe("capture_submissions transitions", () => {
     await assertSucceeds(doc.set(completionMerge(), { merge: true }));
   });
 
+  it("denies rewriting operational_state or upload_error after handoff", async () => {
+    // Once uploaded, a replay may only refresh registration timestamps —
+    // it must not rewrite operational_state subfields or upload_error.
+    const doc = submissionDoc(ownerDb());
+    await assertSucceeds(doc.set(androidCreatePayload()));
+    await assertSucceeds(doc.set(completionMerge(), { merge: true }));
+    await assertFails(
+      doc.set(
+        {
+          ...completionMerge(),
+          operational_state: {
+            assignment_state: "assigned_capture_job",
+            upload_state: "uploaded",
+            qa_state: "not_started",
+            repeat_ready: true,
+          },
+        },
+        { merge: true },
+      ),
+    );
+    await assertFails(
+      doc.set(
+        {
+          ...completionMerge(),
+          upload_error: {
+            code: "late_note",
+            message: "rewriting history",
+            recorded_at: Timestamp.now(),
+          },
+        },
+        { merge: true },
+      ),
+    );
+  });
+
   it("denies regressing an uploaded capture back to uploading or failed", async () => {
     const doc = submissionDoc(ownerDb());
     await assertSucceeds(doc.set(androidCreatePayload()));

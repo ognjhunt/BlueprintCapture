@@ -238,13 +238,17 @@ service cloud.firestore {
 
     // Client upload transitions are monotonic: once the client has reported
     // the raw upload as fully uploaded, the record belongs to the backend.
-    // The only client write still permitted is an idempotent re-assertion of
-    // the uploaded/submitted terminal state (a replayed completion write) —
-    // never a regression to uploading/failed or to a failure status.
+    // The only client write still permitted is a replayed completion write
+    // (the client never received the ack and re-sends the same terminal
+    // payload, possibly with refreshed registration timestamps) — never a
+    // regression to uploading/failed or a failure status, and never a
+    // rewrite of operational_state or upload_error after handoff.
     function captureSubmissionUploadTransitionIsMonotonic(existing, incoming) {
       return !captureSubmissionIsClientUploaded(existing)
         || (captureSubmissionIsClientUploaded(incoming)
-          && incoming.status == 'submitted');
+          && incoming.status == 'submitted'
+          && incoming.diff(existing).affectedKeys()
+            .hasOnly(['created_at', 'submitted_at', 'lifecycle']));
     }
 
     function hasValidClientCaptureSubmissionPayload(data) {
