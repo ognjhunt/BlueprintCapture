@@ -544,10 +544,27 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             consentNotes: isSpaceReviewMode ? spaceReviewChecklist : []
         )
         // A captured site-operator authorization upgrades the rights basis and threads the
-        // signed permission (document reference, allowed areas, restrictions) into the bundle.
-        let defaultCaptureRights = capturedVenuePermission.map { permission in
-            deriveCaptureRights(applying: permission, to: baseCaptureRights)
-        } ?? baseCaptureRights
+        // signed permission (document reference, allowed areas, restrictions) into the bundle —
+        // but ONLY when the permission is still valid (not expired) AND scoped to the site we are
+        // actually capturing. A permission that has expired, or one left over from a reused view
+        // model for a different target/address, must NOT fabricate site-operator authorization:
+        // fall back to the conservative base rights so the bundle is never falsely written as
+        // site_operator_permission for a site the authorization does not cover.
+        let defaultCaptureRights: CaptureRightsMetadata = {
+            guard let permission = capturedVenuePermission, permission.isValid else {
+                return baseCaptureRights
+            }
+            let permissionAddress = permission.venueAddress
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            let activeAddress = (currentAddress ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            guard !permissionAddress.isEmpty, permissionAddress == activeAddress else {
+                return baseCaptureRights
+            }
+            return deriveCaptureRights(applying: permission, to: baseCaptureRights)
+        }()
         let captureRights = reviewSeed?.captureRights ?? defaultCaptureRights
 
         // Derive stable site identity. Priority: buyer target > reservation > session-stable UUID.

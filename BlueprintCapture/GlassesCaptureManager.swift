@@ -1156,10 +1156,15 @@ final class GlassesCaptureManager: NSObject, ObservableObject {
     /// helps keep local artifact directories organized by jobId.
     func startCapture(job: ScanJob) {
         // Adopt the job's declared site type when it maps to a canonical token; otherwise
-        // leave the explicit `.unknown` fallback rather than guessing.
+        // reset to the explicit `.unknown` fallback rather than guessing. Resetting (instead of
+        // only assigning on a successful mapping) is required because this manager can be reused
+        // across jobs: a later job with a nil/unmapped site type must not inherit and be
+        // mislabeled with the previous job's site type in the written manifest.
         if let declaredSiteType = job.siteType,
            let mappedSiteType = SiteType(rawValue: declaredSiteType) {
             intendedSiteType = mappedSiteType
+        } else {
+            intendedSiteType = .unknown
         }
         displayTargetMetadata = MetaDisplayTargetMetadata(
             name: job.title,
