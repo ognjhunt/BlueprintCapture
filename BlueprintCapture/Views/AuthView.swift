@@ -150,7 +150,7 @@ struct AuthView: View {
             Button {
                 openSupportEmail()
             } label: {
-                Text("Questions? Contact \(AppConfig.supportEmailAddress() ?? "support@blueprint.app")")
+                Text("Questions? Contact \(AppConfig.supportEmailAddress() ?? "hello@tryblueprint.io")")
                     .foregroundStyle(BlueprintTheme.textSecondary)
                     .underline()
             }

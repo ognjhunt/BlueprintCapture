@@ -28,6 +28,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | --- | --- | --- |
 | `.agents/skills/capture-public-copy-truth/SKILL.md` | Current source-of-truth | Repo-local Codex workflow for classifying public/Catalyst/investor/capturer claims as approved, blocked, or proof-required before use. |
 | `AGENTS.md` | Current source-of-truth | Repo agent rules; no public copy extraction without capture-first/payout-provider qualifiers. |
+| `AUTH_UI_IMPROVEMENTS.md` | Historical/internal | Superseded sign-in redesign notes; the "get paid instantly" copy it describes is not shipping copy and is not payout/provider/launch proof. |
 | `AUTOCOMPLETE_DOCUMENTATION_INDEX.md` | Historical/internal | Already marked archived; not payout/provider/launch proof. |
 | `AUTONOMOUS_ORG.md` | Current source-of-truth | Internal org doctrine; not external readiness proof. |
 | `BlueprintCapture/AGENTS.md` | Current source-of-truth | iOS app agent rules; simulator and UI states are not payout/provider/TestFlight proof. |
@@ -53,6 +54,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `STRIPE_ISSUE_SUMMARY.md` | Unsafe/stale archive | Historical Stripe issue summary; warning required. |
 | `STRIPE_QUICK_SETUP.md` | Unsafe/stale archive | Historical quick setup; warning required. |
 | `VISION.md` | Current source-of-truth | Cross-repo strategic doctrine; aspirational scope is not launch, provider, payout, buyer, or readiness proof. |
+| `WORLD_MODEL_STRATEGY_CONTEXT.md` | Current source-of-truth | World-model strategy doctrine; buyer/licensing/flywheel framing is strategic scope, not launch, provider, payout, buyer, or commercialization proof. |
 | `android/AGENTS.md` | Current source-of-truth | Android agent rules; Android remains internal-only until gates pass. |
 | `android/IMPLEMENTATION_SPEC.md` | Current source-of-truth | Android implementation spec; not public launch proof. |
 | `android/README.md` | Current source-of-truth | Android local setup/readiness context; no public Android/Meta/XR claims without release proof. |

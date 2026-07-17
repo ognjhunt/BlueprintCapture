@@ -93,7 +93,7 @@ private struct OnboardingWelcomeView: View {
 
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("BlueprintCapture")
+                    Text("Blueprint Capture")
                         .font(BlueprintTheme.body(12, weight: .semibold))
                         .tracking(2.4)
                         .foregroundStyle(BlueprintTheme.textTertiary)

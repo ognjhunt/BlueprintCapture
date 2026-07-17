@@ -482,7 +482,7 @@ private fun WalletPendingRow(
                 )
             }
             Text(
-                text = "Cashout",
+                text = if (cashoutEnabled) "Cashout" else "Cashout not yet available",
                 style = TextStyle(
                     color = if (cashoutEnabled) Color(0xFFDDDDDE) else Color(0xFFA8A8AA),
                     fontSize = 15.sp,

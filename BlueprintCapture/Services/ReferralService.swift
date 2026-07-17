@@ -47,7 +47,7 @@ final class ReferralService {
 
     /// Pre-composed share message for the referral.
     func shareMessage(for code: String) -> String {
-        "Join me on Blueprint Capture and get paid to scan spaces! Use my code: \(code)\n\(shareURL(for: code).absoluteString)"
+        "Join me on Blueprint Capture — help record real spaces for robot evaluation. Use my invite code: \(code)\n\(shareURL(for: code).absoluteString)"
     }
 
     // MARK: - Fetch Referrals

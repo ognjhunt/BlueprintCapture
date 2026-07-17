@@ -152,15 +152,15 @@ fun OnboardingWalkthroughScreen(
             ),
             DeviceCapability(
                 icon = Icons.Rounded.Radar,
-                title = "LiDAR",
-                subtitle = "Standard capture mode",
+                title = "Motion Tracking",
+                subtitle = if (arCoreSupported) "AR motion tracking available" else "Video capture only",
             ),
             DeviceCapability(
                 icon = Icons.Rounded.Verified,
                 title = "Capture Readiness",
-                subtitle = "Standard capture mode",
+                subtitle = if (arCoreSupported) "Standard capture mode" else "Limited capture support",
                 highlighted = true,
-                trailingText = "Standard",
+                trailingText = if (arCoreSupported) "Standard" else "Limited",
             ),
         )
     }

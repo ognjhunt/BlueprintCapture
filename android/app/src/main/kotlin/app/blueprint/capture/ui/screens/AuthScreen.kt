@@ -445,7 +445,7 @@ private fun startGoogleSignIn(
 ) {
     val webClientId = context.googleWebClientId()
     if (webClientId.isNullOrBlank()) {
-        onError("Google sign-in is unavailable because the web client ID was not generated.")
+        onError("Google sign-in isn't available right now. Please use email instead.")
         return
     }
 
@@ -467,7 +467,7 @@ private fun handleGoogleSignInResult(
         val account = task.getResult(ApiException::class.java)
         val token = account.idToken
         if (token.isNullOrBlank()) {
-            onError("Google sign-in returned without an ID token.")
+            onError("Google sign-in didn't complete. Please try again.")
         } else {
             onToken(token)
         }
