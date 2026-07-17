@@ -42,7 +42,7 @@ final class ReferralService {
 
     /// Builds a shareable referral URL.
     func shareURL(for code: String) -> URL {
-        URL(string: "https://blueprintcapture.app/join?ref=\(code)")!
+        URL(string: "https://tryblueprint.io/join?ref=\(code)")!
     }
 
     /// Pre-composed share message for the referral.
