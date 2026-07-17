@@ -27,7 +27,7 @@ import {
   resolveWalkthroughObjectName,
   type CapturePathInfo,
 } from "./capture-paths.js";
-import { parseStrictJsonLines } from "./jsonl.js";
+import { isDeterministicJsonlError, parseStrictJsonLines } from "./jsonl.js";
 
 export {
   captureObjectKind,
@@ -112,6 +112,17 @@ async function loadArkitPoses(
     logger.info("Loaded ARKit pose entries", { posesObjectName, count: rows.length });
     return index;
   } catch (error) {
+    // A malformed line is deterministic — retrying the trigger can never
+    // succeed, so degrade to "poses unavailable" instead of crash-looping the
+    // whole capture. Transient download errors still rethrow so the
+    // at-least-once trigger retries them.
+    if (isDeterministicJsonlError(error)) {
+      logger.error("ARKit pose log is malformed; continuing without poses", {
+        posesObjectName,
+        error,
+      });
+      return { byFrameId: new Map(), byTime: [] };
+    }
     logger.error("Failed to load ARKit pose log", { posesObjectName, error });
     throw error;
   }
@@ -149,6 +160,13 @@ async function loadArkitFrameQuality(
     }
     return byFrameId;
   } catch (error) {
+    if (isDeterministicJsonlError(error)) {
+      logger.error("ARKit frame log is malformed; continuing without frame quality", {
+        frameLogObjectName,
+        error,
+      });
+      return new Map();
+    }
     logger.error("Failed to load ARKit frame log", { frameLogObjectName, error });
     throw error;
   }

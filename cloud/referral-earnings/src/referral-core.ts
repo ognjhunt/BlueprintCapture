@@ -81,6 +81,28 @@ export function computeReferralOutcome(input: {
   };
 }
 
+/** Statuses under which a capture can pay out (and therefore pay commission). */
+export function isPayingCaptureStatus(status: unknown): boolean {
+  return status === "approved" || status === "paid";
+}
+
+/**
+ * Whether a `capture_submissions` write should attempt referral crediting.
+ *
+ * Gate on "currently paying and not yet credited", NOT on the status *edge*
+ * (unpaying → paying): a common ops flow approves a capture first (often with
+ * `payout_cents` still 0) and sets the real amount on a later `paid` write.
+ * Edge-gating silently skipped the commission in that flow. Re-attempting on
+ * every paying write is safe because crediting is idempotent — the
+ * `referralBonusProcessedAt` stamp is re-checked inside the transaction.
+ */
+export function shouldAttemptReferralCredit(input: {
+  newStatus: unknown;
+  referralBonusProcessed: boolean;
+}): boolean {
+  return isPayingCaptureStatus(input.newStatus) && !input.referralBonusProcessed;
+}
+
 // ─── Referral codes ──────────────────────────────────────────────────────────
 
 const REFERRAL_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
