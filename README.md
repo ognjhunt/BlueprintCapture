@@ -66,7 +66,7 @@ capture automatically.
 - ARKit poses, intrinsics, depth, timing, meshes, and motion are preserved when available.
 - Raw bundle metadata reports only evidence that was actually captured and validated.
 - No production-like build should fabricate live capture supply or fake payout/provider readiness.
-- Public/startup-facing copy must follow [docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md) and [docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md) before reusing Stripe, payout, provider, marketplace, buyer-ready, or launch-ready language.
+- Public/startup-facing copy must follow [docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md](docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md) and [docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md](docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md) before reusing Stripe, payout, provider, marketplace, buyer-ready, or launch-ready language.
 
 ## Alpha Scope
 
@@ -75,15 +75,15 @@ capture automatically.
 - Intentionally out of scope by default: direct-provider AI features, Street View previews, and Android payout onboarding UI that is not backed by a live provider contract.
 - External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp, and only when real proof links the iPhone capture, upstream request/job records, bridge handoff, Pipeline package, and WebApp sync. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
 - Meta glasses and Android are internal-only launch paths unless a concrete assignment, physical-device proof, launch proof, and downstream Pipeline/WebApp proof exist for the same capture/job chain. Google/Meta smart-glasses public language must follow the same proof boundary.
-- Current cross-modality runtime limits are documented in [/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](/Users/nijelhunt_1/workspace/BlueprintCapture/docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
+- Current cross-modality runtime limits are documented in [docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
 
 ## Main Areas
 
-- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/VideoCaptureManager.swift): iPhone capture and ARKit logging
-- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/GlassesCaptureManager.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/GlassesCaptureManager.swift): Meta glasses capture
-- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureBundleSupport.swift): bundle finalization and export
-- [/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureUploadService.swift](/Users/nijelhunt_1/workspace/BlueprintCapture/BlueprintCapture/Services/CaptureUploadService.swift): upload pipeline
-- [/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts](/Users/nijelhunt_1/workspace/BlueprintCapture/cloud/extract-frames/src/index.ts): frame extraction bridge
+- [BlueprintCapture/VideoCaptureManager.swift](BlueprintCapture/VideoCaptureManager.swift): iPhone capture and ARKit logging
+- [BlueprintCapture/GlassesCaptureManager.swift](BlueprintCapture/GlassesCaptureManager.swift): Meta glasses capture
+- [BlueprintCapture/Services/CaptureBundleSupport.swift](BlueprintCapture/Services/CaptureBundleSupport.swift): bundle finalization and export
+- [BlueprintCapture/Services/CaptureUploadService.swift](BlueprintCapture/Services/CaptureUploadService.swift): upload pipeline
+- [cloud/extract-frames/src/index.ts](cloud/extract-frames/src/index.ts): frame extraction bridge
 
 ## Build
 
@@ -127,7 +127,8 @@ npm test
 Cross-repo external alpha gate:
 
 ```bash
-python /Users/nijelhunt_1/workspace/BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py
+# From a sibling checkout of BlueprintCapturePipeline
+python ../BlueprintCapturePipeline/scripts/run_external_alpha_launch_gate.py
 ```
 
 Release config validation:
@@ -143,4 +144,4 @@ Android internal-release validation:
 ./scripts/android_alpha_readiness.sh --validate-config-only
 ```
 
-Use the slash-helper form from [ConfigTemplates/BlueprintCapture.release.xcconfig.example](/Users/nijelhunt_1/workspace/BlueprintCapture/ConfigTemplates/BlueprintCapture.release.xcconfig.example) for any `https://...` xcconfig values so Xcode does not truncate them to `https:`.
+Use the slash-helper form from [ConfigTemplates/BlueprintCapture.release.xcconfig.example](ConfigTemplates/BlueprintCapture.release.xcconfig.example) for any `https://...` xcconfig values so Xcode does not truncate them to `https:`.

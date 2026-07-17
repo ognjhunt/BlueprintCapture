@@ -36,6 +36,7 @@ import {
   normalizeReferralCode,
   normalizeReferralStatus,
   parseCaptureStatusUpdate,
+  shouldAttemptReferralCredit,
 } from "./referral-core.js";
 import {
   buildDemandSignalsForWebResearchFindings,
@@ -48,10 +49,10 @@ import {
   buildDemandSignalsForSiteOperatorSubmission,
   type DemandOpportunityFeedRequest,
   rankNearbyOpportunitiesForFeed,
+  sanitizeRobotTeamDemandPayload,
+  sanitizeSiteOperatorDemandPayload,
   type CaptureJobApiRecord,
   type DemandSignalDocument,
-  type RobotTeamDemandRequestPayload,
-  type SiteOperatorDemandSubmissionPayload,
   type StrategicWeightConfig,
 } from "./demand-opportunities.js";
 import {
@@ -327,24 +328,21 @@ export const onCaptureApproved = onDocumentWritten(
   },
   async (event) => {
     const captureId = event.params.captureId;
-    const before = event.data?.before?.data();
     const after = event.data?.after?.data();
 
     if (!after) return; // document deleted — nothing to do
 
     const newStatus = after["status"] as string | undefined;
-    const oldStatus = before?.["status"] as string | undefined;
-
-    const isNowPaying = newStatus === "approved" || newStatus === "paid";
-    const wasAlreadyPaying = oldStatus === "approved" || oldStatus === "paid";
-
-    if (!isNowPaying || wasAlreadyPaying) return;
 
     // Cheap pre-check outside the transaction; the authoritative idempotency
     // guard is re-read inside the transaction below because Firestore triggers
     // are at-least-once and can be delivered concurrently.
-    if (after["referralBonusProcessedAt"] !== undefined) {
-      logger.info("Referral bonus already processed, skipping", { captureId });
+    if (
+      !shouldAttemptReferralCredit({
+        newStatus,
+        referralBonusProcessed: after["referralBonusProcessedAt"] !== undefined,
+      })
+    ) {
       return;
     }
 
@@ -912,11 +910,15 @@ async function refreshCaptureJobDemandSnapshots(
   const jobs = await loadActiveCaptureJobs();
   if (jobs.length === 0) return;
 
+  // Viewer-independent refresh: no origin, so every active job nationwide is
+  // scored on demand/priority/payout and none is excluded by distance from a
+  // fixed reference point. (Per-request feeds still rank by the caller's
+  // real location in demandOpportunityFeed.)
   const annotated = annotateCaptureJobs(
     jobs,
     signals,
-    { lat: 37.7749, lng: -122.4194 },
-    1000 * 1609.34,
+    null,
+    Number.POSITIVE_INFINITY,
     200,
     strategicWeights,
   );
@@ -980,8 +982,10 @@ async function handleSubmitRobotTeamDemand(
     return;
   }
 
-  const payload = parseRequestBody<RobotTeamDemandRequestPayload>(req.body);
-  if (!payload?.company_name || !Array.isArray(payload.site_types) || payload.site_types.length === 0) {
+  // This endpoint is publicly reachable — persist only the bounded,
+  // allowlisted payload, never the raw request body.
+  const payload = sanitizeRobotTeamDemandPayload(parseRequestBody<unknown>(req.body));
+  if (!payload) {
     res.status(400).json({ error: "company_name and site_types are required" });
     return;
   }
@@ -1023,8 +1027,9 @@ async function handleSubmitSiteOperatorDemand(
     return;
   }
 
-  const payload = parseRequestBody<SiteOperatorDemandSubmissionPayload>(req.body);
-  if (!payload?.operator_name || !payload.site_name || !payload.site_address || !Array.isArray(payload.site_types) || payload.site_types.length === 0) {
+  // Publicly reachable — persist only the bounded, allowlisted payload.
+  const payload = sanitizeSiteOperatorDemandPayload(parseRequestBody<unknown>(req.body));
+  if (!payload) {
     res.status(400).json({ error: "operator_name, site_name, site_address, and site_types are required" });
     return;
   }

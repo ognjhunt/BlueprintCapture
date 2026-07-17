@@ -41,6 +41,111 @@ export interface SiteOperatorDemandSubmissionPayload {
   notes?: string;
 }
 
+// ─── Public-endpoint payload sanitization ────────────────────────────────────
+//
+// The demand-submission endpoints are publicly reachable (they back the
+// marketing-site contact forms), and their payloads used to be spread into
+// Firestore verbatim. These sanitizers bound every field to an allowlist with
+// size caps so an anonymous caller cannot persist arbitrary or oversized data
+// into `robot_team_requests` / `site_operator_submissions` (which feed the
+// demand ranking every capturer sees).
+
+const MAX_DEMAND_TEXT_LENGTH = 500;
+const MAX_DEMAND_NOTES_LENGTH = 4000;
+const MAX_DEMAND_ARRAY_ENTRIES = 20;
+
+function boundedString(value: unknown, maxLength = MAX_DEMAND_TEXT_LENGTH): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.slice(0, maxLength);
+}
+
+function boundedStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value
+    .map((entry) => boundedString(entry))
+    .filter((entry): entry is string => entry !== undefined)
+    .slice(0, MAX_DEMAND_ARRAY_ENTRIES);
+  return entries.length > 0 ? entries : undefined;
+}
+
+function boundedEvidenceStrength(value: unknown): DemandEvidenceStrength | undefined {
+  return value === "low" || value === "medium" || value === "high" || value === "critical"
+    ? value
+    : undefined;
+}
+
+function boundedCoordinate(value: unknown, limit: number): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= limit
+    ? value
+    : undefined;
+}
+
+function withoutUndefined<T extends Record<string, unknown>>(record: T): T {
+  return Object.fromEntries(
+    Object.entries(record).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
+/** Returns a bounded, allowlisted payload, or null if required fields are missing. */
+export function sanitizeRobotTeamDemandPayload(
+  raw: unknown,
+): RobotTeamDemandRequestPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const companyName = boundedString(source["company_name"]);
+  const siteTypes = boundedStringArray(source["site_types"]);
+  if (!companyName || !siteTypes) return null;
+
+  return withoutUndefined({
+    company_name: companyName,
+    site_types: siteTypes,
+    requester_name: boundedString(source["requester_name"]),
+    requester_email: boundedString(source["requester_email"]),
+    company_domain: boundedString(source["company_domain"]),
+    company_id: boundedString(source["company_id"]),
+    target_geography: boundedString(source["target_geography"]),
+    target_metros: boundedStringArray(source["target_metros"]),
+    workflows: boundedStringArray(source["workflows"]),
+    constraints: boundedStringArray(source["constraints"]),
+    target_kpis: boundedStringArray(source["target_kpis"]),
+    urgency: boundedEvidenceStrength(source["urgency"]),
+    notes: boundedString(source["notes"], MAX_DEMAND_NOTES_LENGTH),
+    citations: boundedStringArray(source["citations"]),
+  });
+}
+
+/** Returns a bounded, allowlisted payload, or null if required fields are missing. */
+export function sanitizeSiteOperatorDemandPayload(
+  raw: unknown,
+): SiteOperatorDemandSubmissionPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const source = raw as Record<string, unknown>;
+  const operatorName = boundedString(source["operator_name"]);
+  const siteName = boundedString(source["site_name"]);
+  const siteAddress = boundedString(source["site_address"]);
+  const siteTypes = boundedStringArray(source["site_types"]);
+  if (!operatorName || !siteName || !siteAddress || !siteTypes) return null;
+
+  return withoutUndefined({
+    operator_name: operatorName,
+    site_name: siteName,
+    site_address: siteAddress,
+    site_types: siteTypes,
+    operator_email: boundedString(source["operator_email"]),
+    company_name: boundedString(source["company_name"]),
+    latitude: boundedCoordinate(source["latitude"], 90),
+    longitude: boundedCoordinate(source["longitude"], 180),
+    workflows: boundedStringArray(source["workflows"]),
+    access_readiness: boundedEvidenceStrength(source["access_readiness"]),
+    consent_readiness: boundedEvidenceStrength(source["consent_readiness"]),
+    allowed_capture_windows: boundedStringArray(source["allowed_capture_windows"]),
+    restrictions: boundedStringArray(source["restrictions"]),
+    notes: boundedString(source["notes"], MAX_DEMAND_NOTES_LENGTH),
+  });
+}
+
 export interface DemandSignalDocument {
   id: string;
   source_type: string;
@@ -741,10 +846,18 @@ function coerceUpdatedAt(value: unknown): string {
   return new Date().toISOString();
 }
 
+/**
+ * Annotates capture jobs with demand/opportunity scores.
+ *
+ * `origin` is the viewer's location for per-request feeds. Pass `null` for
+ * viewer-independent scoring (e.g. the background snapshot refresh): the
+ * distance term becomes neutral and no job is radius-excluded, so jobs are
+ * ranked purely on demand, priority, and payout.
+ */
 export function annotateCaptureJobs(
   rawJobs: Array<{ id: string; data: Record<string, unknown> }>,
   signals: DemandSignalDocument[],
-  origin: { lat: number; lng: number },
+  origin: { lat: number; lng: number } | null,
   radiusMeters: number,
   limit: number,
   strategicWeights?: StrategicWeightConfig,
@@ -759,8 +872,9 @@ export function annotateCaptureJobs(
         ?? normalizeSiteType(asNullableString(data["facility_template"]))
         ?? normalizeSiteType(asNullableString(data["category"]));
       const aggregate = aggregateSignalsForSiteType(signals, siteType, strategicWeights, now);
-      const distanceMeters = haversineMeters(origin.lat, origin.lng, jobLat, jobLng);
-      const distanceWeight = clamp01(1 - Math.min(1, distanceMeters / radiusMeters));
+      const distanceWeight = origin
+        ? clamp01(1 - Math.min(1, haversineMeters(origin.lat, origin.lng, jobLat, jobLng) / radiusMeters))
+        : 1;
       const priorityWeight = clamp01(asNumber(data["priority_weight"], 1) / 2);
       const payoutWeight = clamp01(asNumber(data["quoted_payout_cents"] ?? data["payout_cents"], 0) / 10000);
       const baseOpportunityScore = clamp01(
@@ -834,7 +948,7 @@ export function annotateCaptureJobs(
       } satisfies CaptureJobApiRecord;
     })
     .filter((job) => job.active)
-    .filter((job) => haversineMeters(origin.lat, origin.lng, job.lat, job.lng) <= radiusMeters)
+    .filter((job) => origin === null || haversineMeters(origin.lat, origin.lng, job.lat, job.lng) <= radiusMeters)
     .sort((lhs, rhs) => {
       const lhsOpportunity = lhs.opportunityScore ?? lhs.demandScore ?? 0;
       const rhsOpportunity = rhs.opportunityScore ?? rhs.demandScore ?? 0;

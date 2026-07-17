@@ -396,11 +396,14 @@ async function discoverNearbyWithGemini(
   ].filter(Boolean).join(" ");
 
   const response = await fetchImpl(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        // Header auth (matches the Places calls) so the key can't leak into
+        // request-URL logs on intermediate proxies.
+        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
         contents: [{

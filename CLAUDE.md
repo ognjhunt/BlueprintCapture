@@ -2,9 +2,9 @@
 
 Read first:
 
-1. `/Users/nijelhunt_1/workspace/BlueprintCapture/PLATFORM_CONTEXT.md`
-2. `/Users/nijelhunt_1/workspace/BlueprintCapture/WORLD_MODEL_STRATEGY_CONTEXT.md`
-3. `/Users/nijelhunt_1/workspace/BlueprintCapture/AGENTS.md`
+1. `PLATFORM_CONTEXT.md`
+2. `WORLD_MODEL_STRATEGY_CONTEXT.md`
+3. `AGENTS.md`
 
 Key rules:
 
@@ -12,7 +12,7 @@ Key rules:
 - Do not fabricate provider readiness, payout readiness, or qualification decisions.
 - Keep downstream contracts stable for the pipeline and webapp.
 - Treat advisory UX as advisory, not authoritative.
-- Before claiming Paperclip/autonomous-loop `done`, `blocked`, or `awaiting_human_decision`, apply `/Users/nijelhunt_1/workspace/Blueprint-WebApp/docs/autonomous-loop-evidence-checklist-2026-05-03.md`.
+- Before claiming Paperclip/autonomous-loop `done`, `blocked`, or `awaiting_human_decision`, apply `../Blueprint-WebApp/docs/autonomous-loop-evidence-checklist-2026-05-03.md` (sibling checkout of Blueprint-WebApp).
 
 Key commands:
 

@@ -137,13 +137,14 @@ class LaunchCityGateViewModel @Inject constructor(
                 city = resolvedCity?.city,
                 stateCode = resolvedCity?.stateCode,
             ).getOrElse { error ->
+                android.util.Log.w("LaunchCityGate", "Launch access check failed", error)
                 _uiState.value = LaunchCityGateUiState(
                     status = LaunchCityGateStatus.Failed,
                     detectedCity = resolvedCity,
                     message = if (resolvedCity != null) {
-                        "Blueprint found ${resolvedCity.displayName}, but launch access could not be verified: ${error.message}"
+                        "Blueprint found ${resolvedCity.displayName}, but couldn't verify launch access. Check your connection and try again."
                     } else {
-                        "Blueprint could not verify launch access: ${error.message}"
+                        "Blueprint couldn't verify launch access. Check your connection and try again."
                     },
                 )
                 return@launch

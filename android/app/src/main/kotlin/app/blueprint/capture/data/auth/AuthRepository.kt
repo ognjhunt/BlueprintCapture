@@ -231,7 +231,7 @@ class AuthRepository @Inject constructor(
     }
 
     private fun extractReferralCode(raw: String): String? {
-        // Try URL form: https://blueprintcapture.app/join?ref=XXXXXX
+        // Try URL form: https://tryblueprint.io/join?ref=XXXXXX
         val urlMatch = "ref=([A-Z0-9]{6})".toRegex(RegexOption.IGNORE_CASE).find(raw)
         if (urlMatch != null) return normalizeCode(urlMatch.groupValues[1])
         // Try bare 6-char code

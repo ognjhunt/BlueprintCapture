@@ -23,9 +23,12 @@ struct RuntimeConfigTests {
         #expect(config.enableOpenCaptureHere == true)
         #expect(config.payoutProvider == "stripe")
         #expect(config.payoutProviderReady == false)
-        #expect(config.websiteURL == nil)
-        #expect(config.termsOfServiceURL == nil)
-        #expect(config.supportEmailAddress == nil)
+        // Public legal/support links fall back to the live site so they are
+        // never dead, even in an unconfigured build.
+        #expect(config.websiteURL?.absoluteString == "https://www.tryblueprint.io")
+        #expect(config.termsOfServiceURL?.absoluteString == "https://www.tryblueprint.io/terms")
+        #expect(config.privacyPolicyURL?.absoluteString == "https://www.tryblueprint.io/privacy")
+        #expect(config.supportEmailAddress == "hello@tryblueprint.io")
     }
 
     @Test
@@ -43,7 +46,7 @@ struct RuntimeConfigTests {
                 "BLUEPRINT_MAX_RESERVATION_DRIVE_MINUTES": "90",
                 "BLUEPRINT_FALLBACK_MAX_RESERVATION_AIR_MILES": "50.5",
                 "BLUEPRINT_MAIN_WEBSITE_URL": "https://www.tryblueprint.io",
-                "BLUEPRINT_SUPPORT_EMAIL_ADDRESS": "support@blueprint.app"
+                "BLUEPRINT_SUPPORT_EMAIL_ADDRESS": "support@tryblueprint.io"
             ],
             infoDictionary: [
                 "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com",
@@ -72,7 +75,7 @@ struct RuntimeConfigTests {
         #expect(config.websiteURL?.absoluteString == "https://www.tryblueprint.io")
         #expect(config.termsOfServiceURL?.absoluteString == "https://www.tryblueprint.io/terms")
         #expect(config.privacyPolicyURL?.absoluteString == "https://www.tryblueprint.io/privacy")
-        #expect(config.supportEmailAddress == "support@blueprint.app")
+        #expect(config.supportEmailAddress == "support@tryblueprint.io")
     }
 
     @Test

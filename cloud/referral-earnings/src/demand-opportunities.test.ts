@@ -5,12 +5,73 @@ import {
   annotateCaptureJobs,
   buildDemandSignalsForRobotTeamRequest,
   buildDemandSignalsForSiteOperatorSubmission,
+  sanitizeRobotTeamDemandPayload,
+  sanitizeSiteOperatorDemandPayload,
   normalizeSiteType,
   rankNearbyOpportunities,
   rankNearbyOpportunitiesForFeed,
   type DemandOpportunityFeedRequest,
   type StrategicWeightConfig,
 } from "./demand-opportunities.js";
+
+test("sanitizeRobotTeamDemandPayload drops unknown fields and bounds sizes", () => {
+  const payload = sanitizeRobotTeamDemandPayload({
+    company_name: `  Atlas Robotics ${"x".repeat(600)}`,
+    site_types: ["warehouse", "", 42, ...Array.from({ length: 40 }, (_, i) => `type-${i}`)],
+    notes: "y".repeat(5000),
+    urgency: "critical",
+    is_admin: true,
+    stats: { totalEarnings: 999999 },
+    __proto__injection: "nope",
+  });
+
+  assert.ok(payload);
+  assert.equal(payload.company_name.length, 500);
+  assert.equal(payload.site_types.length, 20);
+  assert.equal(payload.notes?.length, 4000);
+  assert.equal(payload.urgency, "critical");
+  // Nothing outside the allowlist survives.
+  assert.deepEqual(
+    Object.keys(payload).sort(),
+    ["company_name", "notes", "site_types", "urgency"],
+  );
+});
+
+test("sanitizeRobotTeamDemandPayload rejects missing required fields", () => {
+  assert.equal(sanitizeRobotTeamDemandPayload(null), null);
+  assert.equal(sanitizeRobotTeamDemandPayload({ company_name: "Atlas" }), null);
+  assert.equal(sanitizeRobotTeamDemandPayload({ site_types: ["warehouse"] }), null);
+  assert.equal(
+    sanitizeRobotTeamDemandPayload({ company_name: "  ", site_types: ["warehouse"] }),
+    null,
+  );
+});
+
+test("sanitizeSiteOperatorDemandPayload bounds coordinates and allowlists fields", () => {
+  const payload = sanitizeSiteOperatorDemandPayload({
+    operator_name: "Jordan",
+    site_name: "North Dock",
+    site_address: "1 Warehouse Way",
+    site_types: ["warehouse"],
+    latitude: 95, // out of range — dropped
+    longitude: -78.9,
+    access_readiness: "definitely", // not an allowed value — dropped
+    consent_readiness: "high",
+    injected_field: "nope",
+  });
+
+  assert.ok(payload);
+  assert.equal(payload.latitude, undefined);
+  assert.equal(payload.longitude, -78.9);
+  assert.equal(payload.access_readiness, undefined);
+  assert.equal(payload.consent_readiness, "high");
+  assert.ok(!("injected_field" in payload));
+
+  assert.equal(
+    sanitizeSiteOperatorDemandPayload({ operator_name: "Jordan", site_types: ["warehouse"] }),
+    null,
+  );
+});
 
 test("normalizeSiteType collapses aliases", () => {
   assert.equal(normalizeSiteType("distribution center"), "warehouse");
@@ -149,6 +210,45 @@ test("annotateCaptureJobs applies demand metadata to job payloads", () => {
   assert.equal(jobs[0]?.siteType, "warehouse");
   assert.ok((jobs[0]?.demandScore ?? 0) > 0.8);
   assert.ok((jobs[0]?.opportunityScore ?? 0) > 0.7);
+});
+
+test("annotateCaptureJobs with null origin scores every job without distance exclusion", () => {
+  const signals = buildDemandSignalsForRobotTeamRequest("submission-nationwide", {
+    company_name: "Atlas Robotics",
+    site_types: ["warehouse"],
+    workflows: ["dock handoff"],
+  });
+
+  const jobTemplate = {
+    title: "Warehouse Dock",
+    address: "1 Warehouse Way",
+    payout_cents: 4500,
+    est_minutes: 25,
+    active: true,
+    updated_at: "2026-03-20T14:00:00.000Z",
+    task_type: "buyer_requested_special_task",
+    facility_template: "warehouse",
+  };
+
+  // One SF-adjacent job and one ~2,400 miles away (Durham, NC). The
+  // viewer-independent snapshot refresh must score both identically instead
+  // of radius-excluding or distance-penalizing the far one.
+  const jobs = annotateCaptureJobs(
+    [
+      { id: "job-sf", data: { ...jobTemplate, lat: 37.77, lng: -122.39 } },
+      { id: "job-durham", data: { ...jobTemplate, lat: 35.99, lng: -78.9 } },
+    ],
+    signals,
+    null,
+    Number.POSITIVE_INFINITY,
+    10,
+  );
+
+  assert.equal(jobs.length, 2);
+  const sf = jobs.find((job) => job.id === "job-sf");
+  const durham = jobs.find((job) => job.id === "job-durham");
+  assert.ok(sf && durham);
+  assert.equal(sf.opportunityScore, durham.opportunityScore);
 });
 
 test("strategic weights amplify opportunity scores for prioritized site types", () => {

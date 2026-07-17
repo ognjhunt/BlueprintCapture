@@ -7,11 +7,11 @@ struct PhaseIntegrationFixTests {
 
     @Test
     func referralCodeParsingSupportsURLsAndRawCodes() {
-        let url = URL(string: "https://blueprintcapture.app/join?ref=abcd23")!
+        let url = URL(string: "https://tryblueprint.io/join?ref=abcd23")!
 
         #expect(ReferralService.referralCode(from: url) == "ABCD23")
         #expect(ReferralService.referralCode(from: "abcd23") == "ABCD23")
-        #expect(ReferralService.referralCode(from: " https://blueprintcapture.app/join?ref=ABCD23 ") == "ABCD23")
+        #expect(ReferralService.referralCode(from: " https://tryblueprint.io/join?ref=ABCD23 ") == "ABCD23")
         #expect(ReferralService.referralCode(from: "invalid-code") == nil)
     }
 

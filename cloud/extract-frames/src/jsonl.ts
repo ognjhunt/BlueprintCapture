@@ -1,3 +1,13 @@
+/**
+ * True for `parseStrictJsonLines` failures, which are deterministic — the same
+ * content fails identically on every retry — so callers can degrade to
+ * "log unavailable" instead of crash-looping an at-least-once trigger.
+ * Transient IO errors return false and should be rethrown for retry.
+ */
+export function isDeterministicJsonlError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("invalid_jsonl:");
+}
+
 export function parseStrictJsonLines(
   content: string,
   fileLabel: string

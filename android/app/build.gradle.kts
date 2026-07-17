@@ -42,10 +42,10 @@ android {
         val mainWebsiteUrl = providers.gradleProperty("BLUEPRINT_MAIN_WEBSITE_URL").orNull ?: "https://www.tryblueprint.io"
         val helpCenterUrl =
             providers.gradleProperty("BLUEPRINT_HELP_CENTER_URL").orNull
-                ?: "mailto:support@blueprint.app?subject=Blueprint%20Help"
+                ?: "mailto:hello@tryblueprint.io?subject=Blueprint%20Help"
         val bugReportUrl =
             providers.gradleProperty("BLUEPRINT_BUG_REPORT_URL").orNull
-                ?: "mailto:bugs@blueprint.app?subject=Blueprint%20Bug%20Report"
+                ?: "mailto:hello@tryblueprint.io?subject=Blueprint%20Bug%20Report"
         val termsOfServiceUrl =
             providers.gradleProperty("BLUEPRINT_TERMS_OF_SERVICE_URL").orNull ?: "https://www.tryblueprint.io/terms"
         val privacyPolicyUrl =
@@ -55,7 +55,7 @@ android {
         val accountDeletionUrl =
             providers.gradleProperty("BLUEPRINT_ACCOUNT_DELETION_URL").orNull ?: "https://www.tryblueprint.io/account/delete"
         val supportEmailAddress =
-            providers.gradleProperty("BLUEPRINT_SUPPORT_EMAIL_ADDRESS").orNull ?: "support@blueprint.app"
+            providers.gradleProperty("BLUEPRINT_SUPPORT_EMAIL_ADDRESS").orNull ?: "hello@tryblueprint.io"
 
         buildConfigField("String", "BACKEND_BASE_URL", "\"$backendBaseUrl\"")
         buildConfigField("String", "DEMAND_BACKEND_BASE_URL", "\"$demandBackendBaseUrl\"")

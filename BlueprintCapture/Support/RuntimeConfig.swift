@@ -194,38 +194,42 @@ struct RuntimeConfig: Equatable {
                 infoDictionary["BLUEPRINT_PAYOUT_PROVIDER_READY"],
                 defaultValue: false
             ),
+            // Public web/legal/support destinations fall back to the live
+            // production site so Terms/Privacy/support links are never dead in
+            // an unconfigured build. Backend URLs above intentionally stay nil
+            // (fail-closed) — these are public pages, not secrets.
             websiteURL: urlValue(
                 environment["BLUEPRINT_MAIN_WEBSITE_URL"] ??
                 (infoDictionary["BLUEPRINT_MAIN_WEBSITE_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io"),
             helpCenterURL: urlValue(
                 environment["BLUEPRINT_HELP_CENTER_URL"] ??
                 (infoDictionary["BLUEPRINT_HELP_CENTER_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io/help"),
             bugReportURL: urlValue(
                 environment["BLUEPRINT_BUG_REPORT_URL"] ??
                 (infoDictionary["BLUEPRINT_BUG_REPORT_URL"] as? String)
-            ),
+            ) ?? URL(string: "mailto:hello@tryblueprint.io?subject=Blueprint%20Bug%20Report"),
             termsOfServiceURL: urlValue(
                 environment["BLUEPRINT_TERMS_OF_SERVICE_URL"] ??
                 (infoDictionary["BLUEPRINT_TERMS_OF_SERVICE_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io/terms"),
             privacyPolicyURL: urlValue(
                 environment["BLUEPRINT_PRIVACY_POLICY_URL"] ??
                 (infoDictionary["BLUEPRINT_PRIVACY_POLICY_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io/privacy"),
             capturePolicyURL: urlValue(
                 environment["BLUEPRINT_CAPTURE_POLICY_URL"] ??
                 (infoDictionary["BLUEPRINT_CAPTURE_POLICY_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io/capture-policy"),
             accountDeletionURL: urlValue(
                 environment["BLUEPRINT_ACCOUNT_DELETION_URL"] ??
                 (infoDictionary["BLUEPRINT_ACCOUNT_DELETION_URL"] as? String)
-            ),
+            ) ?? URL(string: "https://www.tryblueprint.io/account/delete"),
             supportEmailAddress: stringValue(
                 environment["BLUEPRINT_SUPPORT_EMAIL_ADDRESS"] ??
                 (infoDictionary["BLUEPRINT_SUPPORT_EMAIL_ADDRESS"] as? String)
-            )
+            ) ?? "hello@tryblueprint.io"
         )
     }
 

@@ -11,8 +11,38 @@ import {
   normalizeReferralCode,
   normalizeReferralStatus,
   parseCaptureStatusUpdate,
+  shouldAttemptReferralCredit,
   timingSafeEqualStrings,
 } from "./referral-core.js";
+
+// ─── shouldAttemptReferralCredit ─────────────────────────────────────────────
+
+test("shouldAttemptReferralCredit attempts on any paying write until credited", () => {
+  // First transition into approved.
+  assert.equal(
+    shouldAttemptReferralCredit({ newStatus: "approved", referralBonusProcessed: false }),
+    true,
+  );
+  // Approve-then-pay flow: still uncredited when the real amount lands on the
+  // later `paid` write (the historical edge-gating bug skipped this case).
+  assert.equal(
+    shouldAttemptReferralCredit({ newStatus: "paid", referralBonusProcessed: false }),
+    true,
+  );
+});
+
+test("shouldAttemptReferralCredit skips once credited or while not paying", () => {
+  assert.equal(
+    shouldAttemptReferralCredit({ newStatus: "paid", referralBonusProcessed: true }),
+    false,
+  );
+  for (const status of ["submitted", "under_review", "needs_fix", "rejected", undefined]) {
+    assert.equal(
+      shouldAttemptReferralCredit({ newStatus: status, referralBonusProcessed: false }),
+      false,
+    );
+  }
+});
 
 // ─── computeReferralOutcome ──────────────────────────────────────────────────
 

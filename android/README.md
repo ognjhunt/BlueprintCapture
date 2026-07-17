@@ -44,7 +44,7 @@ BLUEPRINT_TERMS_OF_SERVICE_URL=https://www.tryblueprint.io/terms
 BLUEPRINT_PRIVACY_POLICY_URL=https://www.tryblueprint.io/privacy
 BLUEPRINT_CAPTURE_POLICY_URL=https://www.tryblueprint.io/capture-policy
 BLUEPRINT_ACCOUNT_DELETION_URL=https://www.tryblueprint.io/account/delete
-BLUEPRINT_SUPPORT_EMAIL_ADDRESS=support@blueprint.app
+BLUEPRINT_SUPPORT_EMAIL_ADDRESS=hello@tryblueprint.io
 # Nearby/provider requests are proxied through BLUEPRINT_DEMAND_BACKEND_BASE_URL.
 # Do not ship Places or Gemini client keys in the Android app.
 # Android XR voice guidance is on-device only until a real Gemini Live

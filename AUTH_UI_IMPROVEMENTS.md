@@ -1,5 +1,7 @@
 # Sign In Screen - UI/UX Improvements
 
+> Current-vs-public-copy note: This document is historical/internal implementation context. It describes a superseded design (the current shipping copy in `BlueprintCapture/Views/AuthView.swift` does not promise instant payouts, and the components below have been replaced). It is not current payout, provider, launch, buyer, or earnings proof, and it must not be reused as external capturer or startup copy without reconciling against `README.md`, `docs/CAPTURER_MARKETING_COPY_POSITIONING_2026-05-13.md`, and `docs/PUBLIC_COPY_TRUTH_INDEX_2026-05-24.md`.
+
 ## Overview
 The Sign in screen has been completely redesigned to match the Blueprint theme, improve visual hierarchy, and create a more intuitive user experience.
 
