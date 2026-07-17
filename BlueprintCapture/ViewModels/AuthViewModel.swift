@@ -8,7 +8,11 @@ import FirebaseFirestore
 @MainActor
 final class AuthViewModel: ObservableObject {
     enum Mode { case signIn, signUp }
-    @Published var mode: Mode = .signIn
+    @Published var mode: Mode
+
+    init(mode: Mode = .signIn) {
+        self.mode = mode
+    }
     @Published var name: String = ""
     @Published var email: String = ""
     @Published var password: String = ""

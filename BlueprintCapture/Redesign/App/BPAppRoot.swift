@@ -2,26 +2,29 @@ import SwiftUI
 
 // MARK: - BPAppRoot
 //
-// The redesign is the shipping UI. Unauthenticated capturers see the dark sign-in
-// hero; the capture/upload path only unlocks once a real (non-anonymous) Firebase
-// account exists. The anonymous-guest bootstrap still runs so pre-auth state (guest
-// session banner, discovery reads) works, but `BPRootView` is gated on
-// `UserDeviceService.hasRegisteredAccount()` — see beta-launch-audit CAP-02.
+// The redesign is the shipping UI. Unauthenticated capturers see the value-first
+// onboarding flow (dark hero → read-only nearby preview → auth); the
+// capture/upload path only unlocks once a real (non-anonymous) Firebase account
+// exists. The anonymous-guest bootstrap still runs so pre-auth state (guest
+// session banner, discovery reads, the onboarding nearby preview) works, but
+// `BPRootView` is gated on `UserDeviceService.hasRegisteredAccount()` — see
+// beta-launch-audit CAP-02.
 
 struct BPAppRoot: View {
     @State private var guestBootstrapState = UserDeviceService.currentGuestBootstrapState()
     @State private var hasRegisteredAccount = UserDeviceService.hasRegisteredAccount()
     @State private var showingAuth = false
+    @State private var authMode: AuthViewModel.Mode = .signIn
 
     var body: some View {
         Group {
             if hasRegisteredAccount {
                 BPRootView()
             } else {
-                BPSignInView(
-                    onContinue: { showingAuth = true },
-                    onHasAccount: { showingAuth = true }
-                )
+                BPOnboardingFlowView { mode in
+                    authMode = mode
+                    showingAuth = true
+                }
             }
         }
         .safeAreaInset(edge: .top) {
@@ -30,9 +33,11 @@ struct BPAppRoot: View {
         // CAP-02: present the real email + Google auth flow. AuthView dismisses
         // itself and posts `.AuthStateDidChange` on success; we re-read the
         // registered-account state so the app advances to the paper tabs only for a
-        // non-anonymous Firebase user.
+        // non-anonymous Firebase user. The onboarding flow picks which mode the
+        // sheet opens in (create-account vs sign-in) so returning capturers skip
+        // the sign-up form.
         .sheet(isPresented: $showingAuth) {
-            AuthView()
+            AuthView(initialMode: authMode)
         }
         .onAppear {
             guestBootstrapState = UserDeviceService.currentGuestBootstrapState()

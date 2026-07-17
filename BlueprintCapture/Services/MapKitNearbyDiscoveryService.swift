@@ -234,7 +234,7 @@ enum MapKitNearbyDiscoveryTransform {
         ].joined(separator: "|")
     }
 
-    private static func normalizedName(_ raw: String) -> String {
+    static func normalizedName(_ raw: String) -> String {
         raw
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .lowercased()

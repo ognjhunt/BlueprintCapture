@@ -17,6 +17,8 @@ struct BPHomeTab: View {
     @StateObject private var viewModel: ScanHomeViewModel
     @State private var reservingJobId: String?
     @State private var reservationError: String?
+    @AppStorage("com.blueprint.hasDismissedEarningExplainer") private var hasDismissedEarningExplainer = false
+    @State private var isPreActivationCapturer = false
 
     private let targetStateService: TargetStateServiceProtocol = TargetStateService()
 
@@ -49,6 +51,9 @@ struct BPHomeTab: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     header
+                    if !hasDismissedEarningExplainer && isPreActivationCapturer {
+                        earningExplainerCard
+                    }
                     if let activeItem {
                         activeCard(activeItem)
                     } else {
@@ -67,6 +72,10 @@ struct BPHomeTab: View {
             .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
         }
         .task {
+            // The earning explainer is a first-run affordance: only capturers who
+            // have not completed first-capture activation see it, so existing
+            // capturers don't get onboarding chrome after an app update.
+            isPreActivationCapturer = !ActivationFunnelStore.shared.snapshot().activationCompleted
             viewModel.onAppear()
             await viewModel.refresh()
         }
@@ -116,6 +125,36 @@ struct BPHomeTab: View {
         case 12..<17: return "Good afternoon"
         default: return "Good evening"
         }
+    }
+
+    // MARK: First-session explainer
+    //
+    // One dismissible card that tells a brand-new capturer how the loop works.
+    // Copy stays review-gated: quoted payouts on eligible jobs only, and review
+    // decides payout eligibility rather than promising payment.
+
+    private var earningExplainerCard: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack {
+                BPEyebrow("How earning works", color: BP.brassDeep)
+                Spacer()
+                Button {
+                    withAnimation(BPMotion.transition) { hasDismissedEarningExplainer = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BP.textFaint)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Dismiss")
+            }
+            BPNumberedStepRow(index: 1, text: "Pick a nearby job — eligible jobs show a quoted payout.")
+            BPNumberedStepRow(index: 2, text: "Walk the space and record with your iPhone.")
+            BPNumberedStepRow(index: 3, text: "Quality and rights review decides payout eligibility.")
+        }
+        .padding(Space.l)
+        .bpCard()
     }
 
     // MARK: Active assignment (real)
