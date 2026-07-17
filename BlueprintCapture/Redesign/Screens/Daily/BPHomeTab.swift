@@ -17,6 +17,7 @@ struct BPHomeTab: View {
     @StateObject private var viewModel: ScanHomeViewModel
     @State private var reservingJobId: String?
     @State private var reservationError: String?
+    @AppStorage("com.blueprint.hasDismissedEarningExplainer") private var hasDismissedEarningExplainer = false
 
     private let targetStateService: TargetStateServiceProtocol = TargetStateService()
 
@@ -49,6 +50,9 @@ struct BPHomeTab: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     header
+                    if !hasDismissedEarningExplainer {
+                        earningExplainerCard
+                    }
                     if let activeItem {
                         activeCard(activeItem)
                     } else {
@@ -115,6 +119,52 @@ struct BPHomeTab: View {
         case 5..<12: return "Good morning"
         case 12..<17: return "Good afternoon"
         default: return "Good evening"
+        }
+    }
+
+    // MARK: First-session explainer
+    //
+    // One dismissible card that tells a brand-new capturer how the loop works.
+    // Copy stays review-gated: quoted payouts per job, payout after review.
+
+    private var earningExplainerCard: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack {
+                BPEyebrow("How earning works", color: BP.brassDeep)
+                Spacer()
+                Button {
+                    withAnimation(BPMotion.transition) { hasDismissedEarningExplainer = true }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(BP.textFaint)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Dismiss")
+            }
+            explainerRow(1, "Pick a nearby job — quoted payouts show on each card.")
+            explainerRow(2, "Walk the space and record with your iPhone.")
+            explainerRow(3, "Review checks quality and rights. Approved captures pay out.")
+        }
+        .padding(Space.l)
+        .bpCard()
+    }
+
+    private func explainerRow(_ index: Int, _ text: String) -> some View {
+        HStack(alignment: .center, spacing: Space.m) {
+            Text("\(index)")
+                .font(.bpMono(BPType.caption))
+                .foregroundStyle(BP.brassDeep)
+                .frame(width: 22, height: 22)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                        .strokeBorder(BP.brass.opacity(0.55), lineWidth: 1)
+                )
+            Text(text)
+                .font(.bpSans(BPType.bodyS, .regular))
+                .foregroundStyle(BP.textBody)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

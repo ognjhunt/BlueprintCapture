@@ -8,6 +8,11 @@ struct AuthView: View {
     @Environment(\.openURL) private var openURL
     @StateObject private var viewModel = AuthViewModel()
     @FocusState private var focusedField: FocusField?
+    @State private var appliedInitialMode = false
+
+    /// Which form the sheet opens on. Onboarding passes `.signUp` for the
+    /// create-account CTA and `.signIn` for returning capturers.
+    var initialMode: AuthViewModel.Mode = .signIn
 
     enum FocusField { case name, email, password, confirmPassword }
 
@@ -20,10 +25,12 @@ struct AuthView: View {
                     VStack(spacing: 0) {
                         // Header
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Welcome to Blueprint")
+                            Text(viewModel.mode == .signUp ? "Create your free account" : "Welcome back")
                                 .font(BlueprintTheme.display(34, weight: .semibold))
                                 .foregroundStyle(BlueprintTheme.textPrimary)
-                            Text("Capture spaces for review. Payout status stays backend-gated.")
+                            Text(viewModel.mode == .signUp
+                                 ? "Takes about a minute. Anything from your guest session carries over."
+                                 : "Sign in to get back to your captures, reviews, and earnings.")
                                 .font(BlueprintTheme.body(14, weight: .medium))
                                 .foregroundStyle(BlueprintTheme.textSecondary)
                         }
@@ -128,6 +135,12 @@ struct AuthView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
+            .onAppear {
+                if !appliedInitialMode {
+                    appliedInitialMode = true
+                    viewModel.mode = initialMode
+                }
+            }
             .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
                 dismiss()
             }
