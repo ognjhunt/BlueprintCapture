@@ -6,13 +6,16 @@ import GoogleSignInSwift
 struct AuthView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @StateObject private var viewModel = AuthViewModel()
+    @StateObject private var viewModel: AuthViewModel
     @FocusState private var focusedField: FocusField?
-    @State private var appliedInitialMode = false
 
-    /// Which form the sheet opens on. Onboarding passes `.signUp` for the
-    /// create-account CTA and `.signIn` for returning capturers.
-    var initialMode: AuthViewModel.Mode = .signIn
+    /// `initialMode` picks which form the sheet opens on: onboarding passes
+    /// `.signUp` for the create-account CTA and `.signIn` for returning
+    /// capturers. Injected at init so the first render is already in the right
+    /// mode (no post-`onAppear` header flash).
+    init(initialMode: AuthViewModel.Mode = .signIn) {
+        _viewModel = StateObject(wrappedValue: AuthViewModel(mode: initialMode))
+    }
 
     enum FocusField { case name, email, password, confirmPassword }
 
@@ -30,7 +33,7 @@ struct AuthView: View {
                                 .foregroundStyle(BlueprintTheme.textPrimary)
                             Text(viewModel.mode == .signUp
                                  ? "Takes about a minute. Anything from your guest session carries over."
-                                 : "Sign in to get back to your captures, reviews, and earnings.")
+                                 : "Sign in to get back to your captures, reviews, and payout status.")
                                 .font(BlueprintTheme.body(14, weight: .medium))
                                 .foregroundStyle(BlueprintTheme.textSecondary)
                         }
@@ -135,12 +138,6 @@ struct AuthView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .onAppear {
-                if !appliedInitialMode {
-                    appliedInitialMode = true
-                    viewModel.mode = initialMode
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
                 dismiss()
             }

@@ -5,8 +5,8 @@ import SwiftUI
 // The first screen a new capturer sees. Full-bleed ink with a faint evidence
 // grid; wordmark top-left, editorial Newsreader headline and the onboarding
 // actions pinned to the bottom. Copy stays review-gated per the capturer copy
-// positioning doc: quoted payouts are shown per job, and payout follows review —
-// no blanket "start earning" claims.
+// positioning doc: quoted payouts appear only on eligible jobs, review decides
+// payout eligibility, and there are no blanket "start earning" claims.
 
 struct BPSignInView: View {
     /// Primary action: continue into the nearby-preview onboarding step.
@@ -44,11 +44,11 @@ struct BPSignInView: View {
 
     private var headline: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Capture real spaces.\nGet paid after review.")
+            Text("Capture real places.\nEarn on eligible jobs.")
                 .font(.bpDisplay(30))
                 .foregroundStyle(BP.onInk)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("Robot and AI teams need walkthrough video of real places. Eligible capture jobs near you show a quoted payout up front — every capture goes through quality and rights review before payout.")
+            Text("Robot and AI teams need walkthrough video of real places. Eligible capture jobs near you show a quoted payout up front — every capture goes through quality and rights review before any payout.")
                 .font(.bpSans(BPType.body, .regular))
                 .foregroundStyle(BP.onInk.opacity(0.7))
                 .fixedSize(horizontal: false, vertical: true)
@@ -57,26 +57,9 @@ struct BPSignInView: View {
 
     private var howItWorks: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            stepRow(1, "Find capture jobs and candidate spaces near you")
-            stepRow(2, "Walk the space and record a guided capture with your iPhone")
-            stepRow(3, "Pass quality and rights review — approved captures pay out")
-        }
-    }
-
-    private func stepRow(_ index: Int, _ text: String) -> some View {
-        HStack(alignment: .center, spacing: Space.m) {
-            Text("\(index)")
-                .font(.bpMono(BPType.caption))
-                .foregroundStyle(BP.brass)
-                .frame(width: 24, height: 24)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(BP.brass.opacity(0.55), lineWidth: 1)
-                )
-            Text(text)
-                .font(.bpSans(BPType.bodyS, .medium))
-                .foregroundStyle(BP.onInk.opacity(0.85))
-                .fixedSize(horizontal: false, vertical: true)
+            BPNumberedStepRow(index: 1, text: "Find capture jobs and candidate spaces near you", onDark: true)
+            BPNumberedStepRow(index: 2, text: "Walk the space and record a guided capture with your iPhone", onDark: true)
+            BPNumberedStepRow(index: 3, text: "Quality and rights review decides payout eligibility", onDark: true)
         }
     }
 

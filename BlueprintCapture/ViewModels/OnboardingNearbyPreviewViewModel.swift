@@ -6,10 +6,12 @@ import CoreLocation
 //
 // Powers the pre-auth "what's around you" onboarding step. Read-only by design:
 // published capture jobs load through the guest Firestore session when available,
-// and walk-in candidate places come from on-device MapKit discovery. Nothing is
-// reserved, submitted, or written before the capturer registers, and payout labels
-// follow the same quoted-only rule as the home feed — no payout is shown unless a
-// job actually quotes one.
+// and candidate places come from the same provider-selected discovery service the
+// home feed uses (no review submissions, nothing reserved, no writes before the
+// capturer registers). Payout labels are stricter than the signed-in feed: this
+// public surface shows a payout ONLY when the job carries a real backend quote
+// (`quotedPayoutCents`) — legacy `payoutCents` alone never becomes a pre-auth
+// payout claim.
 
 @MainActor
 final class OnboardingNearbyPreviewViewModel: ObservableObject {
@@ -31,18 +33,14 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
         let id: String
         let title: String
         let detail: String
-        let distanceMiles: Double
-        /// Quoted payout, formatted. Nil when no payout is quoted — the row shows
-        /// the review-gated placeholder instead of a fabricated number.
+        let distanceLabel: String
+        /// Formatted quoted payout. Nil unless the job carries a real quote — the
+        /// row shows the review-gated placeholder instead of a fabricated number.
         let payoutLabel: String?
         /// Nil for walk-in candidate places that are not published jobs.
         let tier: ScanHomeViewModel.CapturePermissionTier?
 
         var isCandidate: Bool { tier == nil }
-
-        var distanceLabel: String {
-            String(format: "%.1f mi", max(0, distanceMiles))
-        }
     }
 
     @Published private(set) var phase: Phase = .primer
@@ -51,7 +49,7 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
 
     private let locationService: LocationServiceProtocol
     private let jobsRepository: JobsRepositoryProtocol
-    private let placesNearby: PlacesNearbyProtocol
+    private let nearbyDiscovery: NearbyCandidateDiscoveryServiceProtocol
     private let funnel: ActivationFunnelRecording
 
     private let feedRadiusMeters: Double = 10.0 * 1609.34
@@ -62,12 +60,12 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
     init(
         locationService: LocationServiceProtocol = LocationService(),
         jobsRepository: JobsRepositoryProtocol = JobsRepository(),
-        placesNearby: PlacesNearbyProtocol = MapKitNearbyDiscoveryService(),
+        nearbyDiscovery: NearbyCandidateDiscoveryServiceProtocol = NearbyCandidateDiscoveryService(),
         funnel: ActivationFunnelRecording = ActivationFunnelStore.shared
     ) {
         self.locationService = locationService
         self.jobsRepository = jobsRepository
-        self.placesNearby = placesNearby
+        self.nearbyDiscovery = nearbyDiscovery
         self.funnel = funnel
 
         self.locationService.setListener { [weak self] location in
@@ -89,29 +87,32 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
         previewItems.filter { $0.payoutLabel != nil }.count
     }
 
-    /// Called when the preview step appears. If access was granted earlier the
-    /// primer is skipped and the preview loads immediately.
+    /// Called when the preview step appears. Records the funnel's
+    /// permissions-step-viewed event on every path (including permission already
+    /// granted) so `permissions_granted_or_blocked` never appears without it; if
+    /// access was granted earlier the primer is skipped and the preview loads
+    /// immediately.
     func onStepAppear() {
+        recordPermissionStepViewed()
         switch locationService.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
             recordPermissionOutcome("granted")
             startLocating()
         case .denied, .restricted:
+            recordPermissionOutcome("denied")
             if phase == .primer { phase = .denied }
         default:
             break
         }
     }
 
+    /// Called when the preview step disappears — GPS never outlives the screen.
+    func onStepDisappear() {
+        locationService.stopUpdatingLocation()
+    }
+
     func requestLocationAccess() {
-        if !permissionStepRecorded {
-            permissionStepRecorded = true
-            funnel.record(
-                .permissionsStepViewed,
-                captureId: nil,
-                metadata: ["reason": "onboarding_location_primer"]
-            )
-        }
+        recordPermissionStepViewed()
         switch locationService.authorizationStatus {
         case .authorizedWhenInUse, .authorizedAlways:
             recordPermissionOutcome("granted")
@@ -157,8 +158,20 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
     private func beginLoad(at location: CLLocation) {
         guard !hasLoaded else { return }
         hasLoaded = true
+        // One fix is all the snapshot needs — stop the stream immediately.
+        locationService.stopUpdatingLocation()
         phase = .loading
         Task { await load(at: location) }
+    }
+
+    private func recordPermissionStepViewed() {
+        guard !permissionStepRecorded else { return }
+        permissionStepRecorded = true
+        funnel.record(
+            .permissionsStepViewed,
+            captureId: nil,
+            metadata: ["reason": "onboarding_location_primer"]
+        )
     }
 
     private func recordPermissionOutcome(_ outcome: String) {
@@ -172,25 +185,20 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
     }
 
     private func load(at location: CLLocation) async {
-        var jobs: [ScanJob] = []
+        // Ensure the guest session once up front: the jobs read and the backed
+        // discovery providers both ride it. Failure is non-fatal — discovery
+        // providers that need no session (MapKit) can still return candidates.
+        let hasGuestSession: Bool
         do {
             _ = try await UserDeviceService.ensureFirebaseGuestSession(timeout: 8)
-            jobs = try await jobsRepository.fetchActiveJobs(limit: 200)
+            hasGuestSession = true
         } catch {
-            // Guest reads unavailable — the on-device candidate list below still works.
-            jobs = []
+            hasGuestSession = false
         }
 
-        var places: [PlaceDetailsLite] = []
-        if RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled {
-            places = (try? await placesNearby.nearby(
-                lat: location.coordinate.latitude,
-                lng: location.coordinate.longitude,
-                radiusMeters: Int(feedRadiusMeters.rounded()),
-                limit: 12,
-                types: ScanHomeViewModel.inferredNearbyIncludedTypes
-            )) ?? []
-        }
+        async let jobsFetch = fetchJobs(hasGuestSession: hasGuestSession)
+        async let placesFetch = fetchCandidatePlaces(at: location)
+        let (jobs, places) = await (jobsFetch, placesFetch)
 
         let items = Self.buildPreviewItems(
             jobs: jobs,
@@ -202,11 +210,26 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
         phase = items.isEmpty ? .empty : .loaded
     }
 
+    private func fetchJobs(hasGuestSession: Bool) async -> [ScanJob] {
+        guard hasGuestSession else { return [] }
+        return (try? await jobsRepository.fetchActiveJobs(limit: 200)) ?? []
+    }
+
+    private func fetchCandidatePlaces(at location: CLLocation) async -> [PlaceDetailsLite] {
+        guard RuntimeConfig.current.availability(for: .nearbyDiscovery).isEnabled else { return [] }
+        return (try? await nearbyDiscovery.discoverCandidatePlaces(
+            userLocation: location.coordinate,
+            radiusMeters: Int(feedRadiusMeters.rounded()),
+            limit: 12,
+            includedTypes: ScanHomeViewModel.inferredNearbyIncludedTypes
+        )) ?? []
+    }
+
     // MARK: - Preview assembly
 
     /// Merges published jobs and walk-in candidate places into the read-only
-    /// preview list. Published jobs keep the home feed's ranking and honest payout
-    /// labels; candidate places carry no payout and no tier. Blocked jobs never
+    /// preview list. Published jobs keep the home feed's ranking and permission
+    /// tiers; candidate places carry no payout and no tier. Blocked jobs never
     /// appear in a first-run pitch.
     static func buildPreviewItems(
         jobs: [ScanJob],
@@ -235,20 +258,20 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
                     id: "job-\(item.id)",
                     title: item.job.title,
                     detail: item.job.category ?? item.job.address,
-                    distanceMiles: item.distanceMiles,
+                    distanceLabel: item.distanceLabel,
                     payoutLabel: quotedPayoutLabel(for: item.job),
                     tier: item.permissionTier
                 )
             }
 
-        let seenNames = Set(jobItems.map { normalizedName($0.title) })
+        let seenNames = Set(jobItems.map { MapKitNearbyDiscoveryTransform.normalizedName($0.title) })
         let candidateItems: [PreviewItem] = candidatePlaces
             .map { place in
                 (place, CLLocation(latitude: place.lat, longitude: place.lng).distance(from: userLocation))
             }
             .filter { $0.1 <= feedRadiusMeters }
             .filter {
-                let name = normalizedName($0.0.displayName)
+                let name = MapKitNearbyDiscoveryTransform.normalizedName($0.0.displayName)
                 return !name.isEmpty && !seenNames.contains(name)
             }
             .sorted { $0.1 < $1.1 }
@@ -258,7 +281,7 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
                     id: "place-\(place.placeId)",
                     title: place.displayName,
                     detail: place.formattedAddress ?? "Nearby space",
-                    distanceMiles: distanceMeters / 1609.34,
+                    distanceLabel: String(format: "%.1f mi", distanceMeters / 1609.34),
                     payoutLabel: nil,
                     tier: nil
                 )
@@ -267,18 +290,13 @@ final class OnboardingNearbyPreviewViewModel: ObservableObject {
         return jobItems + candidateItems
     }
 
+    /// Pre-auth payout labels come ONLY from a real backend quote. The signed-in
+    /// feed may fall back to legacy `payoutCents`, but this public surface must
+    /// not advertise an unquoted amount (capturer copy positioning, 2026-05-13).
+    /// Formatting matches the home feed's `NumberFormatter.captureCurrency`.
     static func quotedPayoutLabel(for job: ScanJob) -> String? {
-        let cents = job.quotedPayoutCents ?? job.payoutCents
-        guard cents > 0 else { return nil }
-        return BPFormat.currency(Double(cents) / 100.0)
-    }
-
-    private static func normalizedName(_ raw: String) -> String {
-        raw
-            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
-            .lowercased()
-            .components(separatedBy: CharacterSet.alphanumerics.inverted)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        guard let cents = job.quotedPayoutCents, cents > 0 else { return nil }
+        let dollars = NSDecimalNumber(decimal: Decimal(cents) / Decimal(100))
+        return NumberFormatter.captureCurrency.string(from: dollars) ?? "$\(cents / 100)"
     }
 }

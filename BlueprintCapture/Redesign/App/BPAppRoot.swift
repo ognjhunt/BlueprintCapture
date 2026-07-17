@@ -21,8 +21,8 @@ struct BPAppRoot: View {
             if hasRegisteredAccount {
                 BPRootView()
             } else {
-                BPOnboardingFlowView { request in
-                    authMode = (request == .signIn) ? .signIn : .signUp
+                BPOnboardingFlowView { mode in
+                    authMode = mode
                     showingAuth = true
                 }
             }

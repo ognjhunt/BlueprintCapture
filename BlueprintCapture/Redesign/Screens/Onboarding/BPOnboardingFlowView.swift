@@ -12,12 +12,9 @@ import UIKit
 // this flow moves discovery in front of the auth wall, it does not bypass it.
 
 struct BPOnboardingFlowView: View {
-    enum AuthRequest {
-        case signIn
-        case createAccount
-    }
-
-    var onAuth: (AuthRequest) -> Void
+    /// Which auth form the flow wants opened. Reuses the auth view model's own
+    /// mode so there is no second enum to keep in sync.
+    var onAuth: (AuthViewModel.Mode) -> Void
 
     private enum Step {
         case welcome
@@ -28,8 +25,11 @@ struct BPOnboardingFlowView: View {
     @StateObject private var previewViewModel = OnboardingNearbyPreviewViewModel()
     // The redesign previously never recorded the funnel's first step
     // (`onboarding_started` fired only from the retired legacy flow), leaving
-    // pre-auth drop-off invisible. Record it once per install.
-    @AppStorage("com.blueprint.onboardingStartedRecorded") private var onboardingStartedRecorded = false
+    // pre-auth drop-off invisible. Record once per flow appearance — the same
+    // per-launch semantics as the legacy flow and as the permission-step events,
+    // so funnel stage ratios stay meaningful and ActivationFunnelStore.reset()
+    // works without a parallel persistent flag.
+    @State private var onboardingStartedRecorded = false
 
     var body: some View {
         Group {
@@ -47,7 +47,7 @@ struct BPOnboardingFlowView: View {
                     onBack: {
                         withAnimation(BPMotion.transition) { step = .welcome }
                     },
-                    onCreateAccount: { onAuth(.createAccount) },
+                    onCreateAccount: { onAuth(.signUp) },
                     onSignIn: { onAuth(.signIn) }
                 )
             }
@@ -95,6 +95,7 @@ struct BPNearbyPreviewStepView: View {
         .background(BP.canvas.ignoresSafeArea())
         .preferredColorScheme(.light)
         .onAppear { viewModel.onStepAppear() }
+        .onDisappear { viewModel.onStepDisappear() }
     }
 
     // MARK: Header
@@ -375,6 +376,6 @@ struct BPNearbyPreviewRow: View {
 
 #if DEBUG
 #Preview {
-    BPOnboardingFlowView(onAuth: { _ in })
+    BPOnboardingFlowView(onAuth: { (_: AuthViewModel.Mode) in })
 }
 #endif

@@ -10,19 +10,21 @@ struct OnboardingNearbyPreviewTests {
 
     @Test @MainActor func preview_showsQuotedPayoutsAndNeverFabricatesOne() async throws {
         let quoted = makeJob(
-            id: "job-quoted",
+            id: "quoted",
             title: "Mission Market",
             lat: 37.7755,
             lng: -122.4190,
             payoutCents: 4500,
             quotedPayoutCents: 4500
         )
+        // Legacy payout_cents with no real quote must NOT surface a payout on the
+        // pre-auth preview — quoted-only is the rule for this public surface.
         let unquoted = makeJob(
-            id: "job-unquoted",
+            id: "unquoted",
             title: "Valencia Hardware",
             lat: 37.7760,
             lng: -122.4185,
-            payoutCents: 0,
+            payoutCents: 3000,
             quotedPayoutCents: nil
         )
 

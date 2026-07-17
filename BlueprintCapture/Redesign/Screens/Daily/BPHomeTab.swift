@@ -18,6 +18,7 @@ struct BPHomeTab: View {
     @State private var reservingJobId: String?
     @State private var reservationError: String?
     @AppStorage("com.blueprint.hasDismissedEarningExplainer") private var hasDismissedEarningExplainer = false
+    @State private var isPreActivationCapturer = false
 
     private let targetStateService: TargetStateServiceProtocol = TargetStateService()
 
@@ -50,7 +51,7 @@ struct BPHomeTab: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
                     header
-                    if !hasDismissedEarningExplainer {
+                    if !hasDismissedEarningExplainer && isPreActivationCapturer {
                         earningExplainerCard
                     }
                     if let activeItem {
@@ -71,6 +72,10 @@ struct BPHomeTab: View {
             .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
         }
         .task {
+            // The earning explainer is a first-run affordance: only capturers who
+            // have not completed first-capture activation see it, so existing
+            // capturers don't get onboarding chrome after an app update.
+            isPreActivationCapturer = !ActivationFunnelStore.shared.snapshot().activationCompleted
             viewModel.onAppear()
             await viewModel.refresh()
         }
@@ -125,7 +130,8 @@ struct BPHomeTab: View {
     // MARK: First-session explainer
     //
     // One dismissible card that tells a brand-new capturer how the loop works.
-    // Copy stays review-gated: quoted payouts per job, payout after review.
+    // Copy stays review-gated: quoted payouts on eligible jobs only, and review
+    // decides payout eligibility rather than promising payment.
 
     private var earningExplainerCard: some View {
         VStack(alignment: .leading, spacing: Space.m) {
@@ -143,29 +149,12 @@ struct BPHomeTab: View {
                 }
                 .accessibilityLabel("Dismiss")
             }
-            explainerRow(1, "Pick a nearby job — quoted payouts show on each card.")
-            explainerRow(2, "Walk the space and record with your iPhone.")
-            explainerRow(3, "Review checks quality and rights. Approved captures pay out.")
+            BPNumberedStepRow(index: 1, text: "Pick a nearby job — eligible jobs show a quoted payout.")
+            BPNumberedStepRow(index: 2, text: "Walk the space and record with your iPhone.")
+            BPNumberedStepRow(index: 3, text: "Quality and rights review decides payout eligibility.")
         }
         .padding(Space.l)
         .bpCard()
-    }
-
-    private func explainerRow(_ index: Int, _ text: String) -> some View {
-        HStack(alignment: .center, spacing: Space.m) {
-            Text("\(index)")
-                .font(.bpMono(BPType.caption))
-                .foregroundStyle(BP.brassDeep)
-                .frame(width: 22, height: 22)
-                .overlay(
-                    RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
-                        .strokeBorder(BP.brass.opacity(0.55), lineWidth: 1)
-                )
-            Text(text)
-                .font(.bpSans(BPType.bodyS, .regular))
-                .foregroundStyle(BP.textBody)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     // MARK: Active assignment (real)
