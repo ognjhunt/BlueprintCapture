@@ -14,6 +14,10 @@ bounds that cost **without deleting capture truth prematurely.**
   (see `storage.rules`; per-object cap is 12 GiB for large industrial walkthroughs).
 - Policy file: [`storage.lifecycle.json`](../storage.lifecycle.json) (repo root, next
   to `storage.rules`).
+- Canonical source: the cross-repo lifecycle policy is owned by
+  `BlueprintCapturePipeline` at `deploy/storage/primary-capture-bucket-lifecycle.json`.
+  The repo-root `storage.lifecycle.json` here is a mirror of that policy's `scenes/`
+  rules; change the canonical file first and update this mirror to match.
 - Validator: [`scripts/validate_storage_lifecycle.py`](../scripts/validate_storage_lifecycle.py)
   (+ `scripts/validate_storage_lifecycle_tests.py`).
 
@@ -32,24 +36,26 @@ isolated; `scenes/` is the capture tree where every raw capture bundle accumulat
 
 | Age (days) | Action | Storage class match | Effect |
 |-----------:|--------|---------------------|--------|
-| 90  | `SetStorageClass` → **NEARLINE** | `STANDARD` | Warm→cool once past the review/delivery window. |
-| 365 | `SetStorageClass` → **COLDLINE** | `STANDARD`, `NEARLINE` | Cheap cold storage for long-lived provenance. |
-| 3650 | `Delete` | (any) | Deletion only after a **10-year** documented horizon. |
+| 30  | `SetStorageClass` → **NEARLINE** | `STANDARD` | Warm→cool once past the review/delivery window. |
+| 90  | `SetStorageClass` → **COLDLINE** | `STANDARD`, `NEARLINE` | Cheap cold storage for long-lived provenance. |
+| 365 | `SetStorageClass` → **ARCHIVE** | `STANDARD`, `NEARLINE`, `COLDLINE` | Cheapest tier; raw capture truth is preserved forever, archived. |
 
-- **Review / delivery window: 90 days.** No lifecycle action fires before this. Raw
+- **Review / delivery window: 30 days.** No lifecycle action fires before this. Raw
   captures stay in STANDARD (hot) and undeleted while a capture is still being reviewed
   and delivered to a buyer.
-- **Cost is bounded by tiering, not deletion.** COLDLINE is roughly an order of magnitude
-  cheaper per GB than STANDARD; the accumulating warehouse/factory videos land there at
-  1 year and stay retrievable (retrieval incurs a small per-GB fee — acceptable for cold
-  provenance that is rarely re-read).
-- **Minimum retention floor: 2555 days (7 years).** The committed `Delete` age is 3650
-  days (10 years), comfortably above the floor. The validator **fails closed** if any
-  future edit sets a `Delete` age below the 7-year floor, or before the object has been
-  tiered to COLDLINE, or inside the review/delivery window.
+- **No deletion.** Raw capture truth is preserved forever; cost is bounded entirely by
+  tiering down to ARCHIVE (roughly two orders of magnitude cheaper per GB than
+  STANDARD; retrieval incurs a per-GB fee — acceptable for cold provenance that is
+  rarely re-read).
+- **Minimum retention floor: 2555 days (7 years).** The committed policy has no
+  `Delete` rule at all. The validator **fails closed** if any future edit adds a
+  `Delete` age below the 7-year floor, or before the object has been tiered to
+  COLDLINE, or inside the review/delivery window.
 
-Ages are configurable: edit `storage.lifecycle.json`, keep the guardrails
-(review window ≥ 90d, delete ≥ 7y, delete after COLDLINE, COLDLINE after NEARLINE),
+Ages are configurable: edit the canonical policy in `BlueprintCapturePipeline`
+(`deploy/storage/primary-capture-bucket-lifecycle.json`), mirror it into
+`storage.lifecycle.json`, keep the guardrails (review window ≥ 30d, no delete — or,
+if ever reintroduced, delete ≥ 7y and only after COLDLINE; COLDLINE after NEARLINE),
 re-run the validator, and re-apply.
 
 ## Capture-truth guardrail
@@ -57,11 +63,12 @@ re-run the validator, and re-apply.
 Raw capture bundles are **authoritative provenance** (see `PLATFORM_CONTEXT.md`,
 `docs/CAPTURE_RAW_CONTRACT_V3.md`). This policy therefore:
 
-1. **Never** deletes or tiers inside the review/delivery window (< 90 days).
-2. **Never** relies on deletion for routine cost control — cost is bounded by COLDLINE
-   tiering, which preserves the object.
-3. Deletes **only** after a deliberate, long (10-year) documented retention horizon, and
-   **only** after the object has already been cold-tiered.
+1. **Never** deletes or tiers inside the review/delivery window (< 30 days).
+2. **Never** relies on deletion for routine cost control — cost is bounded by
+   COLDLINE/ARCHIVE tiering, which preserves the object.
+3. Deletes **nothing**: the committed policy has no `Delete` rule. If deletion is ever
+   reintroduced it must sit behind a deliberate, long (≥ 7-year) documented retention
+   horizon, and **only** after the object has already been cold-tiered.
 4. Is enforced by `validate_storage_lifecycle.py`, which rejects any drift toward
    aggressive deletion so a well-meaning cost-cutting edit cannot destroy capture truth.
 

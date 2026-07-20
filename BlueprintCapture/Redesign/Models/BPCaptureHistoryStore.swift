@@ -89,11 +89,15 @@ final class BPCaptureHistoryStore: ObservableObject {
         }
 
         do {
-            // Equality-only query so no composite index is required; sorted
+            // Ordered by submission time so the 200-document limit keeps the
+            // newest captures instead of truncating arbitrarily; backed by the
+            // creator_id + submitted_at DESC composite index in
+            // firestore.indexes.json. Display order is still sorted
             // client-side by capture time.
             let snapshot = try await Firestore.firestore()
                 .collection("capture_submissions")
                 .whereField("creator_id", isEqualTo: user.uid)
+                .order(by: "submitted_at", descending: true)
                 .limit(to: 200)
                 .getDocuments()
 

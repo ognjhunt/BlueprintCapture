@@ -45,8 +45,11 @@ from pathlib import Path
 #    long as they respect these guardrails. See docs/STORAGE_RETENTION_POLICY_*.md. ──
 
 # Review + delivery window during which a raw capture must stay hot and undeleted.
-# No lifecycle action (tiering OR deletion) may fire before this age.
-REVIEW_DELIVERY_WINDOW_DAYS = 90
+# No lifecycle action (tiering OR deletion) may fire before this age. Mirrors the
+# canonical cross-repo policy (BlueprintCapturePipeline
+# deploy/storage/primary-capture-bucket-lifecycle.json), which tiers to NEARLINE
+# at 30 days.
+REVIEW_DELIVERY_WINDOW_DAYS = 30
 
 # Minimum age before ANY Delete action may run. Raw capture bundles are authoritative
 # provenance; deletion is only permitted after a long, deliberate retention horizon.
@@ -170,7 +173,9 @@ def validate_lifecycle(config: object, source: str) -> None:
             )
 
     tier_summary = ", ".join(
-        f"{cls}@{tiering_ages[cls]}d" for cls in ("NEARLINE", "COLDLINE") if cls in tiering_ages
+        f"{cls}@{tiering_ages[cls]}d"
+        for cls in ("NEARLINE", "COLDLINE", "ARCHIVE")
+        if cls in tiering_ages
     )
     delete_summary = (
         ", ".join(f"delete@{a}d" for a in sorted(delete_ages)) if delete_ages else "no-delete"

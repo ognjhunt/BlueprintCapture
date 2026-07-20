@@ -57,6 +57,7 @@ final class ReferralService {
             .document(userId)
             .collection("referrals")
             .order(by: "referredAt", descending: true)
+            .limit(to: 200)
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
