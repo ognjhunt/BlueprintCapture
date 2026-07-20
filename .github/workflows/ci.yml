@@ -124,6 +124,12 @@ jobs:
       - name: Storage lifecycle validator
         run: python3 scripts/validate_storage_lifecycle.py
 
+      - name: Embedded storage credential validator tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_no_embedded_storage_credentials_tests.py
+
+      - name: Embedded storage credential validator
+        run: python3 scripts/validate_no_embedded_storage_credentials.py
+
   # ── Swift unit + UI tests ──
   swift-test:
     name: Swift tests (macOS)
