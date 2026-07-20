@@ -2077,6 +2077,11 @@ export const extractFrames = onObjectFinalized(
     if (packingPlan) {
       // Packed layout: a few tar archives + packing manifest + index.jsonl.
       // Individual frame JPEGs are NOT uploaded (that is the point).
+      // Archives are built in memory and streamed with file().save() one at
+      // a time — never written to tmpfs and never held concurrently — so
+      // packing adds at most one ~archive-sized buffer (frames_per_archive ×
+      // frame size) over the unpacked path's footprint instead of a second
+      // full copy of every frame in the 4 GiB memory-backed /tmp.
       for (const archive of packingPlan.archives) {
         const archiveBuffer = buildTarArchive(
           archive.members.map((member) => ({
@@ -2084,26 +2089,20 @@ export const extractFrames = onObjectFinalized(
             data: readFileSync(join(framesDir, member)),
           }))
         );
-        const archivePath = join(framesDir, archive.archiveName);
-        writeFileSync(archivePath, archiveBuffer);
-        uploads.push(
-          bucket.upload(archivePath, {
-            destination: `${pathInfo.framesPrefix}/${archive.archiveName}`,
+        await bucket
+          .file(`${pathInfo.framesPrefix}/${archive.archiveName}`)
+          .save(archiveBuffer, {
+            resumable: false,
             metadata: { contentType: "application/x-tar" },
-          })
-        );
+          });
       }
-      const packingManifestPath = join(framesDir, "packing_manifest.json");
-      writeFileSync(
-        packingManifestPath,
-        JSON.stringify(buildPackingManifest(packingPlan, packingBatch), null, 2),
-        { encoding: "utf8" }
-      );
       uploads.push(
-        bucket.upload(packingManifestPath, {
-          destination: `${pathInfo.framesPrefix}/packing_manifest.json`,
-          metadata: { contentType: "application/json" },
-        })
+        bucket
+          .file(`${pathInfo.framesPrefix}/packing_manifest.json`)
+          .save(JSON.stringify(buildPackingManifest(packingPlan, packingBatch), null, 2), {
+            resumable: false,
+            metadata: { contentType: "application/json" },
+          })
       );
       uploads.push(
         bucket.upload(indexPath, {
