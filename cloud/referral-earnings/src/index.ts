@@ -969,6 +969,11 @@ async function recordDemandSnapshotRefreshCompleted(nowMs: number): Promise<void
   }
 }
 
+// Concurrent submissions on a warm instance share one in-flight refresh
+// instead of each rewriting up to 200 capture_jobs; cross-instance overlap
+// remains best-effort via the marker doc.
+let demandSnapshotRefreshInFlight: Promise<void> | null = null;
+
 async function refreshCaptureJobDemandSnapshotsIfStale(): Promise<void> {
   const nowMs = Date.now();
   if (
@@ -976,25 +981,33 @@ async function refreshCaptureJobDemandSnapshotsIfStale(): Promise<void> {
   ) {
     return;
   }
-  try {
-    const marker = await db.doc(DEMAND_SNAPSHOT_REFRESH_MARKER_PATH).get();
-    const completedAt = marker.data()?.["last_refresh_completed_at"];
-    if (completedAt instanceof Timestamp) {
-      const completedAtMs = completedAt.toMillis();
-      lastDemandSnapshotRefreshCompletedAtMs = Math.max(
-        lastDemandSnapshotRefreshCompletedAtMs ?? 0,
-        completedAtMs,
-      );
-      if (isRefreshFresh(completedAtMs, nowMs, DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS)) return;
-    }
-  } catch (error) {
-    logger.warn("Failed to read demand snapshot refresh marker (best-effort)", { error });
+  if (demandSnapshotRefreshInFlight) {
+    return demandSnapshotRefreshInFlight;
   }
-  const [activeSignals, strategicWeights] = await Promise.all([
-    loadActiveDemandSignals(),
-    loadStrategicWeights(),
-  ]);
-  await refreshCaptureJobDemandSnapshots(activeSignals, strategicWeights);
+  demandSnapshotRefreshInFlight = (async () => {
+    try {
+      const marker = await db.doc(DEMAND_SNAPSHOT_REFRESH_MARKER_PATH).get();
+      const completedAt = marker.data()?.["last_refresh_completed_at"];
+      if (completedAt instanceof Timestamp) {
+        const completedAtMs = completedAt.toMillis();
+        lastDemandSnapshotRefreshCompletedAtMs = Math.max(
+          lastDemandSnapshotRefreshCompletedAtMs ?? 0,
+          completedAtMs,
+        );
+        if (isRefreshFresh(completedAtMs, nowMs, DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS)) return;
+      }
+    } catch (error) {
+      logger.warn("Failed to read demand snapshot refresh marker (best-effort)", { error });
+    }
+    const [activeSignals, strategicWeights] = await Promise.all([
+      loadActiveDemandSignals(),
+      loadStrategicWeights(),
+    ]);
+    await refreshCaptureJobDemandSnapshots(activeSignals, strategicWeights);
+  })().finally(() => {
+    demandSnapshotRefreshInFlight = null;
+  });
+  return demandSnapshotRefreshInFlight;
 }
 
 async function refreshCaptureJobDemandSnapshots(

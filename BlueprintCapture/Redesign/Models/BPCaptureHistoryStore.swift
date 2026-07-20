@@ -89,15 +89,18 @@ final class BPCaptureHistoryStore: ObservableObject {
         }
 
         do {
-            // Ordered by submission time so the 200-document limit keeps the
-            // newest captures instead of truncating arbitrarily; backed by the
-            // creator_id + submitted_at DESC composite index in
-            // firestore.indexes.json. Display order is still sorted
-            // client-side by capture time.
+            // Ordered by capture start time so the 200-document limit keeps
+            // the newest captures instead of truncating arbitrarily; backed by
+            // the creator_id + lifecycle.capture_started_at DESC composite
+            // index in firestore.indexes.json. Ordering must use a field every
+            // record carries — failed uploads have no submitted_at, and
+            // Firestore drops documents missing the ordered field, which would
+            // hide the "Upload failed" / "Needs recapture" entries. Display
+            // order is still sorted client-side by capture time.
             let snapshot = try await Firestore.firestore()
                 .collection("capture_submissions")
                 .whereField("creator_id", isEqualTo: user.uid)
-                .order(by: "submitted_at", descending: true)
+                .order(by: "lifecycle.capture_started_at", descending: true)
                 .limit(to: 200)
                 .getDocuments()
 

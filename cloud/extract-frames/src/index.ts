@@ -199,12 +199,21 @@ async function waitForObjectExists(
   return false;
 }
 
+// Monotonic sequence keeps parallel downloads of same-named objects (e.g. two
+// session_intrinsics.json sidecars loaded in one Promise.all batch) from
+// colliding on a shared /tmp path within the same millisecond.
+let jsonDownloadSequence = 0;
+
 async function loadJsonObject(
   bucket: StorageBucket,
   objectName: string,
   tmpDir: string
 ): Promise<Record<string, unknown> | null> {
-  const localPath = join(tmpDir, `json-${Date.now()}-${basename(objectName)}`);
+  jsonDownloadSequence += 1;
+  const localPath = join(
+    tmpDir,
+    `json-${Date.now()}-${jsonDownloadSequence}-${basename(objectName)}`
+  );
   try {
     await bucket.file(objectName).download({ destination: localPath });
     const raw = readFileSync(localPath, "utf8");

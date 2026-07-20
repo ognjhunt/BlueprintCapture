@@ -40,9 +40,13 @@ class CaptureHistoryRepository @Inject constructor(
     suspend fun fetchHistory(): List<CaptureHistoryEntry> {
         val uid = auth.currentUser?.uid ?: return emptyList()
         return runCatching {
+            // Order by a field every record carries: failed uploads have no
+            // submitted_at, and Firestore drops documents missing the ordered
+            // field, which would hide "needs recapture" entries. Backed by the
+            // creator_id + lifecycle.capture_started_at DESC composite index.
             val snap = firestore.collection("capture_submissions")
                 .whereEqualTo("creator_id", uid)
-                .orderBy("submitted_at", Query.Direction.DESCENDING)
+                .orderBy("lifecycle.capture_started_at", Query.Direction.DESCENDING)
                 .limit(100)
                 .get()
                 .awaitResult()
