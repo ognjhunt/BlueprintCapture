@@ -28,6 +28,13 @@ import {
   type CapturePathInfo,
 } from "./capture-paths.js";
 import { isDeterministicJsonlError, parseStrictJsonLines } from "./jsonl.js";
+import {
+  buildPackingManifest,
+  buildTarArchive,
+  framePackingEnabled,
+  framesPerArchive,
+  planFramePacking,
+} from "./frame-packing.js";
 
 export {
   captureObjectKind,
@@ -1912,6 +1919,15 @@ export const extractFrames = onObjectFinalized(
     let matchedPoseCount = 0;
     const poseDeltaSecValues: number[] = [];
 
+    // Frame packing (SCALE2-03, frames_index.v2): when enabled, frames ship
+    // as a few tar archives instead of one object each; index entries carry
+    // the archive linkage so readers can resolve members without heuristics.
+    const packingEnabled = framePackingEnabled();
+    const packingBatch = framesPerArchive();
+    const packingPlan = packingEnabled
+      ? planFramePacking(sortedFiles, packingBatch)
+      : null;
+
     for (let i = 0; i < sortedFiles.length; i++) {
       const frameId = zeroPad(i + 1, 6);
       const t = i < ptsTimes.length ? ptsTimes[i] : i / 5.0;
@@ -1921,6 +1937,12 @@ export const extractFrames = onObjectFinalized(
         frame_id: frameId,
         t_video_sec: tVideoSec,
       };
+      if (packingPlan) {
+        const memberName = sortedFiles[i];
+        entry.packaging = "tar";
+        entry.archive = packingPlan.memberToArchive.get(memberName) ?? null;
+        entry.archive_member = memberName;
+      }
 
       let poseMatchType: PoseMatchType | undefined;
       let pose: PoseRow | undefined = posesByFrameId.get(frameId);
@@ -2052,20 +2074,59 @@ export const extractFrames = onObjectFinalized(
     );
 
     const uploads: Promise<unknown>[] = [];
-    for (const fname of readdirSync(framesDir)) {
-      const localPath = join(framesDir, fname);
-      const dest = `${pathInfo.framesPrefix}/${fname}`;
-      const ct = fname.endsWith(".jpg")
-        ? "image/jpeg"
-        : fname.endsWith(".jsonl")
-        ? "application/json"
-        : undefined;
+    if (packingPlan) {
+      // Packed layout: a few tar archives + packing manifest + index.jsonl.
+      // Individual frame JPEGs are NOT uploaded (that is the point).
+      for (const archive of packingPlan.archives) {
+        const archiveBuffer = buildTarArchive(
+          archive.members.map((member) => ({
+            name: member,
+            data: readFileSync(join(framesDir, member)),
+          }))
+        );
+        const archivePath = join(framesDir, archive.archiveName);
+        writeFileSync(archivePath, archiveBuffer);
+        uploads.push(
+          bucket.upload(archivePath, {
+            destination: `${pathInfo.framesPrefix}/${archive.archiveName}`,
+            metadata: { contentType: "application/x-tar" },
+          })
+        );
+      }
+      const packingManifestPath = join(framesDir, "packing_manifest.json");
+      writeFileSync(
+        packingManifestPath,
+        JSON.stringify(buildPackingManifest(packingPlan, packingBatch), null, 2),
+        { encoding: "utf8" }
+      );
       uploads.push(
-        bucket.upload(localPath, {
-          destination: dest,
-          metadata: ct ? { contentType: ct } : undefined,
+        bucket.upload(packingManifestPath, {
+          destination: `${pathInfo.framesPrefix}/packing_manifest.json`,
+          metadata: { contentType: "application/json" },
         })
       );
+      uploads.push(
+        bucket.upload(indexPath, {
+          destination: `${pathInfo.framesPrefix}/index.jsonl`,
+          metadata: { contentType: "application/json" },
+        })
+      );
+    } else {
+      for (const fname of readdirSync(framesDir)) {
+        const localPath = join(framesDir, fname);
+        const dest = `${pathInfo.framesPrefix}/${fname}`;
+        const ct = fname.endsWith(".jpg")
+          ? "image/jpeg"
+          : fname.endsWith(".jsonl")
+          ? "application/json"
+          : undefined;
+        uploads.push(
+          bucket.upload(localPath, {
+            destination: dest,
+            metadata: ct ? { contentType: ct } : undefined,
+          })
+        );
+      }
     }
     await Promise.all(uploads);
 
