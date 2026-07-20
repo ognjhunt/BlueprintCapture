@@ -57,6 +57,7 @@ final class ReferralService {
             .document(userId)
             .collection("referrals")
             .order(by: "referredAt", descending: true)
+            .limit(to: 200)
             .getDocuments()
 
         return snapshot.documents.compactMap { doc in
@@ -82,16 +83,35 @@ final class ReferralService {
         }
     }
 
+    /// Stats come from server-side aggregation queries over the full referrals
+    /// subcollection, not from the 200-entry `fetchReferrals` list, so
+    /// high-volume referrers see complete totals while list reads stay bounded.
     func fetchStats(userId: String) async throws -> ReferralStats {
-        let referrals = try await fetchReferrals(userId: userId)
+        let referrals = db.collection("users")
+            .document(userId)
+            .collection("referrals")
 
-        let signUps = referrals.filter { $0.status != .invited }.count
-        let active = referrals.filter { $0.status == .active }.count
-        let totalEarnings = referrals.reduce(0) { $0 + $1.lifetimeEarningsCents }
+        let totalsSnapshot = try await referrals
+            .aggregate([AggregateField.count(), AggregateField.sum("lifetimeEarningsCents")])
+            .getAggregation(source: .server)
+        let invitedSnapshot = try await referrals
+            .whereField("status", isEqualTo: ReferralStatus.invited.rawValue)
+            .count
+            .getAggregation(source: .server)
+        let activeSnapshot = try await referrals
+            .whereField("status", isEqualTo: ReferralStatus.active.rawValue)
+            .count
+            .getAggregation(source: .server)
+
+        let invitesSent = (totalsSnapshot.get(AggregateField.count()) as? NSNumber)?.intValue ?? 0
+        let totalEarnings =
+            (totalsSnapshot.get(AggregateField.sum("lifetimeEarningsCents")) as? NSNumber)?.intValue ?? 0
+        let invited = invitedSnapshot.count.intValue
+        let active = activeSnapshot.count.intValue
 
         return ReferralStats(
-            invitesSent: referrals.count,
-            signUps: signUps,
+            invitesSent: invitesSent,
+            signUps: max(0, invitesSent - invited),
             activeCapturers: active,
             lifetimeEarningsCents: totalEarnings
         )

@@ -102,7 +102,7 @@ class StorageLifecycleValidatorTests(unittest.TestCase):
 
     def test_delete_inside_review_window_fails(self) -> None:
         policy = copy.deepcopy(GOOD_POLICY)
-        policy["rule"][2]["condition"]["age"] = 30
+        policy["rule"][2]["condition"]["age"] = 14
         self.assert_fails(policy, "review/delivery window")
 
     def test_delete_before_coldline_fails(self) -> None:

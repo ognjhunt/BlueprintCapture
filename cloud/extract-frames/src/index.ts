@@ -51,6 +51,10 @@ const ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS =
 // artifact trail (required_action: segmented/Cloud Run ingest) instead of
 // OOM-crash-looping mid-extraction; the segmented path must pick them up.
 export const DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES = 1_000_000_000;
+// Each instance is 4GiB × 2 cpu, so unbounded scale-out is the dominant burst
+// cost risk. 10 instances roughly matches pipeline dispatch concurrency while
+// capping worst-case spend; overridable per-deploy without a code change.
+export const DEFAULT_EXTRACT_FRAMES_MAX_INSTANCES = 10;
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
@@ -195,12 +199,21 @@ async function waitForObjectExists(
   return false;
 }
 
+// Monotonic sequence keeps parallel downloads of same-named objects (e.g. two
+// session_intrinsics.json sidecars loaded in one Promise.all batch) from
+// colliding on a shared /tmp path within the same millisecond.
+let jsonDownloadSequence = 0;
+
 async function loadJsonObject(
   bucket: StorageBucket,
   objectName: string,
   tmpDir: string
 ): Promise<Record<string, unknown> | null> {
-  const localPath = join(tmpDir, `json-${Date.now()}-${basename(objectName)}`);
+  jsonDownloadSequence += 1;
+  const localPath = join(
+    tmpDir,
+    `json-${Date.now()}-${jsonDownloadSequence}-${basename(objectName)}`
+  );
   try {
     await bucket.file(objectName).download({ destination: localPath });
     const raw = readFileSync(localPath, "utf8");
@@ -317,6 +330,16 @@ export function maxInlineExtractFramesVideoBytes(): number {
   const parsed = Number(raw);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     return DEFAULT_MAX_INLINE_EXTRACT_FRAMES_VIDEO_BYTES;
+  }
+  return parsed;
+}
+
+export function extractFramesMaxInstances(): number {
+  const raw = process.env.BLUEPRINT_EXTRACT_FRAMES_MAX_INSTANCES;
+  if (!raw) return DEFAULT_EXTRACT_FRAMES_MAX_INSTANCES;
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return DEFAULT_EXTRACT_FRAMES_MAX_INSTANCES;
   }
   return parsed;
 }
@@ -1611,6 +1634,7 @@ export const extractFrames = onObjectFinalized(
     memory: "4GiB",
     timeoutSeconds: 540,
     cpu: 2,
+    maxInstances: extractFramesMaxInstances(),
   },
   async (event) => {
     const bucketName = event.bucket;
@@ -1686,14 +1710,25 @@ export const extractFrames = onObjectFinalized(
       return;
     }
 
-    const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 3000);
-    const rawManifest = manifestExists ? await loadJsonObject(bucket, manifestObjectName, tmp) : null;
-    const sidecarSiteIdentity = await loadJsonObject(bucket, siteIdentityObjectName, tmp);
-    const sidecarCaptureTopology = await loadJsonObject(bucket, captureTopologyObjectName, tmp);
-    const sidecarCaptureMode = await loadJsonObject(bucket, captureModeObjectName, tmp);
-    const sidecarRouteAnchors = await loadJsonObject(bucket, routeAnchorsObjectName, tmp);
-    const sidecarCheckpointEvents = await loadJsonObject(bucket, checkpointEventsObjectName, tmp);
-    const sidecarRelocalizationEvents = await loadJsonObject(bucket, relocalizationEventsObjectName, tmp);
+    const manifestExists = await waitForObjectExists(bucket, manifestObjectName, 45000, 1000);
+    // The manifest and sidecar loads are independent object reads; batch them.
+    const [
+      rawManifest,
+      sidecarSiteIdentity,
+      sidecarCaptureTopology,
+      sidecarCaptureMode,
+      sidecarRouteAnchors,
+      sidecarCheckpointEvents,
+      sidecarRelocalizationEvents,
+    ] = await Promise.all([
+      manifestExists ? loadJsonObject(bucket, manifestObjectName, tmp) : Promise.resolve(null),
+      loadJsonObject(bucket, siteIdentityObjectName, tmp),
+      loadJsonObject(bucket, captureTopologyObjectName, tmp),
+      loadJsonObject(bucket, captureModeObjectName, tmp),
+      loadJsonObject(bucket, routeAnchorsObjectName, tmp),
+      loadJsonObject(bucket, checkpointEventsObjectName, tmp),
+      loadJsonObject(bucket, relocalizationEventsObjectName, tmp),
+    ]);
     const manifest = mergeManifestWithSidecars(rawManifest, {
       siteIdentity: sidecarSiteIdentity,
       captureTopology: sidecarCaptureTopology,
@@ -1702,47 +1737,78 @@ export const extractFrames = onObjectFinalized(
       checkpointEvents: sidecarCheckpointEvents,
       relocalizationEvents: sidecarRelocalizationEvents,
     });
-    const completionMarker =
-      objectKind === "completion_marker"
-        ? await loadJsonObject(bucket, completionMarkerObjectName, tmp)
-        : null;
     const manifestValidation = validateManifest(manifest);
     const walkthroughObjectName = resolveWalkthroughObjectName(manifest, pathInfo, objectName);
-    const walkthroughExists = await waitForObjectExists(bucket, walkthroughObjectName, 45000, 3000);
-
-    const poseIndex = await loadArkitPoses(bucket, pathInfo.rawPrefix, tmp);
-    const arkitFrameQuality = await loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp);
-    const intrinsics = await loadJsonObject(bucket, intrinsicsObjectName, tmp);
+    const [walkthroughExists, completionMarker, poseIndex, arkitFrameQuality, intrinsics] =
+      await Promise.all([
+        waitForObjectExists(bucket, walkthroughObjectName, 45000, 1000),
+        objectKind === "completion_marker"
+          ? loadJsonObject(bucket, completionMarkerObjectName, tmp)
+          : Promise.resolve(null),
+        loadArkitPoses(bucket, pathInfo.rawPrefix, tmp),
+        loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp),
+        loadJsonObject(bucket, intrinsicsObjectName, tmp),
+      ]);
+    // Independent existence/content probes — run as one parallel batch instead
+    // of ~20 sequential round-trips. Same probes, same ArtifactAvailability.
+    const [
+      arkitDepthAvailable,
+      arkitConfidenceAvailable,
+      arkitMeshesAvailable,
+      motionAvailable,
+      arcorePoseAvailable,
+      arcoreSessionIntrinsics,
+      arcoreDepthManifestExists,
+      arcoreDepthPrefixHasObjects,
+      arcoreConfidenceManifestExists,
+      arcoreConfidencePrefixHasObjects,
+      pointCloudAvailable,
+      planesAvailable,
+      trackingStateAvailable,
+      lightEstimateAvailable,
+      geospatialAvailable,
+      companionPhonePoseAvailable,
+      companionPhoneSessionIntrinsics,
+      companionPhoneCalibrationExists,
+    ] = await Promise.all([
+      prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/depth/`),
+      prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/confidence/`),
+      prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/poses.jsonl`),
+      loadJsonObject(bucket, `${pathInfo.rawPrefix}/arcore/session_intrinsics.json`, tmp),
+      fileExists(bucket, `${pathInfo.rawPrefix}/arcore/depth_manifest.json`),
+      prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/depth/`),
+      fileExists(bucket, `${pathInfo.rawPrefix}/arcore/confidence_manifest.json`),
+      prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/confidence/`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/point_cloud.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/planes.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/tracking_state.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/light_estimates.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/geospatial.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/companion_phone/poses.jsonl`),
+      loadJsonObject(bucket, `${pathInfo.rawPrefix}/companion_phone/session_intrinsics.json`, tmp),
+      fileExists(bucket, `${pathInfo.rawPrefix}/companion_phone/calibration.json`),
+    ]);
     const actualAvailability: ArtifactAvailability = {
       arkit_poses: poseIndex.byFrameId.size > 0 || poseIndex.byTime.length > 0,
       arkit_intrinsics: isValidIntrinsicsPayload(intrinsics),
-      arkit_depth: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/depth/`),
-      arkit_confidence: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/confidence/`),
-      arkit_meshes: await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
-      motion: await fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
-      camera_pose: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/poses.jsonl`),
-      camera_intrinsics: isValidIntrinsicsPayload(
-        await loadJsonObject(bucket, `${pathInfo.rawPrefix}/arcore/session_intrinsics.json`, tmp)
-      ),
-      depth:
-        (await fileExists(bucket, `${pathInfo.rawPrefix}/arcore/depth_manifest.json`)) ||
-        (await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/depth/`)),
-      depth_confidence:
-        (await fileExists(bucket, `${pathInfo.rawPrefix}/arcore/confidence_manifest.json`)) ||
-        (await prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arcore/confidence/`)),
-      point_cloud: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/point_cloud.jsonl`),
-      planes: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/planes.jsonl`),
-      tracking_state: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/tracking_state.jsonl`),
-      light_estimate: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/light_estimates.jsonl`),
-      geospatial: await fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/geospatial.jsonl`),
-      companion_phone_pose: await fileHasContent(bucket, `${pathInfo.rawPrefix}/companion_phone/poses.jsonl`),
-      companion_phone_intrinsics: isValidIntrinsicsPayload(
-        await loadJsonObject(bucket, `${pathInfo.rawPrefix}/companion_phone/session_intrinsics.json`, tmp)
-      ),
-      companion_phone_calibration: await fileExists(
-        bucket,
-        `${pathInfo.rawPrefix}/companion_phone/calibration.json`
-      ),
+      arkit_depth: arkitDepthAvailable,
+      arkit_confidence: arkitConfidenceAvailable,
+      arkit_meshes: arkitMeshesAvailable,
+      motion: motionAvailable,
+      camera_pose: arcorePoseAvailable,
+      camera_intrinsics: isValidIntrinsicsPayload(arcoreSessionIntrinsics),
+      depth: arcoreDepthManifestExists || arcoreDepthPrefixHasObjects,
+      depth_confidence: arcoreConfidenceManifestExists || arcoreConfidencePrefixHasObjects,
+      point_cloud: pointCloudAvailable,
+      planes: planesAvailable,
+      tracking_state: trackingStateAvailable,
+      light_estimate: lightEstimateAvailable,
+      geospatial: geospatialAvailable,
+      companion_phone_pose: companionPhonePoseAvailable,
+      companion_phone_intrinsics: isValidIntrinsicsPayload(companionPhoneSessionIntrinsics),
+      companion_phone_calibration: companionPhoneCalibrationExists,
     };
     const file = bucket.file(walkthroughObjectName);
     if (walkthroughExists) {

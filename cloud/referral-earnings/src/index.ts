@@ -44,6 +44,13 @@ import {
   fetchDailyResearchFindings,
 } from "./autonomous-demand-research.js";
 import {
+  DEFAULT_DEMAND_FEED_CACHE_TTL_MS,
+  DEFAULT_DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS,
+  SingleFlightTtlCache,
+  isRefreshFresh,
+  nonNegativeIntFromEnv,
+} from "./demand-feed-cache.js";
+import {
   annotateCaptureJobs,
   buildDemandSignalsForRobotTeamRequest,
   buildDemandSignalsForSiteOperatorSubmission,
@@ -68,6 +75,12 @@ import {
 if (getApps().length === 0) initializeApp();
 
 const db = getFirestore();
+
+// Scale-out bounds: no function here needs unbounded instances. HTTP surfaces
+// and Firestore triggers cap at 20; scheduled jobs are singletons.
+const HTTP_MAX_INSTANCES = 20;
+const FIRESTORE_TRIGGER_MAX_INSTANCES = 20;
+const SCHEDULED_MAX_INSTANCES = 1;
 
 // Commission/bonus math lives in referral-core.ts so it stays unit-tested.
 
@@ -325,6 +338,7 @@ export const onCaptureApproved = onDocumentWritten(
   {
     document: "capture_submissions/{captureId}",
     region: "us-central1",
+    maxInstances: FIRESTORE_TRIGGER_MAX_INSTANCES,
   },
   async (event) => {
     const captureId = event.params.captureId;
@@ -535,6 +549,7 @@ export const onUserProfileWritten = onDocumentWritten(
   {
     document: "users/{userId}",
     region: "us-central1",
+    maxInstances: FIRESTORE_TRIGGER_MAX_INSTANCES,
   },
   async (event) => {
     const userId = event.params.userId;
@@ -694,6 +709,7 @@ export const syncCaptureLifecycleToOperatingGraph = onDocumentWritten(
   {
     document: "capture_submissions/{captureId}",
     region: "us-central1",
+    maxInstances: FIRESTORE_TRIGGER_MAX_INSTANCES,
   },
   async (event) => {
     const captureId = event.params.captureId;
@@ -732,7 +748,7 @@ export const syncCaptureLifecycleToOperatingGraph = onDocumentWritten(
  * or call with an admin-claimed Firebase ID token.
  */
 export const updateCaptureStatus = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).json({ error: "Method not allowed" });
@@ -903,12 +919,106 @@ async function loadActiveCaptureJobs(): Promise<FirestoreJobDoc[]> {
   return snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() as Record<string, unknown> }));
 }
 
+type DemandFeedInputs = {
+  signals: DemandSignalDocument[];
+  jobs: FirestoreJobDoc[];
+  strategicWeights: StrategicWeightConfig | undefined;
+};
+
+// Shared feed inputs are identical for every caller; per-request ranking and
+// filtering (which use the caller's location) still run per request in
+// handleDemandOpportunityFeed. The feed is advisory UX, so a short TTL of
+// staleness is acceptable. Set BLUEPRINT_DEMAND_FEED_CACHE_TTL_MS=0 to disable.
+const demandFeedInputsCache = new SingleFlightTtlCache<DemandFeedInputs>(
+  async () => {
+    const [signals, jobs, strategicWeights] = await Promise.all([
+      loadActiveDemandSignals(),
+      loadActiveCaptureJobs(),
+      loadStrategicWeights(),
+    ]);
+    return { signals, jobs, strategicWeights };
+  },
+  nonNegativeIntFromEnv("BLUEPRINT_DEMAND_FEED_CACHE_TTL_MS", DEFAULT_DEMAND_FEED_CACHE_TTL_MS),
+);
+
+// Debounce for capture_jobs demand-snapshot rewrites triggered by public
+// demand submissions. The module variable short-circuits repeat refreshes on
+// a warm instance; the Firestore marker doc is a best-effort cross-instance
+// guard (a rare double refresh is acceptable, a refresh per submission is not).
+// Scheduled refreshes stay unconditional. Set
+// BLUEPRINT_DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS=0 to disable the debounce.
+const DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS = nonNegativeIntFromEnv(
+  "BLUEPRINT_DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS",
+  DEFAULT_DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS,
+);
+const DEMAND_SNAPSHOT_REFRESH_MARKER_PATH = "demand_refresh_state/capture_jobs_snapshots";
+let lastDemandSnapshotRefreshCompletedAtMs: number | null = null;
+
+async function recordDemandSnapshotRefreshCompleted(nowMs: number): Promise<void> {
+  lastDemandSnapshotRefreshCompletedAtMs = nowMs;
+  try {
+    await db.doc(DEMAND_SNAPSHOT_REFRESH_MARKER_PATH).set(
+      {
+        last_refresh_completed_at: Timestamp.fromMillis(nowMs),
+        updated_at: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    logger.warn("Failed to write demand snapshot refresh marker (best-effort)", { error });
+  }
+}
+
+// Concurrent submissions on a warm instance share one in-flight refresh
+// instead of each rewriting up to 200 capture_jobs; cross-instance overlap
+// remains best-effort via the marker doc.
+let demandSnapshotRefreshInFlight: Promise<void> | null = null;
+
+async function refreshCaptureJobDemandSnapshotsIfStale(): Promise<void> {
+  const nowMs = Date.now();
+  if (
+    isRefreshFresh(lastDemandSnapshotRefreshCompletedAtMs, nowMs, DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS)
+  ) {
+    return;
+  }
+  if (demandSnapshotRefreshInFlight) {
+    return demandSnapshotRefreshInFlight;
+  }
+  demandSnapshotRefreshInFlight = (async () => {
+    try {
+      const marker = await db.doc(DEMAND_SNAPSHOT_REFRESH_MARKER_PATH).get();
+      const completedAt = marker.data()?.["last_refresh_completed_at"];
+      if (completedAt instanceof Timestamp) {
+        const completedAtMs = completedAt.toMillis();
+        lastDemandSnapshotRefreshCompletedAtMs = Math.max(
+          lastDemandSnapshotRefreshCompletedAtMs ?? 0,
+          completedAtMs,
+        );
+        if (isRefreshFresh(completedAtMs, nowMs, DEMAND_SNAPSHOT_REFRESH_FRESHNESS_MS)) return;
+      }
+    } catch (error) {
+      logger.warn("Failed to read demand snapshot refresh marker (best-effort)", { error });
+    }
+    const [activeSignals, strategicWeights] = await Promise.all([
+      loadActiveDemandSignals(),
+      loadStrategicWeights(),
+    ]);
+    await refreshCaptureJobDemandSnapshots(activeSignals, strategicWeights);
+  })().finally(() => {
+    demandSnapshotRefreshInFlight = null;
+  });
+  return demandSnapshotRefreshInFlight;
+}
+
 async function refreshCaptureJobDemandSnapshots(
   signals: DemandSignalDocument[],
   strategicWeights?: StrategicWeightConfig,
 ): Promise<void> {
   const jobs = await loadActiveCaptureJobs();
-  if (jobs.length === 0) return;
+  if (jobs.length === 0) {
+    await recordDemandSnapshotRefreshCompleted(Date.now());
+    return;
+  }
 
   // Viewer-independent refresh: no origin, so every active job nationwide is
   // scored on demand/priority/payout and none is excluded by distance from a
@@ -951,6 +1061,9 @@ async function refreshCaptureJobDemandSnapshots(
     await batch.commit();
     logger.info("capture_jobs demand snapshots refreshed", { updatedJobs: updateCount });
   }
+  // Every completed refresh (submission-driven or scheduled) stamps the marker
+  // so submission-driven refreshes debounce off the most recent completion.
+  await recordDemandSnapshotRefreshCompleted(Date.now());
 }
 
 async function writeDemandSignals(
@@ -1002,11 +1115,7 @@ async function handleSubmitRobotTeamDemand(
       source_type: "robot_team_request",
     });
     await writeDemandSignals(signals, createdAt);
-    const [activeSignals, strategicWeights] = await Promise.all([
-      loadActiveDemandSignals(),
-      loadStrategicWeights(),
-    ]);
-    await refreshCaptureJobDemandSnapshots(activeSignals, strategicWeights);
+    await refreshCaptureJobDemandSnapshotsIfStale();
     res.status(201).json({
       submission_id: submissionRef.id,
       demand_signal_ids: signals.map((signal) => signal.id),
@@ -1046,11 +1155,7 @@ async function handleSubmitSiteOperatorDemand(
       source_type: "site_operator_submission",
     });
     await writeDemandSignals(signals, createdAt);
-    const [activeSignals, strategicWeights] = await Promise.all([
-      loadActiveDemandSignals(),
-      loadStrategicWeights(),
-    ]);
-    await refreshCaptureJobDemandSnapshots(activeSignals, strategicWeights);
+    await refreshCaptureJobDemandSnapshotsIfStale();
     res.status(201).json({
       submission_id: submissionRef.id,
       demand_signal_ids: signals.map((signal) => signal.id),
@@ -1078,11 +1183,7 @@ async function handleDemandOpportunityFeed(
   }
 
   try {
-    const [signals, jobs, strategicWeights] = await Promise.all([
-      loadActiveDemandSignals(),
-      loadActiveCaptureJobs(),
-      loadStrategicWeights(),
-    ]);
+    const { signals, jobs, strategicWeights } = await demandFeedInputsCache.get();
     const radiusMeters = Math.max(100, Math.min(payload.radius_m ?? 16093, 160934));
     const limit = Math.max(1, Math.min(payload.limit ?? 25, 200));
     const captureJobs = annotateCaptureJobs(
@@ -1294,37 +1395,37 @@ async function runWeeklyDemandStrategicWeightRefresh(now: Date = new Date()): Pr
 }
 
 export const submitRobotTeamDemand = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handleSubmitRobotTeamDemand,
 );
 
 export const submitSiteOperatorDemand = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handleSubmitSiteOperatorDemand,
 );
 
 export const demandOpportunityFeed = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handleDemandOpportunityFeed,
 );
 
 export const nearbyDiscoveryProxy = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handleNearbyDiscoveryProxy,
 );
 
 export const placesAutocompleteProxy = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handlePlacesAutocompleteProxy,
 );
 
 export const placesDetailsProxy = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   handlePlacesDetailsProxy,
 );
 
 export const api = onRequest(
-  { region: "us-central1" },
+  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   async (req, res) => {
     const path = requestPath(req);
     if (path === "/v1/demand/robot-team-requests") {
@@ -1361,6 +1462,7 @@ export const scheduledDailyDemandResearch = onSchedule(
     region: "us-central1",
     schedule: "0 9 * * *",
     timeZone: "America/New_York",
+    maxInstances: SCHEDULED_MAX_INSTANCES,
   },
   async () => {
     await runDailyDemandResearch();
@@ -1372,6 +1474,7 @@ export const scheduledWeeklyDemandDeepResearch = onSchedule(
     region: "us-central1",
     schedule: "0 10 * * 1",
     timeZone: "America/New_York",
+    maxInstances: SCHEDULED_MAX_INSTANCES,
   },
   async () => {
     await runWeeklyDemandStrategicWeightRefresh();
