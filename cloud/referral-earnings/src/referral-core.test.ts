@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  DEFAULT_MAX_PAYOUT_CENTS,
+  createRateLimiter,
   authorizeCaptureStatusRequest,
   claimsGrantAdmin,
   computeReferralOutcome,
@@ -142,6 +144,51 @@ test("normalizeReferralCode rejects ambiguous chars, wrong lengths, and non-stri
   assert.equal(normalizeReferralCode(""), null);
   assert.equal(normalizeReferralCode(123456), null);
   assert.equal(normalizeReferralCode(null), null);
+});
+
+// ─── payout ceiling + rate limiter ───────────────────────────────────────────
+
+test("parseCaptureStatusUpdate rejects payouts above the ceiling", () => {
+  const over = parseCaptureStatusUpdate({
+    captureId: "cap-1",
+    creatorId: "user-1",
+    status: "paid",
+    payoutCents: DEFAULT_MAX_PAYOUT_CENTS + 1,
+  });
+  assert.equal(over.ok, false);
+
+  const custom = parseCaptureStatusUpdate(
+    { captureId: "cap-1", creatorId: "user-1", status: "paid", payoutCents: 900 },
+    1000,
+  );
+  assert.equal(custom.ok, true);
+
+  const customOver = parseCaptureStatusUpdate(
+    { captureId: "cap-1", creatorId: "user-1", status: "paid", payoutCents: 1100 },
+    1000,
+  );
+  assert.equal(customOver.ok, false);
+});
+
+test("parseCaptureStatusUpdate allows payouts at exactly the ceiling", () => {
+  const atCeiling = parseCaptureStatusUpdate({
+    captureId: "cap-1",
+    creatorId: "user-1",
+    status: "paid",
+    payoutCents: DEFAULT_MAX_PAYOUT_CENTS,
+  });
+  assert.equal(atCeiling.ok, true);
+});
+
+test("createRateLimiter enforces the fixed window per key", () => {
+  const check = createRateLimiter({ limit: 3, windowMs: 1000 });
+  const t0 = 1_000_000;
+  assert.equal(check("a", t0), true);
+  assert.equal(check("a", t0 + 1), true);
+  assert.equal(check("a", t0 + 2), true);
+  assert.equal(check("a", t0 + 3), false); // over limit inside window
+  assert.equal(check("b", t0 + 3), true); // other keys unaffected
+  assert.equal(check("a", t0 + 1000), true); // window rolled over
 });
 
 // ─── parseCaptureStatusUpdate ────────────────────────────────────────────────

@@ -146,8 +146,17 @@ export type ParseResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: string };
 
+/**
+ * Hard ceiling on a single capture payout accepted over HTTP. A compromised
+ * shared secret must not be able to mint arbitrary balances (2026-07 audit:
+ * "no payout-amount ceiling"). Override via CAPTURE_STATUS_MAX_PAYOUT_CENTS
+ * only alongside a real pricing change.
+ */
+export const DEFAULT_MAX_PAYOUT_CENTS = 50_000; // $500
+
 export function parseCaptureStatusUpdate(
   body: unknown,
+  maxPayoutCents: number = DEFAULT_MAX_PAYOUT_CENTS,
 ): ParseResult<CaptureStatusUpdate> {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, error: "body must be a JSON object" };
@@ -177,10 +186,42 @@ export function parseCaptureStatusUpdate(
     typeof record.payoutCents === "number" && Number.isFinite(record.payoutCents)
       ? Math.max(0, Math.floor(record.payoutCents))
       : 0;
+  if (payoutCents > maxPayoutCents) {
+    return {
+      ok: false,
+      error: `payoutCents ${payoutCents} exceeds the configured ceiling of ${maxPayoutCents}`,
+    };
+  }
 
   return {
     ok: true,
     value: { captureId, creatorId, status: status as CaptureStatusValue, payoutCents },
+  };
+}
+
+/**
+ * Minimal fixed-window rate limiter for public HTTP endpoints (per-instance,
+ * in-memory — bounds quota burn on the unauthenticated places/discovery
+ * proxies rather than providing exact global limits).
+ */
+export function createRateLimiter(options: { limit: number; windowMs: number }) {
+  const { limit, windowMs } = options;
+  const windows = new Map<string, { windowStart: number; count: number }>();
+
+  return function check(key: string, nowMs: number): boolean {
+    // Opportunistic cleanup so long-lived instances don't grow unbounded.
+    if (windows.size > 10_000) {
+      for (const [k, v] of windows) {
+        if (nowMs - v.windowStart >= windowMs) windows.delete(k);
+      }
+    }
+    const entry = windows.get(key);
+    if (!entry || nowMs - entry.windowStart >= windowMs) {
+      windows.set(key, { windowStart: nowMs, count: 1 });
+      return true;
+    }
+    entry.count += 1;
+    return entry.count <= limit;
   };
 }
 

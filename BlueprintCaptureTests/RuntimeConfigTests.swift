@@ -20,7 +20,6 @@ struct RuntimeConfigTests {
         #expect(config.allowOffsiteCheckIn == false)
         #expect(config.allowMockJobsFallback == false)
         #expect(config.enableInternalTestSpace == false)
-        #expect(config.enableOpenCaptureHere == true)
         #expect(config.payoutProvider == "stripe")
         #expect(config.payoutProviderReady == false)
         // Public legal/support links fall back to the live site so they are
@@ -70,7 +69,6 @@ struct RuntimeConfigTests {
         #expect(config.allowOffsiteCheckIn == true)
         #expect(config.allowMockJobsFallback == true)
         #expect(config.enableInternalTestSpace == true)
-        #expect(config.enableOpenCaptureHere == true)
         #expect(config.maxReservationDriveMinutes == 90)
         #expect(config.fallbackMaxReservationAirMiles == 50.5)
         #expect(config.websiteURL?.absoluteString == "https://www.tryblueprint.io")

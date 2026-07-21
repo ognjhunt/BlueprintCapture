@@ -1,12 +1,6 @@
 import Foundation
 
-enum MapProvider: String {
-    case appleSnapshot
-    case googleStatic
-}
-
 enum AppConfig {
-    static let mapProvider: MapProvider = .appleSnapshot
     static let pendingStartScanJobIdKey = "com.blueprint.pendingStartScanJobId"
     static let pendingNotificationRouteKey = "com.blueprint.pendingNotificationRoute"
 
@@ -32,10 +26,6 @@ enum AppConfig {
 
     static func enableInternalTestSpace() -> Bool {
         RuntimeConfig.current.enableInternalTestSpace
-    }
-
-    static func enableOpenCaptureHere() -> Bool {
-        RuntimeConfig.current.enableOpenCaptureHere
     }
 
     static func enableRemoteNotifications() -> Bool {
