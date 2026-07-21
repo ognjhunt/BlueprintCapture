@@ -65,3 +65,8 @@ descriptor generation, pipeline handoff, scene success, or task success.
 ```bash
 npm test
 ```
+
+> **Open verification (2026-07 audit):** nothing in this repository subscribes
+> to `blueprint-capture-pipeline-handoff`. Confirm the pipeline repository
+> actually consumes this topic (or gate publishing behind a flag) — otherwise
+> every handoff publish is pure cost. Track the answer here when verified.

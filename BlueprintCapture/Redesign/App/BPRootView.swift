@@ -44,6 +44,28 @@ struct BPRootView: View {
         } message: {
             Text("Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand quality, privacy, and rights review may still block downstream use.")
         }
+        // Notification deep links: these were previously consumed only by the
+        // retired legacy screens, so every push tap was a no-op in the
+        // shipping UI. Route them to the matching redesign tab.
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenTab)) { note in
+            switch note.userInfo?["tab"] as? String {
+            case "scan": coordinator.selectedTab = .home
+            case "wallet": coordinator.selectedTab = .earnings
+            default: break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenScanJobDetail)) { _ in
+            coordinator.selectedTab = .home
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenCaptureDetail)) { _ in
+            coordinator.selectedTab = .history
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutEntry)) { _ in
+            coordinator.selectedTab = .earnings
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutSetup)) { _ in
+            coordinator.selectedTab = .earnings
+        }
         .tint(BP.brassDeep)
         .preferredColorScheme(.light)
     }
