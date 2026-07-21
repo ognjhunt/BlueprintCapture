@@ -59,14 +59,19 @@ struct BPEarningsView: View {
 
     private var providerUnavailableCard: some View {
         BPDarkPanel {
-            Text("Payout setup unavailable")
+            Text("Payouts aren't live yet")
                 .bpEyebrow(BP.onInk.opacity(0.6))
             Text("No live balance")
                 .font(.bpDisplay(30))
                 .foregroundStyle(BP.onInk)
-            Text("This build tracks capture review history. Payout onboarding and cashout stay hidden until backend provider readiness is enabled for the cohort.")
+            Text("You can capture now and build your review record. When payouts open in your area, you'll set up your payout account here — approved captures stay on file.")
                 .font(.bpSans(BPType.caption, .regular))
                 .foregroundStyle(BP.onInk.opacity(0.68))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, Space.xs)
+            Text("Every upload goes through quality and rights review first — watch its status in History.")
+                .font(.bpSans(BPType.caption, .regular))
+                .foregroundStyle(BP.onInk.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, Space.xs)
         }

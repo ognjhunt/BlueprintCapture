@@ -19,6 +19,8 @@ final class AuthViewModel: ObservableObject {
     @Published var confirmPassword: String = ""
     @Published var isBusy: Bool = false
     @Published var errorMessage: String?
+    /// Non-error status line (e.g. "reset email sent").
+    @Published var infoMessage: String?
 
     /// Referral code entered by the user or captured from a deep link.
     @AppStorage(PendingReferralStore.storageKey) var pendingReferralCode: String = ""
@@ -33,7 +35,56 @@ final class AuthViewModel: ObservableObject {
         }
     }
 
-    func toggleMode() { mode = (mode == .signIn ? .signUp : .signIn); errorMessage = nil }
+    func toggleMode() { mode = (mode == .signIn ? .signUp : .signIn); errorMessage = nil; infoMessage = nil }
+
+    /// Sends a Firebase password-reset email for the address in the email field.
+    /// The audit flagged the absence of any recovery path as a literal dead end.
+    func sendPasswordReset() async {
+        let address = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else {
+            errorMessage = "Enter your email above first, then tap “Forgot password?”."
+            return
+        }
+        errorMessage = nil
+        infoMessage = nil
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await Auth.auth().sendPasswordReset(withEmail: address)
+            infoMessage = "Password reset email sent to \(address). Check your inbox, then sign in with your new password."
+        } catch {
+            errorMessage = Self.friendlyAuthMessage(for: error)
+        }
+    }
+
+    /// Maps Firebase Auth failures to actionable copy — raw SDK strings must
+    /// not reach capturers (audit UX finding).
+    static func friendlyAuthMessage(for error: Error) -> String {
+        let ns = error as NSError
+        guard let code = AuthErrorCode(rawValue: ns.code) else {
+            return ns.localizedDescription
+        }
+        switch code {
+        case .wrongPassword, .invalidCredential:
+            return "That email and password don't match. Try again, or tap “Forgot password?” to reset it."
+        case .userNotFound:
+            return "No account found with that email. Check the address, or create an account."
+        case .invalidEmail:
+            return "That doesn't look like a valid email address."
+        case .emailAlreadyInUse, .credentialAlreadyInUse:
+            return "An account already exists with that email. Try signing in instead."
+        case .weakPassword:
+            return "Choose a stronger password — at least 8 characters."
+        case .networkError:
+            return "Couldn't reach the server. Check your connection and try again."
+        case .tooManyRequests:
+            return "Too many attempts. Wait a few minutes, then try again."
+        case .userDisabled:
+            return "This account has been disabled. Contact support for help."
+        default:
+            return ns.localizedDescription
+        }
+    }
 
     func submit() async {
         errorMessage = nil
@@ -58,7 +109,7 @@ final class AuthViewModel: ObservableObject {
                 NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
             }
         } catch {
-            errorMessage = (error as NSError).localizedDescription
+            errorMessage = Self.friendlyAuthMessage(for: error)
         }
     }
 
@@ -84,7 +135,7 @@ final class AuthViewModel: ObservableObject {
             )
             NotificationCenter.default.post(name: .AuthStateDidChange, object: nil)
         } catch {
-            errorMessage = (error as NSError).localizedDescription
+            errorMessage = Self.friendlyAuthMessage(for: error)
         }
     }
 

@@ -719,8 +719,8 @@ struct BPOnboardingPayoutStep: View {
 
             if !payoutReady {
                 BPProofBoundary(
-                    "Payout setup opens with your cohort",
-                    message: "This build tracks review history first. When payout onboarding goes live for your cohort, the Earnings tab unlocks account setup — accepted captures record payout eligibility in the meantime.",
+                    "Payouts open soon",
+                    message: "This build tracks your review history first. When payouts go live in your area, the Earnings tab unlocks account setup — approved captures record payout eligibility in the meantime.",
                     signal: .info,
                     systemImage: "clock"
                 )

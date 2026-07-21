@@ -83,6 +83,23 @@ struct AuthView: View {
                             // Fields
                             formFields
 
+                            // Status (e.g. password-reset email sent)
+                            if let info = viewModel.infoMessage, !info.isEmpty {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.caption.weight(.semibold))
+                                    Text(info)
+                                        .font(.caption)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .foregroundStyle(BlueprintTheme.textPrimary)
+                                .padding(12)
+                                .background(
+                                    BlueprintTheme.panelStrong,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                )
+                            }
+
                             // Error
                             if let err = viewModel.errorMessage, !err.isEmpty {
                                 HStack(spacing: 8) {
@@ -355,6 +372,20 @@ struct AuthView: View {
                     focusValue: .confirmPassword,
                     submitLabel: .go
                 ) { Task { await viewModel.submit() } }
+            }
+
+            if viewModel.mode == .signIn {
+                Button {
+                    Task { await viewModel.sendPasswordReset() }
+                } label: {
+                    Text("Forgot password?")
+                        .font(BlueprintTheme.body(13, weight: .semibold))
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .underline()
+                }
+                .buttonStyle(.plain)
+                .disabled(viewModel.isBusy)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }

@@ -71,7 +71,7 @@ struct BPCaptureDetailSheet: View {
 
                     if !isLoading && detail?.hasRenderableDetail != true {
                         BPCard {
-                            Text("Full review detail isn't available for this capture yet. The status above is the current backend truth.")
+                            Text("Full review detail isn't available for this capture yet. The status above is the latest we have on record.")
                                 .font(.bpSans(BPType.caption, .regular))
                                 .foregroundStyle(BP.textMuted)
                                 .fixedSize(horizontal: false, vertical: true)
