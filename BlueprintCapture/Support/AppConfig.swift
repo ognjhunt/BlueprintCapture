@@ -181,6 +181,10 @@ struct CaptureLegalConsentPolicy: Equatable {
     let privacyPolicyURL: URL?
     let capturePolicyURL: URL?
 
+    /// Bump when the acknowledgement text or the linked policies materially
+    /// change — a stored acceptance of an older version means re-consent is due.
+    static let consentVersion = "2026-07-21"
+
     static let acknowledgementText = "I confirm I have permission to capture this site, will avoid restricted or private areas, and agree to Blueprint's Terms of Service, Privacy Policy, and Capture Policy before recording or uploading evidence."
 
     static let missingLegalLinksMessage = "Capture consent is unavailable until Terms of Service, Privacy Policy, and Capture Policy links are configured for this build."

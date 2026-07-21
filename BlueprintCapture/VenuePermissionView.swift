@@ -29,9 +29,14 @@ struct VenuePermission: Identifiable, Equatable, Codable {
             "permission_id": id.uuidString,
             "venue_name": venueName,
             "venue_address": venueAddress,
-            "authorized_by": authorizedBy,
+            // Empty means the job listing named no authorizer — recorded as
+            // absent rather than a fabricated persona.
+            "authorized_by": authorizedBy.isEmpty ? NSNull() as Any : authorizedBy as Any,
             "authorized_title": authorizedTitle,
+            // For listing-derived permissions this is the listing's last-update
+            // time, not a wet signature — declared_from marks the distinction.
             "signed_at": formatter.string(from: signedAt),
+            "declared_from": "job_listing_metadata",
             "valid_until": validUntil.map { formatter.string(from: $0) } ?? NSNull(),
             "capture_areas": captureAreas,
             "restricted_areas": restrictions,
@@ -72,8 +77,11 @@ struct VenuePermission: Identifiable, Equatable, Codable {
             }
         }
 
+        // No fabricated authorizer: when the listing names no one, the field
+        // stays empty and every surface says so instead of inventing
+        // "Site operator" (capture-truth doctrine).
         let owner = job.owner?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let authorizedBy = (owner?.isEmpty == false) ? owner! : "Site operator"
+        let authorizedBy = (owner?.isEmpty == false) ? owner! : ""
 
         return VenuePermission(
             id: UUID(uuidString: job.id) ?? UUID(),
@@ -175,13 +183,14 @@ struct VenuePermissionSheet: View {
                             .foregroundStyle(.green)
                     }
 
-                    Text("Authorized to Record")
+                    Text("Permission on File")
                         .font(.title.weight(.bold))
                         .foregroundStyle(.green)
 
-                    Text("This capture has been approved")
+                    Text("The site listing declares operator permission for this capture. Rights review still verifies it after upload.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(.top, 20)
 
@@ -201,12 +210,15 @@ struct VenuePermissionSheet: View {
 
                     Divider()
 
-                    // Who authorized
+                    // Who authorized — never a fabricated persona: when the
+                    // listing names no one, say so.
                     VStack(alignment: .leading, spacing: 4) {
                         Text("AUTHORIZED BY")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        Text(permission.authorizedBy)
+                        Text(permission.authorizedBy.isEmpty
+                             ? "Not named in the site listing"
+                             : permission.authorizedBy)
                             .font(.headline)
                         Text(permission.authorizedTitle)
                             .font(.subheadline)
@@ -215,9 +227,10 @@ struct VenuePermissionSheet: View {
 
                     Divider()
 
-                    // When signed
+                    // Listing-derived permissions carry the listing's update
+                    // time, not a wet-signature date — label it truthfully.
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("DATE SIGNED")
+                        Text("PERMISSION RECORDED")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text(permission.signedAt, style: .date)

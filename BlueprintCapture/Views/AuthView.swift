@@ -156,6 +156,13 @@ struct AuthView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .onReceive(NotificationCenter.default.publisher(for: .AuthStateDidChange)) { _ in
+                // Auth only proceeds past the consent checkbox, so a successful
+                // auth here means the current policy version was accepted —
+                // put that acceptance on record (T&S audit: consent must be
+                // recorded with a version, not just gated in UI).
+                if legalAcknowledged {
+                    CaptureLegalConsentRecorder.recordAcceptance()
+                }
                 dismiss()
             }
         }
