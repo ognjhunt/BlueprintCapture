@@ -47,47 +47,19 @@ struct BPTaskDetailView: View {
         .safeAreaInset(edge: .bottom) { bottomBar }
     }
 
-    // MARK: Capture-path hero
+    // MARK: Site hero
+    //
+    // Real imagery only. The previous decorative "suggested capture path"
+    // bezier was drawn client-side over whatever image happened to load — a
+    // fabricated route the site never provided. Route guidance comes from the
+    // job's real instructions below.
 
     private var pathHero: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            BPRemoteFacilityImage(
-                url: job.heroImageURL ?? job.thumbnailURL ?? item.previewURL,
-                fallbackName: "pov-warehouse-tote",
-                height: 200
-            )
-            .overlay { BPRegistrationCorners() }
-            .overlay { capturePath }
-            Text("Suggested capture path — follow site guidance on arrival")
-                .font(.bpMono(BPType.caption))
-                .foregroundStyle(BP.textMuted)
-        }
-    }
-
-    private var capturePath: some View {
-        GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let start = CGPoint(x: w * 0.18, y: h * 0.74)
-            let end = CGPoint(x: w * 0.82, y: h * 0.30)
-            ZStack {
-                Path { p in
-                    p.move(to: start)
-                    p.addCurve(
-                        to: end,
-                        control1: CGPoint(x: w * 0.30, y: h * 0.20),
-                        control2: CGPoint(x: w * 0.60, y: h * 0.86)
-                    )
-                }
-                .stroke(BP.brass, style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [6, 5]))
-
-                Circle().fill(BP.brass).frame(width: 11, height: 11).position(start)
-                Image(systemName: "mappin")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(BP.brassLit)
-                    .position(end)
-            }
-        }
-        .allowsHitTesting(false)
+        BPRemoteFacilityImage(
+            url: job.heroImageURL ?? job.thumbnailURL ?? item.previewURL,
+            height: 200
+        )
+        .overlay { BPRegistrationCorners() }
     }
 
     // MARK: Title
@@ -307,7 +279,6 @@ enum BPSignalMapping {
 
 struct BPRemoteFacilityImage: View {
     let url: URL?
-    var fallbackName: String = "pov-warehouse-tote"
     var height: CGFloat = 156
 
     var body: some View {
@@ -321,11 +292,11 @@ struct BPRemoteFacilityImage: View {
                             .scaledToFill()
                             .grayscale(0.9)
                     default:
-                        BPFacilityImage(name: fallbackName, height: height)
+                        neutralPlaceholder
                     }
                 }
             } else {
-                BPFacilityImage(name: fallbackName, height: height)
+                neutralPlaceholder
             }
         }
         .frame(maxWidth: .infinity)
@@ -336,5 +307,17 @@ struct BPRemoteFacilityImage: View {
                 .strokeBorder(BP.line, lineWidth: 1)
         )
         .accessibilityHidden(true)
+    }
+
+    /// Honest no-imagery state: a neutral surface, never a stock photo of a
+    /// different site pretending to be this one.
+    private var neutralPlaceholder: some View {
+        ZStack {
+            BP.ink.opacity(0.05)
+            BPEvidenceGrid(spacing: 22, lineColor: BP.ink.opacity(0.05))
+            Image(systemName: "building.2")
+                .font(.system(size: 26, weight: .regular))
+                .foregroundStyle(BP.textFaint)
+        }
     }
 }

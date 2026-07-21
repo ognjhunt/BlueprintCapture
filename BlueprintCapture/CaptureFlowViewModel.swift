@@ -285,10 +285,20 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         return false
     }
 
+    /// Curated jobs already carry reviewer context from the marketplace listing,
+    /// so the free-text note is optional there (audit: a required essay with an
+    /// AI auto-fill button proves the field shouldn't be required).
+    var contextNotesAreOptional: Bool {
+        if case .spaceReview(let seed) = flowMode { return seed?.captureJobId != nil }
+        return false
+    }
+
     var canConfirmAddress: Bool {
         guard currentAddress != nil else { return false }
         guard isSpaceReviewMode else { return true }
-        return !spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && confirmedCaptureGuidelines
+        guard confirmedCaptureGuidelines else { return false }
+        if contextNotesAreOptional { return true }
+        return !spaceContextNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var spaceReviewChecklist: [String] {
@@ -313,7 +323,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case .medium:
             return [
                 "Lock at the entrance, follow the main spine, and pause at every doorway or intersection that branches the route.",
-                "Add a reverse-direction revisit before the final loop closure."
+                "Walk back through in the reverse direction before finishing at your start point."
             ]
         case .multiZone:
             return [
@@ -920,19 +930,19 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             }
         }
         if monitor.hasWeakSignalConcern {
-            prompts.append("Weak segment detected. Reacquire a recent checkpoint before moving deeper into the site.")
+            prompts.append("Tracking got shaky here. Walk back to the last doorway you passed before going further.")
         } else {
-            prompts.append("Shared checkpoints: \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
+            prompts.append("Pause points: \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
         }
         return Array(prompts.prefix(2))
     }
 
     func liveStatusChips(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
         var chips: [String] = []
-        chips.append(entryHold == nil ? "Entry lock pending" : "Entry locked")
-        chips.append("Checkpoints \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
+        chips.append(entryHold == nil ? "Hold at your start point" : "Start point saved")
+        chips.append("Pause points \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
         if monitor.hasWeakSignalConcern {
-            chips.append("Weak signal \(Int(monitor.limitedTrackingSeconds))s")
+            chips.append("Shaky tracking \(Int(monitor.limitedTrackingSeconds))s")
         }
         if monitor.lowLightWarning != nil {
             chips.append("Low light")
@@ -974,8 +984,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case "revisit":
             return SiteWorldPassBrief(
                 role: role,
-                title: "Revisit Pass",
-                summary: "Reverse through shared checkpoints before closing the route.",
+                title: "Reverse walkthrough",
+                summary: "Walk back through the doorways and intersections you already passed.",
                 requiredCheckpointTarget: max(1, currentCheckpointTarget / 2),
                 requiredPrompt: "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone.",
                 exactPrompts: [
@@ -986,8 +996,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case "loop_closure":
             return SiteWorldPassBrief(
                 role: role,
-                title: "Loop Closure",
-                summary: "Return to the entrance or hub and match the starting view.",
+                title: "Return to start",
+                summary: "Finish by walking back to where you began and matching your first view.",
                 requiredCheckpointTarget: 1,
                 requiredPrompt: "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds.",
                 exactPrompts: [
@@ -998,8 +1008,8 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         case "critical_zone_revisit":
             return SiteWorldPassBrief(
                 role: role,
-                title: "Critical Zone Revisit",
-                summary: "Reacquire operationally critical boundaries and handoff geometry.",
+                title: "Key-area recheck",
+                summary: "Walk the marked key areas once more from the other direction.",
                 requiredCheckpointTarget: max(1, selectedCriticalZoneAnchors.count),
                 requiredPrompt: "Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction.",
                 exactPrompts: [
@@ -1010,7 +1020,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         default:
             return SiteWorldPassBrief(
                 role: "primary",
-                title: "Primary Route",
+                title: "Main walkthrough",
                 summary: primaryPassSummary,
                 requiredCheckpointTarget: currentCheckpointTarget,
                 requiredPrompt: "Walk forward slowly. Pause at every major threshold or branch before moving on.",
@@ -1093,36 +1103,36 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         var missingItems: [String] = []
 
         if hold != nil {
-            completedItems.append("Entrance localization hold captured.")
+            completedItems.append("Start-point hold captured at the entrance.")
         } else {
-            missingItems.append("Entrance localization hold is required before the route counts.")
+            missingItems.append("Hold still at the entrance for a few seconds so the route has a start point.")
         }
 
         switch passRole {
         case "revisit":
             if sharedCheckpointCount >= brief.requiredCheckpointTarget {
-                completedItems.append("Reverse-direction shared checkpoints captured.")
+                completedItems.append("Reverse walkthrough hit its pause points.")
             } else {
-                missingItems.append("Reacquire at least \(brief.requiredCheckpointTarget) doorway or intersection checkpoints in reverse.")
+                missingItems.append("Pause at \(brief.requiredCheckpointTarget) or more doorways or intersections on the way back.")
             }
         case "loop_closure":
             if hasLoopClosureAnchor {
-                completedItems.append("Loop closure returned to the entrance or shared endpoint.")
+                completedItems.append("You returned to your start point — route closed.")
             } else {
-                missingItems.append("Return to the original entrance or shared endpoint before finishing this pass.")
+                missingItems.append("Walk back to the entrance where you started before finishing.")
             }
         case "critical_zone_revisit":
             if selectedCriticalZoneAnchors.isEmpty || !criticalMatches.isEmpty {
-                completedItems.append("Critical zone revisit captured.")
+                completedItems.append("Key areas rechecked.")
             } else {
                 let labels = selectedCriticalZoneAnchors.map(\.displayLabel).sorted().joined(separator: ", ")
-                missingItems.append("Revisit one of the selected critical zones: \(labels).")
+                missingItems.append("Walk through one of your marked key areas again: \(labels).")
             }
         default:
             if sharedCheckpointCount >= brief.requiredCheckpointTarget {
-                completedItems.append("Shared checkpoint target met.")
+                completedItems.append("Enough pause points captured.")
             } else {
-                missingItems.append("Capture \(brief.requiredCheckpointTarget) shared checkpoints at doorways, intersections, or thresholds.")
+                missingItems.append("Pause at \(brief.requiredCheckpointTarget) doorways, intersections, or thresholds during the walk.")
             }
         }
 
@@ -1166,11 +1176,11 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         guard shouldAdvance else {
             switch passRole {
             case "loop_closure":
-                return "Retry loop closure"
+                return "Retry the return to start"
             case "critical_zone_revisit":
-                return "Retry critical zone revisit"
+                return "Retry the key-area recheck"
             default:
-                return "Retake \(passBrief(for: passRole).title.lowercased())"
+                return "Retake the \(passBrief(for: passRole).title.lowercased())"
             }
         }
 
@@ -1180,13 +1190,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         }
         switch nextRole {
         case "revisit":
-            return "Start revisit pass"
+            return "Start the reverse walkthrough"
         case "loop_closure":
-            return "Start loop closure"
+            return "Head back to your start point"
         case "critical_zone_revisit":
-            return "Revisit critical zones"
+            return "Recheck the key areas"
         default:
-            return "Start next pass"
+            return "Start the next walkthrough"
         }
     }
 

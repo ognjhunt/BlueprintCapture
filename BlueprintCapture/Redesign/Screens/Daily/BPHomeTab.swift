@@ -64,12 +64,22 @@ struct BPHomeTab: View {
                     }
                     uploadsInFlightCard
                     BPSetupChecklistCard(model: checklist)
-                    if let activeItem {
-                        activeCard(activeItem)
-                    } else {
-                        emptyStateCard
+                    // Loading, error, and empty are distinct states — "quietly
+                    // shows nothing" was the audit's top silent-failure finding.
+                    switch viewModel.state {
+                    case .idle, .loading:
+                        if viewModel.items.isEmpty {
+                            loadingCard
+                        } else {
+                            activeOrEmpty
+                            nearbySection
+                        }
+                    case .error(let message):
+                        errorCard(message)
+                    case .loaded:
+                        activeOrEmpty
+                        nearbySection
                     }
-                    nearbySection
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.top, Space.s)
@@ -273,7 +283,7 @@ struct BPHomeTab: View {
 
             HStack(spacing: Space.s) {
                 BPPrimaryButton(
-                    title: reservingJobId == item.id ? "Reserving…" : "Continue capture",
+                    title: reservingJobId == item.id ? "Reserving…" : "Reserve & start capture",
                     systemImage: "camera.aperture"
                 ) {
                     Task { await reserveAndLaunch(item) }
@@ -294,6 +304,50 @@ struct BPHomeTab: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("View task details")
+            }
+            .padding(.top, Space.xs)
+        }
+        .padding(Space.l)
+        .bpCard()
+    }
+
+    @ViewBuilder
+    private var activeOrEmpty: some View {
+        if let activeItem {
+            activeCard(activeItem)
+        } else {
+            emptyStateCard
+        }
+    }
+
+    private var loadingCard: some View {
+        HStack(spacing: Space.m) {
+            ProgressView()
+            Text("Finding assignments near you…")
+                .font(.bpSans(BPType.body, .regular))
+                .foregroundStyle(BP.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(Space.xl)
+        .bpCard()
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.s) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 18, weight: .regular))
+                    .foregroundStyle(BP.warnFg)
+                Text("Can't load assignments")
+                    .font(.bpSans(BPType.bodyL, .semibold))
+                    .foregroundStyle(BP.textStrong)
+            }
+            Text(message)
+                .font(.bpSans(BPType.body, .regular))
+                .foregroundStyle(BP.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            BPPrimaryButton(title: "Try again", systemImage: "arrow.clockwise") {
+                Task { await viewModel.refresh() }
             }
             .padding(.top, Space.xs)
         }

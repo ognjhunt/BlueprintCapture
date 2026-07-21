@@ -326,7 +326,7 @@ struct CaptureSessionView: View {
     private func startCurrentPass() {
         guard !captureManager.captureState.isRecording else { return }
         guard let selectedSiteType else {
-            siteTypeError = "Choose the site type so the raw manifest records capture truth."
+            siteTypeError = "Choose what kind of space this is before you start recording."
             return
         }
         siteTypeError = nil
@@ -642,7 +642,7 @@ private struct SiteWorldPreflightCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Site World Candidate")
+                Text("Before you start")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.white)
                 Text(passBrief.title)
@@ -682,7 +682,7 @@ private struct SiteWorldPreflightCard: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Critical zones")
+                Text("Key areas to capture (optional)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.72))
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -712,7 +712,7 @@ private struct SiteWorldPreflightCard: View {
             SiteWorldBulletSection(title: "Optional", items: optionalRules)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Operator prompts")
+                Text("You'll be coached with prompts like")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.72))
                 ForEach(passBrief.exactPrompts.prefix(2), id: \.self) { prompt in
@@ -725,9 +725,9 @@ private struct SiteWorldPreflightCard: View {
             Button(action: onStart) {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Start \(passBrief.title)")
+                        Text("Start recording")
                             .font(.headline.weight(.semibold))
-                        Text("Checkpoint target: \(passBrief.requiredCheckpointTarget)")
+                        Text("Pause at \(passBrief.requiredCheckpointTarget) doorway\(passBrief.requiredCheckpointTarget == 1 ? "" : "s") or intersections along the way")
                             .font(.caption)
                     }
                     Spacer()
@@ -876,7 +876,7 @@ private struct CaptureAnchorToolsView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                 Spacer()
-                Text("Mark anchors to help overlap and relocalization")
+                Text("Tap what you pass — doorways, corners, exits")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.75))
             }
@@ -912,13 +912,13 @@ private struct CaptureAnchorToolsView: View {
     private var passRoleLabel: String {
         switch plannedPassRole {
         case "loop_closure":
-            return "Loop Closure"
+            return "Return to start"
         case "critical_zone_revisit":
-            return "Critical Revisit"
+            return "Key-area recheck"
         case "revisit":
-            return "Revisit"
+            return "Reverse walkthrough"
         default:
-            return "Primary"
+            return "Main walkthrough"
         }
     }
 }
