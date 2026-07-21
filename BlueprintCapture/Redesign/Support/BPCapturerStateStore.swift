@@ -18,6 +18,7 @@ final class BPCapturerStateStore: ObservableObject {
     enum Keys {
         static let onboardingCompletedAt = "com.blueprint.bp.onboarding.completedAt"
         static let rightsCertifiedAt = "com.blueprint.bp.rights.certifiedAt"
+        static let captureRightsAcknowledgedAt = "com.blueprint.bp.rights.captureAcknowledgedAt"
     }
 
     /// Rights training recertifies yearly (SCREENS.md §12 "Recertify yearly").
@@ -25,6 +26,9 @@ final class BPCapturerStateStore: ObservableObject {
 
     @Published private(set) var onboardingCompletedAt: Date?
     @Published private(set) var rightsCertifiedAt: Date?
+    /// Last time the capturer confirmed the per-capture rights acknowledgement
+    /// (parity with Android's RightsAcknowledgementDialog). Advisory record only.
+    @Published private(set) var captureRightsAcknowledgedAt: Date?
 
     private let defaults: UserDefaults
 
@@ -32,6 +36,7 @@ final class BPCapturerStateStore: ObservableObject {
         self.defaults = defaults
         onboardingCompletedAt = Self.storedDate(defaults, Keys.onboardingCompletedAt)
         rightsCertifiedAt = Self.storedDate(defaults, Keys.rightsCertifiedAt)
+        captureRightsAcknowledgedAt = Self.storedDate(defaults, Keys.captureRightsAcknowledgedAt)
     }
 
     var hasCompletedOnboarding: Bool { onboardingCompletedAt != nil }
@@ -52,12 +57,19 @@ final class BPCapturerStateStore: ObservableObject {
         defaults.set(date.timeIntervalSince1970, forKey: Keys.rightsCertifiedAt)
     }
 
+    func recordCaptureRightsAcknowledgement(at date: Date = Date()) {
+        captureRightsAcknowledgedAt = date
+        defaults.set(date.timeIntervalSince1970, forKey: Keys.captureRightsAcknowledgedAt)
+    }
+
     /// Testing/support hook.
     func reset() {
         onboardingCompletedAt = nil
         rightsCertifiedAt = nil
+        captureRightsAcknowledgedAt = nil
         defaults.removeObject(forKey: Keys.onboardingCompletedAt)
         defaults.removeObject(forKey: Keys.rightsCertifiedAt)
+        defaults.removeObject(forKey: Keys.captureRightsAcknowledgedAt)
     }
 
     private static func storedDate(_ defaults: UserDefaults, _ key: String) -> Date? {

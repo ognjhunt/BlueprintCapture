@@ -28,7 +28,7 @@ struct BPRightsTrainingView: View {
                     }
                     BPProofBoundary(
                         "Recertify yearly",
-                        message: "This certification expires 12 months after you confirm it. We'll remind you before it lapses.",
+                        message: "This certification expires 12 months after you confirm it. When it lapses, your Home setup checklist will ask you to recertify here.",
                         signal: .info,
                         systemImage: "calendar"
                     )

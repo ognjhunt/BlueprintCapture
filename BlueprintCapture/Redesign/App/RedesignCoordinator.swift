@@ -23,6 +23,9 @@ struct CaptureLaunch: Identifiable {
 final class RedesignCoordinator: ObservableObject {
     @Published var selectedTab: BPTab = .home
     @Published var captureLaunch: CaptureLaunch?
+    /// Capture launch waiting on the per-capture rights acknowledgement (parity
+    /// with Android's RightsAcknowledgementDialog — the only path into recording).
+    @Published var pendingRightsLaunch: CaptureLaunch?
 
     /// Real capturer identity bound from Firebase Auth (+ creator profile when the
     /// backend is reachable). Empty strings mean "unknown" — screens render neutral
@@ -47,8 +50,21 @@ final class RedesignCoordinator: ObservableObject {
         applyLocalIdentity()
     }
 
+    /// Every capture entry point (FAB, active card, task detail) funnels through
+    /// here; recording only starts after the rights acknowledgement is confirmed.
     func startCapture(task: BPCaptureTask? = nil, seed: SpaceReviewSeed? = nil) {
-        captureLaunch = CaptureLaunch(task: task, seed: seed)
+        pendingRightsLaunch = CaptureLaunch(task: task, seed: seed)
+    }
+
+    func confirmRightsAndLaunch() {
+        guard let pending = pendingRightsLaunch else { return }
+        pendingRightsLaunch = nil
+        BPCapturerStateStore.shared.recordCaptureRightsAcknowledgement()
+        captureLaunch = pending
+    }
+
+    func cancelPendingCapture() {
+        pendingRightsLaunch = nil
     }
 
     func finishCapture() {

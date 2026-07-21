@@ -29,6 +29,21 @@ struct BPRootView: View {
             AnywhereCaptureFlowView(seed: launch.seed)
                 .onDisappear { coordinator.finishCapture() }
         }
+        // Capture-time rights gate (parity with Android's
+        // RightsAcknowledgementDialog): recording never starts without an explicit
+        // per-capture confirmation. `startCapture` parks the launch here.
+        .alert(
+            "Review capture rights",
+            isPresented: Binding(
+                get: { coordinator.pendingRightsLaunch != nil },
+                set: { if !$0 { coordinator.cancelPendingCapture() } }
+            )
+        ) {
+            Button("I confirm") { coordinator.confirmRightsAndLaunch() }
+            Button("Cancel", role: .cancel) { coordinator.cancelPendingCapture() }
+        } message: {
+            Text("Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand quality, privacy, and rights review may still block downstream use.")
+        }
         .tint(BP.brassDeep)
         .preferredColorScheme(.light)
     }
