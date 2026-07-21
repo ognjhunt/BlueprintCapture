@@ -7,7 +7,7 @@ import SwiftUI
 // cover. Paper everywhere; the cover is the only dark surface.
 
 struct BPRootView: View {
-    @StateObject private var coordinator = RedesignCoordinator()
+    @EnvironmentObject private var coordinator: RedesignCoordinator
     @EnvironmentObject private var alertsManager: NearbyAlertsManager
 
     var body: some View {
@@ -29,6 +29,43 @@ struct BPRootView: View {
             AnywhereCaptureFlowView(seed: launch.seed)
                 .onDisappear { coordinator.finishCapture() }
         }
+        // Capture-time rights gate (parity with Android's
+        // RightsAcknowledgementDialog): recording never starts without an explicit
+        // per-capture confirmation. `startCapture` parks the launch here.
+        .alert(
+            "Review capture rights",
+            isPresented: Binding(
+                get: { coordinator.pendingRightsLaunch != nil },
+                set: { if !$0 { coordinator.cancelPendingCapture() } }
+            )
+        ) {
+            Button("I confirm") { coordinator.confirmRightsAndLaunch() }
+            Button("Cancel", role: .cancel) { coordinator.cancelPendingCapture() }
+        } message: {
+            Text("Only continue if you have permission to capture this space, will avoid restricted or private areas, and understand quality, privacy, and rights review may still block downstream use.")
+        }
+        // Notification deep links: these were previously consumed only by the
+        // retired legacy screens, so every push tap was a no-op in the
+        // shipping UI. Route them to the matching redesign tab.
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenTab)) { note in
+            switch note.userInfo?["tab"] as? String {
+            case "scan": coordinator.selectedTab = .home
+            case "wallet": coordinator.selectedTab = .earnings
+            default: break
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenScanJobDetail)) { _ in
+            coordinator.selectedTab = .home
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenCaptureDetail)) { _ in
+            coordinator.selectedTab = .history
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutEntry)) { _ in
+            coordinator.selectedTab = .earnings
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .blueprintOpenPayoutSetup)) { _ in
+            coordinator.selectedTab = .earnings
+        }
         .tint(BP.brassDeep)
         .preferredColorScheme(.light)
     }
@@ -48,5 +85,6 @@ struct BPRootView: View {
 #Preview {
     BPRootView()
         .environmentObject(NearbyAlertsManager())
+        .environmentObject(RedesignCoordinator())
 }
 #endif

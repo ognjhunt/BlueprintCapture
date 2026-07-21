@@ -2,6 +2,9 @@ import Foundation
 #if canImport(FirebaseAuth)
 import FirebaseAuth
 #endif
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // MARK: - API Service
 
@@ -90,24 +93,96 @@ final class APIService {
         buyerRequestId: String?,
         siteSubmissionId: String?,
         rightsProfile: String?,
-        requestedOutputs: [String]
+        requestedOutputs: [String],
+        regionId: String? = nil,
+        siteType: String? = nil,
+        status: String = "submitted"
     ) async throws {
         var request = try makeRequest(path: "v1/creator/captures", method: "POST")
+        request.httpBody = try encoder.encode(makeCaptureRegistrationPayload(
+            id: id,
+            targetAddress: targetAddress,
+            capturedAt: capturedAt,
+            quotedPayoutCents: quotedPayoutCents,
+            captureJobId: captureJobId,
+            buyerRequestId: buyerRequestId,
+            siteSubmissionId: siteSubmissionId,
+            rightsProfile: rightsProfile,
+            requestedOutputs: requestedOutputs,
+            regionId: regionId,
+            siteType: siteType,
+            status: status
+        ))
+        _ = try await perform(request: request, expecting: 201)
+    }
+
+    func preflightCaptureSubmission(
+        id: UUID,
+        targetAddress: String,
+        capturedAt: Date,
+        quotedPayoutCents: Int?,
+        captureJobId: String?,
+        buyerRequestId: String?,
+        siteSubmissionId: String?,
+        rightsProfile: String?,
+        requestedOutputs: [String],
+        regionId: String? = nil,
+        siteType: String? = nil
+    ) async throws {
+        var request = try makeRequest(path: "v1/creator/captures/preflight", method: "POST")
+        request.httpBody = try encoder.encode(makeCaptureRegistrationPayload(
+            id: id,
+            targetAddress: targetAddress,
+            capturedAt: capturedAt,
+            quotedPayoutCents: quotedPayoutCents,
+            captureJobId: captureJobId,
+            buyerRequestId: buyerRequestId,
+            siteSubmissionId: siteSubmissionId,
+            rightsProfile: rightsProfile,
+            requestedOutputs: requestedOutputs,
+            regionId: regionId,
+            siteType: siteType,
+            status: "preflight"
+        ))
+        _ = try await perform(request: request, expecting: 200)
+    }
+
+    private func makeCaptureRegistrationPayload(
+        id: UUID,
+        targetAddress: String,
+        capturedAt: Date,
+        quotedPayoutCents: Int?,
+        captureJobId: String?,
+        buyerRequestId: String?,
+        siteSubmissionId: String?,
+        rightsProfile: String?,
+        requestedOutputs: [String],
+        regionId: String?,
+        siteType: String?,
+        status: String
+    ) -> CreatorCaptureRegistrationPayload {
+        let clientInfo = CaptureClientBuildInfo.current()
         let payload = CreatorCaptureRegistrationPayload(
             id: id.uuidString.lowercased(),
             creatorId: UserDeviceService.resolvedUserId(),
             targetAddress: targetAddress,
             capturedAt: capturedAt,
-            status: "submitted",
+            status: status,
             estimatedPayoutCents: quotedPayoutCents,
             captureJobId: captureJobId,
             buyerRequestId: buyerRequestId,
             siteSubmissionId: siteSubmissionId,
             rightsProfile: rightsProfile,
-            requestedOutputs: requestedOutputs
+            requestedOutputs: requestedOutputs,
+            regionId: regionId,
+            siteType: siteType,
+            clientPlatform: clientInfo.platform,
+            clientVersion: clientInfo.appVersion,
+            clientBuild: clientInfo.appBuild,
+            clientOSVersion: clientInfo.osVersion,
+            clientDeviceModel: clientInfo.deviceModel
         )
-        request.httpBody = try encoder.encode(payload)
-        _ = try await perform(request: request, expecting: 201)
+        return payload
     }
 
     func fetchCaptureDetail(id: UUID) async throws -> CaptureDetailResponse? {
@@ -283,9 +358,18 @@ final class APIService {
     private func buildRequest(url: URL, method: String) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
+        let clientInfo = CaptureClientBuildInfo.current()
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(UserDeviceService.resolvedUserId(), forHTTPHeaderField: "X-Blueprint-Creator-Id")
-        request.setValue("ios", forHTTPHeaderField: "X-Blueprint-Native-Client")
+        request.setValue(clientInfo.platform, forHTTPHeaderField: "X-Blueprint-Native-Client")
+        request.setValue(clientInfo.appVersion, forHTTPHeaderField: "X-Blueprint-App-Version")
+        request.setValue(clientInfo.appBuild, forHTTPHeaderField: "X-Blueprint-App-Build")
+        if let osVersion = clientInfo.osVersion {
+            request.setValue(osVersion, forHTTPHeaderField: "X-Blueprint-OS-Version")
+        }
+        if let deviceModel = clientInfo.deviceModel {
+            request.setValue(deviceModel, forHTTPHeaderField: "X-Blueprint-Device-Model")
+        }
         if method == "POST" || method == "PUT" {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
@@ -469,6 +553,13 @@ private struct CreatorCaptureRegistrationPayload: Codable {
     let siteSubmissionId: String?
     let rightsProfile: String?
     let requestedOutputs: [String]
+    let regionId: String?
+    let siteType: String?
+    let clientPlatform: String
+    let clientVersion: String
+    let clientBuild: String
+    let clientOSVersion: String?
+    let clientDeviceModel: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -482,6 +573,52 @@ private struct CreatorCaptureRegistrationPayload: Codable {
         case siteSubmissionId = "site_submission_id"
         case rightsProfile = "rights_profile"
         case requestedOutputs = "requested_outputs"
+        case regionId = "region_id"
+        case siteType = "site_type"
+        case clientPlatform = "client_platform"
+        case clientVersion = "client_version"
+        case clientBuild = "client_build"
+        case clientOSVersion = "client_os_version"
+        case clientDeviceModel = "client_device_model"
+    }
+}
+
+private struct CaptureClientBuildInfo: Equatable {
+    let platform: String
+    let appVersion: String
+    let appBuild: String
+    let osVersion: String?
+    let deviceModel: String?
+
+    static func current(
+        infoDictionary: [String: Any] = Bundle.main.infoDictionary ?? [:]
+    ) -> CaptureClientBuildInfo {
+        let version = stringValue(infoDictionary["CFBundleShortVersionString"]) ?? "0.0.0"
+        let build = stringValue(infoDictionary["CFBundleVersion"]) ?? "0"
+        #if canImport(UIKit)
+        let device = UIDevice.current
+        return CaptureClientBuildInfo(
+            platform: "ios",
+            appVersion: version,
+            appBuild: build,
+            osVersion: device.systemVersion,
+            deviceModel: device.model
+        )
+        #else
+        return CaptureClientBuildInfo(
+            platform: "ios",
+            appVersion: version,
+            appBuild: build,
+            osVersion: nil,
+            deviceModel: nil
+        )
+        #endif
+    }
+
+    private static func stringValue(_ raw: Any?) -> String? {
+        guard let raw else { return nil }
+        let value = String(describing: raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 }
 

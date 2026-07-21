@@ -48,6 +48,8 @@ const pubsub = new PubSub();
 
 const PIPELINE_HANDOFF_TOPIC =
   process.env.BLUEPRINT_CAPTURE_PIPELINE_TOPIC ?? "blueprint-capture-pipeline-handoff";
+const LARGE_VIDEO_INGEST_TOPIC =
+  process.env.BLUEPRINT_LARGE_VIDEO_INGEST_TOPIC ?? "blueprint-large-video-ingest";
 const ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS =
   process.env.BLUEPRINT_ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS === "true";
 // Cloud Functions v2 runs on Cloud Run where /tmp is an in-memory tmpfs that
@@ -417,13 +419,22 @@ export function buildLargeVideoIngestBlockedArtifacts(input: {
   blockReport: Record<string, unknown>;
   qaReport: Record<string, unknown>;
   pipelineStatusEvent: Record<string, unknown>;
+  largeVideoIngestRequest: Record<string, unknown>;
 } {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const blockReportUri = gsUri(
     input.bucketName,
     `${input.pathInfo.capturesPrefix}/large_video_ingest_blocked.json`
   );
+  const requestUri = gsUri(
+    input.bucketName,
+    `${input.pathInfo.capturesPrefix}/large_video_ingest_request.json`
+  );
   const qaReportUri = gsUri(input.bucketName, `${input.pathInfo.capturesPrefix}/qa_report.json`);
+  const pipelineStatusEventUri = gsUri(
+    input.bucketName,
+    `${input.pathInfo.capturesPrefix}/pipeline_status_event.json`
+  );
   const rawVideoUri = gsUri(input.bucketName, input.walkthroughObjectName);
   const blockCode = input.sizeGate.blockCode ?? "blocked_large_video_requires_segmented_ingest";
   const base = {
@@ -441,6 +452,38 @@ export function buildLargeVideoIngestBlockedArtifacts(input: {
     reasons: input.sizeGate.reasons,
     generated_at: generatedAt,
   };
+  const largeVideoIngestRequest = {
+    schema_version: "large_video_cloud_run_ingest_request.v1",
+    status: "pending",
+    requested_stage: "large_video_cloud_run_ingest",
+    source: "BlueprintCapture.extractFrames",
+    source_event_type: "capture.raw_video_ingest_blocked.v1",
+    topic: LARGE_VIDEO_INGEST_TOPIC,
+    ...base,
+    request_uri: requestUri,
+    artifacts: {
+      block_report_uri: blockReportUri,
+      qa_report_uri: qaReportUri,
+      pipeline_status_event_uri: pipelineStatusEventUri,
+    },
+    inline_extract_frames: {
+      blocked: true,
+      function_memory: "2GiB",
+      function_timeout_seconds: 540,
+      tmpfs_video_download_avoided: true,
+      ffmpeg_attempted: false,
+    },
+    processing_requirements: {
+      must_not_download_to_cloud_function_tmp: true,
+      requires_disk_backed_scratch: true,
+      segmented_decode_required: true,
+      recommended_runtime: "cloud_run_job_or_service",
+      recommended_min_memory: "8GiB",
+      recommended_timeout_seconds: 3600,
+    },
+    claim_boundary:
+      "large_video_ingest_request_only_no_frames_descriptor_pipeline_handoff_or_task_success_were_generated",
+  };
   const blockReport = {
     schema_version: "extract_frames_large_video_block.v1",
     status: "blocked",
@@ -450,6 +493,7 @@ export function buildLargeVideoIngestBlockedArtifacts(input: {
     ffmpeg_attempted: false,
     required_action: "route_capture_to_segmented_or_cloud_run_video_ingest",
     recommended_next_stage: "large_video_cloud_run_ingest",
+    large_video_ingest_request_uri: requestUri,
     qa_report_uri: qaReportUri,
     claim_boundary:
       "blocked_report_only_no_frames_descriptor_pipeline_handoff_or_policy_success_were_generated",
@@ -487,9 +531,11 @@ export function buildLargeVideoIngestBlockedArtifacts(input: {
     qa_status: "blocked",
     block_report_uri: blockReportUri,
     qa_report_uri: qaReportUri,
+    large_video_ingest_request_uri: requestUri,
+    pipeline_status_event_uri: pipelineStatusEventUri,
     ...base,
   };
-  return { blockReport, qaReport, pipelineStatusEvent };
+  return { blockReport, qaReport, pipelineStatusEvent, largeVideoIngestRequest };
 }
 
 function asRecordArray(value: unknown): Record<string, unknown>[] {
@@ -1048,6 +1094,90 @@ async function publishPipelineHandoff(payload: Record<string, unknown>): Promise
     },
   });
   return messageId;
+}
+
+async function publishLargeVideoIngestRequest(payload: Record<string, unknown>): Promise<string> {
+  const topic = pubsub.topic(LARGE_VIDEO_INGEST_TOPIC);
+  const messageBuffer = Buffer.from(JSON.stringify(payload));
+  return topic.publishMessage({
+    data: messageBuffer,
+    attributes: {
+      scene_id: String(payload.scene_id ?? ""),
+      capture_id: String(payload.capture_id ?? ""),
+      raw_video_uri: String(payload.raw_video_uri ?? ""),
+      raw_video_size_bytes: String(payload.raw_video_size_bytes ?? ""),
+      requested_stage: String(payload.requested_stage ?? "large_video_cloud_run_ingest"),
+      source_event_type: String(payload.source_event_type ?? "capture.raw_video_ingest_blocked.v1"),
+    },
+  });
+}
+
+async function loadExistingLargeVideoIngestReceipt(
+  bucket: StorageBucket,
+  capturesPrefix: string
+): Promise<Record<string, unknown> | null> {
+  const receipt = await loadJsonObject(
+    bucket,
+    `${capturesPrefix}/large_video_ingest_pubsub_receipt.json`,
+    tmpdir()
+  );
+  if (receipt?.status === "published" && typeof receipt.message_id === "string") {
+    return receipt;
+  }
+  return null;
+}
+
+async function saveLargeVideoIngestReceipt(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  await bucket.file(`${capturesPrefix}/large_video_ingest_pubsub_receipt.json`).save(
+    JSON.stringify(payload, null, 2),
+    {
+      contentType: "application/json",
+    }
+  );
+}
+
+async function publishLargeVideoIngestRequestOnce(
+  bucket: StorageBucket,
+  capturesPrefix: string,
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const existingReceipt = await loadExistingLargeVideoIngestReceipt(bucket, capturesPrefix);
+  if (existingReceipt) {
+    return existingReceipt;
+  }
+
+  try {
+    const messageId = await publishLargeVideoIngestRequest(payload);
+    const receipt = {
+      schema_version: "large_video_ingest_pubsub_receipt.v1",
+      status: "published",
+      message_id: messageId,
+      topic: LARGE_VIDEO_INGEST_TOPIC,
+      published_at: new Date().toISOString(),
+      scene_id: payload.scene_id ?? null,
+      capture_id: payload.capture_id ?? null,
+      request_uri: payload.request_uri ?? null,
+    };
+    await saveLargeVideoIngestReceipt(bucket, capturesPrefix, receipt);
+    return receipt;
+  } catch (error) {
+    const receipt = {
+      schema_version: "large_video_ingest_pubsub_receipt.v1",
+      status: "publish_failed",
+      topic: LARGE_VIDEO_INGEST_TOPIC,
+      failed_at: new Date().toISOString(),
+      scene_id: payload.scene_id ?? null,
+      capture_id: payload.capture_id ?? null,
+      request_uri: payload.request_uri ?? null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+    await saveLargeVideoIngestReceipt(bucket, capturesPrefix, receipt);
+    return receipt;
+  }
 }
 
 async function loadExistingHandoffReceipt(
@@ -1831,21 +1961,27 @@ export const extractFrames = onObjectFinalized(
       }
       const sizeGate = inlineFrameExtractionSizeGate(rawVideoSizeBytes);
       if (!sizeGate.inlineAllowed) {
-        const { blockReport, qaReport, pipelineStatusEvent } = buildLargeVideoIngestBlockedArtifacts({
-          bucketName,
-          pathInfo,
-          objectName,
-          objectKind,
-          walkthroughObjectName,
-          manifestExists,
-          walkthroughExists,
-          manifestValidation,
-          sizeGate,
-        });
+        const { blockReport, qaReport, pipelineStatusEvent, largeVideoIngestRequest } =
+          buildLargeVideoIngestBlockedArtifacts({
+            bucketName,
+            pathInfo,
+            objectName,
+            objectKind,
+            walkthroughObjectName,
+            manifestExists,
+            walkthroughExists,
+            manifestValidation,
+            sizeGate,
+          });
         await Promise.all([
           bucket
             .file(`${pathInfo.capturesPrefix}/large_video_ingest_blocked.json`)
             .save(JSON.stringify(blockReport, null, 2), { contentType: "application/json" }),
+          bucket
+            .file(`${pathInfo.capturesPrefix}/large_video_ingest_request.json`)
+            .save(JSON.stringify(largeVideoIngestRequest, null, 2), {
+              contentType: "application/json",
+            }),
           bucket
             .file(`${pathInfo.capturesPrefix}/qa_report.json`)
             .save(JSON.stringify(qaReport, null, 2), { contentType: "application/json" }),
@@ -1855,6 +1991,11 @@ export const extractFrames = onObjectFinalized(
               contentType: "application/json",
             }),
         ]);
+        const largeVideoIngestReceipt = await publishLargeVideoIngestRequestOnce(
+          bucket,
+          pathInfo.capturesPrefix,
+          largeVideoIngestRequest
+        );
         logger.warn("Blocked inline frame extraction before downloading raw walkthrough video", {
           captureId: pathInfo.captureId,
           sceneId: pathInfo.sceneId,
@@ -1862,6 +2003,8 @@ export const extractFrames = onObjectFinalized(
           blockCode: sizeGate.blockCode,
           rawVideoSizeBytes: sizeGate.rawVideoSizeBytes,
           maxInlineVideoBytes: sizeGate.maxInlineVideoBytes,
+          largeVideoIngestTopic: LARGE_VIDEO_INGEST_TOPIC,
+          largeVideoIngestHandoffStatus: largeVideoIngestReceipt.status,
         });
         return;
       }

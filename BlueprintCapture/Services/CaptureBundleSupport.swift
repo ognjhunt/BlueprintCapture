@@ -592,7 +592,8 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             payload["site_operator_authorization"] = [
                 "status": venuePermission.isValid ? "valid" : "expired",
                 "venue_name": venuePermission.venueName,
-                "authorized_by": venuePermission.authorizedBy,
+                "authorized_by": venuePermission.authorizedBy.isEmpty
+                    ? NSNull() as Any : venuePermission.authorizedBy as Any,
                 "authorized_title": venuePermission.authorizedTitle,
                 "capture_areas": venuePermission.captureAreas,
                 "restricted_areas": venuePermission.restrictions,

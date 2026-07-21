@@ -250,7 +250,9 @@ struct LocationConfirmationView: View {
     private var contextCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Why is this space worth reviewing?")
+                Text(viewModel.contextNotesAreOptional
+                     ? "Anything reviewers should know? (optional)"
+                     : "What should reviewers know about this space?")
                     .font(BlueprintTheme.body(14, weight: .semibold))
                     .foregroundStyle(BlueprintTheme.textPrimary)
                 Spacer()

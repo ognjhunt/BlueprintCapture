@@ -128,31 +128,14 @@ struct PostCaptureSummaryView: View {
                         .disabled(isBusy)
                         .accessibilityIdentifier("post-capture-upload")
 
-                        // Secondary — Export / AirDrop
-                        Button(action: onExport) {
-                            HStack(spacing: 8) {
-                                if isExporting {
-                                    ProgressView()
-                                        .tint(.white)
-                                } else {
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 15, weight: .semibold))
-                                }
-                                Text(isExporting ? "Preparing export…" : "Export bundle")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(BlueprintTheme.panelStrong)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                    .stroke(BlueprintTheme.hairline, lineWidth: 1)
-                            )
-                        }
-                        .disabled(isBusy)
-                        .accessibilityIdentifier("post-capture-export")
+                        // Export / AirDrop is an engineering affordance for
+                        // pulling raw bundles off-device — not part of the
+                        // capturer journey, so it ships in debug builds only
+                        // (audit: a testing feature was offered to every
+                        // capturer as a co-equal choice).
+                        #if DEBUG
+                        exportBundleButton
+                        #endif
 
                         // Tertiary — save for later
                         Button(action: onUploadLater) {
@@ -172,6 +155,35 @@ struct PostCaptureSummaryView: View {
         }
         .blueprintAppBackground()
     }
+
+    #if DEBUG
+    private var exportBundleButton: some View {
+        Button(action: onExport) {
+            HStack(spacing: 8) {
+                if isExporting {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                Text(isExporting ? "Preparing export…" : "Export bundle (testing)")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(BlueprintTheme.panelStrong)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(BlueprintTheme.hairline, lineWidth: 1)
+            )
+        }
+        .disabled(isBusy)
+        .accessibilityIdentifier("post-capture-export")
+    }
+    #endif
 
     // MARK: - Row helper
 

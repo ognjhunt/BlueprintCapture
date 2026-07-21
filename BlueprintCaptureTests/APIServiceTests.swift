@@ -12,6 +12,31 @@ struct APIServiceTests {
     }
 
     @Test
+    func captureRegistrationSendsClientVersionMetadataAndPreflightsUpload() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let apiSource = try String(
+            contentsOf: root.appendingPathComponent("BlueprintCapture/Services/APIService.swift"),
+            encoding: .utf8
+        )
+        let uploadSource = try String(
+            contentsOf: root.appendingPathComponent("BlueprintCapture/Services/CaptureUploadService.swift"),
+            encoding: .utf8
+        )
+
+        #expect(apiSource.contains("preflightCaptureSubmission("))
+        #expect(apiSource.contains("v1/creator/captures/preflight"))
+        #expect(apiSource.contains("\"X-Blueprint-App-Version\""))
+        #expect(apiSource.contains("\"X-Blueprint-App-Build\""))
+        #expect(apiSource.contains("clientVersion = \"client_version\""))
+        #expect(apiSource.contains("clientBuild = \"client_build\""))
+        #expect(uploadSource.contains("ensureCaptureClientPreflightAllowed(for: record.request)"))
+        #expect(uploadSource.contains("captureClientPolicyBlocked"))
+        #expect(uploadSource.contains("capture_client_policy_blocked"))
+    }
+
+    @Test
     func demandOpportunityFeedContractsDecodeSnakeCasePayloads() throws {
         let json = """
         {

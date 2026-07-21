@@ -112,3 +112,15 @@ These files must carry a `Current-vs-public-copy note` banner near the top:
 ## Scanner
 
 `scripts/validate_launch_readiness_tests.py` scans Markdown and text docs for risky public-copy claim patterns, including Stripe/payout/provider/marketplace/readiness, Android XR, Google/Meta glasses, Catalyst, capturer, and investor terms. A matching doc must be listed in this index, and unsafe/stale Stripe/settings archives must carry a direct warning banner.
+
+## Addendum — 2026-07-21 cleanup
+
+The session-era debugging/summary documents this index classified as
+historical (the root-level `AUTOCOMPLETE_*`, `STRIPE_*`, `ADDRESS_*`,
+`SETTINGS_*`, `AUTH_UI_*`, `CHANGES_APPLIED`, `CLEANUP_SUMMARY`,
+`CODE_CHANGES_REFERENCE`, `FILES_ADDED`, `QUICK_REFERENCE_AUTOCOMPLETE`,
+and `README_STRIPE_DEBUGGING` files) were removed from the repo in the
+2026-07 audit cleanup. They described dead or non-shipping UI and are
+retrievable from git history if ever needed. Entries in this index that
+point at those paths are historical records of that classification, not
+live documents.

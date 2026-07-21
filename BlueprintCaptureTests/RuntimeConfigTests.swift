@@ -20,7 +20,6 @@ struct RuntimeConfigTests {
         #expect(config.allowOffsiteCheckIn == false)
         #expect(config.allowMockJobsFallback == false)
         #expect(config.enableInternalTestSpace == false)
-        #expect(config.enableOpenCaptureHere == true)
         #expect(config.payoutProvider == "stripe")
         #expect(config.payoutProviderReady == false)
         // Public legal/support links fall back to the live site so they are
@@ -51,7 +50,8 @@ struct RuntimeConfigTests {
             infoDictionary: [
                 "BLUEPRINT_BACKEND_BASE_URL": "https://alpha.example.com",
                 "BLUEPRINT_TERMS_OF_SERVICE_URL": "https://www.tryblueprint.io/terms",
-                "BLUEPRINT_PRIVACY_POLICY_URL": "https://www.tryblueprint.io/privacy"
+                "BLUEPRINT_PRIVACY_POLICY_URL": "https://www.tryblueprint.io/privacy",
+                "BLUEPRINT_CAPTURE_POLICY_URL": "https://www.tryblueprint.io/capture-policy"
             ]
         )
 
@@ -69,12 +69,12 @@ struct RuntimeConfigTests {
         #expect(config.allowOffsiteCheckIn == true)
         #expect(config.allowMockJobsFallback == true)
         #expect(config.enableInternalTestSpace == true)
-        #expect(config.enableOpenCaptureHere == true)
         #expect(config.maxReservationDriveMinutes == 90)
         #expect(config.fallbackMaxReservationAirMiles == 50.5)
         #expect(config.websiteURL?.absoluteString == "https://www.tryblueprint.io")
         #expect(config.termsOfServiceURL?.absoluteString == "https://www.tryblueprint.io/terms")
         #expect(config.privacyPolicyURL?.absoluteString == "https://www.tryblueprint.io/privacy")
+        #expect(config.capturePolicyURL?.absoluteString == "https://www.tryblueprint.io/capture-policy")
         #expect(config.supportEmailAddress == "support@tryblueprint.io")
     }
 

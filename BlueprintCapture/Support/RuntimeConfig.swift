@@ -54,7 +54,6 @@ struct RuntimeConfig: Equatable {
     let enableDirectProviderFeatures: Bool
     let allowMockJobsFallback: Bool
     let enableInternalTestSpace: Bool
-    let enableOpenCaptureHere: Bool
     let enableRemoteNotifications: Bool
     let payoutProvider: String
     let payoutProviderReady: Bool
@@ -85,7 +84,6 @@ struct RuntimeConfig: Equatable {
         enableDirectProviderFeatures: Bool = false,
         allowMockJobsFallback: Bool = false,
         enableInternalTestSpace: Bool = false,
-        enableOpenCaptureHere: Bool = true,
         enableRemoteNotifications: Bool = false,
         payoutProvider: String = "stripe",
         payoutProviderReady: Bool = false,
@@ -111,7 +109,6 @@ struct RuntimeConfig: Equatable {
         self.enableDirectProviderFeatures = enableDirectProviderFeatures
         self.allowMockJobsFallback = allowMockJobsFallback
         self.enableInternalTestSpace = enableInternalTestSpace
-        self.enableOpenCaptureHere = enableOpenCaptureHere
         self.enableRemoteNotifications = enableRemoteNotifications
         self.payoutProvider = payoutProvider
         self.payoutProviderReady = payoutProviderReady
@@ -174,11 +171,6 @@ struct RuntimeConfig: Equatable {
                 environment["BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE"] ??
                 infoDictionary["BLUEPRINT_ENABLE_INTERNAL_TEST_SPACE"],
                 defaultValue: isUITesting
-            ),
-            enableOpenCaptureHere: boolValue(
-                environment["BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE"] ??
-                infoDictionary["BLUEPRINT_ENABLE_OPEN_CAPTURE_HERE"],
-                defaultValue: true
             ),
             enableRemoteNotifications: boolValue(
                 environment["BLUEPRINT_ENABLE_REMOTE_NOTIFICATIONS"] ??

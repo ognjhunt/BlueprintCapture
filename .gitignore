@@ -103,3 +103,13 @@ firebase-debug*.log
 # Local device screenshots / scratch captures
 /android-*.png
 /android-*.jpg
+
+# Python bytecode / caches
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Local capture test artifacts
+output/mock_refs/

@@ -31,8 +31,10 @@ import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue, Timestamp } from "firebase-admin/firestore";
 import {
+  DEFAULT_MAX_PAYOUT_CENTS,
   authorizeCaptureStatusRequest,
   computeReferralOutcome,
+  createRateLimiter,
   normalizeReferralCode,
   normalizeReferralStatus,
   parseCaptureStatusUpdate,
@@ -769,13 +771,28 @@ export const updateCaptureStatus = onRequest(
       return;
     }
 
-    const parsed = parseCaptureStatusUpdate(req.body);
+    const maxPayoutCents = Number.parseInt(
+      process.env.CAPTURE_STATUS_MAX_PAYOUT_CENTS ?? "",
+      10,
+    );
+    const parsed = parseCaptureStatusUpdate(
+      req.body,
+      Number.isFinite(maxPayoutCents) && maxPayoutCents > 0
+        ? maxPayoutCents
+        : undefined,
+    );
     if (!parsed.ok) {
+      logger.warn("updateCaptureStatus rejected payload", { error: parsed.error });
       res.status(400).json({ error: parsed.error });
       return;
     }
     const { captureId, creatorId, status } = parsed.value;
     const cents = parsed.value.payoutCents;
+    if (cents >= DEFAULT_MAX_PAYOUT_CENTS / 2) {
+      // Anomaly breadcrumb: unusually large payouts should stand out in logs
+      // even when they pass the ceiling.
+      logger.warn("updateCaptureStatus large payout", { captureId, creatorId, cents });
+    }
 
     const docRef = db.collection("capture_submissions").doc(captureId);
     const update: Record<string, unknown> = {
@@ -1394,39 +1411,34 @@ async function runWeeklyDemandStrategicWeightRefresh(now: Date = new Date()): Pr
   }
 }
 
-export const submitRobotTeamDemand = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handleSubmitRobotTeamDemand,
-);
-
-export const submitSiteOperatorDemand = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handleSubmitSiteOperatorDemand,
-);
-
-export const demandOpportunityFeed = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handleDemandOpportunityFeed,
-);
-
-export const nearbyDiscoveryProxy = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handleNearbyDiscoveryProxy,
-);
-
-export const placesAutocompleteProxy = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handlePlacesAutocompleteProxy,
-);
-
-export const placesDetailsProxy = onRequest(
-  { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
-  handlePlacesDetailsProxy,
-);
+// The demand/places handlers deploy ONLY through the `api` router below.
+// They were previously also exported standalone, deploying every endpoint
+// twice; both clients (iOS APIService/NearbyProxyBackendService, Android
+// DemandIntelligenceBackendApi/PlacesRepository) call the /v1/... router
+// paths exclusively, so the standalone functions carried cost and attack
+// surface for zero traffic (2026-07 audit). After deploying this change,
+// delete the orphaned functions:
+//   firebase functions:delete submitRobotTeamDemand submitSiteOperatorDemand \
+//     demandOpportunityFeed nearbyDiscoveryProxy placesAutocompleteProxy \
+//     placesDetailsProxy --region us-central1
+// Per-instance fixed-window limiter for the public router: the places/
+// discovery proxies and demand submissions are unauthenticated, so without a
+// cap anyone can burn the billed provider quota (2026-07 audit). 60 requests
+// per minute per client IP per instance.
+const apiRateLimiter = createRateLimiter({ limit: 60, windowMs: 60_000 });
 
 export const api = onRequest(
   { region: "us-central1", maxInstances: HTTP_MAX_INSTANCES },
   async (req, res) => {
+    const clientIp =
+      (typeof req.headers["x-forwarded-for"] === "string"
+        ? req.headers["x-forwarded-for"].split(",")[0]?.trim()
+        : undefined) ?? req.ip ?? "unknown";
+    if (!apiRateLimiter(clientIp, Date.now())) {
+      res.status(429).json({ error: "Too many requests" });
+      return;
+    }
+
     const path = requestPath(req);
     if (path === "/v1/demand/robot-team-requests") {
       await handleSubmitRobotTeamDemand(req, res);

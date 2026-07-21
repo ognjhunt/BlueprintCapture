@@ -48,15 +48,25 @@ If object metadata is unavailable or the raw video exceeds the inline limit, the
 function returns before `file.download()` and before ffmpeg. It writes:
 
 - `captures/{capture_id}/large_video_ingest_blocked.json`
+- `captures/{capture_id}/large_video_ingest_request.json`
+- `captures/{capture_id}/large_video_ingest_pubsub_receipt.json`
 - `captures/{capture_id}/qa_report.json` with `status: "blocked"`
 - `captures/{capture_id}/pipeline_status_event.json`
 
-The blocker points the capture to `large_video_cloud_run_ingest`; it does not
-claim frames, descriptor generation, pipeline handoff, scene success, or task
-success.
+The request is published to Pub/Sub topic
+`BLUEPRINT_LARGE_VIDEO_INGEST_TOPIC` or `blueprint-large-video-ingest` by
+default. It is a handoff for a disk-backed Cloud Run worker: it explicitly
+requires segmented decode and forbids downloading the raw video into the
+2 GiB extractFrames function tmpfs. These artifacts do not claim frames,
+descriptor generation, pipeline handoff, scene success, or task success.
 
 ## Tests
 
 ```bash
 npm test
 ```
+
+> **Open verification (2026-07 audit):** nothing in this repository subscribes
+> to `blueprint-capture-pipeline-handoff`. Confirm the pipeline repository
+> actually consumes this topic (or gate publishing behind a flag) — otherwise
+> every handoff publish is pure cost. Track the answer here when verified.

@@ -21,6 +21,18 @@ struct PayoutVerificationSummaryTests {
     }
 
     @Test
+    func accountLoadFailureBlocksDefaultPayoutState() {
+        let state = PayoutAccountStateLoadState.failure(
+            from: StripeConnectService.StripeConnectError.invalidResponse(status: 503)
+        )
+
+        #expect(state.blocksDefaultPayoutState)
+        #expect(state.failureMessage == "Payout account state could not be loaded. Payout service returned HTTP 503.")
+        #expect(PayoutAccountStateLoadState.loaded.blocksDefaultPayoutState == false)
+        #expect(PayoutAccountStateLoadState.idle.failureMessage == nil)
+    }
+
+    @Test
     func summaryMapsStripeRequirementsToIdentityTaxAndBankSteps() throws {
         let state = try decodeState(
             """

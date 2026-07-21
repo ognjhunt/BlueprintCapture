@@ -14,6 +14,30 @@ enum PayoutVerificationPrimaryAction: Equatable {
     case refresh
 }
 
+enum PayoutAccountStateLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+
+    var failureMessage: String? {
+        guard case .failed(let message) = self else { return nil }
+        return message
+    }
+
+    var blocksDefaultPayoutState: Bool {
+        if case .failed = self {
+            return true
+        }
+        return false
+    }
+
+    static func failure(from error: Error) -> PayoutAccountStateLoadState {
+        let detail = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return .failed("Payout account state could not be loaded. \(detail)")
+    }
+}
+
 enum PayoutVerificationStepKind: String, CaseIterable, Identifiable {
     case account
     case identity
