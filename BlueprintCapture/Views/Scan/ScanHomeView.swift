@@ -863,7 +863,9 @@ struct ScanHomeView: View {
             id: item.job.id,
             title: item.job.title,
             address: item.job.address,
-            payoutRange: item.job.quotedPayoutCents.map { max(5, $0 / 100 - 10)...($0 / 100) },
+            // The backend quotes a single payout; never widen it into an invented
+            // client-side range (marketing-copy guardrail: no fabricated numbers).
+            payoutRange: item.job.quotedPayoutCents.map { ($0 / 100)...($0 / 100) },
             captureJobId: hasUpstreamBootstrap ? item.job.id : nil,
             buyerRequestId: item.job.buyerRequestId,
             siteSubmissionId: item.job.siteSubmissionId,
