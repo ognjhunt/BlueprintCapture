@@ -169,6 +169,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case .fileMissing, .cancelled, .authenticationRequired,
              .missingStructuredIntake, .rawContractValidationFailed,
              .insufficientDiskSpace, .uploadLimitExceeded,
+             .captureClientPolicyBlocked,
              .captureLifecycleRegistrationFailed, .invalidBundle:
             // Requires user action or a real precondition change; retrying
             // in-session would just repeat the same deterministic failure.
@@ -884,6 +885,23 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func ensureCaptureClientPreflightAllowed(for request: CaptureUploadRequest) async -> Bool {
+        // The authoritative POST v1/creator/captures/preflight route is not
+        // deployed yet (docs/PUBLIC_BETA_CLOSURE_2026-07-16), so this check is
+        // advisory: only an explicit backend policy denial (403/409/422)
+        // blocks the upload. A missing backend, missing route (404), server
+        // error, or network failure falls through to the Firestore
+        // fail-closed submission contract, which still gates the capture —
+        // otherwise every normal upload would brick against the absent route.
+        guard AppConfig.hasBackendBaseURL() else {
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "capture_client_preflight",
+                status: "skipped_no_backend",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request)
+                ]
+            )
+            return true
+        }
         do {
             try await APIService.shared.preflightCaptureSubmission(
                 id: request.metadata.id,
@@ -908,16 +926,31 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             )
             return true
         } catch {
-            SessionEventManager.shared.logError(
-                errorCode: "capture_client_preflight_blocked",
+            if case APIService.APIError.invalidResponse(let statusCode) = error,
+               [403, 409, 422].contains(statusCode) {
+                // Explicit, deliberate backend denial — fail closed.
+                SessionEventManager.shared.logError(
+                    errorCode: "capture_client_preflight_blocked",
+                    metadata: [
+                        "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                        "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                        "status_code": "\(statusCode)",
+                        "message": error.localizedDescription
+                    ]
+                )
+                print("❌ [UploadService] Capture client preflight blocked captureId=\(CaptureBundleContext.captureIdentifier(for: request)): \(error.localizedDescription)")
+                return false
+            }
+            // Route missing / server error / network failure: advisory only.
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "capture_client_preflight",
+                status: "skipped_unavailable",
                 metadata: [
                     "capture_id": CaptureBundleContext.captureIdentifier(for: request),
-                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
                     "message": error.localizedDescription
                 ]
             )
-            print("❌ [UploadService] Capture client preflight blocked captureId=\(CaptureBundleContext.captureIdentifier(for: request)): \(error.localizedDescription)")
-            return false
+            return true
         }
     }
 

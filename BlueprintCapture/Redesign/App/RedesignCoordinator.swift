@@ -103,6 +103,9 @@ final class RedesignCoordinator: ObservableObject {
         }
         capturerEmail = user.email ?? ""
         capturerReference = Self.reference(fromUserId: user.uid)
+        // Device-local setup state (onboarding/rights) belongs to this uid —
+        // a different account signing in on the same device starts fresh.
+        BPCapturerStateStore.shared.bindOwner(uid: user.uid)
         let displayName = (user.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !displayName.isEmpty {
             capturerName = Self.firstName(from: displayName)

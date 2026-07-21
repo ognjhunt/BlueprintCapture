@@ -214,6 +214,37 @@ describe("sessionEvents", () => {
   });
 });
 
+describe("client telemetry collections", () => {
+  const COLLECTIONS = [
+    "captureClientTelemetry",
+    "clientCrashReports",
+    "clientErrorTelemetry",
+  ];
+
+  for (const collection of COLLECTIONS) {
+    it(`${collection}: allows self-scoped create + idempotent rewrite, denies spoofing and reads`, async () => {
+      const event = { creator_id: OWNER_UID, event_type: "crash", platform: "android" };
+      await assertSucceeds(
+        ownerDb().collection(collection).doc("e1").set(event)
+      );
+      // Idempotent retry of the same client write (set with merge).
+      await assertSucceeds(
+        ownerDb().collection(collection).doc("e1").set(event, { merge: true })
+      );
+      // Spoofing another user's creator_id is denied.
+      await assertFails(
+        strangerDb().collection(collection).doc("e2").set(event)
+      );
+      // Unauthenticated writes and all client reads are denied.
+      await assertFails(
+        anonDb().collection(collection).doc("e3").set(event)
+      );
+      await assertFails(ownerDb().collection(collection).doc("e1").get());
+      await assertFails(ownerDb().collection(collection).doc("e1").delete());
+    });
+  }
+});
+
 describe("users self-deletion", () => {
   async function seedUser(uid) {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {

@@ -706,7 +706,10 @@ struct BPOnboardingRightsStep: View {
 // MARK: - Step 5 · Payouts (honest, provider-gated)
 
 struct BPOnboardingPayoutStep: View {
-    private let payoutReady = RuntimeConfig.current.payoutProviderReady
+    /// Same availability check StripeOnboardingView uses (provider readiness
+    /// AND a configured backend) — gating on the readiness flag alone would
+    /// offer a setup CTA that immediately reports unavailable.
+    private let payoutReady = RuntimeConfig.current.availability(for: .payouts).isEnabled
     @State private var showingPayoutSetup = false
     var onDone: () -> Void
 

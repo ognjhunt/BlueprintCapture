@@ -19,6 +19,7 @@ final class BPCapturerStateStore: ObservableObject {
         static let onboardingCompletedAt = "com.blueprint.bp.onboarding.completedAt"
         static let rightsCertifiedAt = "com.blueprint.bp.rights.certifiedAt"
         static let captureRightsAcknowledgedAt = "com.blueprint.bp.rights.captureAcknowledgedAt"
+        static let ownerUid = "com.blueprint.bp.state.ownerUid"
     }
 
     /// Rights training recertifies yearly (SCREENS.md §12 "Recertify yearly").
@@ -60,6 +61,21 @@ final class BPCapturerStateStore: ObservableObject {
     func recordCaptureRightsAcknowledgement(at date: Date = Date()) {
         captureRightsAcknowledgedAt = date
         defaults.set(date.timeIntervalSince1970, forKey: Keys.captureRightsAcknowledgedAt)
+    }
+
+    /// Binds this device-local state to the signed-in capturer. UserDefaults
+    /// are per-device, not per-account: when a DIFFERENT registered uid signs
+    /// in, the previous user's onboarding/rights state must not carry over
+    /// (they would skip induction and appear rights-trained). Same-uid
+    /// re-login keeps state; nil (signed out) keeps state so a returning
+    /// capturer isn't forced to redo onboarding.
+    func bindOwner(uid: String?) {
+        guard let uid, !uid.isEmpty else { return }
+        let storedOwner = defaults.string(forKey: Keys.ownerUid)
+        if let storedOwner, storedOwner != uid {
+            reset()
+        }
+        defaults.set(uid, forKey: Keys.ownerUid)
     }
 
     /// Testing/support hook.

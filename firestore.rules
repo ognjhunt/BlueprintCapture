@@ -432,6 +432,36 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ─── Client telemetry (Android breadcrumb/crash transport) ──────────────
+    // Write-only from the client, scoped to the writer's own uid so one
+    // capturer can't spoof another's telemetry. Reads are backend-only.
+    // Updates allow the client's idempotent set(merge) retries on its own
+    // events; deletes are backend-only.
+    match /captureClientTelemetry/{eventId} {
+      allow read, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.creator_id == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.creator_id == request.auth.uid
+        && request.resource.data.creator_id == request.auth.uid;
+    }
+    match /clientCrashReports/{eventId} {
+      allow read, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.creator_id == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.creator_id == request.auth.uid
+        && request.resource.data.creator_id == request.auth.uid;
+    }
+    match /clientErrorTelemetry/{eventId} {
+      allow read, delete: if false;
+      allow create: if isSignedIn()
+        && request.resource.data.creator_id == request.auth.uid;
+      allow update: if isSignedIn()
+        && resource.data.creator_id == request.auth.uid
+        && request.resource.data.creator_id == request.auth.uid;
+    }
+
     // ─── Default deny ────────────────────────────────────────────────────────
     // Any collection not matched above is denied to client-SDK access.
     // Admin-SDK (Cloud Functions / server routes) bypasses this.

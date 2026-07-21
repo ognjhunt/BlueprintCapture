@@ -359,8 +359,11 @@ struct AuthView: View {
                 focusValue: .password,
                 submitLabel: viewModel.mode == .signUp ? .next : .go
             ) {
+                // Keyboard Go must honor the same consent gate as the visible
+                // submit button — otherwise auth can complete without the
+                // legal acknowledgement being recorded.
                 if viewModel.mode == .signUp { focusedField = .confirmPassword }
-                else { Task { await viewModel.submit() } }
+                else if canSubmitEmailAuth { Task { await viewModel.submit() } }
             }
 
             if viewModel.mode == .signUp {
@@ -371,7 +374,7 @@ struct AuthView: View {
                     focusBinding: $focusedField,
                     focusValue: .confirmPassword,
                     submitLabel: .go
-                ) { Task { await viewModel.submit() } }
+                ) { if canSubmitEmailAuth { Task { await viewModel.submit() } } }
             }
 
             if viewModel.mode == .signIn {

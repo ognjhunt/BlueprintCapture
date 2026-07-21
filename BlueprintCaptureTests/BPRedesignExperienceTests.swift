@@ -94,6 +94,28 @@ final class BPCapturerStateStoreTests: XCTestCase {
         XCTAssertFalse(store.hasCompletedOnboarding)
         XCTAssertFalse(store.isRightsCertified)
     }
+
+    func testOwnerBindingResetsStateForADifferentAccount() {
+        let (store, _) = makeStore()
+        store.bindOwner(uid: "uid-alice")
+        store.completeOnboarding()
+        store.certifyRights()
+
+        // Same account re-binding (fresh launch, re-login) keeps state.
+        store.bindOwner(uid: "uid-alice")
+        XCTAssertTrue(store.hasCompletedOnboarding)
+        XCTAssertTrue(store.isRightsCertified)
+
+        // Signed-out (nil) keeps state for the returning capturer.
+        store.bindOwner(uid: nil)
+        XCTAssertTrue(store.hasCompletedOnboarding)
+
+        // A DIFFERENT account on the same device must start fresh — the
+        // previous user's onboarding/rights state cannot carry over.
+        store.bindOwner(uid: "uid-bob")
+        XCTAssertFalse(store.hasCompletedOnboarding)
+        XCTAssertFalse(store.isRightsCertified)
+    }
 }
 
 final class BPStatusPresentationTests: XCTestCase {
