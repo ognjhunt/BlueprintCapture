@@ -8,11 +8,14 @@ import Combine
 // last certified. This is advisory UX state (see AGENTS.md) — it never asserts
 // backend qualification, payout readiness, or rights truth on its own.
 //
-// Deliberately NOT @MainActor: isolated deinit crashes libmalloc on the iOS 26
-// simulator runtime when instances release off-executor (seen in unit tests).
+// Deliberately NOT MainActor-isolated: isolated deinit crashes libmalloc on
+// the iOS 26 simulator runtime when instances release off-executor (seen in
+// unit tests). The module builds with SWIFT_DEFAULT_ACTOR_ISOLATION =
+// MainActor, so the exemption must be EXPLICIT — without the `nonisolated`
+// keyword the class silently becomes @MainActor and the crash returns.
 // All UI mutation happens from main-thread call sites anyway.
 
-final class BPCapturerStateStore: ObservableObject {
+nonisolated final class BPCapturerStateStore: ObservableObject {
     static let shared = BPCapturerStateStore()
 
     enum Keys {

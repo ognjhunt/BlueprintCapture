@@ -1095,8 +1095,8 @@ struct CaptureBundleAndInferenceTests {
         #expect(scaffolding.contains("hub_return_plan"))
         #expect(scaffolding.contains("critical_zone_revisits"))
         #expect(coveragePlan.contains(where: { $0.contains("hub") || $0.contains("Hub") }))
-        #expect(review?.nextActionLabel == "Retake primary route")
-        #expect(review?.missingItems.contains(where: { $0.contains("Entrance localization hold") }) == true)
+        #expect(review?.nextActionLabel == "Retake the main walkthrough")
+        #expect(review?.missingItems.contains(where: { $0.contains("Hold still at the entrance") }) == true)
         #expect(pendingRequest?.metadata.sceneMemory?.continuityScore == review.map { Double($0.score) / 100.0 })
     }
 
