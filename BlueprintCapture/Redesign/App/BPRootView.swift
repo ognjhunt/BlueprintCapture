@@ -7,7 +7,7 @@ import SwiftUI
 // cover. Paper everywhere; the cover is the only dark surface.
 
 struct BPRootView: View {
-    @StateObject private var coordinator = RedesignCoordinator()
+    @EnvironmentObject private var coordinator: RedesignCoordinator
 
     var body: some View {
         ZStack {
@@ -46,5 +46,6 @@ struct BPRootView: View {
 #if DEBUG
 #Preview {
     BPRootView()
+        .environmentObject(RedesignCoordinator())
 }
 #endif

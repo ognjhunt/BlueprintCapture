@@ -28,6 +28,7 @@ import app.blueprint.capture.data.capture.isComplete
 import app.blueprint.capture.data.model.CaptureLaunch
 import app.blueprint.capture.data.model.CapturePermissionTone
 import app.blueprint.capture.data.model.CaptureRequestedOutputs
+import app.blueprint.capture.data.telemetry.CaptureClientTelemetryService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -395,6 +396,7 @@ class CaptureSessionViewModel @Inject constructor(
     private val uploadRepository: CaptureUploadRepository,
     private val intakeResolutionService: IntakeResolutionService,
     private val exportService: CaptureExportService,
+    private val captureClientTelemetryService: CaptureClientTelemetryService,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CaptureSessionUiState())
@@ -486,6 +488,11 @@ class CaptureSessionViewModel @Inject constructor(
         val sampler = CaptureIMUSampler(context)
         sampler.startCapture(captureStartMs)
         imuSampler = sampler
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "capture_recording_started",
+            status = "android_phone",
+            metadata = mapOf("capture_start_epoch_ms" to captureStartMs),
+        )
     }
 
     /** Stop sampling and flush to a .jsonl file alongside the recording. Returns sample count. */
@@ -494,6 +501,14 @@ class CaptureSessionViewModel @Inject constructor(
         val count = sampler.sampleCount()
         val file = if (count > 0) sampler.writeToFile(rawOutputDir) else null
         imuSampler = null
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "capture_recording_stopped",
+            status = "imu_flushed",
+            metadata = mapOf(
+                "motion_sample_count" to count,
+                "imu_samples_path" to (file?.absolutePath ?: ""),
+            ),
+        )
         return Pair(file, count)
     }
 
@@ -556,6 +571,16 @@ class CaptureSessionViewModel @Inject constructor(
                     )
                 }
             }.onSuccess { draft ->
+                captureClientTelemetryService.recordBreadcrumb(
+                    name = "capture_review_prepared",
+                    status = "success",
+                    metadata = mapOf(
+                        "job_id" to draft.capture.jobId,
+                        "site_submission_id" to draft.capture.siteSubmissionId,
+                        "capture_duration_ms" to draft.captureDurationMs,
+                        "motion_sample_count" to draft.motionSampleCount,
+                    ),
+                )
                 val nextCompletedRequiredPasses = if (review.shouldAdvanceWorkflow) {
                     minOf(review.completedRequiredPasses, review.totalRequiredPasses)
                 } else {
@@ -569,6 +594,15 @@ class CaptureSessionViewModel @Inject constructor(
                 )
             }.onFailure { error ->
                 recordingFile.delete()
+                captureClientTelemetryService.recordErrorCode(
+                    errorCode = "capture_review_prepare_failed",
+                    metadata = mapOf(
+                        "job_id" to capture.jobId,
+                        "site_submission_id" to capture.siteSubmissionId,
+                        "capture_duration_ms" to captureDurationMs,
+                        "reason" to (error.message ?: "unknown"),
+                    ),
+                )
                 _uiState.value = snapshot.copy(
                     errorMessage = error.message ?: "Failed to prepare the capture for review.",
                 )
@@ -802,12 +836,29 @@ class CaptureSessionViewModel @Inject constructor(
             }
         }.onSuccess { result ->
             when (action) {
-                FinishedCaptureActionState.QueueingUpload ->
+                FinishedCaptureActionState.QueueingUpload -> {
+                    captureClientTelemetryService.recordBreadcrumb(
+                        name = "capture_action_completed",
+                        status = "upload_queued",
+                        metadata = request.telemetryMetadata(),
+                    )
                     _uiState.value = CaptureSessionUiState(queuedUploadId = result as String)
-                FinishedCaptureActionState.SavingForLater ->
+                }
+                FinishedCaptureActionState.SavingForLater -> {
+                    captureClientTelemetryService.recordBreadcrumb(
+                        name = "capture_action_completed",
+                        status = "saved_for_later",
+                        metadata = request.telemetryMetadata(),
+                    )
                     _uiState.value = CaptureSessionUiState(savedUploadId = result as String)
+                }
                 FinishedCaptureActionState.Exporting -> {
                     val bundle = result as app.blueprint.capture.data.capture.FinalizedCaptureBundle
+                    captureClientTelemetryService.recordBreadcrumb(
+                        name = "capture_action_completed",
+                        status = "exported_for_testing",
+                        metadata = request.telemetryMetadata(),
+                    )
                     _uiState.value = _uiState.value.copy(
                         actionState = FinishedCaptureActionState.Idle,
                         exportSharePath = bundle.shareArtifact.absolutePath,
@@ -817,6 +868,13 @@ class CaptureSessionViewModel @Inject constructor(
                 else -> Unit
             }
         }.onFailure { error ->
+            captureClientTelemetryService.recordErrorCode(
+                errorCode = "capture_action_failed",
+                metadata = request.telemetryMetadata() + mapOf(
+                    "action" to action.name,
+                    "reason" to (error.message ?: "unknown"),
+                ),
+            )
             _uiState.value = _uiState.value.copy(
                 actionState = FinishedCaptureActionState.Idle,
                 errorMessage = error.message ?: "Capture action failed.",
@@ -848,6 +906,13 @@ class CaptureSessionViewModel @Inject constructor(
             arcoreEvidenceDirectory = draft.arcoreEvidenceDirectory,
         )
         draft.recordingFile.takeIf(File::exists)?.delete()
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "capture_bundle_packaged",
+            status = "success",
+            metadata = request.telemetryMetadata() + mapOf(
+                "capture_bundle_path" to bundle.captureRoot.absolutePath,
+            ),
+        )
 
         val updatedDraft = draft.copy(
             preparedBundlePath = bundle.captureRoot.absolutePath,
@@ -877,6 +942,19 @@ class CaptureSessionViewModel @Inject constructor(
     }
 
     private companion object {
+        fun AndroidCaptureBundleRequest.telemetryMetadata(): Map<String, Any?> = mapOf(
+            "capture_id" to captureId,
+            "scene_id" to sceneId,
+            "job_id" to jobId,
+            "capture_job_id" to captureJobId,
+            "buyer_request_id" to buyerRequestId,
+            "site_submission_id" to siteSubmissionId,
+            "capture_source" to captureSource.name,
+            "capture_duration_ms" to captureDurationMs,
+            "motion_sample_count" to motionSampleCount,
+            "requested_outputs" to requestedOutputs.joinToString(","),
+        )
+
         fun defaultTaskSteps(label: String): List<String> = listOf(
             "Start with a wide exterior or entry framing pass for $label",
             "Walk the main path slowly and hold transitions for review",

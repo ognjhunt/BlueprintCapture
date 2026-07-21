@@ -57,7 +57,8 @@ test("buildLargeVideoIngestBlockedArtifacts emits actionable pre-download blocke
   assert.ok(pathInfo);
 
   const sizeGate = inlineFrameExtractionSizeGate(5_000, 4_000);
-  const { blockReport, qaReport, pipelineStatusEvent } = buildLargeVideoIngestBlockedArtifacts({
+  const { blockReport, qaReport, pipelineStatusEvent, largeVideoIngestRequest } =
+    buildLargeVideoIngestBlockedArtifacts({
     bucketName: "test-bucket",
     pathInfo,
     objectName: "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
@@ -82,6 +83,10 @@ test("buildLargeVideoIngestBlockedArtifacts emits actionable pre-download blocke
   assert.equal(blockReport.block_code, "blocked_large_video_requires_segmented_ingest");
   assert.equal(blockReport.recommended_next_stage, "large_video_cloud_run_ingest");
   assert.equal(
+    blockReport.large_video_ingest_request_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/large_video_ingest_request.json"
+  );
+  assert.equal(
     blockReport.raw_video_uri,
     "gs://test-bucket/scenes/scene-123/captures/capture-456/raw/walkthrough.mov"
   );
@@ -102,6 +107,37 @@ test("buildLargeVideoIngestBlockedArtifacts emits actionable pre-download blocke
     pipelineStatusEvent.block_report_uri,
     "gs://test-bucket/scenes/scene-123/captures/capture-456/large_video_ingest_blocked.json"
   );
+  assert.equal(
+    pipelineStatusEvent.large_video_ingest_request_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/large_video_ingest_request.json"
+  );
+
+  assert.equal(
+    largeVideoIngestRequest.schema_version,
+    "large_video_cloud_run_ingest_request.v1"
+  );
+  assert.equal(largeVideoIngestRequest.status, "pending");
+  assert.equal(largeVideoIngestRequest.topic, "blueprint-large-video-ingest");
+  assert.equal(largeVideoIngestRequest.raw_video_size_bytes, 5_000);
+  assert.equal(
+    largeVideoIngestRequest.request_uri,
+    "gs://test-bucket/scenes/scene-123/captures/capture-456/large_video_ingest_request.json"
+  );
+  assert.deepEqual(largeVideoIngestRequest.inline_extract_frames, {
+    blocked: true,
+    function_memory: "2GiB",
+    function_timeout_seconds: 540,
+    tmpfs_video_download_avoided: true,
+    ffmpeg_attempted: false,
+  });
+  assert.deepEqual(largeVideoIngestRequest.processing_requirements, {
+    must_not_download_to_cloud_function_tmp: true,
+    requires_disk_backed_scratch: true,
+    segmented_decode_required: true,
+    recommended_runtime: "cloud_run_job_or_service",
+    recommended_min_memory: "8GiB",
+    recommended_timeout_seconds: 3600,
+  });
 });
 
 test("parseCapturePath supports canonical scenes capture layout", () => {

@@ -6,8 +6,12 @@ import SwiftUI
 // editorial Newsreader headline and the sign-in actions pinned to the bottom.
 
 struct BPSignInView: View {
+    @Environment(\.openURL) private var openURL
+    @State private var captureConsentAcknowledged = false
+
     var onContinue: () -> Void
     var onHasAccount: () -> Void = {}
+    var consentPolicy: CaptureLegalConsentPolicy = .current()
 
     var body: some View {
         ZStack {
@@ -68,18 +72,66 @@ struct BPSignInView: View {
 
     private var actions: some View {
         VStack(spacing: Space.s) {
-            BPPrimaryButton(title: "Continue with email", action: onContinue)
+            consentAcknowledgement
+            legalLinks
+            BPPrimaryButton(
+                title: "Continue with email",
+                enabled: consentPolicy.canContinue(hasAcknowledged: captureConsentAcknowledged),
+                action: onContinue
+            )
             Button("I already have an account", action: onHasAccount)
                 .buttonStyle(BPGhostButtonStyle(tint: BP.onInk, border: BP.onInk.opacity(0.25)))
         }
     }
 
     private var fineprint: some View {
-        Text("By continuing you confirm you only capture sites where the operator has granted permission, and you accept Blueprint's privacy terms.")
-            .font(.bpSans(BPType.caption, .regular))
-            .foregroundStyle(BP.onInk.opacity(0.5))
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, Space.m)
+        Group {
+            if consentPolicy.hasRequiredLegalLinks {
+                Text("You can review the legal links above before continuing. Existing accounts still confirm consent in the auth sheet before sign-in.")
+            } else {
+                Text(CaptureLegalConsentPolicy.missingLegalLinksMessage)
+            }
+        }
+        .font(.bpSans(BPType.caption, .regular))
+        .foregroundStyle(consentPolicy.hasRequiredLegalLinks ? BP.onInk.opacity(0.5) : BP.blockFg)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, Space.m)
+    }
+
+    private var consentAcknowledgement: some View {
+        Button {
+            captureConsentAcknowledged.toggle()
+        } label: {
+            HStack(alignment: .top, spacing: Space.s) {
+                Image(systemName: captureConsentAcknowledged ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(captureConsentAcknowledged ? BP.brass : BP.onInk.opacity(0.45))
+                Text(CaptureLegalConsentPolicy.acknowledgementText)
+                    .font(.bpSans(BPType.caption, .regular))
+                    .foregroundStyle(BP.onInk.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("captureLegalConsentAcknowledgement")
+    }
+
+    private var legalLinks: some View {
+        HStack(spacing: Space.s) {
+            ForEach(consentPolicy.requiredLinks, id: \.title) { link in
+                Button(link.title) {
+                    guard let url = link.url else { return }
+                    openURL(url)
+                }
+                .font(.bpSans(BPType.caption, .semibold))
+                .foregroundStyle(link.url == nil ? BP.onInk.opacity(0.35) : BP.onInk)
+                .underline(link.url != nil)
+                .disabled(link.url == nil)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

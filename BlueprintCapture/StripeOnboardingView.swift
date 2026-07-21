@@ -10,6 +10,7 @@ struct StripeOnboardingView: View {
     @State private var errorMessage: String?
     @State private var accountState: StripeAccountState?
     @State private var billingInfo: BillingInfo?
+    @State private var accountLoadState: PayoutAccountStateLoadState = .idle
     @State private var didOpenOnboarding = false
     private let payoutAvailability = RuntimeConfig.current.availability(for: .payouts)
 
@@ -64,12 +65,16 @@ struct StripeOnboardingView: View {
                         )
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
+                    } else if let message = accountLoadState.failureMessage {
+                        loadFailureBanner(message: message)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 20)
                     } else if verificationSummary.overallStatus != .verified {
                         statusBanner(
                             icon: verificationSummary.overallStatus == .pendingReview ? "clock.badge.checkmark" : "exclamationmark.triangle.fill",
                             title: verificationSummary.headline,
                             subtitle: verificationSummary.detail,
-                            tone: verificationSummary.overallStatus == .pendingReview ? BlueprintTheme.brandTeal : Color(red: 0.9, green: 0.55, blue: 0.1)
+                            tone: verificationSummary.overallStatus == .pendingReview ? BlueprintTheme.brandTeal : BP.warnLit
                         )
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
@@ -78,7 +83,7 @@ struct StripeOnboardingView: View {
                             icon: "calendar.badge.clock",
                             title: "Next payout \(next.estimatedArrival.formatted(.dateTime.month(.abbreviated).day()))",
                             subtitle: next.amount.formatted(.currency(code: "USD")),
-                            tone: BlueprintTheme.brandTeal
+                            tone: BP.brass
                         )
                         .padding(.horizontal, 20)
                         .padding(.bottom, 20)
@@ -89,9 +94,9 @@ struct StripeOnboardingView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 12)
 
-                    verificationChecklistCard
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 28)
+                    verificationSectionCard
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 28)
 
                     // MARK: Payout Schedule
                     sectionLabel("Payout Schedule")
@@ -122,7 +127,7 @@ struct StripeOnboardingView: View {
             if isLoading {
                 Color.black.opacity(0.5).ignoresSafeArea()
                 ProgressView()
-                    .tint(BlueprintTheme.brandTeal)
+                    .tint(BP.brass)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -142,9 +147,7 @@ struct StripeOnboardingView: View {
             Text(errorMessage ?? "")
         }
         .task {
-            isLoading = true
             await loadAccountState()
-            isLoading = false
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active, didOpenOnboarding else { return }
@@ -154,6 +157,15 @@ struct StripeOnboardingView: View {
     }
 
     // MARK: - Verification Card
+
+    @ViewBuilder
+    private var verificationSectionCard: some View {
+        if let message = accountLoadState.failureMessage {
+            accountLoadFailureCard(message: message)
+        } else {
+            verificationChecklistCard
+        }
+    }
 
     private var verificationChecklistCard: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -192,6 +204,55 @@ struct StripeOnboardingView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(white: 0.12), lineWidth: 1)
+        )
+    }
+
+    private func accountLoadFailureCard(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(BP.warnLit)
+                    .frame(width: 30, height: 30)
+                    .background(Color(white: 0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Payout status unavailable")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.5))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Button {
+                Task { await loadAccountState() }
+            } label: {
+                HStack {
+                    Text("Retry status load")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+                .background(Color(white: 0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color(white: 0.18), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(BP.warnLit.opacity(0.24), lineWidth: 1)
         )
     }
 
@@ -254,29 +315,52 @@ struct StripeOnboardingView: View {
         )
     }
 
+    private func loadFailureBanner(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            statusBanner(
+                icon: "exclamationmark.triangle.fill",
+                title: "Payout status unavailable",
+                subtitle: message,
+                tone: BP.warnLit
+            )
+
+            Button {
+                Task { await loadAccountState() }
+            } label: {
+                Label("Retry status load", systemImage: "arrow.clockwise")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(Color(white: 0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     // MARK: - Payout Schedule Card
 
     private var payoutScheduleCard: some View {
         VStack(spacing: 0) {
             scheduleRow(
                 icon: "calendar",
-                iconColor: Color(red: 0.2, green: 0.6, blue: 1.0),
-                title: accountState?.payoutSchedule.displayName ?? "Manual",
-                subtitle: "Schedule comes from your connected Stripe account"
+                iconColor: BP.brass,
+                title: scheduleTitle,
+                subtitle: scheduleSubtitle
             )
             rowDivider
             scheduleRow(
                 icon: "building.columns.fill",
-                iconColor: BlueprintTheme.brandTeal,
+                iconColor: BP.brass,
                 title: "Standard payouts",
                 subtitle: "Available after approved captures and Stripe payout enablement"
             )
             rowDivider
             scheduleRow(
                 icon: "bolt.fill",
-                iconColor: Color(red: 0.9, green: 0.55, blue: 0.1),
+                iconColor: BP.warnLit,
                 title: "Provider-gated cashout",
-                subtitle: accountState?.instantPayoutEligible == true ? "Eligible balance is available for a provider cashout request" : "Unlocks only when Stripe marks the account eligible"
+                subtitle: cashoutSubtitle
             )
         }
         .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -284,6 +368,29 @@ struct StripeOnboardingView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(Color(white: 0.12), lineWidth: 1)
         )
+    }
+
+    private var scheduleTitle: String {
+        if accountLoadState.blocksDefaultPayoutState {
+            return "Unavailable"
+        }
+        return accountState?.payoutSchedule.displayName ?? "Not loaded"
+    }
+
+    private var scheduleSubtitle: String {
+        if accountLoadState.blocksDefaultPayoutState {
+            return "Retry before trusting schedule, bank, or payout readiness."
+        }
+        return "Schedule comes from your connected Stripe account"
+    }
+
+    private var cashoutSubtitle: String {
+        if accountLoadState.blocksDefaultPayoutState {
+            return "Cashout stays locked until Stripe account state loads successfully."
+        }
+        return accountState?.instantPayoutEligible == true
+            ? "Eligible balance is available for a provider cashout request"
+            : "Unlocks only when Stripe marks the account eligible"
     }
 
     private func scheduleRow(icon: String, iconColor: Color, title: String, subtitle: String) -> some View {
@@ -317,7 +424,7 @@ struct StripeOnboardingView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 36, height: 36)
-                    .background(Color(red: 0.9, green: 0.55, blue: 0.1).opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(BP.warnLit.opacity(0.22), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 TextField("Amount in USD", text: $instantAmount)
                     .keyboardType(.numberPad)
@@ -327,10 +434,10 @@ struct StripeOnboardingView: View {
                 Button { triggerInstantPayout() } label: {
                     Text("Request")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(canCashOut ? .white : Color(white: 0.4))
+                        .foregroundStyle(canCashOut ? BP.ink : Color(white: 0.4))
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(canCashOut ? BlueprintTheme.successGreen : Color(white: 0.15), in: Capsule())
+                        .background(canCashOut ? BP.brass : Color(white: 0.15), in: Capsule())
                 }
                 .disabled(!canCashOut)
             }
@@ -341,9 +448,7 @@ struct StripeOnboardingView: View {
 
             HStack {
                 Text(
-                    accountState?.instantPayoutEligible == true
-                        ? "Stripe has marked the balance eligible. Settlement timing still depends on provider and bank processing."
-                        : "Cashout stays locked until Stripe verifies the account and marks a balance eligible."
+                    cashoutSubtitle
                 )
                 .font(.caption)
                 .foregroundStyle(Color(white: 0.3))
@@ -360,7 +465,7 @@ struct StripeOnboardingView: View {
     }
 
     private var canCashOut: Bool {
-        verificationSummary.allowsCashout && Int(instantAmount) != nil && !isLoading
+        accountLoadState == .loaded && verificationSummary.allowsCashout && Int(instantAmount) != nil && !isLoading
     }
 
     // MARK: - Helpers
@@ -382,7 +487,17 @@ struct StripeOnboardingView: View {
     // MARK: - Actions
 
     private func loadAccountState() async {
-        guard payoutAvailability.isEnabled else { return }
+        guard payoutAvailability.isEnabled else {
+            await MainActor.run {
+                isLoading = false
+                accountLoadState = .idle
+            }
+            return
+        }
+        await MainActor.run {
+            isLoading = true
+            accountLoadState = .loading
+        }
         do {
             async let stateTask = StripeConnectService.shared.fetchAccountState()
             async let billingTask = APIService.shared.fetchBillingInfo()
@@ -390,8 +505,17 @@ struct StripeOnboardingView: View {
             await MainActor.run {
                 self.accountState = state
                 self.billingInfo = billing
+                self.accountLoadState = .loaded
+                self.isLoading = false
             }
         } catch {
+            let loadState = PayoutAccountStateLoadState.failure(from: error)
+            await MainActor.run {
+                self.accountState = nil
+                self.billingInfo = nil
+                self.accountLoadState = loadState
+                self.isLoading = false
+            }
             print("[PayoutsUI] ✗ \(error)")
         }
     }
@@ -472,7 +596,7 @@ struct StripeOnboardingView: View {
         case .pendingReview:
             return BlueprintTheme.brandTeal
         case .actionRequired:
-            return Color(red: 0.9, green: 0.55, blue: 0.1)
+            return BP.warnLit
         case .notStarted:
             return Color(white: 0.44)
         case .unavailable:

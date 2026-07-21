@@ -10,6 +10,7 @@ struct SettingsView: View {
     @State private var showingEditProfile = false
     @State private var showingAuth = false
     @State private var showingGlassesCapture = false
+    @State private var showingSupportHelp = false
     @State private var showNearbyAlertInfo = false
     @State private var showDeleteAccountConfirmation = false
 
@@ -98,6 +99,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showingEditProfile) { EditProfileView(viewModel: viewModel) }
         .sheet(isPresented: $showingAuth) { AuthView() }
         .sheet(isPresented: $showingGlassesCapture) { GlassesCaptureView() }
+        .sheet(isPresented: $showingSupportHelp) { CapturerSupportHelpView() }
         .task {
             await viewModel.loadUserData()
             await notificationPreferences.refreshFromBackendIfPossible()
@@ -320,16 +322,24 @@ struct SettingsView: View {
     private var usefulLinksCard: some View {
         kledCard {
             VStack(spacing: 0) {
+                settingsLinkRow(icon: "lifepreserver.fill", iconBg: Color(white: 0.25), title: "Support & Recovery") {
+                    showingSupportHelp = true
+                }
+                kledRowDivider
                 settingsLinkRow(icon: "globe", iconBg: Color(white: 0.25), title: "Main Website") {
                     openExternalLink(AppConfig.mainWebsiteURL())
                 }
                 kledRowDivider
                 settingsLinkRow(icon: "questionmark.circle.fill", iconBg: Color(white: 0.25), title: "Help Center") {
-                    openExternalLink(AppConfig.helpCenterURL())
+                    openExternalLink(AppConfig.helpCenterOrBetaGuideURL())
+                }
+                kledRowDivider
+                settingsLinkRow(icon: "list.bullet.rectangle.fill", iconBg: Color(white: 0.25), title: "Beta Capturer Guide") {
+                    openExternalLink(AppConfig.betaCapturerGuideURL())
                 }
                 kledRowDivider
                 settingsLinkRow(icon: "ant.fill", iconBg: Color.red.opacity(0.8), title: "Report a Bug") {
-                    openExternalLink(AppConfig.bugReportURL())
+                    openExternalLink(AppConfig.bugReportOrSupportURL())
                 }
             }
         }
@@ -575,6 +585,138 @@ struct SettingsView: View {
     private func openExternalLink(_ url: URL?) {
         guard let url else { return }
         openURL(url)
+    }
+}
+
+private struct CapturerSupportHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    actionCard
+                    escalationCard
+                }
+                .padding(20)
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("Support")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                Button("Done") { dismiss() }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Support & Recovery")
+                .font(BlueprintTheme.display(30, weight: .semibold))
+                .foregroundStyle(BlueprintTheme.textPrimary)
+            Text("Use one support path for uploads, access, privacy, payout, and review-state questions so the account and capture record stay attached.")
+                .font(BlueprintTheme.body(15, weight: .medium))
+                .foregroundStyle(BlueprintTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var actionCard: some View {
+        supportCard {
+            VStack(spacing: 0) {
+                supportRow(title: "Email support", detail: AppConfig.effectiveSupportEmailAddress(), icon: "envelope.fill") {
+                    if let url = AppConfig.supportEmailURL(subject: "Blueprint Capture Support") {
+                        openURL(url)
+                    }
+                }
+                supportDivider
+                supportRow(title: "Beta capturer guide", detail: "Scope, first run, review states, payout expectations, and escalation.", icon: "list.bullet.rectangle.fill") {
+                    openURL(AppConfig.betaCapturerGuideURL())
+                }
+                supportDivider
+                supportRow(title: "Report a bug", detail: "Falls back to support email if a bug-report URL is not configured.", icon: "ant.fill") {
+                    openURL(AppConfig.bugReportOrSupportURL())
+                }
+            }
+        }
+    }
+
+    private var escalationCard: some View {
+        supportCard {
+            VStack(alignment: .leading, spacing: 0) {
+                guidanceRow("Stalled upload", "Email support if a capture is stuck for more than 24 hours. Include the capture id, device model, app version, and network context.")
+                supportDivider
+                guidanceRow("Privacy or restricted area", "Stop sharing the media and contact support immediately. Do not retry the capture until a safe next step is confirmed.")
+                supportDivider
+                guidanceRow("Payout or account state", "Include the assignment id and the exact status shown in Wallet or Settings. Open capture is not automatically payout eligible.")
+                supportDivider
+                guidanceRow("Blocked or degraded review", "Send the status text, capture id, and the site/task context so review can identify the missing layer.")
+            }
+        }
+    }
+
+    private func supportRow(title: String, detail: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(Color(white: 0.52))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Color(white: 0.35))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func guidanceRow(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(Color(white: 0.55))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    private func supportCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(Color(white: 0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(white: 0.12), lineWidth: 1)
+            )
+    }
+
+    private var supportDivider: some View {
+        Rectangle()
+            .fill(Color(white: 0.12))
+            .frame(height: 1)
+            .padding(.leading, 66)
     }
 }
 
