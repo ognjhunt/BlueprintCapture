@@ -7,7 +7,7 @@ import SwiftUI
 // cover. Paper everywhere; the cover is the only dark surface.
 
 struct BPRootView: View {
-    @StateObject private var coordinator = RedesignCoordinator()
+    @EnvironmentObject private var coordinator: RedesignCoordinator
     @EnvironmentObject private var alertsManager: NearbyAlertsManager
 
     var body: some View {
@@ -48,5 +48,6 @@ struct BPRootView: View {
 #Preview {
     BPRootView()
         .environmentObject(NearbyAlertsManager())
+        .environmentObject(RedesignCoordinator())
 }
 #endif

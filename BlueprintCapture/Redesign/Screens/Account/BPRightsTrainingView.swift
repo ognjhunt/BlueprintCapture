@@ -7,13 +7,18 @@ import SwiftUI
 
 struct BPRightsTrainingView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var capturerState = BPCapturerStateStore.shared
     @State private var acknowledged = false
     private let principles = BPSample.principles
 
     var body: some View {
         VStack(spacing: 0) {
             BPNavBar(title: "Rights & privacy") {
-                BPStatusChip("Certified", signal: .proof)
+                if capturerState.isRightsCertified {
+                    BPStatusChip("Certified", signal: .proof)
+                } else {
+                    BPStatusChip("Not certified", signal: .caution)
+                }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
@@ -98,7 +103,17 @@ struct BPRightsTrainingView: View {
     private var bottomBar: some View {
         VStack(spacing: Space.m) {
             acknowledgement
-            BPPrimaryButton(title: "Confirm certification", enabled: acknowledged) {
+            if let certifiedAt = capturerState.rightsCertifiedAt, capturerState.isRightsCertified {
+                Text("Certified \(certifiedAt.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.bpMono(BPType.caption))
+                    .foregroundStyle(BP.textMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            BPPrimaryButton(
+                title: capturerState.isRightsCertified ? "Recertify" : "Confirm certification",
+                enabled: acknowledged
+            ) {
+                capturerState.certifyRights()
                 dismiss()
             }
         }

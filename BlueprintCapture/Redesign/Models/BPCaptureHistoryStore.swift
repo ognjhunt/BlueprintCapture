@@ -49,6 +49,26 @@ struct BPCaptureHistoryEntry: Identifiable, Hashable {
 
     var needsFix: Bool { status == "needs_fix" }
 
+    /// Typed status for surfaces that want `BPStatusPresentation` explanations
+    /// (e.g. the capture detail sheet). Nil when the backend wrote a status this
+    /// build doesn't know — those render the raw chip only, nothing synthesized.
+    var captureStatus: CaptureStatus? {
+        switch status {
+        case "draft": return .draft
+        case "ready_to_submit": return .readyToSubmit
+        case "submitted": return .submitted
+        case "under_review": return .underReview
+        case "processing": return .processing
+        case "qc", "quality_control": return .qc
+        case "approved": return .approved
+        case "needs_recapture": return .needsRecapture
+        case "needs_fix": return .needsFix
+        case "rejected": return .rejected
+        case "paid": return .paid
+        default: return nil
+        }
+    }
+
     var chip: BPChip {
         switch status {
         case "approved": return BPChip(label: "Approved", signal: .proof)

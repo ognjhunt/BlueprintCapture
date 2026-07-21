@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -27,11 +28,22 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     firebase_json = repo_root / "firebase.json"
     storage_rules = repo_root / "storage.rules"
+    webapp_storage_rules = Path(
+        os.environ.get(
+            "WEBAPP_STORAGE_RULES_PATH",
+            str(repo_root.parent / "Blueprint-WebApp" / "storage.rules"),
+        )
+    ).expanduser()
 
     if not firebase_json.exists():
         fail("firebase.json is missing")
     if not storage_rules.exists():
         fail("storage.rules is missing")
+    if not webapp_storage_rules.exists():
+        fail(
+            "WebApp storage.rules is missing; set WEBAPP_STORAGE_RULES_PATH to "
+            "the sibling Blueprint-WebApp/storage.rules file for cross-repo parity validation"
+        )
 
     try:
         firebase_config = json.loads(firebase_json.read_text(encoding="utf-8"))
@@ -83,7 +95,15 @@ def main() -> None:
         if re.search(pattern, rules):
             fail(f"unsafe broad rule matched {pattern}")
 
-    print("Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, size cap, and catch-all deny.")
+    if storage_rules.read_bytes() != webapp_storage_rules.read_bytes():
+        fail(
+            "storage.rules differs from WebApp storage.rules; both repos deploy to "
+            "the same Firebase Storage project and must carry the byte-identical canonical superset"
+        )
+
+    print(
+        "Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, size cap, catch-all deny, and WebApp/Capture byte parity."
+    )
 
 
 if __name__ == "__main__":

@@ -1,24 +1,32 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Home / assignments (tab: Home)
 //
 // CAP-04: this screen is bound to the real discovery/reservation engine
 // (`ScanHomeViewModel` + `NearbyAlertsManager`), not `BPSample.*` constants. Nearby
-// and active assignments come from the live `capture_jobs` feed. Selecting a job
-// reserves/claims it (yielding a stable `capture_job_id`) and launches the real
-// capture engine with that id threaded through (CAP-01).
+// and active assignments come from the live `capture_jobs` feed. Browsing a job
+// opens the real task detail; accepting reserves/claims it (yielding a stable
+// `capture_job_id`) and launches the real capture engine with that id threaded
+// through (CAP-01).
 
 struct BPHomeTab: View {
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var coordinator: RedesignCoordinator
     @EnvironmentObject private var glassesManager: GlassesCaptureManager
     @EnvironmentObject private var uploadQueue: UploadQueueViewModel
     @EnvironmentObject private var alertsManager: NearbyAlertsManager
 
     @StateObject private var viewModel: ScanHomeViewModel
+    @StateObject private var checklist = BPSetupChecklistModel()
     @State private var reservingJobId: String?
     @State private var reservationError: String?
     @AppStorage("com.blueprint.hasDismissedEarningExplainer") private var hasDismissedEarningExplainer = false
     @State private var isPreActivationCapturer = false
+    @State private var detailItem: ScanHomeViewModel.JobItem?
+    @State private var showingDetail = false
+    @State private var showingMap = false
+    @State private var showingHowItWorks = false
 
     private let targetStateService: TargetStateServiceProtocol = TargetStateService()
 
@@ -54,6 +62,8 @@ struct BPHomeTab: View {
                     if !hasDismissedEarningExplainer && isPreActivationCapturer {
                         earningExplainerCard
                     }
+                    uploadsInFlightCard
+                    BPSetupChecklistCard(model: checklist)
                     if let activeItem {
                         activeCard(activeItem)
                     } else {
@@ -70,6 +80,17 @@ struct BPHomeTab: View {
             .background(BP.canvas.ignoresSafeArea())
             .navigationBarHidden(true)
             .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
+            .navigationDestination(isPresented: $showingDetail) {
+                if let detailItem {
+                    BPTaskDetailView(
+                        item: detailItem,
+                        isReserving: reservingJobId == detailItem.id,
+                        onAccept: { item in
+                            Task { await reserveAndLaunch(item) }
+                        }
+                    )
+                }
+            }
         }
         .task {
             // The earning explainer is a first-run affordance: only capturers who
@@ -78,6 +99,20 @@ struct BPHomeTab: View {
             isPreActivationCapturer = !ActivationFunnelStore.shared.snapshot().activationCompleted
             viewModel.onAppear()
             await viewModel.refresh()
+            await checklist.refresh()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                Task { await checklist.refresh() }
+            }
+        }
+        .sheet(isPresented: $showingMap) {
+            BPNearbyMapView(items: viewModel.items) { item in
+                openDetail(item)
+            }
+        }
+        .sheet(isPresented: $showingHowItWorks) {
+            NavigationStack { BPHowItWorksView() }
         }
         .alert(
             "Couldn’t start this capture",
@@ -97,10 +132,8 @@ struct BPHomeTab: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: Space.xs) {
-                BPEyebrow("Capture", color: BP.brassDeep)
-                Text(coordinator.capturerFirstName.isEmpty
-                     ? greeting
-                     : "\(greeting), \(coordinator.capturerFirstName)")
+                BPEyebrow(eyebrowText, color: BP.brassDeep)
+                Text(greetingLine)
                     .font(.bpSans(BPType.largeTitle, .bold))
                     .tracking(BPTracking.headlineLarge)
                     .foregroundStyle(BP.textStrong)
@@ -115,8 +148,17 @@ struct BPHomeTab: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
+            .accessibilityLabel("Notifications")
             .offset(x: 8)
         }
+    }
+
+    private var eyebrowText: String {
+        coordinator.capturerCity.isEmpty ? "Field capture" : coordinator.capturerCity
+    }
+
+    private var greetingLine: String {
+        coordinator.capturerName.isEmpty ? greeting : "\(greeting), \(coordinator.capturerName)"
     }
 
     private var greeting: String {
@@ -157,15 +199,60 @@ struct BPHomeTab: View {
         .bpCard()
     }
 
+    // MARK: Uploads in flight (real queue state)
+
+    @ViewBuilder
+    private var uploadsInFlightCard: some View {
+        let active = uploadQueue.uploadStatuses.filter {
+            if case .completed = $0.state { return false }
+            return true
+        }
+        if !active.isEmpty {
+            VStack(spacing: Space.m) {
+                ForEach(active) { status in
+                    let entry = BPStatusPresentation.entry(for: status.state)
+                    HStack(spacing: Space.m) {
+                        Image(systemName: "arrow.up.doc")
+                            .font(.system(size: 18, weight: .regular))
+                            .foregroundStyle(entry.signal.fg)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(status.targetName ?? "Capture bundle")
+                                .font(.bpSans(BPType.body, .semibold))
+                                .foregroundStyle(BP.textStrong)
+                                .lineLimit(1)
+                            if case .uploading(let progress) = status.state {
+                                ProgressView(value: progress)
+                                    .tint(BP.brassDeep)
+                            }
+                        }
+                        Spacer(minLength: Space.s)
+                        BPStatusChip(entry.label, signal: entry.signal, mono: true)
+                    }
+                    .padding(Space.l)
+                    .bpCard()
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+    }
+
     // MARK: Active assignment (real)
 
     private func activeCard(_ item: ScanHomeViewModel.JobItem) -> some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            BPFacilityImage(name: "pov-warehouse-tote", height: 156)
+            Button {
+                openDetail(item)
+            } label: {
+                BPRemoteFacilityImage(
+                    url: item.job.heroImageURL ?? item.job.thumbnailURL ?? item.previewURL,
+                    height: 156
+                )
                 .overlay(alignment: .topLeading) {
-                    BPStatusChip(item.permissionTier.shortLabel, signal: signal(for: item.permissionTier))
+                    BPStatusChip(item.permissionTier.shortLabel, signal: BPSignalMapping.signal(for: item.permissionTier))
                         .padding(Space.m)
                 }
+            }
+            .buttonStyle(.plain)
 
             HStack(alignment: .firstTextBaseline) {
                 Text(item.job.title)
@@ -179,18 +266,35 @@ struct BPHomeTab: View {
                 }
             }
 
-            Text([item.job.title, item.job.category ?? item.job.address, item.distanceLabel]
+            Text([item.job.category ?? item.job.address, item.distanceLabel]
                 .joined(separator: "  ·  "))
                 .font(.bpMono(BPType.caption))
                 .foregroundStyle(BP.textMuted)
 
-            BPPrimaryButton(
-                title: reservingJobId == item.id ? "Reserving…" : "Continue capture",
-                systemImage: "camera.aperture"
-            ) {
-                Task { await reserveAndLaunch(item) }
+            HStack(spacing: Space.s) {
+                BPPrimaryButton(
+                    title: reservingJobId == item.id ? "Reserving…" : "Continue capture",
+                    systemImage: "camera.aperture"
+                ) {
+                    Task { await reserveAndLaunch(item) }
+                }
+                .disabled(reservingJobId != nil || item.permissionTier == .blocked)
+
+                Button {
+                    openDetail(item)
+                } label: {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 18, weight: .regular))
+                        .foregroundStyle(BP.textStrong)
+                        .frame(width: 52, height: 52)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                                .strokeBorder(BP.lineStrong, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("View task details")
             }
-            .disabled(reservingJobId != nil || item.permissionTier == .blocked)
             .padding(.top, Space.xs)
         }
         .padding(Space.l)
@@ -202,13 +306,18 @@ struct BPHomeTab: View {
             Text("No assignments nearby yet")
                 .font(.bpSans(BPType.bodyL, .semibold))
                 .foregroundStyle(BP.textStrong)
-            Text("Move closer to a published site, or start an open capture where you have permission.")
+            Text("Assignments appear when published sites are near you. Open capture is always available where you have permission — those uploads enter review first.")
                 .font(.bpSans(BPType.body, .regular))
                 .foregroundStyle(BP.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
             BPPrimaryButton(title: "Start open capture", systemImage: "camera.aperture") {
                 coordinator.startCapture()
             }
             .padding(.top, Space.xs)
+            Button("How Blueprint works") { showingHowItWorks = true }
+                .font(.bpSans(BPType.bodyS, .semibold))
+                .foregroundStyle(BP.brassDeep)
+                .underline()
         }
         .padding(Space.l)
         .bpCard()
@@ -224,6 +333,10 @@ struct BPHomeTab: View {
                     .tracking(BPTracking.headline)
                     .foregroundStyle(BP.textStrong)
                 Spacer()
+                if !viewModel.items.isEmpty {
+                    BPTextAction(title: "Map") { showingMap = true }
+                        .accessibilityLabel("Open nearby map")
+                }
             }
 
             if nearbyItems.isEmpty {
@@ -234,16 +347,24 @@ struct BPHomeTab: View {
                 VStack(spacing: Space.m) {
                     ForEach(nearbyItems) { item in
                         Button {
-                            Task { await reserveAndLaunch(item) }
+                            openDetail(item)
                         } label: {
                             BPJobRow(item: item, isReserving: reservingJobId == item.id)
                         }
                         .buttonStyle(.plain)
-                        .disabled(reservingJobId != nil || item.permissionTier == .blocked)
+                        .disabled(reservingJobId != nil)
+                        .accessibilityLabel("\(item.job.title), \(item.payoutLabel), \(item.distanceLabel). Opens task detail.")
                     }
                 }
             }
         }
+    }
+
+    // MARK: Navigation
+
+    private func openDetail(_ item: ScanHomeViewModel.JobItem) {
+        detailItem = item
+        showingDetail = true
     }
 
     // MARK: Reservation → capture launch (CAP-04 → CAP-01)
@@ -281,6 +402,8 @@ struct BPHomeTab: View {
             }
         }
 
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        showingDetail = false
         coordinator.startCapture(seed: seed(for: item))
     }
 
@@ -339,15 +462,6 @@ struct BPHomeTab: View {
         guard cents > 0 else { return nil }
         return Double(cents) / 100.0
     }
-
-    private func signal(for tier: ScanHomeViewModel.CapturePermissionTier) -> BPSignal {
-        switch tier {
-        case .approved: return .proof
-        case .reviewRequired: return .info
-        case .permissionRequired: return .caution
-        case .blocked: return .caution
-        }
-    }
 }
 
 // MARK: - Real job row
@@ -358,6 +472,12 @@ struct BPJobRow: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
+            BPRemoteFacilityImage(
+                url: item.job.thumbnailURL ?? item.previewURL,
+                height: 52
+            )
+            .frame(width: 52)
+
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text(item.job.title)
                     .font(.bpSans(BPType.body, .semibold))
@@ -383,6 +503,9 @@ struct BPJobRow: View {
                 }
                 BPStatusChip(item.permissionTier.shortLabel, signal: signal)
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(BP.textFaint)
         }
         .padding(Space.l)
         .bpCard()
@@ -390,12 +513,7 @@ struct BPJobRow: View {
     }
 
     private var signal: BPSignal {
-        switch item.permissionTier {
-        case .approved: return .proof
-        case .reviewRequired: return .info
-        case .permissionRequired: return .caution
-        case .blocked: return .caution
-        }
+        BPSignalMapping.signal(for: item.permissionTier)
     }
 }
 

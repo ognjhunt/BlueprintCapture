@@ -70,6 +70,7 @@ struct StripeAccountState: Codable {
 final class StripeConnectService {
     enum StripeConnectError: LocalizedError {
         case missingConfiguration
+        case authenticationRequired
         case invalidResponse(status: Int)
         case decodingError(Error)
         case networkError(Error)
@@ -78,6 +79,8 @@ final class StripeConnectService {
             switch self {
             case .missingConfiguration:
                 return RuntimeConfig.current.availability(for: .payouts).message ?? "Payout setup is not enabled for this build."
+            case .authenticationRequired:
+                return "Sign in again before changing payout settings."
             case .invalidResponse(let status):
                 return "Payout service returned HTTP \(status)."
             case .decodingError:
@@ -89,6 +92,14 @@ final class StripeConnectService {
     }
 
     static let shared = StripeConnectService()
+    static func requiresFirebaseToken(httpMethod: String?) -> Bool {
+        switch (httpMethod ?? "GET").uppercased() {
+        case "POST", "PUT", "PATCH", "DELETE":
+            return true
+        default:
+            return false
+        }
+    }
 
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -217,6 +228,9 @@ final class StripeConnectService {
         var authorizedRequest = request
         if let token = try await currentFirebaseIdToken() {
             authorizedRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else if Self.requiresFirebaseToken(httpMethod: authorizedRequest.httpMethod) {
+            print("[Stripe] ✗ Missing Firebase ID token for state-changing payout request")
+            throw StripeConnectError.authenticationRequired
         }
 
         print("[Stripe] Performing request: \(authorizedRequest.httpMethod ?? "GET") \(authorizedRequest.url?.absoluteString ?? "N/A")")

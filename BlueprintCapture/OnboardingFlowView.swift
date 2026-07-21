@@ -114,8 +114,8 @@ private struct OnboardingWelcomeView: View {
                     .padding(.bottom, 20)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    featureRow(icon: "location.viewfinder", text: "Pick one nearby or current-place capture")
-                    featureRow(icon: "camera.fill", text: "Record raw video, poses, motion, and device context")
+                    featureRow(icon: "building.2.crop.circle", text: "Pick an assigned facility, industrial task, or approved site")
+                    featureRow(icon: "camera.fill", text: "Record task context, route geometry, privacy limits, and device evidence")
                     featureRow(icon: "arrow.up.doc.fill", text: "Finish when the raw bundle uploads completely")
                 }
                 .padding(.horizontal, 28)
@@ -696,41 +696,7 @@ private struct AuthSecureFieldView: View {
 private struct FirstCaptureGoalStepView: View {
     let onContinue: () -> Void
 
-    @AppStorage("com.blueprint.firstCaptureGoal") private var selectedGoal: String = FirstCaptureGoal.currentPlace.rawValue
-
-    private enum FirstCaptureGoal: String, CaseIterable, Identifiable {
-        case currentPlace = "current_place_raw_capture"
-        case nearbyOpportunity = "nearby_approved_opportunity"
-
-        var id: String { rawValue }
-
-        var title: String {
-            switch self {
-            case .currentPlace:
-                return "Capture a place I can access now"
-            case .nearbyOpportunity:
-                return "Find an approved nearby opportunity"
-            }
-        }
-
-        var subtitle: String {
-            switch self {
-            case .currentPlace:
-                return "Start with a lawful, visible area and upload one truthful raw bundle for review."
-            case .nearbyOpportunity:
-                return "Use the feed to pick a scoped capture job before recording."
-            }
-        }
-
-        var icon: String {
-            switch self {
-            case .currentPlace:
-                return "camera.metering.matrix"
-            case .nearbyOpportunity:
-                return "location.viewfinder"
-            }
-        }
-    }
+    @AppStorage(OnboardingFirstCaptureGoal.storageKey) private var selectedGoal: String = OnboardingFirstCaptureGoal.assignedOrApprovedSite.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
@@ -746,7 +712,7 @@ private struct FirstCaptureGoalStepView: View {
                     .foregroundStyle(BlueprintTheme.textPrimary)
                     .multilineTextAlignment(.center)
 
-                Text("The goal is one real raw bundle: recorded, finalized, and uploaded. No readiness, payout, or rights status is inferred here.")
+                Text("Start with one assigned facility, industrial task area, or operator-approved site. Recording is raw evidence only; payout, rights, and downstream use require review.")
                     .font(BlueprintTheme.body(15, weight: .medium))
                     .foregroundStyle(BlueprintTheme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -755,7 +721,7 @@ private struct FirstCaptureGoalStepView: View {
             .padding(.bottom, 30)
 
             VStack(spacing: 12) {
-                ForEach(FirstCaptureGoal.allCases) { goal in
+                ForEach(OnboardingFirstCaptureGoal.allCases) { goal in
                     Button {
                         selectedGoal = goal.rawValue
                     } label: {
@@ -840,7 +806,7 @@ private struct OnboardingPermissionsView: View {
                         .font(BlueprintTheme.display(30, weight: .semibold))
                         .foregroundStyle(BlueprintTheme.textPrimary)
 
-                    Text("We use these to find nearby spaces, capture stronger evidence, and keep review states up to date.")
+                    Text("We use these to confirm assigned-site context, capture stronger evidence, and keep review states up to date.")
                         .font(BlueprintTheme.body(15, weight: .medium))
                         .foregroundStyle(BlueprintTheme.textSecondary)
                         .multilineTextAlignment(.center)
@@ -880,7 +846,7 @@ private struct OnboardingPermissionsView: View {
             }
             Button("Continue Anyway") { onContinue() }
         } message: {
-            Text("Location and notifications are recommended for nearby alerts. Camera and motion access are required for capture.")
+            Text("Location and notifications are recommended for assigned-site and nearby alerts. Camera and motion access are required for capture.")
         }
     }
 
@@ -1065,6 +1031,8 @@ private struct OnboardingGlassesView: View {
 // MARK: - Step 8: Complete
 
 private struct OnboardingCompleteView: View {
+    @Environment(\.openURL) private var openURL
+
     let glassesConnected: Bool
     let onFinish: () -> Void
 
@@ -1093,9 +1061,31 @@ private struct OnboardingCompleteView: View {
 
                 Spacer()
 
-                kledPrimaryButton("Open Capture Feed", action: onFinish)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 32)
+                VStack(spacing: 12) {
+                    Button {
+                        openURL(AppConfig.betaCapturerGuideURL())
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "list.bullet.rectangle")
+                                .font(.body.weight(.semibold))
+                            Text("Read beta capturer guide")
+                                .font(.body.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    kledPrimaryButton("Open Capture Feed", action: onFinish)
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 32)
             }
         }
     }

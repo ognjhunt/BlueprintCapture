@@ -8,6 +8,9 @@ import SwiftUI
 struct BPHistoryView: View {
     @EnvironmentObject private var coordinator: RedesignCoordinator
     @StateObject private var store = BPCaptureHistoryStore()
+    @State private var selectedEntry: BPCaptureHistoryEntry?
+    @State private var selectedDetail: CaptureDetailResponse?
+    @State private var isLoadingDetail = false
 
     var body: some View {
         ScrollView {
@@ -45,6 +48,30 @@ struct BPHistoryView: View {
         .bpTabBarOverlay(selection: $coordinator.selectedTab, onCapture: { coordinator.startCapture() })
         .task { await store.refresh() }
         .refreshable { await store.refresh() }
+        .sheet(item: $selectedEntry) { entry in
+            BPCaptureDetailSheet(
+                entry: entry,
+                detail: selectedDetail,
+                isLoading: isLoadingDetail
+            )
+        }
+    }
+
+    /// Opens the per-capture detail sheet. Review detail is fetched best-effort
+    /// from the backend; the sheet renders honestly with just the submission
+    /// status when no detail is available.
+    private func openDetail(_ entry: BPCaptureHistoryEntry) {
+        selectedDetail = nil
+        selectedEntry = entry
+        guard let uuid = UUID(uuidString: entry.id) else { return }
+        isLoadingDetail = true
+        Task {
+            let detail = try? await APIService.shared.fetchCaptureDetail(id: uuid)
+            if selectedEntry?.id == entry.id {
+                selectedDetail = detail
+                isLoadingDetail = false
+            }
+        }
     }
 
     private var eyebrow: String {
@@ -87,24 +114,34 @@ struct BPHistoryView: View {
     }
 
     private func row(_ entry: BPCaptureHistoryEntry) -> some View {
-        HStack(spacing: Space.m) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.site)
-                    .font(.bpSans(BPType.body, .semibold))
-                    .foregroundStyle(BP.textStrong)
-                    .lineLimit(1)
-                if !entry.meta.isEmpty {
-                    Text(entry.meta)
-                        .font(.bpMono(BPType.caption))
-                        .foregroundStyle(BP.textMuted)
+        Button {
+            openDetail(entry)
+        } label: {
+            HStack(spacing: Space.m) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(entry.site)
+                        .font(.bpSans(BPType.body, .semibold))
+                        .foregroundStyle(BP.textStrong)
                         .lineLimit(1)
+                    if !entry.meta.isEmpty {
+                        Text(entry.meta)
+                            .font(.bpMono(BPType.caption))
+                            .foregroundStyle(BP.textMuted)
+                            .lineLimit(1)
+                    }
                 }
+                Spacer(minLength: Space.s)
+                BPStatusChip(entry.chip.label, signal: entry.chip.signal)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(BP.textFaint)
             }
-            Spacer(minLength: Space.s)
-            BPStatusChip(entry.chip.label, signal: entry.chip.signal)
+            .padding(Space.m)
+            .bpCard()
+            .contentShape(Rectangle())
         }
-        .padding(Space.m)
-        .bpCard()
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(entry.site), \(entry.chip.label). Opens capture detail.")
     }
 }
 

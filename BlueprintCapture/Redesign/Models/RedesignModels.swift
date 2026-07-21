@@ -66,7 +66,7 @@ enum BPSample {
     /// Rights & privacy training copy — static editorial content, not data.
     static let principles: [BPPrinciple] = [
         BPPrinciple(index: 1, title: "Operator permission", body: "Only capture sites where the operator has granted access. Confirm permission before you record."),
-        BPPrinciple(index: 2, title: "Privacy first", body: "Faces and screens are blurred on-device. Never record people, badges, or restricted zones."),
+        BPPrinciple(index: 2, title: "Privacy first", body: "Keep people, badges, screens, and restricted zones out of frame. Privacy review gates every capture before it is used."),
         BPPrinciple(index: 3, title: "Truthful evidence", body: "Capture what is really there. Don't stage, reshoot to mislead, or overclaim coverage.")
     ]
 }

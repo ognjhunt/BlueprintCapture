@@ -7,6 +7,7 @@ struct AuthView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @StateObject private var viewModel: AuthViewModel
+    @State private var legalAcknowledged = false
     @FocusState private var focusedField: FocusField?
 
     /// `initialMode` picks which form the sheet opens on: onboarding passes
@@ -18,6 +19,21 @@ struct AuthView: View {
     }
 
     enum FocusField { case name, email, password, confirmPassword }
+
+    private var legalConsentPolicy: CaptureLegalConsentPolicy {
+        .current()
+    }
+
+    private var canUseExternalAuthProvider: Bool {
+        legalConsentPolicy.canContinue(
+            hasAcknowledged: legalAcknowledged,
+            isBusy: viewModel.isBusy
+        )
+    }
+
+    private var canSubmitEmailAuth: Bool {
+        viewModel.canSubmit && canUseExternalAuthProvider
+    }
 
     var body: some View {
         NavigationStack {
@@ -86,6 +102,7 @@ struct AuthView: View {
 
                             // Submit
                             Button {
+                                guard canSubmitEmailAuth else { return }
                                 Task { await viewModel.submit() }
                             } label: {
                                 Group {
@@ -103,12 +120,12 @@ struct AuthView: View {
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 52)
                                 .background(
-                                    viewModel.canSubmit ? Color.white : Color(white: 0.35),
+                                    canSubmitEmailAuth ? Color.white : Color(white: 0.35),
                                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 )
                             }
                             .buttonStyle(.plain)
-                            .disabled(!viewModel.canSubmit)
+                            .disabled(!canSubmitEmailAuth)
                         }
                         .padding(.horizontal, 20)
 
@@ -146,21 +163,42 @@ struct AuthView: View {
     }
 
     private var legalFooter: some View {
-        VStack(spacing: 10) {
-            Text("By continuing, you agree to Blueprint's")
-                .foregroundStyle(BlueprintTheme.textSecondary)
+        let policy = legalConsentPolicy
+
+        return VStack(spacing: 10) {
+            Button {
+                legalAcknowledged.toggle()
+            } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: legalAcknowledged ? "checkmark.square.fill" : "square")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(legalAcknowledged ? Color.white : BlueprintTheme.textSecondary)
+                    Text(CaptureLegalConsentPolicy.acknowledgementText)
+                        .foregroundStyle(BlueprintTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("captureLegalConsentAcknowledgement")
 
             HStack(spacing: 6) {
-                footerLink("Terms of Service", url: AppConfig.termsOfServiceURL())
-                Text("and")
-                    .foregroundStyle(BlueprintTheme.textSecondary)
-                footerLink("Privacy Policy", url: AppConfig.privacyPolicyURL())
+                ForEach(policy.requiredLinks, id: \.title) { link in
+                    footerLink(link)
+                }
+            }
+            .frame(maxWidth: .infinity)
+
+            if policy.hasRequiredLegalLinks == false {
+                Text(CaptureLegalConsentPolicy.missingLegalLinksMessage)
+                    .foregroundStyle(Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Button {
                 openSupportEmail()
             } label: {
-                Text("Questions? Contact \(AppConfig.supportEmailAddress() ?? "hello@tryblueprint.io")")
+                Text("Questions? Contact \(AppConfig.effectiveSupportEmailAddress())")
                     .foregroundStyle(BlueprintTheme.textSecondary)
                     .underline()
             }
@@ -171,16 +209,17 @@ struct AuthView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func footerLink(_ title: String, url: URL?) -> some View {
+    private func footerLink(_ link: CaptureLegalConsentPolicy.RequiredLink) -> some View {
         Button {
-            guard let url else { return }
+            guard let url = link.url else { return }
             openURL(url)
         } label: {
-            Text(title)
-                .foregroundStyle(BlueprintTheme.textPrimary)
+            Text(link.title)
+                .foregroundStyle(link.url == nil ? Color(white: 0.45) : BlueprintTheme.textPrimary)
                 .underline()
         }
         .buttonStyle(.plain)
+        .disabled(link.url == nil)
     }
 
     private func openSupportEmail() {
@@ -194,15 +233,18 @@ struct AuthView: View {
         VStack(spacing: 10) {
             #if canImport(GoogleSignInSwift)
             GoogleSignInButton(
-                viewModel: .init(scheme: .dark, style: .wide, state: viewModel.isBusy ? .disabled : .normal)
+                viewModel: .init(scheme: .dark, style: .wide, state: canUseExternalAuthProvider ? .normal : .disabled)
             ) {
+                guard canUseExternalAuthProvider else { return }
                 Task { await viewModel.signInWithGoogle() }
             }
             .frame(height: 52)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(!canUseExternalAuthProvider)
             #else
             Button {
+                guard canUseExternalAuthProvider else { return }
                 Task { await viewModel.signInWithGoogle() }
             } label: {
                 HStack(spacing: 12) {
@@ -222,6 +264,7 @@ struct AuthView: View {
                 )
             }
             .buttonStyle(.plain)
+            .disabled(!canUseExternalAuthProvider)
             #endif
         }
     }

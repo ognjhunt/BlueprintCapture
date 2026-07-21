@@ -54,4 +54,44 @@ struct LaunchCityGateTests {
         #expect(LaunchCityMatcher.supportedCity(for: durham, in: supportedCities)?.stateCode == "NC")
         #expect(LaunchCityMatcher.supportedCity(for: austin, in: supportedCities)?.stateCode == "TX")
     }
+
+    @Test
+    func unsupportedCitiesAllowReviewGatedCaptureInsteadOfHardBlocking() {
+        let unsupported = LaunchCityGateViewModel.State.unsupported(
+            .init(city: "Seattle", stateCode: "WA", displayName: "Seattle, WA", citySlug: nil, isSupported: false)
+        )
+
+        #expect(unsupported.allowsReviewGatedCapture)
+        #expect(LaunchCityGateViewModel.State.locationPermissionDenied.allowsReviewGatedCapture == false)
+        #expect(LaunchCityGateViewModel.State.failed("backend unavailable").allowsReviewGatedCapture == false)
+    }
+
+    @Test
+    func launchAccessRecoveryURLFallsBackWhenRuntimeLinksAreMissing() throws {
+        let url = LaunchCityGateRecoveryDestination.requestURL(
+            mainWebsiteURL: nil,
+            helpCenterURL: nil,
+            supportEmailURL: nil,
+            resolvedCity: ResolvedLaunchCity(city: "Seattle", stateCode: "WA", countryCode: "US")
+        )
+
+        #expect(url.scheme == "mailto")
+        #expect(url.absoluteString.contains(CaptureSupportDestination.fallbackSupportEmailAddress))
+        #expect(url.absoluteString.contains("Request%20launch%20access"))
+    }
+
+    @Test
+    func launchAccessRecoveryURLCarriesResolvedCityWhenWebsiteIsConfigured() throws {
+        let url = LaunchCityGateRecoveryDestination.requestURL(
+            mainWebsiteURL: URL(string: "https://www.tryblueprint.io")!,
+            helpCenterURL: nil,
+            supportEmailURL: nil,
+            resolvedCity: ResolvedLaunchCity(city: "Seattle", stateCode: "WA", countryCode: "US")
+        )
+
+        let components = try #require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        #expect(url.path == "/capture-app/launch-access")
+        #expect(components.queryItems?.contains(URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")) == true)
+        #expect(components.queryItems?.contains(URLQueryItem(name: "city", value: "Seattle, WA")) == true)
+    }
 }

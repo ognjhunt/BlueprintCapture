@@ -8,10 +8,9 @@ struct LaunchCityGateRootView<Content: View>: View {
 
     var body: some View {
         Group {
-            switch viewModel.state {
-            case .supported:
+            if viewModel.state.allowsReviewGatedCapture {
                 content()
-            default:
+            } else {
                 LaunchCityGateView(viewModel: viewModel)
             }
         }
@@ -25,22 +24,13 @@ struct LaunchCityGateView: View {
     @Bindable var viewModel: LaunchCityGateViewModel
     @Environment(\.openURL) private var openURL
 
-    private var launchRequestURL: URL? {
-        if let websiteURL = AppConfig.mainWebsiteURL() {
-            var components = URLComponents(
-                url: websiteURL.appendingPathComponent("capture-app/launch-access"),
-                resolvingAgainstBaseURL: false
-            )
-            var queryItems = [URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")]
-            if let resolvedCity = viewModel.resolvedCity?.displayName {
-                queryItems.append(URLQueryItem(name: "city", value: resolvedCity))
-            }
-            components?.queryItems = queryItems
-            return components?.url
-        }
-
-        return AppConfig.helpCenterURL()
-            ?? AppConfig.supportEmailURL(subject: "Request launch access")
+    private var launchRequestURL: URL {
+        LaunchCityGateRecoveryDestination.requestURL(
+            mainWebsiteURL: AppConfig.mainWebsiteURL(),
+            helpCenterURL: AppConfig.helpCenterURL(),
+            supportEmailURL: AppConfig.supportEmailURL(subject: "Request launch access"),
+            resolvedCity: viewModel.resolvedCity
+        )
     }
 
     var body: some View {
@@ -239,14 +229,12 @@ struct LaunchCityGateView: View {
             }
 
         case .unsupported, .failed:
-            if let launchRequestURL {
-                Button {
-                    openURL(launchRequestURL)
-                } label: {
-                    primaryLabel("Request launch access")
-                }
-                .buttonStyle(.plain)
+            Button {
+                openURL(launchRequestURL)
+            } label: {
+                primaryLabel("Request launch access")
             }
+            .buttonStyle(.plain)
 
         case .checking, .supported:
             EmptyView()
@@ -276,7 +264,7 @@ struct LaunchCityGateView: View {
         case .supported(let city):
             return "\(city.displayName) is live"
         case .unsupported:
-            return "Blueprint isn’t live here yet"
+            return "Open capture is review-gated here"
         case .failed:
             return "We couldn’t verify your city"
         }
@@ -293,7 +281,7 @@ struct LaunchCityGateView: View {
         case .supported:
             return "Your city is inside the current launch footprint. The capture app will unlock automatically."
         case .unsupported:
-            return "We’re rolling out city by city. You can request access or check again after you move into a supported market."
+            return "This city is outside the active launch program, but truthful open capture can still proceed as review-gated evidence. Request launch access for operator-approved work."
         case .failed(let message):
             return message
         }
@@ -333,6 +321,48 @@ struct LaunchCityGateView: View {
                 .frame(width: 50, height: 50)
                 .background(BlueprintTheme.panelStrong, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+    }
+}
+
+enum LaunchCityGateRecoveryDestination {
+    static let fallbackSupportEmailAddress = CaptureSupportDestination.fallbackSupportEmailAddress
+
+    static func requestURL(
+        mainWebsiteURL: URL?,
+        helpCenterURL: URL?,
+        supportEmailURL: URL?,
+        resolvedCity: ResolvedLaunchCity?
+    ) -> URL {
+        if let mainWebsiteURL,
+           var components = URLComponents(
+               url: mainWebsiteURL.appendingPathComponent("capture-app/launch-access"),
+               resolvingAgainstBaseURL: false
+           ) {
+            var queryItems = [URLQueryItem(name: "source", value: "ios-capture-app-launch-gate")]
+            if let displayName = resolvedCity?.displayName {
+                queryItems.append(URLQueryItem(name: "city", value: displayName))
+            }
+            components.queryItems = queryItems
+            if let url = components.url {
+                return url
+            }
+        }
+
+        if let helpCenterURL {
+            return helpCenterURL
+        }
+
+        if let supportEmailURL {
+            return supportEmailURL
+        }
+
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = fallbackSupportEmailAddress
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Request launch access")
+        ]
+        return components.url ?? URL(string: "mailto:\(fallbackSupportEmailAddress)")!
     }
 }
 

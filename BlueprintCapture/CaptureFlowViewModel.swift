@@ -1400,7 +1400,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                     buyerRequestId: request.metadata.buyerRequestId,
                     siteSubmissionId: request.metadata.siteSubmissionId,
                     rightsProfile: request.metadata.rightsProfile,
-                    requestedOutputs: request.metadata.requestedOutputs
+                    requestedOutputs: request.metadata.requestedOutputs,
+                    regionId: request.metadata.regionId,
+                    siteType: nil
                 )
             }
             // Mark target as completed in Firestore so it no longer appears in Nearby

@@ -8,6 +8,7 @@ import app.blueprint.capture.BuildConfig
 import app.blueprint.capture.data.auth.AuthRepository
 import app.blueprint.capture.data.auth.FirebaseAuthErrorFormatter
 import app.blueprint.capture.data.notification.PushNotificationManager
+import app.blueprint.capture.data.telemetry.CaptureClientTelemetryService
 import com.meta.wearable.dat.core.Wearables
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -27,11 +28,15 @@ class BlueprintCaptureApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var pushNotificationManager: PushNotificationManager
 
+    @Inject
+    lateinit var captureClientTelemetryService: CaptureClientTelemetryService
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
         super.onCreate()
         app.blueprint.capture.data.capture.CaptureUploadNotifications.initialize(this)
+        captureClientTelemetryService.configure()
         if (BuildConfig.MWDAT_PRIVATE_SDK_ENABLED) {
             val mwdatResult = Wearables.initialize(this)
             if (!mwdatResult.isSuccess) {

@@ -17,6 +17,7 @@ import app.blueprint.capture.data.model.UploadQueueItem
 import app.blueprint.capture.data.model.UploadQueueStatus
 import app.blueprint.capture.data.ops.OperationalTelemetry
 import app.blueprint.capture.data.session.SessionPreferences
+import app.blueprint.capture.data.telemetry.CaptureClientTelemetryService
 import app.blueprint.capture.data.util.awaitResult
 import com.google.firebase.FirebaseException
 import com.google.firebase.Timestamp
@@ -111,6 +112,7 @@ class CaptureUploadRepository @Inject constructor(
     private val workManager: WorkManager,
     private val sessionPreferences: SessionPreferences,
     private val operationalTelemetry: OperationalTelemetry,
+    private val captureClientTelemetryService: CaptureClientTelemetryService,
 ) {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val json = Json {
@@ -189,6 +191,11 @@ class CaptureUploadRepository @Inject constructor(
             _queue.value = updated
             persistQueue(updated)
         }
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "capture_upload_enqueued",
+            status = if (startImmediately) "queued" else "saved_for_later",
+            metadata = item.telemetryMetadata(),
+        )
         if (startImmediately) {
             enqueueWork(uploadId, replaceExisting = true)
         }
@@ -212,6 +219,10 @@ class CaptureUploadRepository @Inject constructor(
             return
         }
         if (item.localBundlePath.isNullOrBlank()) {
+            captureClientTelemetryService.recordErrorCode(
+                errorCode = "capture_upload_missing_local_bundle",
+                metadata = item.telemetryMetadata() + mapOf("reason" to "missing_local_bundle"),
+            )
             markFailed(id, "Local capture bundle is missing.")
             return
         }
@@ -287,6 +298,11 @@ class CaptureUploadRepository @Inject constructor(
             updateItemAndEmit(id, onItemUpdated) { item ->
                 item.copy(lastAttemptEpochMs = System.currentTimeMillis())
             }
+            captureClientTelemetryService.recordBreadcrumb(
+                name = "capture_upload_attempt_started",
+                status = "attempt_${runAttemptCount + 1}",
+                metadata = initialItem.telemetryMetadata(),
+            )
 
             val latestItem = _queue.value.firstOrNull { it.id == id } ?: initialItem
             throwIfCancellationRequested(latestItem)
@@ -324,6 +340,7 @@ class CaptureUploadRepository @Inject constructor(
             CaptureUploadWorkOutcome.Success
         } catch (error: PermanentUploadException) {
             val reason = error.message ?: "Upload failed."
+            recordUploadFailureTelemetry(id, reason, permanent = true)
             markFailed(id, reason)
             registerUploadFailureTransition(id, reason)
             CaptureUploadWorkOutcome.Failure
@@ -336,10 +353,12 @@ class CaptureUploadRepository @Inject constructor(
         } catch (error: Exception) {
             val permanentMessage = permanentFailureMessage(error)
             if (permanentMessage != null) {
+                recordUploadFailureTelemetry(id, permanentMessage, permanent = true)
                 markFailed(id, permanentMessage)
                 registerUploadFailureTransition(id, permanentMessage)
                 CaptureUploadWorkOutcome.Failure
             } else {
+                recordUploadFailureTelemetry(id, error.message ?: "Upload failed.", permanent = false)
                 val outcome = queueAutomaticRetry(id, runAttemptCount, error.message ?: "Upload failed.")
                 if (outcome == CaptureUploadWorkOutcome.Failure) {
                     registerUploadFailureTransition(id, error.message ?: "Upload failed after retries.")
@@ -546,6 +565,11 @@ class CaptureUploadRepository @Inject constructor(
                 operation = "capture_lifecycle_start",
                 detail = "waiting_for_firebase_auth",
             )
+            captureClientTelemetryService.recordOperationalBreadcrumb(
+                operation = "capture_lifecycle_start",
+                status = "blocked_waiting_for_firebase_auth",
+                metadata = item.telemetryMetadata(),
+            )
             return false
         }
 
@@ -568,6 +592,11 @@ class CaptureUploadRepository @Inject constructor(
         operationalTelemetry.recordSuccess(
             operation = "capture_lifecycle_start",
             detail = captureId,
+        )
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "capture_lifecycle_start",
+            status = "success",
+            metadata = item.telemetryMetadata(),
         )
         updateItem(item.id) {
             it.copy(creatorId = authenticatedCreatorId)
@@ -593,6 +622,11 @@ class CaptureUploadRepository @Inject constructor(
                 operation = "submission_registration",
                 detail = "waiting_for_firebase_auth",
             )
+            captureClientTelemetryService.recordOperationalBreadcrumb(
+                operation = "submission_registration",
+                status = "blocked_waiting_for_firebase_auth",
+                metadata = item.telemetryMetadata(),
+            )
             return false
         }
 
@@ -617,6 +651,11 @@ class CaptureUploadRepository @Inject constructor(
         operationalTelemetry.recordSuccess(
             operation = "submission_registration",
             detail = captureId,
+        )
+        captureClientTelemetryService.recordBreadcrumb(
+            name = "submission_registration",
+            status = "success",
+            metadata = item.telemetryMetadata(),
         )
         updateItem(item.id) {
             it.copy(creatorId = authenticatedCreatorId)
@@ -841,6 +880,11 @@ class CaptureUploadRepository @Inject constructor(
                 operation = "capture_upload_retry",
                 detail = reason,
             )
+            captureClientTelemetryService.recordOperationalBreadcrumb(
+                operation = "capture_upload_retry",
+                status = "retry_scheduled",
+                metadata = item.telemetryMetadata() + mapOf("reason" to reason),
+            )
             updateItem(id) {
                 it.copy(
                     status = UploadQueueStatus.Queued,
@@ -872,6 +916,15 @@ class CaptureUploadRepository @Inject constructor(
             operation = "capture_upload",
             detail = submissionDocumentPath ?: id,
         )
+        _queue.value.firstOrNull { it.id == id }?.let { item ->
+            captureClientTelemetryService.recordBreadcrumb(
+                name = "capture_upload_completed",
+                status = "success",
+                metadata = item.telemetryMetadata() + mapOf(
+                    "submission_document_path" to (submissionDocumentPath ?: ""),
+                ),
+            )
+        }
         updateItem(id) {
             it.copy(
                 status = UploadQueueStatus.Completed,
@@ -888,6 +941,13 @@ class CaptureUploadRepository @Inject constructor(
             operation = "capture_upload",
             detail = reason,
         )
+        _queue.value.firstOrNull { it.id == id }?.let { item ->
+            captureClientTelemetryService.recordOperationalBreadcrumb(
+                operation = "capture_upload",
+                status = "failure",
+                metadata = item.telemetryMetadata() + mapOf("reason" to reason),
+            )
+        }
         updateItem(id) {
             it.copy(
                 status = UploadQueueStatus.Failed,
@@ -1134,6 +1194,37 @@ class CaptureUploadRepository @Inject constructor(
     private class PermanentUploadException(
         override val message: String,
     ) : IllegalStateException(message)
+
+    private fun recordUploadFailureTelemetry(
+        id: String,
+        reason: String,
+        permanent: Boolean,
+    ) {
+        val item = _queue.value.firstOrNull { it.id == id }
+        captureClientTelemetryService.recordErrorCode(
+            errorCode = if (permanent) "capture_upload_permanent_failure" else "capture_upload_retryable_failure",
+            metadata = item.telemetryMetadata() + mapOf(
+                "reason" to reason,
+                "permanent" to permanent,
+            ),
+        )
+    }
+
+    private fun UploadQueueItem?.telemetryMetadata(): Map<String, Any?> {
+        if (this == null) return emptyMap()
+        return mapOf(
+            "capture_id" to captureId.ifBlank { id },
+            "scene_id" to sceneId,
+            "job_id" to jobId,
+            "capture_job_id" to captureJobId,
+            "buyer_request_id" to buyerRequestId,
+            "site_submission_id" to siteSubmissionId,
+            "capture_source" to captureSource,
+            "status" to status.name,
+            "motion_sample_count" to motionSampleCount,
+            "requested_outputs" to requestedOutputs.joinToString(","),
+        )
+    }
 
     private companion object {
         const val QUEUE_KEY = "capture_upload_queue"

@@ -46,6 +46,7 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         case rawContractValidationFailed
         case insufficientDiskSpace
         case uploadLimitExceeded(reasons: [String])
+        case captureClientPolicyBlocked
         case captureLifecycleRegistrationFailed
         case submissionRegistrationFailed
         case invalidBundle(reasons: [String])
@@ -68,6 +69,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "Not enough free space to finalize this capture bundle safely. Free storage and try again before uploading."
             case .uploadLimitExceeded(let reasons):
                 return "Capture exceeds beta upload limits and was not uploaded: \(reasons.joined(separator: ", ")). Shorten the walkthrough or split the site into smaller captures."
+            case .captureClientPolicyBlocked:
+                return "Blueprint capture intake is paused or this app build must be updated before uploading."
             case .captureLifecycleRegistrationFailed:
                 return "Blueprint could not register this capture as in-progress before upload started. Check Firebase Auth and Firestore configuration before retrying."
             case .submissionRegistrationFailed:
@@ -95,6 +98,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "insufficient_disk_space"
             case .uploadLimitExceeded:
                 return "capture_upload_limit_exceeded"
+            case .captureClientPolicyBlocked:
+                return "capture_client_policy_blocked"
             case .captureLifecycleRegistrationFailed:
                 return "capture_lifecycle_registration_failed"
             case .submissionRegistrationFailed:
@@ -114,6 +119,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "raw_validation_failed"
             case .insufficientDiskSpace, .uploadLimitExceeded:
                 return "local_preflight_failed"
+            case .captureClientPolicyBlocked:
+                return "capture_client_policy_blocked"
             default:
                 return "upload_failed"
             }
@@ -127,6 +134,8 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
                 return "blocked_local_storage"
             case .uploadLimitExceeded:
                 return "blocked_local_capture_limits"
+            case .captureClientPolicyBlocked:
+                return "blocked_capture_client_policy"
             default:
                 return "not_started"
             }
@@ -298,6 +307,11 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         let storage = Storage.storage(url: storageBucketURL)
+        let clientPreflightAllowed = await ensureCaptureClientPreflightAllowed(for: record.request)
+        guard clientPreflightAllowed else {
+            markUploadFailed(id: id, attempt: attempt, error: .captureClientPolicyBlocked)
+            return
+        }
         let lifecycleWritten = await ensureCaptureLifecycleRecordWritten(for: record.request)
         guard lifecycleWritten else {
             markUploadFailed(id: id, attempt: attempt, error: .captureLifecycleRegistrationFailed)
@@ -694,6 +708,18 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         return trimmed?.isEmpty == false ? trimmed : nil
     }
 
+    private func captureRegistrationTargetAddress(for request: CaptureUploadRequest) -> String {
+        if let address = request.metadata.siteIdentity?.addressFull?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !address.isEmpty {
+            return address
+        }
+        if let siteName = request.metadata.siteIdentity?.siteName?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !siteName.isEmpty {
+            return siteName
+        }
+        return "Submitted space"
+    }
+
     private func resolvedBuyerRequestId(for request: CaptureUploadRequest) -> String? {
         if let explicit = normalizedExternalId(request.metadata.buyerRequestId) {
             return explicit
@@ -855,6 +881,44 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         #else
         return true
         #endif
+    }
+
+    private func ensureCaptureClientPreflightAllowed(for request: CaptureUploadRequest) async -> Bool {
+        do {
+            try await APIService.shared.preflightCaptureSubmission(
+                id: request.metadata.id,
+                targetAddress: captureRegistrationTargetAddress(for: request),
+                capturedAt: request.metadata.capturedAt,
+                quotedPayoutCents: request.metadata.quotedPayoutCents,
+                captureJobId: request.metadata.captureJobId,
+                buyerRequestId: request.metadata.buyerRequestId,
+                siteSubmissionId: request.metadata.siteSubmissionId,
+                rightsProfile: request.metadata.rightsProfile,
+                requestedOutputs: request.metadata.requestedOutputs,
+                regionId: request.metadata.regionId,
+                siteType: nil
+            )
+            SessionEventManager.shared.logOperationalEvent(
+                operation: "capture_client_preflight",
+                status: "allowed",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request)
+                ]
+            )
+            return true
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "capture_client_preflight_blocked",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                    "message": error.localizedDescription
+                ]
+            )
+            print("❌ [UploadService] Capture client preflight blocked captureId=\(CaptureBundleContext.captureIdentifier(for: request)): \(error.localizedDescription)")
+            return false
+        }
     }
 
     /// Writes `capture_submissions/{captureId}` before the upload is reported as complete.

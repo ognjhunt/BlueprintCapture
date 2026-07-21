@@ -94,6 +94,15 @@ final class LaunchCityGateViewModel {
         case supported(CreatorLaunchStatusResponse.SupportedCity)
         case unsupported(CreatorLaunchStatusResponse.CurrentCity?)
         case failed(String)
+
+        var allowsReviewGatedCapture: Bool {
+            switch self {
+            case .supported, .unsupported:
+                return true
+            case .checking, .locationPermissionRequired, .locationPermissionDenied, .failed:
+                return false
+            }
+        }
     }
 
     private let locationService: LocationServiceProtocol
