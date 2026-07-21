@@ -28,21 +28,20 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     firebase_json = repo_root / "firebase.json"
     storage_rules = repo_root / "storage.rules"
+    explicit_webapp_path = os.environ.get("WEBAPP_STORAGE_RULES_PATH")
     webapp_storage_rules = Path(
-        os.environ.get(
-            "WEBAPP_STORAGE_RULES_PATH",
-            str(repo_root.parent / "Blueprint-WebApp" / "storage.rules"),
-        )
+        explicit_webapp_path
+        or str(repo_root.parent / "Blueprint-WebApp" / "storage.rules")
     ).expanduser()
 
     if not firebase_json.exists():
         fail("firebase.json is missing")
     if not storage_rules.exists():
         fail("storage.rules is missing")
-    if not webapp_storage_rules.exists():
+    if explicit_webapp_path and not webapp_storage_rules.exists():
+        # An explicitly requested parity check must never silently pass.
         fail(
-            "WebApp storage.rules is missing; set WEBAPP_STORAGE_RULES_PATH to "
-            "the sibling Blueprint-WebApp/storage.rules file for cross-repo parity validation"
+            f"WEBAPP_STORAGE_RULES_PATH points at {webapp_storage_rules}, which does not exist"
         )
 
     try:
@@ -95,15 +94,24 @@ def main() -> None:
         if re.search(pattern, rules):
             fail(f"unsafe broad rule matched {pattern}")
 
-    if storage_rules.read_bytes() != webapp_storage_rules.read_bytes():
-        fail(
-            "storage.rules differs from WebApp storage.rules; both repos deploy to "
-            "the same Firebase Storage project and must carry the byte-identical canonical superset"
+    if webapp_storage_rules.exists():
+        if storage_rules.read_bytes() != webapp_storage_rules.read_bytes():
+            fail(
+                "storage.rules differs from WebApp storage.rules; both repos deploy to "
+                "the same Firebase Storage project and must carry the byte-identical canonical superset"
+            )
+        print(
+            "Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, size cap, catch-all deny, and WebApp/Capture byte parity."
         )
-
-    print(
-        "Storage rules validation passed: raw capture writes require auth, owner metadata, path binding, checksum, size cap, catch-all deny, and WebApp/Capture byte parity."
-    )
+    else:
+        # Cross-repo parity can only run where a Blueprint-WebApp checkout is
+        # available (dev machines, cross-repo CI). This repo's standalone CI has
+        # no sibling checkout, so skip the parity comparison loudly rather than
+        # failing every build — the local checks above still ran and passed.
+        print(
+            "Storage rules validation passed (local checks only): WebApp parity SKIPPED — "
+            "no Blueprint-WebApp checkout found; set WEBAPP_STORAGE_RULES_PATH to enforce byte parity."
+        )
 
 
 if __name__ == "__main__":

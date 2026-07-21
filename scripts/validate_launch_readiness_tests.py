@@ -60,7 +60,11 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
         "docs/CAPTURE_RAW_CONTRACT_V3.md",
         "docs/PRIVATE_ALPHA_READINESS.md",
     ]
-    ARCHIVED_DOCS_REQUIRING_WARNING = [
+    # These session-era docs were deleted outright in the 2026-07 audit cleanup
+    # (deletion supersedes the warning banners this test used to require). They
+    # must stay deleted — reintroducing one without going through the copy-truth
+    # index would resurrect stale payout/provider claims.
+    ARCHIVED_DOCS_REMOVED_IN_CLEANUP = [
         "CHANGES_APPLIED.md",
         "FILES_ADDED.md",
         "README_STRIPE_DEBUGGING.md",
@@ -91,11 +95,17 @@ class LaunchReadinessValidatorTests(unittest.TestCase):
 
         self.assertEqual([], missing_from_index)
 
-        for relative_path in self.ARCHIVED_DOCS_REQUIRING_WARNING:
-            text = (ROOT / relative_path).read_text(encoding="utf-8")[:1200].lower()
-            self.assertIn("current-vs-public-copy note", text, relative_path)
-            self.assertIn("historical/internal", text, relative_path)
-            self.assertIn("not current payout, provider, launch, buyer, or earnings proof", text, relative_path)
+        self.assertIn(
+            "Addendum — 2026-07-21 cleanup",
+            index_text,
+            "the copy-truth index must record the removal of the session-era docs",
+        )
+        for relative_path in self.ARCHIVED_DOCS_REMOVED_IN_CLEANUP:
+            self.assertFalse(
+                (ROOT / relative_path).exists(),
+                f"{relative_path} was deleted in the 2026-07 cleanup and must not be reintroduced "
+                "without reclassification in the copy-truth index",
+            )
 
     def test_public_copy_truth_workflow_exists_and_forces_claim_classification(self) -> None:
         workflow_path = ROOT / self.PUBLIC_COPY_WORKFLOW
