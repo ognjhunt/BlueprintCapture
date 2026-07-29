@@ -23,6 +23,28 @@ Enforcement:
 
 Raw first-party evidence remains authoritative. Derived geometry remains separate and non-authoritative.
 
+## Additive V3.2 iPhone Retention/PTS Update
+
+`capture_schema_version = 3.2.0` is emitted only by the shared ARKit video
+recorder. It closes the distinction between AR frames presented to the client,
+frames successfully retained by the encoder, and frames actually decoded from
+the finalized video. Screen-recorder and legacy AV capture paths remain at
+`3.1.0`; they must not claim this stronger synchronization proof.
+
+For V3.2 bundles:
+
+- `video_frame_retention.jsonl` records every encoder write attempt as retained
+  or `dropped_backpressure` with a precise reason;
+- `sync_map.jsonl` contains only successfully retained frames, paired by ordinal
+  with decoded video sample presentation timestamps;
+- the first retained video frame is both `t_video_sec = 0` and
+  `t_capture_sec = 0`; if that first frame cannot be retained, capture fails and
+  requests recapture;
+- finalization and validation independently decode the canonical video and fail
+  closed on count, ordering, timestamp, or source-frame binding mismatch.
+- finalization drains the AR and motion writer queues before deriving or hashing
+  synchronization artifacts.
+
 ## Goals
 
 - Keep raw capture independent of any single world-model provider.
@@ -57,6 +79,7 @@ raw/
   capture_upload_complete.json               required
   walkthrough.mov                            required
   sync_map.jsonl                             required
+  video_frame_retention.jsonl                required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
   glasses/
@@ -706,6 +729,11 @@ Required fields:
 - `video_file`
 - `duration_sec`
 - `frame_count`
+- `frame_count_source`
+- `decoded_pts_verified`
+- `write_attempt_count`
+- `retained_frame_count`
+- `dropped_frame_count`
 - `nominal_fps`
 - `contains_vfr`
 - `width`
@@ -722,6 +750,11 @@ Example:
   "video_file": "walkthrough.mov",
   "duration_sec": 61.433,
   "frame_count": 1842,
+  "frame_count_source": "decoded_sample_presentation_timestamps",
+  "decoded_pts_verified": true,
+  "write_attempt_count": 1845,
+  "retained_frame_count": 1842,
+  "dropped_frame_count": 3,
   "nominal_fps": 30.0,
   "contains_vfr": false,
   "video_start_pts_sec": 0.0,
@@ -731,6 +764,35 @@ Example:
   "codec": "h264",
   "color_space": "bt709"
 }
+```
+
+For pre-3.2 compatibility, `frame_count_source` may be
+`estimated_duration_nominal_fps` and `decoded_pts_verified` may be false. Such a
+bundle does not satisfy the V3.2 retained-frame synchronization claim.
+
+### `video_frame_retention.jsonl`
+
+Purpose:
+- Preserve the outcome of every AR-frame encoder write attempt.
+- Make backpressure omissions inspectable without pretending the omitted frame
+  exists in the video.
+
+Required per-line fields:
+- `write_attempt_index`
+- `source_timestamp_sec`
+- `frame_id`
+- `t_capture_sec`
+- `retention_status`
+- `drop_reason`
+- `encoded_frame_index`
+- `t_video_sec`
+
+Retained rows bind to a decoded frame index and decoded PTS. Dropped rows retain
+their source frame identity but use null encoded-frame and video-time fields.
+
+```json
+{"write_attempt_index":741,"source_timestamp_sec":8123.3371,"frame_id":"000742","t_capture_sec":24.733333,"retention_status":"retained","drop_reason":null,"encoded_frame_index":739,"t_video_sec":24.733333}
+{"write_attempt_index":742,"source_timestamp_sec":8123.3704,"frame_id":"000743","t_capture_sec":24.766666,"retention_status":"dropped_backpressure","drop_reason":"asset_writer_input_not_ready","encoded_frame_index":null,"t_video_sec":null}
 ```
 
 ### `hashes.json`
@@ -796,12 +858,18 @@ Required per-line fields:
 - `pose_frame_id`
 - `sync_status`
 - `delta_ms`
+- `encoded_frame_index` for V3.2
+- `write_attempt_index` for V3.2
 
 Example line:
 
 ```json
-{"frame_id":"000742","t_video_sec":24.733333,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","motion_sample_time":{"before_ns":91234567880000,"after_ns":91234567900000},"sync_status":"exact_frame_id_match","delta_ms":0.0}
+{"frame_id":"000742","t_video_sec":24.733333,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","sync_status":"encoded_decoded_pts_match","delta_ms":0.0,"encoded_frame_index":739,"write_attempt_index":741}
 ```
+
+`exact_frame_id_match` does not prove video retention or decoded PTS alignment
+and is not valid for V3.2. A compatibility-only projection from AR rows uses
+`unverified_ar_frame_only` and must be treated as weaker evidence.
 
 ### `motion.jsonl`
 
@@ -1104,6 +1172,15 @@ The following must be true for a canonical V3 raw bundle:
 8. `sync_map.jsonl` is the canonical timing join for downstream bridge and pipeline work.
 9. Any file path referenced by a manifest or JSONL row must exist in the bundle.
 10. Rights remain conservative. Unknown rights must not authorize derived generation.
+11. For V3.2, decoded video frame count equals retained-attempt count,
+    sync-map row count, and `video_track.json.frame_count`; write-attempt count
+    equals retained plus dropped count.
+12. For V3.2, every sync row is `encoded_decoded_pts_match`, uses the decoded
+    sample PTS, and binds to exactly one retained write attempt and AR frame.
+13. For V3.2, dropped write attempts remain explicit and never appear as
+    retained video frames.
+14. For V3.2, the first retained frame is both the decoded-video and capture-time
+    origin.
 
 ## Validator Checklist
 
@@ -1116,6 +1193,12 @@ Hard fail:
 - Missing `scene_id`, `capture_id`, or `coordinate_frame_session_id`.
 - `hardware_model_identifier` missing or generic-only device metadata.
 - `sync_map.jsonl` missing.
+- V3.2 `video_frame_retention.jsonl` missing or empty.
+- V3.2 video cannot be decoded, uses an estimated frame count, or has a
+  retained/sync/decoded count mismatch.
+- V3.2 sync timestamp differs from decoded sample PTS or the first retained
+  frame is not the capture-time origin.
+- A dropped encoder attempt lacks an explicit supported reason.
 - `arkit/poses.jsonl`, `arkit/frames.jsonl`, `arkit/frame_quality.jsonl`, or `arkit/session_intrinsics.json` missing for iPhone capture.
 - Depth supported but `depth_manifest.json` or `confidence_manifest.json` missing.
 - Referenced depth/confidence files missing.

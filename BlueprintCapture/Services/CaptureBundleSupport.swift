@@ -7,6 +7,184 @@ import CryptoKit
 import ZIPFoundation
 #endif
 
+enum CaptureVideoSynchronizationError: Error, Equatable {
+    case noRetainedWriteAttempts
+    case decodedFrameCountMismatch(expected: Int, actual: Int)
+    case retainedAttemptMissingSourceTimestamp(index: Int)
+    case retainedAttemptMissingFrame(sourceTimestampNs: Int64)
+    case writeAttemptMissingSourceTimestamp(index: Int)
+    case writeAttemptMissingFrame(sourceTimestampNs: Int64)
+    case writeAttemptMissingFrameId(sourceTimestampNs: Int64)
+    case writeAttemptMissingCaptureTime(frameId: String)
+    case retainedFrameMissingFrameId(sourceTimestampNs: Int64)
+    case retainedFrameMissingCaptureTime(frameId: String)
+    case decodedPresentationTimeInvalid(index: Int)
+    case decodedPresentationTimeNonMonotonic(index: Int)
+}
+
+struct CaptureVideoSynchronizationResult {
+    let syncRows: [[String: Any]]
+    let retentionRows: [[String: Any]]
+}
+
+enum CaptureVideoSynchronization {
+    static func build(
+        frameRows: [[String: Any]],
+        writeAttemptRows: [[String: Any]],
+        decodedPresentationTimes: [Double]
+    ) throws -> CaptureVideoSynchronizationResult {
+        let retainedAttempts = writeAttemptRows.filter {
+            ($0["retention_status"] as? String) == "retained"
+        }
+        guard !retainedAttempts.isEmpty else {
+            throw CaptureVideoSynchronizationError.noRetainedWriteAttempts
+        }
+        guard retainedAttempts.count == decodedPresentationTimes.count else {
+            throw CaptureVideoSynchronizationError.decodedFrameCountMismatch(
+                expected: retainedAttempts.count,
+                actual: decodedPresentationTimes.count
+            )
+        }
+
+        var framesByTimestampNs: [Int64: [String: Any]] = [:]
+        for row in frameRows {
+            guard let timestamp = number(row["timestamp"]) else { continue }
+            framesByTimestampNs[Int64((timestamp * 1_000_000_000.0).rounded())] = row
+        }
+        guard let firstDecodedPTS = decodedPresentationTimes.first, firstDecodedPTS.isFinite else {
+            throw CaptureVideoSynchronizationError.decodedPresentationTimeInvalid(index: 0)
+        }
+
+        var syncRows: [[String: Any]] = []
+        var retainedByAttemptIndex: [Int: [String: Any]] = [:]
+        for (decodedIndex, attempt) in retainedAttempts.enumerated() {
+            guard let sourceTimestamp = number(attempt["source_timestamp_sec"]) else {
+                throw CaptureVideoSynchronizationError.retainedAttemptMissingSourceTimestamp(
+                    index: decodedIndex
+                )
+            }
+            let sourceTimestampNs = Int64((sourceTimestamp * 1_000_000_000.0).rounded())
+            guard let frame = framesByTimestampNs[sourceTimestampNs] else {
+                throw CaptureVideoSynchronizationError.retainedAttemptMissingFrame(
+                    sourceTimestampNs: sourceTimestampNs
+                )
+            }
+            let decodedPTS = decodedPresentationTimes[decodedIndex]
+            guard decodedPTS.isFinite else {
+                throw CaptureVideoSynchronizationError.decodedPresentationTimeInvalid(
+                    index: decodedIndex
+                )
+            }
+            if decodedIndex > 0, decodedPTS < decodedPresentationTimes[decodedIndex - 1] {
+                throw CaptureVideoSynchronizationError.decodedPresentationTimeNonMonotonic(
+                    index: decodedIndex
+                )
+            }
+            let tVideoSec = decodedPTS - firstDecodedPTS
+            guard let frameId = frame["frame_id"] as? String
+                    ?? frame["frameId"] as? String,
+                  !frameId.isEmpty else {
+                throw CaptureVideoSynchronizationError.retainedFrameMissingFrameId(
+                    sourceTimestampNs: sourceTimestampNs
+                )
+            }
+            guard let tCaptureSec = number(
+                frame["t_capture_sec"] ?? frame["tCaptureSec"]
+            ) else {
+                throw CaptureVideoSynchronizationError.retainedFrameMissingCaptureTime(
+                    frameId: frameId
+                )
+            }
+            var syncRow: [String: Any] = [
+                "frame_id": frameId,
+                "t_video_sec": tVideoSec,
+                "t_capture_sec": tCaptureSec,
+                "pose_frame_id": frameId,
+                "sync_status": "encoded_decoded_pts_match",
+                "delta_ms": abs(tVideoSec - tCaptureSec) * 1_000.0,
+                "encoded_frame_index": decodedIndex,
+                "write_attempt_index": intNumber(attempt["write_attempt_index"]) ?? decodedIndex,
+            ]
+            if let monotonic = int64Number(frame["t_monotonic_ns"] ?? frame["tMonotonicNs"]) {
+                syncRow["t_monotonic_ns"] = monotonic
+            } else {
+                syncRow["t_monotonic_ns"] = sourceTimestampNs
+            }
+            syncRows.append(syncRow)
+            retainedByAttemptIndex[intNumber(attempt["write_attempt_index"]) ?? decodedIndex] = syncRow
+        }
+
+        let retentionRows = try writeAttemptRows.enumerated().map {
+            fallbackIndex, attempt -> [String: Any] in
+            let attemptIndex = intNumber(attempt["write_attempt_index"]) ?? fallbackIndex
+            guard let sourceTimestamp = number(attempt["source_timestamp_sec"]) else {
+                throw CaptureVideoSynchronizationError.writeAttemptMissingSourceTimestamp(
+                    index: attemptIndex
+                )
+            }
+            let sourceTimestampNs = Int64(
+                (sourceTimestamp * 1_000_000_000.0).rounded()
+            )
+            guard let frame = framesByTimestampNs[sourceTimestampNs] else {
+                throw CaptureVideoSynchronizationError.writeAttemptMissingFrame(
+                    sourceTimestampNs: sourceTimestampNs
+                )
+            }
+            let retainedSync = retainedByAttemptIndex[attemptIndex]
+            guard let frameId = frame["frame_id"] as? String
+                    ?? frame["frameId"] as? String,
+                  !frameId.isEmpty else {
+                throw CaptureVideoSynchronizationError.writeAttemptMissingFrameId(
+                    sourceTimestampNs: sourceTimestampNs
+                )
+            }
+            guard let tCaptureSec = number(
+                frame["t_capture_sec"] ?? frame["tCaptureSec"]
+            ) else {
+                throw CaptureVideoSynchronizationError.writeAttemptMissingCaptureTime(
+                    frameId: frameId
+                )
+            }
+            var row: [String: Any] = [
+                "write_attempt_index": attemptIndex,
+                "source_timestamp_sec": sourceTimestamp,
+                "frame_id": frameId,
+                "t_capture_sec": tCaptureSec,
+                "retention_status": attempt["retention_status"] ?? "unknown",
+                "drop_reason": attempt["drop_reason"] ?? NSNull(),
+                "encoded_frame_index": retainedSync?["encoded_frame_index"] ?? NSNull(),
+                "t_video_sec": retainedSync?["t_video_sec"] ?? NSNull(),
+            ]
+            row["source_timestamp_ns"] = sourceTimestampNs
+            return row
+        }
+        return CaptureVideoSynchronizationResult(
+            syncRows: syncRows,
+            retentionRows: retentionRows
+        )
+    }
+
+    private static func number(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let number = value as? Double { return number }
+        if let number = value as? Int { return Double(number) }
+        return nil
+    }
+
+    private static func intNumber(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        if let number = value as? Int { return number }
+        return nil
+    }
+
+    private static func int64Number(_ value: Any?) -> Int64? {
+        if let number = value as? NSNumber { return number.int64Value }
+        if let number = value as? Int64 { return number }
+        if let number = value as? Int { return Int64(number) }
+        return nil
+    }
+}
+
 protocol CaptureBundleFinalizerProtocol {
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle
 }
@@ -195,9 +373,24 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
     private let captureModeFilename = "capture_mode.json"
     private let fileManager = FileManager.default
     private let rawBundleValidator = CaptureRawBundleValidator()
+    private let rawContractV3Validator = CaptureRawContractV3Validator()
 
     func validateRawBundle(in directory: URL) -> [String] {
-        rawBundleValidator.validate(in: directory)
+        var reasons = rawBundleValidator.validate(in: directory)
+        let manifestURL = directory.appendingPathComponent("manifest.json")
+        let manifest = (try? JSONSerialization.jsonObject(
+            with: Data(contentsOf: manifestURL)
+        )) as? [String: Any]
+        if isCaptureSchemaAtLeast(
+            manifest?["capture_schema_version"] as? String,
+            major: 3,
+            minor: 2
+        ) {
+            reasons.append(contentsOf: rawContractV3Validator.validate(
+                rawDirectoryURL: directory
+            ).errors)
+        }
+        return Array(Set(reasons)).sorted()
     }
 
     func finalize(request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws -> FinalizedCaptureBundle {
@@ -1150,20 +1343,57 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let videoTrack = asset.tracks(withMediaType: .video).first
         let trackSize = videoTrack?.naturalSize ?? .zero
         let nominalFPS = videoTrack?.nominalFrameRate ?? Float(fps)
-        let estimatedFrameCount: Int = {
+        let captureSchemaVersion = manifestObject?["capture_schema_version"] as? String
+        let decodedPresentationTimes: [Double]?
+        if isCaptureSchemaAtLeast(captureSchemaVersion, major: 3, minor: 2) {
+            decodedPresentationTimes = try decodedVideoPresentationTimes(at: videoFileURL)
+        } else {
+            decodedPresentationTimes = try? decodedVideoPresentationTimes(at: videoFileURL)
+        }
+        let fallbackEstimatedFrameCount: Int = {
             if nominalFPS > 0, durationSeconds > 0 {
                 return Int((durationSeconds * Double(nominalFPS)).rounded())
             }
             return frameRows.count
         }()
+        let frameCount = decodedPresentationTimes?.count ?? fallbackEstimatedFrameCount
+        let normalizedPTS = decodedPresentationTimes.map { values -> [Double] in
+            guard let first = values.first else { return [] }
+            return values.map { max(0.0, $0 - first) }
+        } ?? []
+        let frameIntervals = zip(normalizedPTS.dropFirst(), normalizedPTS).map {
+            $0.0 - $0.1
+        }
+        let containsVFR: Bool = {
+            guard frameIntervals.count > 1 else { return false }
+            let minimum = frameIntervals.min() ?? 0.0
+            let maximum = frameIntervals.max() ?? 0.0
+            return maximum - minimum > 0.001
+        }()
+        let retentionRows = readJSONLines(
+            from: directory.appendingPathComponent("video_frame_retention.jsonl")
+        )
+        let retainedCount = retentionRows.filter {
+            ($0["retention_status"] as? String) == "retained"
+        }.count
+        let droppedCount = retentionRows.filter {
+            ($0["retention_status"] as? String) != "retained"
+        }.count
 
         let videoTrackPayload: [String: Any] = [
             "schema_version": "v1",
             "video_file": videoFileName,
             "duration_sec": durationSeconds,
-            "frame_count": estimatedFrameCount,
+            "frame_count": frameCount,
+            "frame_count_source": decodedPresentationTimes == nil
+                ? "estimated_duration_nominal_fps"
+                : "decoded_sample_presentation_timestamps",
+            "decoded_pts_verified": decodedPresentationTimes != nil,
+            "write_attempt_count": retentionRows.count,
+            "retained_frame_count": retainedCount,
+            "dropped_frame_count": droppedCount,
             "nominal_fps": Double(nominalFPS),
-            "contains_vfr": false,
+            "contains_vfr": containsVFR,
             "video_start_pts_sec": 0.0,
             "width": Int(trackSize.width.rounded()).nonZero(or: width),
             "height": Int(trackSize.height.rounded()).nonZero(or: height),
@@ -1174,6 +1404,54 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let videoTrackURL = directory.appendingPathComponent("video_track.json")
         let data = try JSONSerialization.data(withJSONObject: videoTrackPayload, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: videoTrackURL, options: .atomic)
+    }
+
+    private func decodedVideoPresentationTimes(at videoURL: URL) throws -> [Double] {
+        let asset = AVURLAsset(url: videoURL)
+        guard let videoTrack = asset.tracks(withMediaType: .video).first else {
+            throw FinalizationError.invalidBundle(reasons: ["decoded_video_track_missing"])
+        }
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else {
+            throw FinalizationError.invalidBundle(reasons: ["decoded_video_track_unreadable"])
+        }
+        reader.add(output)
+        guard reader.startReading() else {
+            throw reader.error ?? FinalizationError.invalidBundle(
+                reasons: ["decoded_video_reader_failed_to_start"]
+            )
+        }
+        var presentationTimes: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            let seconds = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            guard seconds.isFinite else {
+                throw FinalizationError.invalidBundle(reasons: ["decoded_video_pts_non_finite"])
+            }
+            presentationTimes.append(seconds)
+        }
+        if reader.status == .failed {
+            throw reader.error ?? FinalizationError.invalidBundle(
+                reasons: ["decoded_video_reader_failed"]
+            )
+        }
+        guard !presentationTimes.isEmpty else {
+            throw FinalizationError.invalidBundle(reasons: ["decoded_video_has_no_frames"])
+        }
+        return presentationTimes
+    }
+
+    private func isCaptureSchemaAtLeast(
+        _ version: String?,
+        major requiredMajor: Int,
+        minor requiredMinor: Int
+    ) -> Bool {
+        guard let version else { return false }
+        let components = version.split(separator: ".").compactMap { Int($0) }
+        guard components.count >= 2 else { return false }
+        return components[0] > requiredMajor
+            || (components[0] == requiredMajor && components[1] >= requiredMinor)
     }
 
     private func resolvedVideoFileURL(in directory: URL, videoURI: String) -> URL {
@@ -1406,26 +1684,52 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
         try perFrameCameraStateLines.joined(separator: "\n").appending("\n").write(to: perFrameCameraStateURL, atomically: true, encoding: .utf8)
 
-        let syncMapLines = frameRows.compactMap { row -> String? in
-            guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]),
-                  let tCaptureSec = doubleValue(in: row, keys: ["tCaptureSec", "t_capture_sec"]) else { return nil }
-            var payload: [String: Any] = [
-                "frame_id": frameId,
-                "t_video_sec": tCaptureSec,
-                "t_capture_sec": tCaptureSec,
-                "pose_frame_id": frameId,
-                "sync_status": "exact_frame_id_match",
-                "delta_ms": 0.0,
-            ]
-            if let tMonotonicNs = objectValue(in: row, keys: ["tMonotonicNs", "t_monotonic_ns"]) as? NSNumber {
-                payload["t_monotonic_ns"] = tMonotonicNs.int64Value
-            } else if let timestamp = doubleValue(in: row, keys: ["timestamp"]) {
-                payload["t_monotonic_ns"] = Int64((timestamp * 1_000_000_000.0).rounded())
+        let retentionURL = directory.appendingPathComponent("video_frame_retention.jsonl")
+        let writeAttemptRows = readJSONLines(from: retentionURL)
+        let syncRows: [[String: Any]]
+        if !writeAttemptRows.isEmpty {
+            let videoURI = rawManifest?["video_uri"] as? String ?? "walkthrough.mov"
+            let videoURL = resolvedVideoFileURL(in: directory, videoURI: videoURI)
+            let decodedPTS = try decodedVideoPresentationTimes(at: videoURL)
+            let synchronization = try CaptureVideoSynchronization.build(
+                frameRows: frameRows,
+                writeAttemptRows: writeAttemptRows,
+                decodedPresentationTimes: decodedPTS
+            )
+            syncRows = synchronization.syncRows
+            try writeJSONLines(synchronization.retentionRows, to: retentionURL)
+        } else {
+            // Compatibility-only projection for pre-3.2 bundles. These rows are
+            // deliberately non-authoritative because they are not bound to
+            // successful encoder writes or decoded sample PTS.
+            syncRows = frameRows.compactMap { row -> [String: Any]? in
+                guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]),
+                      let tCaptureSec = doubleValue(
+                        in: row,
+                        keys: ["tCaptureSec", "t_capture_sec"]
+                      ) else { return nil }
+                var payload: [String: Any] = [
+                    "frame_id": frameId,
+                    "t_video_sec": tCaptureSec,
+                    "t_capture_sec": tCaptureSec,
+                    "pose_frame_id": frameId,
+                    "sync_status": "unverified_ar_frame_only",
+                    "delta_ms": 0.0,
+                ]
+                if let tMonotonicNs = objectValue(
+                    in: row,
+                    keys: ["tMonotonicNs", "t_monotonic_ns"]
+                ) as? NSNumber {
+                    payload["t_monotonic_ns"] = tMonotonicNs.int64Value
+                } else if let timestamp = doubleValue(in: row, keys: ["timestamp"]) {
+                    payload["t_monotonic_ns"] = Int64(
+                        (timestamp * 1_000_000_000.0).rounded()
+                    )
+                }
+                return payload
             }
-            let encoded = try? JSONSerialization.data(withJSONObject: payload, options: [.withoutEscapingSlashes])
-            return String(data: encoded ?? Data("{}".utf8), encoding: .utf8)
         }
-        try syncMapLines.joined(separator: "\n").appending(syncMapLines.isEmpty ? "" : "\n").write(to: syncMapURL, atomically: true, encoding: .utf8)
+        try writeJSONLines(syncRows, to: syncMapURL)
 
         let depthEntries = frameRows.compactMap { row -> [String: Any]? in
             guard let frameId = stringValue(in: row, keys: ["frameId", "frame_id"]) else { return nil }
@@ -1579,6 +1883,19 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 }
                 return object
             }
+    }
+
+    private func writeJSONLines(_ rows: [[String: Any]], to url: URL) throws {
+        let lines = try rows.map { row -> String in
+            let data = try JSONSerialization.data(
+                withJSONObject: row,
+                options: [.withoutEscapingSlashes]
+            )
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+        try lines.joined(separator: "\n")
+            .appending(lines.isEmpty ? "" : "\n")
+            .write(to: url, atomically: true, encoding: .utf8)
     }
 
     private func stringValue(in object: [String: Any], keys: [String]) -> String? {

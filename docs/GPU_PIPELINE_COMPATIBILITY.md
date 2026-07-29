@@ -96,7 +96,9 @@ claims the corresponding raw evidence.
 
 ## Manifest Shape
 
-Current raw bundles write `schema_version = "v3"` and `capture_schema_version = "3.1.0"`.
+Current raw bundles write `schema_version = "v3"`. Shared ARKit video captures
+write `capture_schema_version = "3.2.0"` with retained-frame/decoded-PTS proof;
+screen-recorder and legacy AV capture paths remain at `3.1.0`.
 
 Required manifest fields include:
 
