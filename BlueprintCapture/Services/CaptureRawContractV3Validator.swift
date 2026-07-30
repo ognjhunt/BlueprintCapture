@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 #if canImport(CryptoKit)
 import CryptoKit
 #endif
@@ -24,6 +25,11 @@ final class CaptureRawContractV3Validator {
         }
 
         validateRequiredManifestFields(manifest, errors: &errors)
+        let requiresDecodedVideoSynchronization = isCaptureSchemaAtLeast(
+            manifest["capture_schema_version"] as? String,
+            major: 3,
+            minor: 2
+        )
 
         let requiredBaseFiles = [
             "manifest.json",
@@ -49,6 +55,10 @@ final class CaptureRawContractV3Validator {
             if !FileManager.default.fileExists(atPath: rawDirectoryURL.appendingPathComponent(path).path) {
                 errors.append("missing_required_file:\(path)")
             }
+        }
+        if requiresDecodedVideoSynchronization,
+           !fileExists(rawDirectoryURL, "video_frame_retention.jsonl") {
+            errors.append("missing_required_file:video_frame_retention.jsonl")
         }
 
         if !hasCanonicalVideo(in: rawDirectoryURL, manifest: manifest) {
@@ -160,6 +170,7 @@ final class CaptureRawContractV3Validator {
         let captureTopology = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("capture_topology.json"), errors: &errors)
         let completion = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("capture_upload_complete.json"), errors: &errors)
         let hashes = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("hashes.json"), errors: &errors)
+        let videoTrack = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("video_track.json"), errors: &errors)
         let depthManifest = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/depth_manifest.json"), errors: &errors)
         let confidenceManifest = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/confidence_manifest.json"), errors: &errors)
         let sessionIntrinsics = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/session_intrinsics.json"), errors: &errors)
@@ -176,6 +187,10 @@ final class CaptureRawContractV3Validator {
         let arcoreTracking = loadJSONLinesIfPresent(at: rawDirectoryURL.appendingPathComponent("arcore/tracking_state.jsonl"), errors: &errors)
         let companionPhonePoses = loadJSONLinesIfPresent(at: rawDirectoryURL.appendingPathComponent("companion_phone/poses.jsonl"), errors: &errors)
         let syncMap = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("sync_map.jsonl"), errors: &errors)
+        let videoFrameRetention = loadJSONLinesIfPresent(
+            at: rawDirectoryURL.appendingPathComponent("video_frame_retention.jsonl"),
+            errors: &errors
+        )
 
         let motionRows = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("motion.jsonl"), errors: &errors)
         let semanticAnchorRows = loadJSONLines(at: rawDirectoryURL.appendingPathComponent("semantic_anchor_observations.jsonl"), errors: &errors)
@@ -234,6 +249,17 @@ final class CaptureRawContractV3Validator {
 
         if (!poses.isEmpty || !arcorePoses.isEmpty || !companionPhonePoses.isEmpty) && syncMap.isEmpty {
             errors.append("sync_map_missing_rows")
+        }
+
+        if requiresDecodedVideoSynchronization {
+            validateDecodedVideoSynchronization(
+                rawDirectoryURL: rawDirectoryURL,
+                manifest: manifest,
+                videoTrack: videoTrack,
+                syncRows: syncMap,
+                retentionRows: videoFrameRetention,
+                errors: &errors
+            )
         }
 
         for pose in poses + arcorePoses + companionPhonePoses {
@@ -343,13 +369,195 @@ final class CaptureRawContractV3Validator {
     }
 
     private func hasCanonicalVideo(in root: URL, manifest: [String: Any]) -> Bool {
+        canonicalVideoURL(in: root, manifest: manifest) != nil
+    }
+
+    private func canonicalVideoURL(in root: URL, manifest: [String: Any]) -> URL? {
         if let videoURI = manifest["video_uri"] as? String, !videoURI.isEmpty {
-            let normalized = videoURI.replacingOccurrences(of: "raw/", with: "")
-            if fileExists(root, normalized) || fileExists(root, videoURI) {
-                return true
+            let normalized = videoURI.hasPrefix("raw/")
+                ? String(videoURI.dropFirst("raw/".count))
+                : videoURI
+            for relativePath in [videoURI, normalized] {
+                let candidate = root.appendingPathComponent(relativePath)
+                if FileManager.default.fileExists(atPath: candidate.path) {
+                    return candidate
+                }
             }
         }
-        return fileExists(root, "walkthrough.mov") || fileExists(root, "walkthrough.mp4")
+        for filename in ["walkthrough.mov", "walkthrough.mp4"] {
+            let candidate = root.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func validateDecodedVideoSynchronization(
+        rawDirectoryURL: URL,
+        manifest: [String: Any],
+        videoTrack: [String: Any]?,
+        syncRows: [[String: Any]],
+        retentionRows: [[String: Any]],
+        errors: inout [String]
+    ) {
+        guard let videoTrack else {
+            errors.append("decoded_video_sync_missing_video_track")
+            return
+        }
+        guard videoTrack["decoded_pts_verified"] as? Bool == true else {
+            errors.append("decoded_video_pts_not_verified")
+            return
+        }
+        guard (videoTrack["frame_count_source"] as? String)
+                == "decoded_sample_presentation_timestamps" else {
+            errors.append("decoded_video_frame_count_not_authoritative")
+            return
+        }
+        guard let videoURL = canonicalVideoURL(in: rawDirectoryURL, manifest: manifest) else {
+            errors.append("decoded_video_sync_missing_video")
+            return
+        }
+
+        let decodedPTS: [Double]
+        do {
+            decodedPTS = try decodedVideoPresentationTimes(at: videoURL)
+        } catch {
+            errors.append("decoded_video_pts_unreadable")
+            return
+        }
+        guard let firstPTS = decodedPTS.first else {
+            errors.append("decoded_video_has_no_frames")
+            return
+        }
+
+        let retainedRows = retentionRows.filter {
+            ($0["retention_status"] as? String) == "retained"
+        }
+        let droppedRows = retentionRows.filter {
+            ($0["retention_status"] as? String) != "retained"
+        }
+        if retentionRows.isEmpty {
+            errors.append("video_frame_retention_missing_rows")
+        }
+        if retainedRows.count != decodedPTS.count {
+            errors.append("retained_frame_count_mismatch")
+        }
+        if syncRows.count != decodedPTS.count {
+            errors.append("sync_map_decoded_frame_count_mismatch")
+        }
+
+        let declaredCounts: [(String, Int)] = [
+            ("frame_count", decodedPTS.count),
+            ("write_attempt_count", retentionRows.count),
+            ("retained_frame_count", retainedRows.count),
+            ("dropped_frame_count", droppedRows.count),
+        ]
+        for (key, expected) in declaredCounts {
+            if (videoTrack[key] as? NSNumber)?.intValue != expected {
+                errors.append("video_track_count_mismatch:\(key)")
+            }
+        }
+
+        for (expectedAttemptIndex, row) in retentionRows.enumerated() {
+            guard let attemptIndex = (row["write_attempt_index"] as? NSNumber)?.intValue,
+                  attemptIndex == expectedAttemptIndex else {
+                errors.append("video_frame_retention_attempt_order_invalid")
+                break
+            }
+            let status = row["retention_status"] as? String
+            if status == "retained" {
+                if isMissingJSONValue(row["encoded_frame_index"])
+                    || isMissingJSONValue(row["frame_id"])
+                    || isMissingJSONValue(row["t_video_sec"]) {
+                    errors.append("retained_frame_missing_sync_binding")
+                }
+            } else {
+                if status != "dropped_backpressure"
+                    || (row["drop_reason"] as? String)?.isEmpty != false {
+                    errors.append("video_frame_drop_reason_invalid")
+                }
+                if isMissingJSONValue(row["frame_id"])
+                    || isMissingJSONValue(row["t_capture_sec"])
+                    || isMissingJSONValue(row["source_timestamp_sec"]) {
+                    errors.append("dropped_frame_missing_source_binding")
+                }
+                if !isMissingJSONValue(row["encoded_frame_index"])
+                    || !isMissingJSONValue(row["t_video_sec"]) {
+                    errors.append("dropped_frame_has_encoded_binding")
+                }
+            }
+        }
+
+        let tolerance = 0.000_1
+        for (index, decoded) in decodedPTS.enumerated() {
+            if index > 0, decoded < decodedPTS[index - 1] {
+                errors.append("decoded_video_pts_non_monotonic")
+                break
+            }
+            guard index < syncRows.count else { continue }
+            let row = syncRows[index]
+            if (row["sync_status"] as? String) != "encoded_decoded_pts_match" {
+                errors.append("sync_map_status_not_decoded_verified")
+            }
+            let expectedVideoTime = decoded - firstPTS
+            guard let actualVideoTime = numericValue(row["t_video_sec"]),
+                  abs(actualVideoTime - expectedVideoTime) <= tolerance else {
+                errors.append("sync_map_decoded_pts_mismatch:\(index)")
+                continue
+            }
+            guard let encodedIndex = (row["encoded_frame_index"] as? NSNumber)?.intValue else {
+                errors.append("sync_map_encoded_frame_index_missing:\(index)")
+                continue
+            }
+            if encodedIndex != index {
+                errors.append("sync_map_encoded_frame_index_mismatch:\(index)")
+            }
+            if index < retainedRows.count {
+                let retention = retainedRows[index]
+                if (retention["frame_id"] as? String) != (row["frame_id"] as? String) {
+                    errors.append("sync_map_retention_frame_mismatch:\(index)")
+                }
+            }
+        }
+
+        if let firstSync = syncRows.first {
+            let firstVideoTime = numericValue(firstSync["t_video_sec"])
+            let firstCaptureTime = numericValue(firstSync["t_capture_sec"])
+            if firstVideoTime.map({ abs($0) <= tolerance }) != true
+                || firstCaptureTime.map({ abs($0) <= tolerance }) != true {
+                errors.append("first_retained_video_frame_not_capture_origin")
+            }
+        }
+    }
+
+    private func decodedVideoPresentationTimes(at videoURL: URL) throws -> [Double] {
+        let asset = AVURLAsset(url: videoURL)
+        guard let track = asset.tracks(withMediaType: .video).first else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        reader.add(output)
+        guard reader.startReading() else {
+            throw reader.error ?? CocoaError(.fileReadCorruptFile)
+        }
+        var presentationTimes: [Double] = []
+        while let sample = output.copyNextSampleBuffer() {
+            let seconds = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            guard seconds.isFinite else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            presentationTimes.append(seconds)
+        }
+        guard reader.status != .failed, !presentationTimes.isEmpty else {
+            throw reader.error ?? CocoaError(.fileReadCorruptFile)
+        }
+        return presentationTimes
     }
 
     private func validateIdentityConsistency(
@@ -598,6 +806,18 @@ final class CaptureRawContractV3Validator {
     private func isCanonicalV3Manifest(_ manifest: [String: Any]) -> Bool {
         (manifest["schema_version"] as? String) == "v3" &&
         ((manifest["capture_schema_version"] as? String)?.hasPrefix("3.") == true)
+    }
+
+    private func isCaptureSchemaAtLeast(
+        _ version: String?,
+        major requiredMajor: Int,
+        minor requiredMinor: Int
+    ) -> Bool {
+        guard let version else { return false }
+        let components = version.split(separator: ".").compactMap { Int($0) }
+        guard components.count >= 2 else { return false }
+        return components[0] > requiredMajor
+            || (components[0] == requiredMajor && components[1] >= requiredMinor)
     }
 
     private func isValidTransformMatrix(_ value: Any?) -> Bool {

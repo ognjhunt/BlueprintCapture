@@ -54,7 +54,8 @@ struct PipelineContractTests {
 
     @Test
     func captureManifestSchemaConstantsAreStable() {
-        #expect(VideoCaptureManager.captureSchemaVersion == "3.1.0")
+        #expect(VideoCaptureManager.captureSchemaVersion == "3.2.0")
+        #expect(VideoCaptureManager.legacyCaptureSchemaVersion == "3.1.0")
         #expect(VideoCaptureManager.captureSource == "iphone")
         #expect(VideoCaptureManager.captureTierHint == "tier1_iphone")
     }

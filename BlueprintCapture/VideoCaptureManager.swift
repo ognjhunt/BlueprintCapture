@@ -185,7 +185,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     }
 
     static let poseSchemaVersion = "3.0"
-    static let captureSchemaVersion = "3.1.0"
+    static let captureSchemaVersion = "3.2.0"
+    static let legacyCaptureSchemaVersion = "3.1.0"
     static let captureSource = "iphone"
     static let captureTierHint = "tier1_iphone"
     static let movingDepthSnapshotIntervalSeconds: TimeInterval = 0.2
@@ -360,6 +361,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var awaitingScreenRecorderCompletion = false
     private var lastCaptureUsedScreenRecorder = false
     private var usingCustomARSessionRecorder = false
+    private var currentCaptureSchemaVersion = VideoCaptureManager.legacyCaptureSchemaVersion
     private var awaitingFirstARVideoFrame = false
     private var arSessionRecorder: AnyObject?
     private var currentSiteType: CaptureSiteType = .unknown
@@ -586,6 +588,9 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         pendingAnchorObservationExpirations = [:]
         latestUploadPayload = nil
         exposureSamples = []
+        currentCaptureSchemaVersion = canUseARSessionRecorder
+            ? Self.captureSchemaVersion
+            : Self.legacyCaptureSchemaVersion
         Task { @MainActor in qualityMonitor.start() }
         if shouldUseScreenRecorder {
             currentCameraIntrinsics = makeScreenIntrinsics()
@@ -959,6 +964,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 return
             }
 
+            self.drainEvidenceWriters()
             self.persistManifest(duration: durationSeconds, synchronous: true)
 
             guard self.currentArtifacts != nil else {
@@ -1016,6 +1022,20 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 }
             }
         }
+    }
+
+    private func drainEvidenceWriters() {
+        // The video writer and AR sidecar writer use independent serial queues.
+        // Finalization must not inspect or hash the bundle until both the final
+        // AR frame and the final motion sample have reached their files.
+        arDataQueue.sync {}
+        motionLogQueue.sync {}
+        arFrameLogFileHandle?.synchronizeFile()
+        arPoseLogFileHandle?.synchronizeFile()
+        arFeaturePointsLogFileHandle?.synchronizeFile()
+        arPlaneObservationsLogFileHandle?.synchronizeFile()
+        arLightEstimatesLogFileHandle?.synchronizeFile()
+        motionLogFileHandle?.synchronizeFile()
     }
 
     private func prepareMotionLog(for artifacts: RecordingArtifacts) {
@@ -1918,6 +1938,7 @@ private final class ARSessionVideoRecorder {
         case unableToAddInput
         case writerFailed
         case noFramesRecorded
+        case firstFrameBackpressure
 
         var errorDescription: String? {
             switch self {
@@ -1927,6 +1948,8 @@ private final class ARSessionVideoRecorder {
                 return "The video writer failed to start."
             case .noFramesRecorded:
                 return "No AR frames were captured during recording."
+            case .firstFrameBackpressure:
+                return "The first AR frame could not be retained by the video encoder. Please recapture."
             }
         }
     }
@@ -1937,9 +1960,11 @@ private final class ARSessionVideoRecorder {
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private let orientation: UIInterfaceOrientation
     private let errorHandler: (Error) -> Void
+    private let retentionLogURL: URL
     private var startTime: CMTime?
     private var lastTime: CMTime?
     private var recordedFrameCount = 0
+    private var writeAttempts: [[String: Any]] = []
     private var isFinishing = false
 
     init(destinationURL: URL, orientation: UIInterfaceOrientation, errorHandler: @escaping (Error) -> Void) throws {
@@ -1950,6 +1975,12 @@ private final class ARSessionVideoRecorder {
         assetWriter.shouldOptimizeForNetworkUse = true
         self.orientation = orientation
         self.errorHandler = errorHandler
+        retentionLogURL = destinationURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("video_frame_retention.jsonl")
+        if FileManager.default.fileExists(atPath: retentionLogURL.path) {
+            try FileManager.default.removeItem(at: retentionLogURL)
+        }
     }
 
     func append(pixelBuffer: CVPixelBuffer, timestampSeconds: TimeInterval, resolution: CGSize) {
@@ -1986,6 +2017,14 @@ private final class ARSessionVideoRecorder {
             guard self.recordedFrameCount > 0 else {
                 self.assetWriter.cancelWriting()
                 DispatchQueue.main.async { completion(.failure(RecorderError.noFramesRecorded)) }
+                return
+            }
+
+            do {
+                try self.persistWriteAttempts()
+            } catch {
+                self.assetWriter.cancelWriting()
+                DispatchQueue.main.async { completion(.failure(error)) }
                 return
             }
 
@@ -2044,6 +2083,7 @@ private final class ARSessionVideoRecorder {
     private func appendFrame(pixelBuffer: CVPixelBuffer, timestampSeconds: TimeInterval) throws {
         guard let input = videoInput, let adaptor = adaptor else { return }
 
+        let writeAttemptIndex = writeAttempts.count
         let timestamp = CMTime(seconds: timestampSeconds, preferredTimescale: 600)
         if startTime == nil {
             startTime = timestamp
@@ -2051,14 +2091,46 @@ private final class ARSessionVideoRecorder {
             assetWriter.startSession(atSourceTime: timestamp)
         }
 
-        guard input.isReadyForMoreMediaData else { return }
+        guard input.isReadyForMoreMediaData else {
+            if recordedFrameCount == 0 {
+                throw RecorderError.firstFrameBackpressure
+            }
+            writeAttempts.append([
+                "write_attempt_index": writeAttemptIndex,
+                "source_timestamp_sec": timestampSeconds,
+                "retention_status": "dropped_backpressure",
+                "drop_reason": "asset_writer_input_not_ready",
+                "encoded_frame_index": NSNull(),
+            ])
+            return
+        }
 
         if adaptor.append(pixelBuffer, withPresentationTime: timestamp) {
+            writeAttempts.append([
+                "write_attempt_index": writeAttemptIndex,
+                "source_timestamp_sec": timestampSeconds,
+                "retention_status": "retained",
+                "drop_reason": NSNull(),
+                "encoded_frame_index": recordedFrameCount,
+            ])
             lastTime = timestamp
             recordedFrameCount += 1
         } else {
             throw RecorderError.writerFailed
         }
+    }
+
+    private func persistWriteAttempts() throws {
+        let lines = try writeAttempts.map { row -> String in
+            let data = try JSONSerialization.data(
+                withJSONObject: row,
+                options: [.withoutEscapingSlashes]
+            )
+            return String(data: data, encoding: .utf8) ?? "{}"
+        }
+        try lines.joined(separator: "\n")
+            .appending(lines.isEmpty ? "" : "\n")
+            .write(to: retentionLogURL, atomically: true, encoding: .utf8)
     }
 
     private func transform(for orientation: UIInterfaceOrientation) -> CGAffineTransform {
@@ -2174,7 +2246,7 @@ private extension VideoCaptureManager {
                 "capture_start_epoch_ms": epochMs,
                 "has_lidar": hasLiDAR,
                 "depth_supported": hasLiDAR,
-                "capture_schema_version": Self.captureSchemaVersion,
+                "capture_schema_version": currentCaptureSchemaVersion,
                 "capture_source": Self.captureSource,
                 "capture_tier_hint": Self.captureTierHint,
                 "recording_session_id": recordingSessionId as Any,

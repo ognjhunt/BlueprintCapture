@@ -16,6 +16,25 @@ struct CaptureRawContractV3ValidatorTests {
     }
 
     @Test
+    func validatorRequiresRetentionEvidenceForCaptureSchema32() throws {
+        let root = try makeValidBundle()
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        var manifest = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
+                as? [String: Any]
+        )
+        manifest["capture_schema_version"] = "3.2.0"
+        try writeJSON(manifest, to: manifestURL)
+        try refreshHashes(in: root)
+
+        let result = CaptureRawContractV3Validator().validate(rawDirectoryURL: root)
+
+        #expect(result.isValid == false)
+        #expect(result.errors.contains("missing_required_file:video_frame_retention.jsonl"))
+        #expect(result.errors.contains("decoded_video_pts_not_verified"))
+    }
+
+    @Test
     func validatorRejectsHashManifestMissingRequiredFileCoverage() throws {
         let root = try makeValidBundle()
         let hashesURL = root.appendingPathComponent("hashes.json")

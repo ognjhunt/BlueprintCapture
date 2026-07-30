@@ -38,6 +38,24 @@ struct CaptureRawBundleValidatorTests {
         #expect(reasons.contains("missing_sidecar_sync_map_jsonl"))
     }
 
+    @Test
+    func finalizerAppliesStrictContractValidationToSchema32() throws {
+        let root = try makeBundleRoot()
+        let manifestURL = root.appendingPathComponent("manifest.json")
+        var manifest = try #require(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
+                as? [String: Any]
+        )
+        manifest["schema_version"] = "v3"
+        manifest["capture_schema_version"] = "3.2.0"
+        let data = try JSONSerialization.data(withJSONObject: manifest)
+        try data.write(to: manifestURL)
+
+        let reasons = CaptureBundleFinalizer().validateRawBundle(in: root)
+
+        #expect(reasons.contains("missing_required_file:video_frame_retention.jsonl"))
+    }
+
     private func makeBundleRoot(includeVideo: Bool = true, includeManifest: Bool = true) throws -> URL {
         let root = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("raw-bundle-validator-\(UUID().uuidString)", isDirectory: true)
