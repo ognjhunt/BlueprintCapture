@@ -12,6 +12,7 @@ Key rules:
 - Do not fabricate provider readiness, payout readiness, or qualification decisions.
 - Keep downstream contracts stable for the pipeline and webapp.
 - Treat advisory UX as advisory, not authoritative.
+- Never hand-edit between the `<!-- SHARED_*_START/END -->` markers in `PLATFORM_CONTEXT.md`, `VISION.md`, or `WORLD_MODEL_STRATEGY_CONTEXT.md`. Those regions are generated from `BlueprintCapturePipeline doctrine/` and gated by `scripts/verify_shared_doctrine.py`; see the Shared Doctrine Blocks section of `AGENTS.md`.
 - Before claiming Paperclip/autonomous-loop `done`, `blocked`, or `awaiting_human_decision`, apply `../Blueprint-WebApp/docs/autonomous-loop-evidence-checklist-2026-05-03.md` (sibling checkout of Blueprint-WebApp).
 
 Key commands:
@@ -21,6 +22,7 @@ xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture -derived
 cd cloud/extract-frames && npm test
 ./scripts/archive_external_alpha.sh --validate-config-only
 ./scripts/android_alpha_readiness.sh --validate-config-only
+python3 scripts/verify_shared_doctrine.py
 ```
 
 ## gstack

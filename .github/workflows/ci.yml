@@ -103,6 +103,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Shared doctrine blocks must stay byte-identical across BlueprintCapture,
+      # BlueprintCapturePipeline, and Blueprint-WebApp. This compares committed
+      # content against contracts/shared-doctrine.lock.json, so it needs no
+      # sibling checkout — the sibling-comparison it replaces passed trivially
+      # in CI and let all three blocks diverge on 2026-07-29 unnoticed.
+      - name: Shared doctrine verifier tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/verify_shared_doctrine_tests.py
+
+      - name: Verify shared doctrine blocks match the cross-repo lock
+        run: python3 scripts/verify_shared_doctrine.py
+
       - name: Launch readiness validator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 scripts/validate_launch_readiness_tests.py
 

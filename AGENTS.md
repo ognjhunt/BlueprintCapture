@@ -34,6 +34,28 @@ This repo must stay aligned with:
 - `scripts/`: alpha-readiness and release validation
 - `docs/`: rollout, alpha, bridge, and capture constraints
 
+## Shared Doctrine Blocks
+
+The regions between `<!-- SHARED_*_START -->` and `<!-- SHARED_*_END -->` in
+`PLATFORM_CONTEXT.md`, `VISION.md`, and `WORLD_MODEL_STRATEGY_CONTEXT.md` are
+**generated**. They must stay byte-identical across `BlueprintCapture`,
+`BlueprintCapturePipeline`, and `Blueprint-WebApp`.
+
+- Never hand-edit inside those markers. `python3 scripts/verify_shared_doctrine.py`
+  runs in CI and rejects it.
+- To change shared doctrine, edit the single canonical fragment in
+  `BlueprintCapturePipeline doctrine/`, then run
+  `python3 scripts/sync_shared_doctrine.py --write` from that repo with this one
+  checked out as a sibling. That splices every repo and updates
+  `contracts/shared-doctrine.lock.json`.
+- Everything outside the markers is this repo's own header and footer. Edit it
+  freely; the sync never touches it.
+
+Enforcement compares committed content against the lock, so it needs no sibling
+checkout. The previous mechanism was a sibling comparison that passed trivially
+in CI whenever the sibling was absent — which is always true in CI — and that is
+how all three blocks diverged on 2026-07-29 without any gate firing.
+
 ## Working Rules
 
 - Favor truthful capture, bundle integrity, upload reliability, and explicit user state.
