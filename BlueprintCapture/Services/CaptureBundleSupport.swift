@@ -975,9 +975,39 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         json["environment_variability"] = environmentVariability
         json["capture_rights"] = manifestCaptureRights(normalizedRights)
         json["video_uri"] = mode.videoURI
+        if let nsdkAugmentation = nsdkAugmentationSummary(in: directory) {
+            json["capture_augmentations"] = [nsdkAugmentation]
+        }
 
         let patched = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .withoutEscapingSlashes])
         try patched.write(to: manifestURL, options: .atomic)
+    }
+
+    private func nsdkAugmentationSummary(in directory: URL) -> [String: Any]? {
+        let manifestURL = directory
+            .appendingPathComponent(NianticScanSidecarLayout.directoryName, isDirectory: true)
+            .appendingPathComponent(NianticScanSidecarLayout.archiveManifestFilename)
+        guard let data = try? Data(contentsOf: manifestURL),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return [
+            "schema_version": "v1",
+            "provider": payload["vendor"] ?? "niantic_spatial",
+            "sdk_product": payload["sdk_product"] ?? "niantic_spatial_sdk_swift",
+            "status": payload["status"] ?? "unknown",
+            "authority": payload["authority"] ?? "supplemental_vendor_recording_not_canonical",
+            "canonical_capture_authority": false,
+            "coordinate_frame_session_id": payload["coordinate_frame_session_id"] ?? NSNull(),
+            "manifest_uri": "nsdk/archive_manifest.json",
+            "binding_uri": FileManager.default.fileExists(
+                atPath: directory
+                    .appendingPathComponent(NianticScanSidecarLayout.directoryName, isDirectory: true)
+                    .appendingPathComponent(NianticScanSidecarLayout.reconstructionBindingFilename)
+                    .path
+            ) ? "nsdk/reconstruction_binding.json" : NSNull(),
+            "alignment_status": "unverified_until_archive_inspection",
+        ]
     }
 
     private func materializeSupplementalFiles(in directory: URL, request: CaptureUploadRequest, mode: CaptureBundleFinalizationMode) throws {

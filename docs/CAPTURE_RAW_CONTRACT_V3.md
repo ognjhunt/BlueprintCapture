@@ -116,6 +116,10 @@ raw/
     light_estimates.jsonl                    required when light_estimate=true and geometry_source=arcore
     depth_manifest.json                      required when depth=true and geometry_source=arcore
     confidence_manifest.json                 required when depth_confidence=true and geometry_source=arcore
+  nsdk/                                      optional; experimental supplemental recording only
+    archive_manifest.json                    required when NSDK recording was attempted
+    reconstruction_binding.json              required only after successful NSDK archive export
+    archives/*.tgz                           required only after successful NSDK archive export
 ```
 
 ## Global Rules
@@ -175,6 +179,21 @@ raw/
 - Derived generation, licensing, and payout eligibility must not be inferred from job type alone.
 - Consent evidence source and permission document hash must be preserved.
 - Raw bundle finalization must write a hash manifest for all contract files.
+
+### Optional Vendor Recording Augmentations
+
+- `nsdk/` is additive support evidence and never changes the canonical capture
+  authority of the V3.2 video, retention ledger, synchronization map, ARKit
+  poses, intrinsics, or depth/confidence records.
+- The feature is disabled by default. Missing vendor terms authorization,
+  runtime access token, LiDAR support, SDK availability, or disk headroom must
+  skip the secondary recorder without weakening or failing the canonical
+  capture.
+- A shared `ARSession` does not prove identical vendor and canonical retained
+  frame sets, timestamps, coordinate conventions, poses, or depth products.
+  Archive inspection and residual validation are required before alignment.
+- Provider-derived splats or meshes remain derived assets bound to the source
+  capture digest. See `docs/NIANTIC_NSDK_CAPTURE_AUGMENTATION.md`.
 
 ## Required Files
 

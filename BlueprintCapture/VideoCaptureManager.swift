@@ -272,6 +272,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     let session = AVCaptureSession()
     let arSession = ARSession()
+    private let nianticScanAugmentation = NianticScanAugmentationService()
 
     /// Returns true when the capture manager will use ARSession for video recording.
     /// When true, the UI should use ARView instead of AVCaptureVideoPreviewLayer for camera preview.
@@ -807,6 +808,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
             // Start ARSession to begin receiving frames
             startARSessionForRecording()
+            if isARRunning {
+                let appVersion = Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? "unknown"
+                let appBuild = Bundle.main.object(
+                    forInfoDictionaryKey: kCFBundleVersionKey as String
+                ) as? String ?? "unknown"
+                nianticScanAugmentation.beginIfAvailable(
+                    arSession: arSession,
+                    identity: NianticScanCaptureIdentity(
+                        captureBaseFilename: artifacts.baseFilename,
+                        coordinateFrameSessionId: currentRecordingSessionId ?? artifacts.baseFilename,
+                        startedAt: artifacts.startedAt,
+                        appVersion: appVersion,
+                        appBuild: appBuild
+                    )
+                )
+            }
 
             captureState = .recording(artifacts)
             CaptureCrashTelemetryService.shared.recordBreadcrumb(
@@ -935,6 +954,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
         DispatchQueue.main.async {
             if let error {
+                self.nianticScanAugmentation.captureDidFail()
                 let nsError = error as NSError
                 var friendlyMessage = nsError.localizedDescription
                 let avError = (error as? AVError) ?? AVError(_nsError: nsError)
@@ -967,58 +987,65 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             self.drainEvidenceWriters()
             self.persistManifest(duration: durationSeconds, synchronous: true)
 
-            guard self.currentArtifacts != nil else {
+            guard let artifactsToPackage = self.currentArtifacts else {
                 self.latestUploadPayload = nil
                 self.captureState = .error("Capture artifacts were unavailable.")
                 self.cleanupAfterRecording()
                 return
             }
 
-            print("📦 [Capture] Packaging artifacts …")
-            DispatchQueue.global(qos: .userInitiated).async {
-                var artifactsToPackage: RecordingArtifacts?
-                DispatchQueue.main.sync {
-                    print("📦 [Capture] Capturing currentArtifacts for packaging")
-                    artifactsToPackage = self.currentArtifacts
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // The vendor export must settle before finalization hashes or upload
+                // can observe this directory. Failure writes a bounded status sidecar
+                // and never invalidates the canonical V3.2 capture.
+                await self.nianticScanAugmentation.finishAndAttach(
+                    to: artifactsToPackage.directoryURL
+                )
+                self.packageCompletedArtifacts(
+                    artifactsToPackage,
+                    durationSeconds: durationSeconds
+                )
+            }
+        }
+    }
+
+    private func packageCompletedArtifacts(
+        _ artifacts: RecordingArtifacts,
+        durationSeconds: Double?
+    ) {
+        print("📦 [Capture] Packaging artifacts …")
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try self.packageArtifacts(artifacts)
+                DispatchQueue.main.async {
+                    self.latestUploadPayload = artifacts.uploadPayload
+                    self.captureState = .finished(artifacts)
+                    CaptureCrashTelemetryService.shared.recordBreadcrumb(
+                        name: "capture_recording_finished",
+                        status: "packaged",
+                        metadata: [
+                            "capture_id": artifacts.baseFilename,
+                            "duration_seconds": durationSeconds.map { String(format: "%.3f", $0) } ?? "unknown",
+                            "niantic_augmentation": String(describing: self.nianticScanAugmentation.lastOutcome),
+                        ]
+                    )
+                    print("✅ [Capture] Packaging complete → \(artifacts.packageURL.lastPathComponent)")
+                    self.cleanupAfterRecording()
                 }
-                guard let artifactsToPackage else {
-                    DispatchQueue.main.async {
-                        self.latestUploadPayload = nil
-                        self.captureState = .error("Capture artifacts were unavailable.")
-                        self.cleanupAfterRecording()
-                    }
-                    return
-                }
-                do {
-                    try self.packageArtifacts(artifactsToPackage)
-                    DispatchQueue.main.async {
-                        self.latestUploadPayload = artifactsToPackage.uploadPayload
-                        self.captureState = .finished(artifactsToPackage)
-                        CaptureCrashTelemetryService.shared.recordBreadcrumb(
-                            name: "capture_recording_finished",
-                            status: "packaged",
-                            metadata: [
-                                "capture_id": artifactsToPackage.baseFilename,
-                                "duration_seconds": durationSeconds.map { String(format: "%.3f", $0) } ?? "unknown"
-                            ]
-                        )
-                        print("✅ [Capture] Packaging complete → \(artifactsToPackage.packageURL.lastPathComponent)")
-                        self.cleanupAfterRecording()
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.latestUploadPayload = nil
-                        self.captureState = .error(error.localizedDescription)
-                        CaptureCrashTelemetryService.shared.recordErrorCode(
-                            "capture_packaging_failed",
-                            metadata: [
-                                "capture_id": artifactsToPackage.baseFilename,
-                                "message": error.localizedDescription
-                            ]
-                        )
-                        print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
-                        self.cleanupAfterRecording()
-                    }
+            } catch {
+                DispatchQueue.main.async {
+                    self.latestUploadPayload = nil
+                    self.captureState = .error(error.localizedDescription)
+                    CaptureCrashTelemetryService.shared.recordErrorCode(
+                        "capture_packaging_failed",
+                        metadata: [
+                            "capture_id": artifacts.baseFilename,
+                            "message": error.localizedDescription
+                        ]
+                    )
+                    print("❌ [Capture] Packaging failed: \(error.localizedDescription)")
+                    self.cleanupAfterRecording()
                 }
             }
         }
@@ -1874,6 +1901,9 @@ extension VideoCaptureManager: @preconcurrency ARSessionDelegate {
                 resolution: frame.camera.imageResolution
             )
         }
+        // Offer NSDK the same current ARSession sample only after Blueprint has
+        // attempted its canonical video write. NSDK may decimate independently.
+        nianticScanAugmentation.noteFrame()
         let shouldPersistDepth = shouldPersistDepthSnapshot(
             at: frame.timestamp,
             cameraTransform: frame.camera.transform
@@ -2150,6 +2180,9 @@ private final class ARSessionVideoRecorder {
 private extension VideoCaptureManager {
     func cleanupAfterRecording() {
         print("🧹 [Capture] cleanupAfterRecording")
+        if nianticScanAugmentation.isActive {
+            nianticScanAugmentation.captureDidFail()
+        }
         currentArtifacts = nil
         currentARKitArtifacts = nil
         currentCameraIntrinsics = nil
