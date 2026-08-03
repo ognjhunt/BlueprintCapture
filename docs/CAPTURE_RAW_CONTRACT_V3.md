@@ -82,6 +82,8 @@ raw/
   video_frame_retention.jsonl                required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
+  reconstruction_qualification_request.json required for canonical iPhone closed-loop capture
+  device_calibration.json                    optional periodic known-rig calibration evidence
   glasses/
     stream_metadata.json                     required for glasses
     frame_timestamps.jsonl                   required for glasses
@@ -553,6 +555,7 @@ Required fields:
 - `world_frame_definition`
 - `units`
 - `handedness`
+- `up_axis`
 - `gravity_aligned`
 - `session_reset_count`
 
@@ -565,14 +568,15 @@ Example:
   "capture_id": "cap_20260320_001",
   "site_visit_id": "visit_9001",
   "route_id": "route_receiving_v2",
-  "pass_id": "pass_primary_1",
+  "pass_id": "pass_guided_closed_loop_1",
   "pass_index": 1,
-  "pass_role": "primary",
+  "pass_role": "guided_closed_loop",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "arkit_session_id": "arkit_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "world_frame_definition": "arkit_world_origin_at_session_start",
   "units": "meters",
   "handedness": "right_handed",
+  "up_axis": "Y",
   "gravity_aligned": true,
   "session_reset_count": 0,
   "captured_at": "2026-03-20T14:00:05Z"
@@ -600,13 +604,19 @@ Example:
   "schema_version": "v1",
   "capture_session_id": "visit_9001",
   "route_id": "route_receiving_v2",
-  "pass_id": "pass_primary_1",
+  "pass_id": "pass_guided_closed_loop_1",
   "pass_index": 1,
-  "intended_pass_role": "primary",
+  "intended_pass_role": "guided_closed_loop",
   "entry_anchor_id": "anchor_entry",
-  "return_anchor_id": "anchor_exit",
+  "return_anchor_id": "anchor_entry_return",
   "entry_anchor_t_capture_sec": 2.146,
   "entry_anchor_hold_duration_sec": 2.041,
+  "loop_closure_detected": true,
+  "loop_closure_return_t_capture_sec": 118.421,
+  "loop_closure_return_hold_duration_sec": 2.038,
+  "loop_closure_translation_residual_m": 0.11,
+  "loop_closure_rotation_residual_deg": 4.2,
+  "loop_closure_max_excursion_m": 18.7,
   "site_visit_id": "visit_9001",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "arkit_session_id": "arkit_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91"
@@ -1081,8 +1091,12 @@ Required fields:
 - `schema_version`
 - `coordinate_frame_session_id`
 - `representation`
-- `encoding`
+- `depth_encoding`
+- `scale_to_meters`
 - `units`
+- `camera_ray_convention`
+- `depth_intrinsics`
+- `depth_registered_to_arkit_camera`
 - `invalid_value_semantics`
 - `missing_depth_reason`
 - `frames`
@@ -1091,11 +1105,16 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_depth_manifest.v2",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "representation": "per_frame_depth_map",
+  "depth_encoding": "uint16_png",
   "encoding": "png_u16_mm",
   "units": "millimeters",
+  "scale_to_meters": 0.001,
+  "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+  "depth_intrinsics": {"fx": 206.4, "fy": 206.4, "cx": 128.0, "cy": 96.0, "width": 256, "height": 192},
+  "depth_registered_to_arkit_camera": true,
   "invalid_value_semantics": "0_means_missing",
   "missing_depth_reason": null,
   "frames": [
@@ -1122,7 +1141,8 @@ Required fields:
 - `schema_version`
 - `coordinate_frame_session_id`
 - `representation`
-- `encoding`
+- `confidence_encoding`
+- `accepted_confidence_values`
 - `confidence_scale`
 - `frames`
 
@@ -1130,10 +1150,12 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_confidence_manifest.v2",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "representation": "per_frame_confidence_map",
+  "confidence_encoding": "uint8_png",
   "encoding": "png_u8",
+  "accepted_confidence_values": [2],
   "confidence_scale": {
     "0": "low_or_missing",
     "1": "medium",
@@ -1149,6 +1171,23 @@ Example:
 }
 ```
 
+### `reconstruction_qualification_request.json`
+
+Purpose:
+- Carry Capture-observed evidence and request the remaining deterministic checks from BlueprintPipeline.
+- Bind thresholds to a task/site evidence-profile digest. The capture client must not invent a universal qualification threshold.
+- Keep ARKit meshes and scale as candidates until every requested check passes.
+
+The canonical check set is loop closure, tracking quality, depth reprojection error, mesh coverage, floor/support continuity, physical collision probes, and registered Postshot reconstruction. Capture emits `abstain_pending_downstream_measurements`; BlueprintPipeline is the qualification authority and returns either a qualified decision or the smallest missing measurement/targeted recapture.
+
+### `device_calibration.json`
+
+Purpose:
+- Preserve an optional one-time or periodic known-rig LiDAR scale check for the exact hardware model.
+- Record rig ID, reference and observed distances, sample count, confidence level, error/spread limits, result, and expiry.
+
+A qualified device profile strengthens sensor-scale evidence only. It does not qualify site geometry, collisions, Postshot registration, or physical behavior.
+
 ## Optional But High-Value `arkit/` Files
 
 ### `arkit/mesh_manifest.json`
@@ -1160,9 +1199,14 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_mesh_manifest.v1",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
-  "mesh_files": [
+  "coordinate_frame": "arkit_world",
+  "units": "meters",
+  "up_axis": "Y",
+  "collision_status": "candidate_only",
+  "qualification_authority": "downstream_evidence_gates",
+  "meshes": [
     {
       "mesh_id": "mesh_0001",
       "mesh_path": "arkit/meshes/mesh_0001.obj",

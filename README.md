@@ -76,6 +76,7 @@ capture automatically.
 - External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp, and only when real proof links the iPhone capture, upstream request/job records, bridge handoff, Pipeline package, and WebApp sync. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
 - Meta glasses and Android are internal-only launch paths unless a concrete assignment, physical-device proof, launch proof, and downstream Pipeline/WebApp proof exist for the same capture/job chain. Google/Meta smart-glasses public language must follow the same proof boundary.
 - Current cross-modality runtime limits are documented in [docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
+- The canonical iPhone Pro single-walk/Postshot evidence flow and remaining physical launch gates are documented in [docs/SINGLE_WALK_POSTSHOT_LAUNCH_READINESS.md](docs/SINGLE_WALK_POSTSHOT_LAUNCH_READINESS.md).
 - The disabled-by-default vendor recording experiment is documented in [docs/NIANTIC_NSDK_CAPTURE_AUGMENTATION.md](docs/NIANTIC_NSDK_CAPTURE_AUGMENTATION.md).
 
 ## Main Areas
