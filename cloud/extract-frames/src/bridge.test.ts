@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import {
   buildCaptureBundleReferences,
   buildPoseIndex,
+  buildVideoSyncIndex,
   chooseKeyframeCandidate,
   evaluateClaimedArtifacts,
   evaluateQualityGate,
   findClosestPoseByTime,
+  findClosestVideoSyncByTime,
   parsePoseRows,
+  parseVideoSyncRows,
 } from "./bridge.js";
 
 test("parsePoseRows supports legacy schema and derives frame_id/t_device_sec", () => {
@@ -103,6 +106,19 @@ test("findClosestPoseByTime falls back to nearest timestamp", () => {
   const index = buildPoseIndex(rows);
   const pose = findClosestPoseByTime(index.byTime, 0.31);
   assert.equal(pose?.frame_id, "000003");
+});
+
+test("decoded video synchronization maps a sampled thumbnail to the retained source frame", () => {
+  const rows = parseVideoSyncRows([
+    JSON.stringify({ frame_id: "000001", encoded_frame_index: 0, t_video_sec: 0.0, pose_frame_id: "000001", sync_status: "decoded_pts_exact" }),
+    JSON.stringify({ frame_id: "000007", encoded_frame_index: 6, t_video_sec: 0.2, pose_frame_id: "000007", sync_status: "decoded_pts_exact" }),
+    JSON.stringify({ frame_id: "000013", encoded_frame_index: 12, t_video_sec: 0.4, pose_frame_id: "000013", sync_status: "decoded_pts_exact" }),
+  ].join("\n"));
+  const index = buildVideoSyncIndex(rows);
+  const synchronized = findClosestVideoSyncByTime(index.byVideoTime, 0.198);
+  assert.equal(synchronized?.frame_id, "000007");
+  assert.equal(synchronized?.pose_frame_id, "000007");
+  assert.equal(synchronized?.encoded_frame_index, 6);
 });
 
 test("chooseKeyframeCandidate uses middle-third and sharpness proxy", () => {

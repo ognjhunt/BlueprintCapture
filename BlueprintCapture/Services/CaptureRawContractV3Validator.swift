@@ -286,6 +286,13 @@ final class CaptureRawContractV3Validator {
             baseDirectory: rawDirectoryURL,
             errors: &errors
         )
+        if captureSource == "iphone" && capability(captureCapabilities, key: "depth") {
+            validateARKitMetricDepthDeclarations(
+                depthManifest: depthManifest,
+                confidenceManifest: confidenceManifest,
+                errors: &errors
+            )
+        }
         validateReferencedArtifacts(
             manifest: arcoreDepthManifest,
             rowArrayKey: "frames",
@@ -766,6 +773,56 @@ final class CaptureRawContractV3Validator {
         }
         if let units = recordingSession["units"] as? String, units != "meters" {
             errors.append("recording_session_invalid_units")
+        }
+        if hasPoseWorldTracking && (recordingSession["up_axis"] as? String) != "Y" {
+            errors.append("recording_session_invalid_up_axis")
+        }
+    }
+
+    private func validateARKitMetricDepthDeclarations(
+        depthManifest: [String: Any]?,
+        confidenceManifest: [String: Any]?,
+        errors: inout [String]
+    ) {
+        guard let depthManifest else {
+            errors.append("arkit_depth_manifest_missing")
+            return
+        }
+        if (depthManifest["schema_version"] as? String) != "arkit_depth_manifest.v2" {
+            errors.append("arkit_depth_manifest_schema_unsupported")
+        }
+        if (depthManifest["depth_encoding"] as? String) != "uint16_png" {
+            errors.append("arkit_depth_encoding_unsupported")
+        }
+        if numericValue(depthManifest["scale_to_meters"]) != 0.001 {
+            errors.append("arkit_depth_scale_to_meters_invalid")
+        }
+        if (depthManifest["camera_ray_convention"] as? String) != "arkit_x_right_y_up_z_backward" {
+            errors.append("arkit_depth_camera_ray_convention_invalid")
+        }
+        if (depthManifest["depth_registered_to_arkit_camera"] as? Bool) != true {
+            errors.append("arkit_depth_registration_not_declared")
+        }
+        guard let intrinsics = depthManifest["depth_intrinsics"] as? [String: Any],
+              ["fx", "fy", "width", "height"].allSatisfy({ (numericValue(intrinsics[$0]) ?? 0) > 0 }),
+              ["cx", "cy"].allSatisfy({ numericValue(intrinsics[$0]) != nil }) else {
+            errors.append("arkit_depth_intrinsics_invalid")
+            return
+        }
+
+        guard let confidenceManifest else {
+            errors.append("arkit_confidence_manifest_missing")
+            return
+        }
+        if (confidenceManifest["schema_version"] as? String) != "arkit_confidence_manifest.v2" {
+            errors.append("arkit_confidence_manifest_schema_unsupported")
+        }
+        if (confidenceManifest["confidence_encoding"] as? String) != "uint8_png" {
+            errors.append("arkit_confidence_encoding_unsupported")
+        }
+        let accepted = (confidenceManifest["accepted_confidence_values"] as? [NSNumber])?.map(\.intValue) ?? []
+        if accepted != [2] {
+            errors.append("arkit_confidence_values_invalid")
         }
     }
 

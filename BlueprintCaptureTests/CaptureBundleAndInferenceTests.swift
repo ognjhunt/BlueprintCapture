@@ -568,7 +568,7 @@ struct CaptureBundleAndInferenceTests {
         try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
             .write(to: arkit.appendingPathComponent("poses.jsonl"))
         try Data("""
-{"frameId":"000001","tCaptureSec":0.0,"sceneDepthFile":"arkit/depth/000001.png","confidenceFile":"arkit/confidence/000001.png","trackingState":"normal","worldMappingStatus":"mapped","relocalizationEvent":false,"sharpnessScore":123.4,"depthValidFraction":0.84,"missingDepthFraction":0.16,"anchorObservations":["anchor_entry","semantic_doorway"],"coordinateFrameSessionId":"arkit-session-1"}
+{"frameId":"000001","tCaptureSec":0.0,"sceneDepthFile":"arkit/depth/000001.png","confidenceFile":"arkit/confidence/000001.png","depthImageResolution":[256,192],"confidenceImageResolution":[256,192],"trackingState":"normal","worldMappingStatus":"mapped","relocalizationEvent":false,"sharpnessScore":123.4,"depthValidFraction":0.84,"missingDepthFraction":0.16,"anchorObservations":["anchor_entry","semantic_doorway"],"coordinateFrameSessionId":"arkit-session-1"}
 """.utf8).write(to: arkit.appendingPathComponent("frames.jsonl"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
@@ -669,16 +669,23 @@ struct CaptureBundleAndInferenceTests {
         #expect(recording["world_frame_definition"] as? String == "arkit_world_origin_at_session_start")
         #expect(recording["units"] as? String == "meters")
         #expect(recording["handedness"] as? String == "right_handed")
+        #expect(recording["up_axis"] as? String == "Y")
         #expect(recording["gravity_aligned"] as? Bool == true)
         #expect((recording["session_reset_count"] as? NSNumber)?.intValue == 0)
 
         let depthManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/depth_manifest.json")))
         let depthManifest = try #require(depthManifestObject as? [String: Any])
+        #expect(depthManifest["schema_version"] as? String == "arkit_depth_manifest.v2")
+        #expect(depthManifest["depth_registered_to_arkit_camera"] as? Bool == true)
+        #expect(depthManifest["camera_ray_convention"] as? String == "arkit_x_right_y_up_z_backward")
+        #expect(depthManifest["depth_intrinsics"] is [String: Any])
         let depthFrames = try #require(depthManifest["frames"] as? [[String: Any]])
         #expect(depthFrames.count == 1)
 
         let confidenceManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/confidence_manifest.json")))
         let confidenceManifest = try #require(confidenceManifestObject as? [String: Any])
+        #expect(confidenceManifest["schema_version"] as? String == "arkit_confidence_manifest.v2")
+        #expect((confidenceManifest["accepted_confidence_values"] as? [NSNumber])?.map(\.intValue) == [2])
         let confidenceFrames = try #require(confidenceManifest["frames"] as? [[String: Any]])
         #expect(confidenceFrames.count == 1)
     }

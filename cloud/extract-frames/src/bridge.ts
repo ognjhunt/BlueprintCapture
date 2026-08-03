@@ -18,6 +18,20 @@ export type PoseIndex = {
   byTime: PoseRow[];
 };
 
+export type VideoSyncRow = {
+  frame_id: string;
+  pose_frame_id?: string;
+  encoded_frame_index?: number;
+  t_video_sec: number;
+  t_capture_sec?: number;
+  sync_status?: string;
+  delta_ms?: number;
+};
+
+export type VideoSyncIndex = {
+  byVideoTime: VideoSyncRow[];
+};
+
 export type QualityGateInput = {
   captureSource: "iphone" | "android" | "glasses" | "unknown";
   manifestPresent: boolean;
@@ -169,6 +183,53 @@ export function buildPoseIndex(rows: PoseRow[]): PoseIndex {
   }
   byTime.sort((a, b) => (a.t_device_sec ?? 0) - (b.t_device_sec ?? 0));
   return { byFrameId, byTime };
+}
+
+export function parseVideoSyncRows(content: string): VideoSyncRow[] {
+  return parseStrictJsonLines(content, "sync_map.jsonl").flatMap((row) => {
+    const frameId = typeof row.frame_id === "string" ? row.frame_id : undefined;
+    const tVideoSec = toFiniteNumber(row.t_video_sec);
+    if (!frameId || tVideoSec === undefined) return [];
+    return [{
+      frame_id: frameId,
+      pose_frame_id: typeof row.pose_frame_id === "string" ? row.pose_frame_id : undefined,
+      encoded_frame_index: toFiniteNumber(row.encoded_frame_index),
+      t_video_sec: tVideoSec,
+      t_capture_sec: toFiniteNumber(row.t_capture_sec),
+      sync_status: typeof row.sync_status === "string" ? row.sync_status : undefined,
+      delta_ms: toFiniteNumber(row.delta_ms),
+    }];
+  });
+}
+
+export function buildVideoSyncIndex(rows: VideoSyncRow[]): VideoSyncIndex {
+  return {
+    byVideoTime: rows
+      .filter((row) => Number.isFinite(row.t_video_sec))
+      .sort((a, b) => a.t_video_sec - b.t_video_sec),
+  };
+}
+
+export function findClosestVideoSyncByTime(
+  rows: VideoSyncRow[],
+  targetTime: number
+): VideoSyncRow | undefined {
+  if (!rows.length) return undefined;
+  let low = 0;
+  let high = rows.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (rows[mid].t_video_sec < targetTime) low = mid + 1;
+    else high = mid;
+  }
+  const candidates = [rows[low], low > 0 ? rows[low - 1] : undefined].filter(
+    (row): row is VideoSyncRow => row !== undefined
+  );
+  return candidates.reduce((best, candidate) =>
+    Math.abs(candidate.t_video_sec - targetTime) < Math.abs(best.t_video_sec - targetTime)
+      ? candidate
+      : best
+  );
 }
 
 export function findClosestPoseByTime(poses: PoseRow[], targetTime: number): PoseRow | undefined {

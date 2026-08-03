@@ -343,6 +343,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let worldFrameDefinition: String
         let units: String
         let handedness: String
+        let upAxis: String
         let gravityAligned: Bool
         let sessionResetCount: Int
         let capturedAt: String
@@ -352,6 +353,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let worldFrameDefinition: String
         let units: String
         let handedness: String
+        let upAxis: String
         let gravityAligned: Bool
         let sessionResetCount: Int
     }
@@ -855,6 +857,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 worldFrameDefinition: "arkit_world_origin_at_session_start",
                 units: "meters",
                 handedness: "right_handed",
+                upAxis: "Y",
                 gravityAligned: true,
                 sessionResetCount: 0
             )
@@ -864,6 +867,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 worldFrameDefinition: "arcore_world_origin_at_session_start",
                 units: "meters",
                 handedness: "right_handed",
+                upAxis: "Y",
                 gravityAligned: true,
                 sessionResetCount: 0
             )
@@ -872,6 +876,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             worldFrameDefinition: "unavailable_no_public_world_tracking",
             units: "meters",
             handedness: "unknown",
+            upAxis: "unknown",
             gravityAligned: false,
             sessionResetCount: 0
         )
@@ -1188,6 +1193,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             worldFrameDefinition: recordingWorldFrame.worldFrameDefinition,
             units: recordingWorldFrame.units,
             handedness: recordingWorldFrame.handedness,
+            upAxis: recordingWorldFrame.upAxis,
             gravityAligned: recordingWorldFrame.gravityAligned,
             sessionResetCount: recordingWorldFrame.sessionResetCount,
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
@@ -1578,6 +1584,69 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         return relative.isEmpty ? url.lastPathComponent : relative
     }
 
+    private func writeARKitMeshManifest(in directory: URL, coordinateFrameSessionId: String?) throws {
+        let meshDirectory = directory.appendingPathComponent("arkit/meshes", isDirectory: true)
+        guard fileManager.fileExists(atPath: meshDirectory.path) else { return }
+        let meshURLs = try fileManager.contentsOfDirectory(
+            at: meshDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension.lowercased() == "obj" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        let meshes: [[String: Any]] = meshURLs.map { url in
+            let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            var vertexCount = 0
+            var triangleCount = 0
+            var minimum = [Double.infinity, Double.infinity, Double.infinity]
+            var maximum = [-Double.infinity, -Double.infinity, -Double.infinity]
+            for line in contents.split(whereSeparator: \.isNewline) {
+                if line.hasPrefix("v ") {
+                    let fields = line.split(separator: " ")
+                    if fields.count >= 4,
+                       let x = Double(fields[1]), let y = Double(fields[2]), let z = Double(fields[3]) {
+                        vertexCount += 1
+                        for (index, value) in [x, y, z].enumerated() {
+                            minimum[index] = min(minimum[index], value)
+                            maximum[index] = max(maximum[index], value)
+                        }
+                    }
+                } else if line.hasPrefix("f ") {
+                    triangleCount += 1
+                }
+            }
+            var entry: [String: Any] = [
+                "mesh_path": relativePathInBundle(for: url, relativeTo: directory),
+                "encoding": "wavefront_obj",
+                "vertex_count": vertexCount,
+                "triangle_count": triangleCount,
+            ]
+            if vertexCount > 0 {
+                entry["bounds_m"] = ["min": minimum, "max": maximum]
+            }
+            return entry
+        }
+        var manifest: [String: Any] = [
+            "schema_version": "arkit_mesh_manifest.v1",
+            "coordinate_frame": "arkit_world",
+            "units": "meters",
+            "up_axis": "Y",
+            "handedness": "right_handed",
+            "source": "arkit_scene_reconstruction_mesh",
+            "collision_status": "candidate_only",
+            "qualification_authority": "downstream_evidence_gates",
+            "mesh_count": meshes.count,
+            "vertex_count": meshes.reduce(0) { $0 + (($1["vertex_count"] as? Int) ?? 0) },
+            "triangle_count": meshes.reduce(0) { $0 + (($1["triangle_count"] as? Int) ?? 0) },
+            "meshes": meshes,
+        ]
+        if let coordinateFrameSessionId {
+            manifest["coordinate_frame_session_id"] = coordinateFrameSessionId
+        }
+        let url = directory.appendingPathComponent("arkit/mesh_manifest.json")
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try data.write(to: url, options: .atomic)
+    }
+
     private func writeARKitDerivedSidecars(in directory: URL, coordinateFrameSessionId: String?) throws {
         let arkitDirectory = directory.appendingPathComponent("arkit", isDirectory: true)
         let framesURL = arkitDirectory.appendingPathComponent("frames.jsonl")
@@ -1772,6 +1841,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 "representation": "per_frame_depth_map",
                 "depth_source": stringValue(in: row, keys: ["depthSource", "depth_source"]) ?? "unknown",
             ]
+            if let resolution = objectValue(in: row, keys: ["depthImageResolution", "depth_image_resolution"]) as? [NSNumber],
+               resolution.count == 2 {
+                entry["width"] = resolution[0].intValue
+                entry["height"] = resolution[1].intValue
+            }
+            if let pairedConfidencePath = stringValue(in: row, keys: ["confidenceFile", "confidence_file"]) {
+                entry["paired_confidence_path"] = pairedConfidencePath
+            }
             if let depthValidFraction = doubleValue(in: row, keys: ["depthValidFraction", "depth_valid_fraction"]) {
                 entry["depth_valid_fraction"] = depthValidFraction
             }
@@ -1781,14 +1858,42 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             return entry
         }
         var depthManifest: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_depth_manifest.v2",
             "representation": "per_frame_depth_map",
+            "depth_encoding": "uint16_png",
             "encoding": "png_u16_mm",
             "units": "millimeters",
+            "scale_to_meters": 0.001,
             "invalid_value_semantics": "0_means_missing",
+            "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+            "depth_registered_to_arkit_camera": true,
+            "registration_authority": "arkit_scene_depth",
             "missing_depth_reason": NSNull(),
             "frames": depthEntries,
         ]
+        if let rgbIntrinsics = intrinsicsObject,
+           let fx = doubleValue(in: rgbIntrinsics, keys: ["fx"]),
+           let fy = doubleValue(in: rgbIntrinsics, keys: ["fy"]),
+           let cx = doubleValue(in: rgbIntrinsics, keys: ["cx"]),
+           let cy = doubleValue(in: rgbIntrinsics, keys: ["cy"]),
+           let rgbWidth = doubleValue(in: rgbIntrinsics, keys: ["width"]), rgbWidth > 0,
+           let rgbHeight = doubleValue(in: rgbIntrinsics, keys: ["height"]), rgbHeight > 0,
+           let firstDepth = depthEntries.first,
+           let depthWidth = (firstDepth["width"] as? NSNumber)?.doubleValue,
+           let depthHeight = (firstDepth["height"] as? NSNumber)?.doubleValue,
+           depthWidth > 0, depthHeight > 0 {
+            let scaleX = depthWidth / rgbWidth
+            let scaleY = depthHeight / rgbHeight
+            depthManifest["depth_intrinsics"] = [
+                "fx": fx * scaleX,
+                "fy": fy * scaleY,
+                "cx": cx * scaleX,
+                "cy": cy * scaleY,
+                "width": Int(depthWidth),
+                "height": Int(depthHeight),
+            ]
+            depthManifest["depth_intrinsics_source"] = "scaled_arkit_rgb_intrinsics_to_registered_depth_resolution"
+        }
         if let coordinateFrameSessionId {
             depthManifest["coordinate_frame_session_id"] = coordinateFrameSessionId
         }
@@ -1803,6 +1908,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 "confidence_path": confidencePath,
                 "representation": "per_frame_confidence_map",
             ]
+            if let resolution = objectValue(in: row, keys: ["confidenceImageResolution", "confidence_image_resolution"]) as? [NSNumber],
+               resolution.count == 2 {
+                entry["width"] = resolution[0].intValue
+                entry["height"] = resolution[1].intValue
+            }
             if let pairedDepthPath = stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"])
                 ?? stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"]) {
                 entry["paired_depth_path"] = pairedDepthPath
@@ -1810,9 +1920,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             return entry
         }
         var confidenceManifest: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_confidence_manifest.v2",
             "representation": "per_frame_confidence_map",
+            "confidence_encoding": "uint8_png",
             "encoding": "png_u8",
+            "accepted_confidence_values": [2],
             "confidence_scale": [
                 "0": "low_or_missing",
                 "1": "medium",
@@ -1827,11 +1939,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         try confidenceManifestData.write(to: confidenceManifestURL, options: .atomic)
 
         var sessionIntrinsics: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_session_intrinsics.v2",
             "camera_model": "pinhole",
             "principal_point_reference": "full_resolution_image",
-            "distortion_model": "apple_standard",
+            "pixel_orientation": "encoded_source_no_autorotate",
+            "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+            "distortion_model": "arkit_managed_not_portably_declared",
             "distortion_coeffs": [],
+            "rolling_shutter_model": "not_declared",
         ]
         if let coordinateFrameSessionId {
             sessionIntrinsics["coordinate_frame_session_id"] = coordinateFrameSessionId
@@ -1847,6 +1962,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
         let sessionIntrinsicsData = try JSONSerialization.data(withJSONObject: sessionIntrinsics, options: [.prettyPrinted, .withoutEscapingSlashes])
         try sessionIntrinsicsData.write(to: sessionIntrinsicsURL, options: .atomic)
+        try writeARKitMeshManifest(in: directory, coordinateFrameSessionId: coordinateFrameSessionId)
     }
 
     private func groupedRelocalizationEvents(in directory: URL) -> [RelocalizationEventsFile.RelocalizationEvent] {

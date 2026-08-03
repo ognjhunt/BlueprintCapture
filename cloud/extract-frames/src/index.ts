@@ -11,15 +11,19 @@ import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 import {
   buildCaptureBundleReferences,
   buildPoseIndex,
+  buildVideoSyncIndex,
   chooseKeyframeCandidate,
   evaluateClaimedArtifacts,
   evaluateQualityGate,
   findClosestPoseByTime,
+  findClosestVideoSyncByTime,
   parsePoseRows,
+  parseVideoSyncRows,
   percentile,
   type ArtifactAvailability,
   type PoseRow,
   type PoseIndex,
+  type VideoSyncIndex,
 } from "./bridge.js";
 import {
   captureObjectKind,
@@ -67,7 +71,7 @@ export const DEFAULT_EXTRACT_FRAMES_MAX_INSTANCES = 10;
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
-type PoseMatchType = "frame_id" | "time";
+type PoseMatchType = "sync_map_frame_id" | "time" | "legacy_frame_id_unverified";
 type InlineFrameExtractionSizeGate = {
   inlineAllowed: boolean;
   blockCode: string | null;
@@ -137,6 +141,33 @@ async function loadArkitPoses(
       return { byFrameId: new Map(), byTime: [] };
     }
     logger.error("Failed to load ARKit pose log", { posesObjectName, error });
+    throw error;
+  }
+}
+
+async function loadVideoSyncIndex(
+  bucket: StorageBucket,
+  rawPrefix: string,
+  tmpDir: string
+): Promise<VideoSyncIndex> {
+  const objectName = `${rawPrefix}/sync_map.jsonl`;
+  const file = bucket.file(objectName);
+  const [exists] = await file.exists();
+  if (!exists) return { byVideoTime: [] };
+  const localPath = join(tmpDir, `video-sync-${Date.now()}.jsonl`);
+  try {
+    await file.download({ destination: localPath });
+    const rows = parseVideoSyncRows(readFileSync(localPath, { encoding: "utf8" }));
+    logger.info("Loaded decoded-video synchronization rows", { objectName, count: rows.length });
+    return buildVideoSyncIndex(rows);
+  } catch (error) {
+    if (isDeterministicJsonlError(error)) {
+      logger.error("Video synchronization map is malformed; pose association will use timestamps", {
+        objectName,
+        error,
+      });
+      return { byVideoTime: [] };
+    }
     throw error;
   }
 }
@@ -1876,13 +1907,14 @@ export const extractFrames = onObjectFinalized(
     });
     const manifestValidation = validateManifest(manifest);
     const walkthroughObjectName = resolveWalkthroughObjectName(manifest, pathInfo, objectName);
-    const [walkthroughExists, completionMarker, poseIndex, arkitFrameQuality, intrinsics] =
+    const [walkthroughExists, completionMarker, poseIndex, videoSyncIndex, arkitFrameQuality, intrinsics] =
       await Promise.all([
         waitForObjectExists(bucket, walkthroughObjectName, 45000, 1000),
         objectKind === "completion_marker"
           ? loadJsonObject(bucket, completionMarkerObjectName, tmp)
           : Promise.resolve(null),
         loadArkitPoses(bucket, pathInfo.rawPrefix, tmp),
+        loadVideoSyncIndex(bucket, pathInfo.rawPrefix, tmp),
         loadArkitFrameQuality(bucket, pathInfo.rawPrefix, tmp),
         loadJsonObject(bucket, intrinsicsObjectName, tmp),
       ]);
@@ -2080,6 +2112,18 @@ export const extractFrames = onObjectFinalized(
         frame_id: frameId,
         t_video_sec: tVideoSec,
       };
+      const videoSync = findClosestVideoSyncByTime(videoSyncIndex.byVideoTime, tVideoSec);
+      const sourceFrameId = videoSync?.frame_id;
+      if (videoSync) {
+        entry.source_frame_id = videoSync.frame_id;
+        entry.source_pose_frame_id = videoSync.pose_frame_id ?? videoSync.frame_id;
+        entry.encoded_frame_index = videoSync.encoded_frame_index ?? null;
+        entry.capture_sync_status = videoSync.sync_status ?? null;
+        entry.capture_sync_delta_ms = videoSync.delta_ms ?? null;
+        entry.extraction_to_decoded_frame_delta_ms = Number(
+          (Math.abs(videoSync.t_video_sec - tVideoSec) * 1000).toFixed(3)
+        );
+      }
       if (packingPlan) {
         const memberName = sortedFiles[i];
         entry.packaging = "tar";
@@ -2088,14 +2132,20 @@ export const extractFrames = onObjectFinalized(
       }
 
       let poseMatchType: PoseMatchType | undefined;
-      let pose: PoseRow | undefined = posesByFrameId.get(frameId);
+      const synchronizedPoseFrameId = videoSync?.pose_frame_id ?? sourceFrameId;
+      let pose: PoseRow | undefined = synchronizedPoseFrameId
+        ? posesByFrameId.get(synchronizedPoseFrameId)
+        : undefined;
       if (pose) {
-        poseMatchType = "frame_id";
+        poseMatchType = "sync_map_frame_id";
       } else if (posesByTime.length > 0) {
         pose = findClosestPoseByTime(posesByTime, tVideoSec);
         if (pose) {
           poseMatchType = "time";
         }
+      } else {
+        pose = posesByFrameId.get(frameId);
+        if (pose) poseMatchType = "legacy_frame_id_unverified";
       }
 
       if (pose) {
@@ -2104,7 +2154,7 @@ export const extractFrames = onObjectFinalized(
 
         if (typeof pose.frame_id === "string") {
           arkitPose.pose_frame_id = pose.frame_id;
-          if (pose.frame_id !== frameId) {
+          if (sourceFrameId && pose.frame_id !== sourceFrameId) {
             arkitPose.frame_id_mismatch = true;
           }
         }
@@ -2141,6 +2191,7 @@ export const extractFrames = onObjectFinalized(
         const poseFrameId = asString(pose.frame_id);
         const frameQuality =
           (poseFrameId ? arkitFrameQuality.get(poseFrameId) : undefined) ??
+          (sourceFrameId ? arkitFrameQuality.get(sourceFrameId) : undefined) ??
           arkitFrameQuality.get(frameId);
         if (frameQuality) {
           const sceneDepthFile =

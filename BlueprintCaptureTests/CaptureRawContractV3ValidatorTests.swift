@@ -391,6 +391,7 @@ struct CaptureRawContractV3ValidatorTests {
             "world_frame_definition": "arkit_world_origin_at_session_start",
             "units": "meters",
             "handedness": "right_handed",
+            "up_axis": "Y",
             "gravity_aligned": true,
             "session_reset_count": 0,
         ], to: root.appendingPathComponent("recording_session.json"))
@@ -413,7 +414,12 @@ struct CaptureRawContractV3ValidatorTests {
         try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
         try writeJSON([
-            "schema_version": "v1",
+            "schema_version": "arkit_depth_manifest.v2",
+            "depth_encoding": "uint16_png",
+            "scale_to_meters": 0.001,
+            "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+            "depth_registered_to_arkit_camera": true,
+            "depth_intrinsics": ["fx": 1, "fy": 1, "cx": 1, "cy": 1, "width": 1, "height": 1],
             "frames": [[
                 "frame_id": "000001",
                 "depth_path": "arkit/depth/000001.png",
@@ -421,7 +427,9 @@ struct CaptureRawContractV3ValidatorTests {
             ]],
         ], to: arkit.appendingPathComponent("depth_manifest.json"))
         try writeJSON([
-            "schema_version": "v1",
+            "schema_version": "arkit_confidence_manifest.v2",
+            "confidence_encoding": "uint8_png",
+            "accepted_confidence_values": [2],
             "frames": [[
                 "frame_id": "000001",
                 "confidence_path": "arkit/confidence/000001.png",
@@ -505,6 +513,7 @@ struct CaptureRawContractV3ValidatorTests {
             "world_frame_definition": "arcore_world_origin_at_session_start",
             "units": "meters",
             "handedness": "right_handed",
+            "up_axis": "Y",
             "gravity_aligned": true,
             "session_reset_count": 0,
         ], to: root.appendingPathComponent("recording_session.json"))
@@ -613,6 +622,7 @@ struct CaptureRawContractV3ValidatorTests {
             "world_frame_definition": includeCompanionPhone ? "arkit_world_origin_at_session_start" : "unavailable_no_public_world_tracking",
             "units": "meters",
             "handedness": includeCompanionPhone ? "right_handed" : "unknown",
+            "up_axis": includeCompanionPhone ? "Y" : "unknown",
             "gravity_aligned": includeCompanionPhone,
             "session_reset_count": 0,
         ], to: root.appendingPathComponent("recording_session.json"))
