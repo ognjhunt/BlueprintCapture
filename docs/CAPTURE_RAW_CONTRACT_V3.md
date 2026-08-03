@@ -922,30 +922,29 @@ and is not valid for V3.2. A compatibility-only projection from AR rows uses
 ### `downstream_candidate_manifest.json`
 
 Purpose:
-- Provide a deterministic, provider-neutral registry from every retained RGB
-  observation to the immutable video, decoded source PTS, ARKit camera pose,
-  per-frame intrinsics, tracking state, and optional depth/confidence files.
+- Give downstream code a deterministic, provider-neutral address for every
+  retained decoded RGB observation and its exact ARKit pose/intrinsics row.
 - Let Pipeline construct Postshot/COLMAP inputs without guessing frame order,
-  using nominal frame rate, or silently selecting a provider in the client.
+  using nominal frame rate, or selecting a provider in the client.
 - Bind rights, revocation, redaction, and separate provider-authorization
-  requirements before any derived processing.
+  requirements while keeping task/site frame selection downstream.
 
 Required top-level fields:
 - `schema_version = "downstream_candidate_manifest.v1"`
 - `manifest_digest`
 - `source_video_uri` and `source_video_sha256`
-- `coordinate_frame_session_id`
+- identity fields and `coordinate_frame_session_id`
 - `source_video_authority`, `decoded_timing_authority`, and `candidate_order`
 - `selection_contract`, `provider_neutrality`, `allowed_use_scope`, and
   `claim_boundary`
 - `candidate_count` and `candidates`
 
 Each candidate binds a unique candidate ID and safe prospective output path to
-the decoded ordinal/source PTS, encoder write attempt, raw frame and pose IDs,
-`T_site_camera`, per-observation ARKit intrinsics, calibration digest, tracking
-and relocalization state, and optional depth/confidence references. Candidate
-order and count must exactly match `sync_map.jsonl`. The prospective image need
-not already exist in the raw bundle.
+the decoded ordinal/source PTS, capture-relative time, encoder write attempt,
+raw frame and pose IDs, `T_site_camera`, per-observation ARKit intrinsics,
+calibration digest, tracking/relocalization state, and optional depth/confidence
+references. Candidate order and count must exactly match `sync_map.jsonl`. The
+prospective image need not already exist in the raw bundle.
 
 Pipeline selection requires an explicit, digest-bound task/site evidence
 profile. If none exists, the exact blocker is
