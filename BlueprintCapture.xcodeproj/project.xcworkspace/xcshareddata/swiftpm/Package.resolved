@@ -1,5 +1,5 @@
 {
-  "originHash" : "1f38311bb1d7eefbd40ee2774021fb1e78a051051ad4e85f7df4b0ce7b46d832",
+  "originHash" : "e735db6b873985a6677ab2efd3ba7aaa668726b2e54f5316104b520a1c12cba3",
   "pins" : [
     {
       "identity" : "abseil-cpp-binary",
@@ -161,6 +161,15 @@
       "state" : {
         "revision" : "b7e1104502eca3a213b46303391ca4d3bc8ddec1",
         "version" : "2.30910.0"
+      }
+    },
+    {
+      "identity" : "nsdk-library-xcframework",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/nianticspatial/nsdk-library-xcframework.git",
+      "state" : {
+        "revision" : "7b22900f8d38d732262897debc43986bda65c7aa",
+        "version" : "4.1.0-26051913"
       }
     },
     {
