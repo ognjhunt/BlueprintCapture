@@ -696,12 +696,14 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         siteWorldWorkflowConfigured = true
         capturePassAttemptIndex += 1
         let hold = captureManager.detectedEntryAnchorHold
+        let loopClosure = captureManager.detectedLoopClosure
         let passRole = currentPlannedPassRole
         let coordinateFrameSessionId = captureManager.latestRecordingSessionId
         let passReview = buildSiteWorldPassReview(
             passAttemptIndex: capturePassAttemptIndex,
             passRole: passRole,
             hold: hold,
+            loopClosure: loopClosure,
             anchorEvents: captureManager.semanticAnchorEvents,
             monitor: captureManager.qualityMonitor
         )
@@ -738,9 +740,15 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
             passIndex: capturePassAttemptIndex,
             intendedPassRole: passRole,
             entryAnchorId: hold?.anchorId,
-            returnAnchorId: passRole == "loop_closure" && captureManager.semanticAnchorEvents.contains(where: { $0.anchorType == .entrance || $0.anchorType == .exitPoint }) ? "semantic_entrance" : nil,
+            returnAnchorId: loopClosure == nil ? nil : "anchor_entry_return",
             entryAnchorTCaptureSec: hold?.tCaptureSec,
             entryAnchorHoldDurationSec: hold?.durationSec,
+            loopClosureDetected: loopClosure != nil,
+            loopClosureReturnTCaptureSec: loopClosure?.returnTCaptureSec,
+            loopClosureReturnHoldDurationSec: loopClosure?.returnHoldDurationSec,
+            loopClosureTranslationResidualM: loopClosure?.translationResidualM,
+            loopClosureRotationResidualDeg: loopClosure?.rotationResidualDeg,
+            loopClosureMaxExcursionM: loopClosure?.maxExcursionM,
             siteVisitId: topologySiteVisitId,
             coordinateFrameSessionId: coordinateFrameSessionId,
             arkitSessionId: coordinateFrameSessionId
@@ -889,7 +897,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         siteWorldSiteScale = .medium
     }
 
-    func livePrompt(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, anchorEvents: [CaptureSemanticAnchorEvent]) -> String {
+    func livePrompt(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, loopClosure: VideoCaptureManager.LoopClosureObservation?, anchorEvents: [CaptureSemanticAnchorEvent]) -> String {
         if entryHold == nil {
             return "Stand at the main entry point. Hold still for 3 seconds. Slowly pan left, center, right. Keep the door frame, floor edge, and nearby wall in view."
         }
@@ -898,23 +906,13 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         }
         let sharedCheckpointCount = anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count
         let target = currentSiteWorldPassBrief.requiredCheckpointTarget
-        switch currentPlannedPassRole {
-        case "revisit":
-            return "Turn back and reacquire the last checkpoint from the reverse direction before leaving this zone."
-        case "loop_closure":
-            return "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds."
-        case "critical_zone_revisit":
-            return "Capture the static boundary, approach path, and exit path. Revisit once from the opposite direction."
-        default:
-            if sharedCheckpointCount < target {
-                return "At the next doorway or intersection, stop at the threshold. Show left frame, center opening, right frame. Then continue."
-            }
-            if let lastCheckpointT = anchorEvents.compactMap(\.tCaptureSec).max(),
-               monitor.elapsedSeconds - lastCheckpointT > 35 {
-                return "Before leaving this shared area, pause and show the last checkpoint again for 2 seconds."
-            }
-            return currentSiteWorldPassBrief.requiredPrompt
+        if loopClosure != nil {
+            return "Route closed. Hold briefly, then finish the capture."
         }
+        if sharedCheckpointCount >= target {
+            return "Return to your start anchor. Match the original entrance view as closely as practical, then hold for 3 seconds."
+        }
+        return "At the next doorway or intersection, stop at the threshold. Show left frame, center opening, right frame. Then continue."
     }
 
     func liveSupportPrompts(for monitor: CaptureQualityMonitor, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
@@ -937,9 +935,10 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         return Array(prompts.prefix(2))
     }
 
-    func liveStatusChips(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
+    func liveStatusChips(for monitor: CaptureQualityMonitor, entryHold: VideoCaptureManager.EntryAnchorHold?, loopClosure: VideoCaptureManager.LoopClosureObservation?, anchorEvents: [CaptureSemanticAnchorEvent]) -> [String] {
         var chips: [String] = []
         chips.append(entryHold == nil ? "Hold at your start point" : "Start point saved")
+        chips.append(loopClosure == nil ? "Return to start pending" : "Route closed")
         chips.append("Pause points \(anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count)/\(currentSiteWorldPassBrief.requiredCheckpointTarget)")
         if monitor.hasWeakSignalConcern {
             chips.append("Shaky tracking \(Int(monitor.limitedTrackingSeconds))s")
@@ -962,17 +961,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
     }
 
     private func workflowPassSequence() -> [String] {
-        var roles: [String]
-        switch siteWorldSiteScale {
-        case .smallSimple:
-            roles = ["primary", "loop_closure"]
-        case .medium, .multiZone:
-            roles = ["primary", "revisit", "loop_closure"]
-        }
-        if !selectedCriticalZoneAnchors.isEmpty {
-            roles.append("critical_zone_revisit")
-        }
-        return roles
+        ["guided_closed_loop"]
     }
 
     private var sharedCheckpointAnchorTypes: Set<CaptureSemanticAnchorType> {
@@ -981,6 +970,19 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
 
     private func passBrief(for role: String) -> SiteWorldPassBrief {
         switch role {
+        case "guided_closed_loop":
+            return SiteWorldPassBrief(
+                role: role,
+                title: "Guided closed-loop walk",
+                summary: "Record one continuous walk: establish the start, cover the site, revisit shared geometry on the way back, and finish at the same start point.",
+                requiredCheckpointTarget: currentCheckpointTarget,
+                requiredPrompt: "Return along overlapping structure and finish at your start point with a steady 3-second hold.",
+                exactPrompts: [
+                    "Stand at the main entry point and hold still for 3 seconds.",
+                    "Pause at doorways and intersections, showing stable structure from both approach directions.",
+                    "Return to your start anchor, match the opening view, and hold for 3 seconds."
+                ]
+            )
         case "revisit":
             return SiteWorldPassBrief(
                 role: role,
@@ -1091,6 +1093,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         passAttemptIndex: Int,
         passRole: String,
         hold: VideoCaptureManager.EntryAnchorHold?,
+        loopClosure: VideoCaptureManager.LoopClosureObservation?,
         anchorEvents: [CaptureSemanticAnchorEvent],
         monitor: CaptureQualityMonitor
     ) -> SiteWorldPassReview {
@@ -1098,7 +1101,6 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         let anchorTypes = Set(anchorEvents.map(\.anchorType))
         let sharedCheckpointCount = anchorEvents.filter { sharedCheckpointAnchorTypes.contains($0.anchorType) }.count
         let criticalMatches = selectedCriticalZoneAnchors.intersection(anchorTypes)
-        let hasLoopClosureAnchor = anchorTypes.contains(.entrance) || anchorTypes.contains(.exitPoint) || hold != nil
         var completedItems: [String] = []
         var missingItems: [String] = []
 
@@ -1109,6 +1111,19 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
         }
 
         switch passRole {
+        case "guided_closed_loop":
+            if sharedCheckpointCount >= brief.requiredCheckpointTarget {
+                completedItems.append("Enough pause points captured during the continuous walk.")
+            } else {
+                missingItems.append("Pause at \(brief.requiredCheckpointTarget) doorways, intersections, or thresholds during the walk.")
+            }
+            if let loopClosure {
+                completedItems.append(
+                    String(format: "Route closed within %.2f m after %.1f m of travel from the start.", loopClosure.translationResidualM, loopClosure.maxExcursionM)
+                )
+            } else {
+                missingItems.append("Return to the start point and hold still until the route-closed indicator appears.")
+            }
         case "revisit":
             if sharedCheckpointCount >= brief.requiredCheckpointTarget {
                 completedItems.append("Reverse walkthrough hit its pause points.")
@@ -1116,7 +1131,7 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 missingItems.append("Pause at \(brief.requiredCheckpointTarget) or more doorways or intersections on the way back.")
             }
         case "loop_closure":
-            if hasLoopClosureAnchor {
+            if loopClosure != nil {
                 completedItems.append("You returned to your start point — route closed.")
             } else {
                 missingItems.append("Walk back to the entrance where you started before finishing.")

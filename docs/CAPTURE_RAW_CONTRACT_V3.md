@@ -37,6 +37,9 @@ For V3.2 bundles:
   or `dropped_backpressure` with a precise reason;
 - `sync_map.jsonl` contains only successfully retained frames, paired by ordinal
   with decoded video sample presentation timestamps;
+- `downstream_candidate_manifest.json` binds every retained decoded RGB
+  observation to its exact source PTS, ARKit pose, per-frame intrinsics, and
+  coordinate-frame identity without selecting or authorizing a provider;
 - the first retained video frame is both `t_video_sec = 0` and
   `t_capture_sec = 0`; if that first frame cannot be retained, capture fails and
   requests recapture;
@@ -44,6 +47,19 @@ For V3.2 bundles:
   closed on count, ordering, timestamp, or source-frame binding mismatch.
 - finalization drains the AR and motion writer queues before deriving or hashing
   synchronization artifacts.
+- `decoded_source_pts_sec` preserves the presentation timestamp read from the
+  finalized video, while `t_video_sec` is that timestamp minus
+  `video_track.json.video_start_pts_sec`;
+- every retained observation is indexed in
+  `downstream_candidate_manifest.json`. This is a provider-neutral registry,
+  not a frame selection, provider authorization, reconstruction result, or
+  qualification;
+- each pose row declares `T_site_camera` as the exact alias of
+  `T_world_camera`, plus the site-frame definition, matrix layout, units,
+  handedness, gravity alignment, and reset segment;
+- `rights_consent.json` explicitly declares privacy processing, retention,
+  revocation, and that the mobile bundle does not authorize a third-party
+  provider upload.
 
 ## Goals
 
@@ -80,8 +96,12 @@ raw/
   walkthrough.mov                            required
   sync_map.jsonl                             required
   video_frame_retention.jsonl                required when capture_schema_version>=3.2
+  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
+  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
+  reconstruction_qualification_request.json required for canonical iPhone closed-loop capture
+  device_calibration.json                    optional periodic known-rig calibration evidence
   glasses/
     stream_metadata.json                     required for glasses
     frame_timestamps.jsonl                   required for glasses
@@ -553,6 +573,7 @@ Required fields:
 - `world_frame_definition`
 - `units`
 - `handedness`
+- `up_axis`
 - `gravity_aligned`
 - `session_reset_count`
 
@@ -565,14 +586,15 @@ Example:
   "capture_id": "cap_20260320_001",
   "site_visit_id": "visit_9001",
   "route_id": "route_receiving_v2",
-  "pass_id": "pass_primary_1",
+  "pass_id": "pass_guided_closed_loop_1",
   "pass_index": 1,
-  "pass_role": "primary",
+  "pass_role": "guided_closed_loop",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "arkit_session_id": "arkit_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "world_frame_definition": "arkit_world_origin_at_session_start",
   "units": "meters",
   "handedness": "right_handed",
+  "up_axis": "Y",
   "gravity_aligned": true,
   "session_reset_count": 0,
   "captured_at": "2026-03-20T14:00:05Z"
@@ -600,13 +622,19 @@ Example:
   "schema_version": "v1",
   "capture_session_id": "visit_9001",
   "route_id": "route_receiving_v2",
-  "pass_id": "pass_primary_1",
+  "pass_id": "pass_guided_closed_loop_1",
   "pass_index": 1,
-  "intended_pass_role": "primary",
+  "intended_pass_role": "guided_closed_loop",
   "entry_anchor_id": "anchor_entry",
-  "return_anchor_id": "anchor_exit",
+  "return_anchor_id": "anchor_entry_return",
   "entry_anchor_t_capture_sec": 2.146,
   "entry_anchor_hold_duration_sec": 2.041,
+  "loop_closure_detected": true,
+  "loop_closure_return_t_capture_sec": 118.421,
+  "loop_closure_return_hold_duration_sec": 2.038,
+  "loop_closure_translation_residual_m": 0.11,
+  "loop_closure_rotation_residual_deg": 4.2,
+  "loop_closure_max_excursion_m": 18.7,
   "site_visit_id": "visit_9001",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "arkit_session_id": "arkit_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91"
@@ -776,7 +804,9 @@ Example:
   "dropped_frame_count": 3,
   "nominal_fps": 30.0,
   "contains_vfr": false,
-  "video_start_pts_sec": 0.0,
+  "video_start_pts_sec": 8123.3371,
+  "video_time_origin": "first_decoded_sample_presentation_timestamp",
+  "t_video_semantics": "decoded_source_pts_minus_video_start_pts",
   "width": 1920,
   "height": 1440,
   "orientation": "portrait",
@@ -805,12 +835,13 @@ Required per-line fields:
 - `drop_reason`
 - `encoded_frame_index`
 - `t_video_sec`
+- `decoded_source_pts_sec` for retained V3.2 rows
 
 Retained rows bind to a decoded frame index and decoded PTS. Dropped rows retain
 their source frame identity but use null encoded-frame and video-time fields.
 
 ```json
-{"write_attempt_index":741,"source_timestamp_sec":8123.3371,"frame_id":"000742","t_capture_sec":24.733333,"retention_status":"retained","drop_reason":null,"encoded_frame_index":739,"t_video_sec":24.733333}
+{"write_attempt_index":741,"source_timestamp_sec":8123.3371,"frame_id":"000742","t_capture_sec":24.733333,"retention_status":"retained","drop_reason":null,"encoded_frame_index":739,"t_video_sec":24.733333,"decoded_source_pts_sec":8148.070433}
 {"write_attempt_index":742,"source_timestamp_sec":8123.3704,"frame_id":"000743","t_capture_sec":24.766666,"retention_status":"dropped_backpressure","drop_reason":"asset_writer_input_not_ready","encoded_frame_index":null,"t_video_sec":null}
 ```
 
@@ -879,16 +910,80 @@ Required per-line fields:
 - `delta_ms`
 - `encoded_frame_index` for V3.2
 - `write_attempt_index` for V3.2
+- `decoded_source_pts_sec` for V3.2
+- `decoded_time_origin_pts_sec` for V3.2
 
 Example line:
 
 ```json
-{"frame_id":"000742","t_video_sec":24.733333,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","sync_status":"encoded_decoded_pts_match","delta_ms":0.0,"encoded_frame_index":739,"write_attempt_index":741}
+{"frame_id":"000742","t_video_sec":24.733333,"decoded_source_pts_sec":8148.070433,"decoded_time_origin_pts_sec":8123.3371,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","sync_status":"encoded_decoded_pts_match","delta_ms":0.0,"encoded_frame_index":739,"write_attempt_index":741}
 ```
 
 `exact_frame_id_match` does not prove video retention or decoded PTS alignment
 and is not valid for V3.2. A compatibility-only projection from AR rows uses
 `unverified_ar_frame_only` and must be treated as weaker evidence.
+
+### `downstream_candidate_manifest.json`
+
+Purpose:
+- Provide a deterministic, provider-neutral registry from every retained RGB
+  observation to the immutable video, decoded source PTS, ARKit camera pose,
+  per-frame intrinsics, tracking state, and optional depth/confidence files.
+- Let Pipeline construct Postshot/COLMAP inputs without guessing frame order,
+  using nominal frame rate, or silently selecting a provider in the client.
+- Bind rights, revocation, redaction, and separate provider-authorization
+  requirements before any derived processing.
+
+Required top-level fields:
+- `schema_version = "downstream_candidate_manifest.v1"`
+- `manifest_digest`
+- `source_video_uri` and `source_video_sha256`
+- `coordinate_frame_session_id`
+- `source_video_authority`, `decoded_timing_authority`, and `candidate_order`
+- `selection_contract`, `provider_neutrality`, `allowed_use_scope`, and
+  `claim_boundary`
+- `candidate_count` and `candidates`
+
+Each candidate binds `decoded_source_pts_sec`, capture-relative time,
+`frame_id`, `pose_frame_id`, `T_site_camera`, camera intrinsics, tracking and
+relocalization state, and deterministic output-image addressing. Candidate
+order and count must exactly match `sync_map.jsonl`.
+
+This registry is capture truth plus deterministic addressing. It does not
+qualify reconstruction appearance, registration, metric scale, collision
+geometry, physics, task success, provider selection, or provider upload.
+
+### `downstream_candidate_manifest.json`
+
+Purpose:
+- Give downstream code a deterministic, immutable address for every retained
+  decoded RGB observation and its exact ARKit pose/intrinsics row.
+- Keep task/site frame selection and reconstruction-provider authorization out
+  of the capture client.
+
+Required top-level fields include `schema_version =
+"downstream_candidate_manifest.v1"`, identity and coordinate-frame IDs,
+`source_video_uri`, `source_video_sha256`, `candidate_count`,
+`selection_contract`, `provider_neutrality`, `allowed_use_scope`,
+`claim_boundary`, `candidates`, and a canonical `manifest_digest`.
+
+Each candidate binds a unique candidate ID and safe prospective output path to
+the decoded ordinal/source PTS, encoder write attempt, raw frame and pose IDs,
+`T_site_camera`, per-observation ARKit intrinsics, calibration digest, tracking
+state, and optional depth/confidence references. The prospective image need not
+already exist in the raw bundle.
+
+The manifest must state that direct mobile/provider upload and third-party
+provider authorization are false. Pipeline selection requires an explicit,
+digest-bound task/site evidence profile. If none exists, the exact blocker is
+`task_site_evidence_profile_with_frame_selection_parameters`; Capture does not
+invent a default.
+
+The manifest proves only deterministic addressing of captured observations. It
+does not prove provider readiness, reconstruction quality, metric scale,
+collision/physics validity, Task Evaluation Run success, or physical transfer.
+A compact versioned example is under
+`docs/fixtures/capture_raw_contract_v3_2/`.
 
 ### `motion.jsonl`
 
@@ -1081,8 +1176,12 @@ Required fields:
 - `schema_version`
 - `coordinate_frame_session_id`
 - `representation`
-- `encoding`
+- `depth_encoding`
+- `scale_to_meters`
 - `units`
+- `camera_ray_convention`
+- `depth_intrinsics`
+- `depth_registered_to_arkit_camera`
 - `invalid_value_semantics`
 - `missing_depth_reason`
 - `frames`
@@ -1091,11 +1190,16 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_depth_manifest.v2",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "representation": "per_frame_depth_map",
+  "depth_encoding": "uint16_png",
   "encoding": "png_u16_mm",
   "units": "millimeters",
+  "scale_to_meters": 0.001,
+  "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+  "depth_intrinsics": {"fx": 206.4, "fy": 206.4, "cx": 128.0, "cy": 96.0, "width": 256, "height": 192},
+  "depth_registered_to_arkit_camera": true,
   "invalid_value_semantics": "0_means_missing",
   "missing_depth_reason": null,
   "frames": [
@@ -1122,7 +1226,8 @@ Required fields:
 - `schema_version`
 - `coordinate_frame_session_id`
 - `representation`
-- `encoding`
+- `confidence_encoding`
+- `accepted_confidence_values`
 - `confidence_scale`
 - `frames`
 
@@ -1130,10 +1235,12 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_confidence_manifest.v2",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
   "representation": "per_frame_confidence_map",
+  "confidence_encoding": "uint8_png",
   "encoding": "png_u8",
+  "accepted_confidence_values": [2],
   "confidence_scale": {
     "0": "low_or_missing",
     "1": "medium",
@@ -1149,6 +1256,23 @@ Example:
 }
 ```
 
+### `reconstruction_qualification_request.json`
+
+Purpose:
+- Carry Capture-observed evidence and request the remaining deterministic checks from BlueprintPipeline.
+- Bind thresholds to a task/site evidence-profile digest. The capture client must not invent a universal qualification threshold.
+- Keep ARKit meshes and scale as candidates until every requested check passes.
+
+The canonical check set is loop closure, tracking quality, depth reprojection error, mesh coverage, floor/support continuity, physical collision probes, and registered Postshot reconstruction. Capture emits `abstain_pending_downstream_measurements`; BlueprintPipeline is the qualification authority and returns either a qualified decision or the smallest missing measurement/targeted recapture.
+
+### `device_calibration.json`
+
+Purpose:
+- Preserve an optional one-time or periodic known-rig LiDAR scale check for the exact hardware model.
+- Record rig ID, reference and observed distances, sample count, confidence level, error/spread limits, result, and expiry.
+
+A qualified device profile strengthens sensor-scale evidence only. It does not qualify site geometry, collisions, Postshot registration, or physical behavior.
+
 ## Optional But High-Value `arkit/` Files
 
 ### `arkit/mesh_manifest.json`
@@ -1160,9 +1284,14 @@ Example:
 
 ```json
 {
-  "schema_version": "v1",
+  "schema_version": "arkit_mesh_manifest.v1",
   "coordinate_frame_session_id": "cfs_8ec7d26d-1f0e-4ed0-86de-5b3c6d4c7d91",
-  "mesh_files": [
+  "coordinate_frame": "arkit_world",
+  "units": "meters",
+  "up_axis": "Y",
+  "collision_status": "candidate_only",
+  "qualification_authority": "downstream_evidence_gates",
+  "meshes": [
     {
       "mesh_id": "mesh_0001",
       "mesh_path": "arkit/meshes/mesh_0001.obj",

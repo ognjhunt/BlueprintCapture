@@ -157,11 +157,17 @@ struct CaptureTopologyMetadata: Equatable, Codable {
     let routeId: String
     let passId: String
     let passIndex: Int
-    let intendedPassRole: String   // "primary" | "revisit" | "loop_closure" | "critical_zone_revisit"
+    let intendedPassRole: String   // "guided_closed_loop" for the canonical single-walk flow
     let entryAnchorId: String?
     let returnAnchorId: String?
     let entryAnchorTCaptureSec: Double?      // t_device_sec midpoint of detected entry hold
     let entryAnchorHoldDurationSec: Double?  // seconds held at entry anchor
+    let loopClosureDetected: Bool?
+    let loopClosureReturnTCaptureSec: Double?
+    let loopClosureReturnHoldDurationSec: Double?
+    let loopClosureTranslationResidualM: Double?
+    let loopClosureRotationResidualDeg: Double?
+    let loopClosureMaxExcursionM: Double?
     let siteVisitId: String?
     let coordinateFrameSessionId: String?
     let arkitSessionId: String?
@@ -176,6 +182,12 @@ struct CaptureTopologyMetadata: Equatable, Codable {
         returnAnchorId: String?,
         entryAnchorTCaptureSec: Double?,
         entryAnchorHoldDurationSec: Double?,
+        loopClosureDetected: Bool? = nil,
+        loopClosureReturnTCaptureSec: Double? = nil,
+        loopClosureReturnHoldDurationSec: Double? = nil,
+        loopClosureTranslationResidualM: Double? = nil,
+        loopClosureRotationResidualDeg: Double? = nil,
+        loopClosureMaxExcursionM: Double? = nil,
         siteVisitId: String? = nil,
         coordinateFrameSessionId: String? = nil,
         arkitSessionId: String? = nil
@@ -189,6 +201,12 @@ struct CaptureTopologyMetadata: Equatable, Codable {
         self.returnAnchorId = returnAnchorId
         self.entryAnchorTCaptureSec = entryAnchorTCaptureSec
         self.entryAnchorHoldDurationSec = entryAnchorHoldDurationSec
+        self.loopClosureDetected = loopClosureDetected
+        self.loopClosureReturnTCaptureSec = loopClosureReturnTCaptureSec
+        self.loopClosureReturnHoldDurationSec = loopClosureReturnHoldDurationSec
+        self.loopClosureTranslationResidualM = loopClosureTranslationResidualM
+        self.loopClosureRotationResidualDeg = loopClosureRotationResidualDeg
+        self.loopClosureMaxExcursionM = loopClosureMaxExcursionM
         self.siteVisitId = siteVisitId
         self.coordinateFrameSessionId = coordinateFrameSessionId
         self.arkitSessionId = arkitSessionId

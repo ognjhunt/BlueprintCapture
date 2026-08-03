@@ -1,14 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   buildCaptureBundleReferences,
+  buildDownstreamCandidateIndex,
   buildPoseIndex,
+  buildVideoSyncIndex,
   chooseKeyframeCandidate,
   evaluateClaimedArtifacts,
   evaluateQualityGate,
   findClosestPoseByTime,
+  findClosestVideoSyncByTime,
+  classifyVideoSyncAssociation,
   parsePoseRows,
+  parseVideoSyncRows,
 } from "./bridge.js";
 
 test("parsePoseRows supports legacy schema and derives frame_id/t_device_sec", () => {
@@ -103,6 +109,80 @@ test("findClosestPoseByTime falls back to nearest timestamp", () => {
   const index = buildPoseIndex(rows);
   const pose = findClosestPoseByTime(index.byTime, 0.31);
   assert.equal(pose?.frame_id, "000003");
+});
+
+test("decoded video synchronization maps a sampled thumbnail to the retained source frame", () => {
+  const rows = parseVideoSyncRows([
+    JSON.stringify({ frame_id: "000001", encoded_frame_index: 0, t_video_sec: 0.0, pose_frame_id: "000001", sync_status: "decoded_pts_exact" }),
+    JSON.stringify({ frame_id: "000007", encoded_frame_index: 6, t_video_sec: 0.2, pose_frame_id: "000007", sync_status: "decoded_pts_exact" }),
+    JSON.stringify({ frame_id: "000013", encoded_frame_index: 12, t_video_sec: 0.4, pose_frame_id: "000013", sync_status: "decoded_pts_exact" }),
+  ].join("\n"));
+  const index = buildVideoSyncIndex(rows);
+  const synchronized = findClosestVideoSyncByTime(index.byVideoTime, 0.198);
+  assert.equal(synchronized?.frame_id, "000007");
+  assert.equal(synchronized?.pose_frame_id, "000007");
+  assert.equal(synchronized?.encoded_frame_index, 6);
+});
+
+test("bridge labels only exact retained observation timing as exact", () => {
+  const row = parseVideoSyncRows(JSON.stringify({
+    frame_id: "000001",
+    encoded_frame_index: 0,
+    t_video_sec: 0.2,
+    pose_frame_id: "000001",
+    sync_status: "encoded_decoded_pts_match",
+  }))[0];
+  assert.equal(classifyVideoSyncAssociation(row, 0.2).match, "exact_retained_observation");
+  assert.equal(
+    classifyVideoSyncAssociation(row, 0.198).match,
+    "approximate_nearest_retained_observation"
+  );
+});
+
+test("bridge validates and indexes the versioned V3.2 candidate fixture", () => {
+  const fixture = JSON.parse(readFileSync(
+    "../../docs/fixtures/capture_raw_contract_v3_2/downstream_candidate_manifest.json",
+    "utf8"
+  )) as Record<string, unknown>;
+  const index = buildDownstreamCandidateIndex(fixture);
+  assert.deepEqual(index.errors, []);
+  assert.equal(index.valid, true);
+  assert.equal(index.byDecodedFrameOrdinal.get(0)?.candidate_id, "rgb_000000");
+});
+
+test("bridge rejects provider authorization in a candidate manifest", () => {
+  const fixture = JSON.parse(readFileSync(
+    "../../docs/fixtures/capture_raw_contract_v3_2/downstream_candidate_manifest.json",
+    "utf8"
+  )) as Record<string, unknown>;
+  fixture.provider_neutrality = {
+    mobile_app_direct_provider_upload_allowed: false,
+    third_party_provider_upload_authorized: true,
+    provider_selection_authority: "blueprint_pipeline",
+  };
+  const index = buildDownstreamCandidateIndex(fixture);
+  assert.equal(index.valid, false);
+  assert.ok(index.errors.includes("downstream_candidate_provider_neutrality_invalid"));
+});
+
+test("bridge rejects qualified claims and tampered camera calibration", () => {
+  const fixture = JSON.parse(readFileSync(
+    "../../docs/fixtures/capture_raw_contract_v3_2/downstream_candidate_manifest.json",
+    "utf8"
+  )) as Record<string, unknown>;
+  fixture.claim_boundary = {
+    raw_capture_remains_authoritative: true,
+    candidate_manifest_qualifies_reconstruction: false,
+    candidate_manifest_qualifies_metric_scale: true,
+    candidate_manifest_qualifies_collision_or_physics: false,
+    candidate_manifest_proves_task_success: false,
+  };
+  const candidates = fixture.candidates as Array<Record<string, unknown>>;
+  candidates[0].camera_calibration_digest = `sha256:${"0".repeat(64)}`;
+  const index = buildDownstreamCandidateIndex(fixture);
+  assert.equal(index.valid, false);
+  assert.ok(index.errors.includes("downstream_candidate_claim_boundary_invalid"));
+  assert.ok(index.errors.includes("downstream_candidate_row_invalid:0"));
 });
 
 test("chooseKeyframeCandidate uses middle-third and sharpness proxy", () => {
@@ -254,8 +334,19 @@ test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
       arkit_intrinsics: false,
       arkit_depth: true,
       arkit_confidence: false,
-      arkit_meshes: false,
+      arkit_meshes: true,
       motion: true,
+      video_sync: true,
+      arkit_frames: true,
+      arkit_frame_quality: true,
+      arkit_feature_points: true,
+      arkit_planes: true,
+      arkit_light_estimates: true,
+    },
+    declaredReferences: {
+      reconstructionQualificationRequest: true,
+      deviceCalibration: true,
+      downstreamCandidateManifest: true,
     },
   });
 
@@ -269,4 +360,32 @@ test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
     "gs://bucket/scenes/scene/captures/capture/raw/arkit/depth"
   );
   assert.equal(captureBundle.motion_uri, "gs://bucket/scenes/scene/captures/capture/raw/motion.jsonl");
+  assert.equal(
+    captureBundle.arkit_mesh_manifest_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/mesh_manifest.json"
+  );
+  assert.equal(
+    captureBundle.reconstruction_qualification_request_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/reconstruction_qualification_request.json"
+  );
+  assert.equal(
+    captureBundle.device_calibration_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/device_calibration.json"
+  );
+  assert.equal(
+    captureBundle.sync_map_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/sync_map.jsonl"
+  );
+  assert.equal(
+    captureBundle.arkit_feature_points_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/feature_points.jsonl"
+  );
+  assert.equal(
+    captureBundle.arkit_plane_observations_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/plane_observations.jsonl"
+  );
+  assert.equal(
+    captureBundle.downstream_candidate_manifest_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/downstream_candidate_manifest.json"
+  );
 });

@@ -16,6 +16,7 @@ struct CaptureSessionView: View {
     @State private var selectedSiteType: CaptureSiteType?
     @State private var siteExtentForm = CaptureSiteExtentFormState()
     @State private var siteTypeError: String?
+    @State private var isShowingDeviceCalibration = false
     @Environment(\.dismiss) private var dismiss
     let targetId: String?
     let reservationId: String?
@@ -69,11 +70,13 @@ struct CaptureSessionView: View {
                         chips: viewModel.liveStatusChips(
                             for: captureManager.qualityMonitor,
                             entryHold: captureManager.detectedEntryAnchorHold,
+                            loopClosure: captureManager.detectedLoopClosure,
                             anchorEvents: captureManager.semanticAnchorEvents
                         ),
                         prompt: viewModel.livePrompt(
                             for: captureManager.qualityMonitor,
                             entryHold: captureManager.detectedEntryAnchorHold,
+                            loopClosure: captureManager.detectedLoopClosure,
                             anchorEvents: captureManager.semanticAnchorEvents
                         ),
                         supportPrompts: viewModel.liveSupportPrompts(
@@ -127,6 +130,32 @@ struct CaptureSessionView: View {
                             startCurrentPass()
                         }
                     )
+                    .padding(.horizontal)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Label("Device scale calibration", systemImage: "scope")
+                                .font(.footnote.weight(.semibold))
+                            Spacer()
+                            Button(captureManager.currentDeviceCalibrationProfile?.isCurrentlyQualified == true ? "Recalibrate" : "Calibrate") {
+                                isShowingDeviceCalibration = true
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .disabled(!captureManager.supportsDeviceCalibration)
+                        }
+                        if let profile = captureManager.currentDeviceCalibrationProfile,
+                           profile.isCurrentlyQualified {
+                            Text("Qualified on \(profile.rigId); expires \(profile.expiresAt.formatted(date: .abbreviated, time: .omitted)).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Optional periodic known-rig check. Routine site walks need no ruler or marker.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .padding(.horizontal)
                 }
 
@@ -233,6 +262,9 @@ struct CaptureSessionView: View {
         .onDisappear {
             UIApplication.shared.isIdleTimerDisabled = false
             viewModel.preserveInterruptedRecordingForRecovery(reason: .viewDismissed)
+        }
+        .sheet(isPresented: $isShowingDeviceCalibration) {
+            DeviceCalibrationSheet(captureManager: captureManager)
         }
         .fullScreenCover(isPresented: $isShowingPostCaptureSummary) {
             let monitor = captureManager.qualityMonitor
@@ -1010,6 +1042,106 @@ private struct UploadStatusRow: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(.systemBackground))
                 .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        )
+    }
+}
+
+private struct DeviceCalibrationSheet: View {
+    @ObservedObject var captureManager: VideoCaptureManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var rigId = ""
+    @State private var referenceDistanceText = "1.000"
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                ZStack {
+                    ARCameraPreview(session: captureManager.arSession)
+                    Image(systemName: "plus")
+                        .font(.system(size: 42, weight: .ultraLight))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
+                .frame(height: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Place a flat rig target at the known distance from the camera plane. Keep the target centered and the phone still; Blueprint samples only high-confidence LiDAR pixels.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    TextField("Rig ID", text: $rigId)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Reference distance (meters)", text: $referenceDistanceText)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                    calibrationStatus
+                }
+
+                Spacer()
+
+                Button(action: startCalibration) {
+                    Label("Measure calibration", systemImage: "scope")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isCollecting)
+            }
+            .padding()
+            .navigationTitle("Device calibration")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .interactiveDismissDisabled(isCollecting)
+        .onDisappear {
+            if isCollecting {
+                captureManager.cancelDeviceCalibration()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var calibrationStatus: some View {
+        switch captureManager.deviceCalibrationState {
+        case .idle:
+            Text("No measurement running.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .collecting(let accepted, let required):
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: Double(accepted), total: Double(required))
+                Text("High-confidence samples \(accepted)/\(required)")
+                    .font(.caption.monospacedDigit())
+            }
+        case .completed(let profile):
+            let errorPercent = profile.relativeError * 100
+            Label(
+                profile.status == .qualified
+                    ? String(format: "Qualified: median error %.2f%%", errorPercent)
+                    : String(format: "Not qualified: median error %.2f%%", errorPercent),
+                systemImage: profile.status == .qualified ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(profile.status == .qualified ? .green : .orange)
+        case .failed(let message):
+            Text(message)
+                .font(.footnote)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private var isCollecting: Bool {
+        if case .collecting = captureManager.deviceCalibrationState { return true }
+        return false
+    }
+
+    private func startCalibration() {
+        captureManager.beginDeviceCalibration(
+            rigId: rigId,
+            referenceDistanceM: Double(referenceDistanceText) ?? .nan
         )
     }
 }

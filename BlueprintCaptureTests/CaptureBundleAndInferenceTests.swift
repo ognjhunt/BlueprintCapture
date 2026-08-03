@@ -2,6 +2,30 @@ import Foundation
 import Testing
 @testable import BlueprintCapture
 
+@Test
+func deviceCalibrationEvaluatorQualifiesOnlyBoundedKnownRigMeasurements() throws {
+    let samples = (0..<DeviceCalibrationEvaluator.minimumSamples).map { index in
+        1.002 + Double((index % 5) - 2) * 0.0005
+    }
+    let profile = try #require(DeviceCalibrationEvaluator.evaluate(
+        rigId: "rig-a",
+        hardwareModelIdentifier: "iPhone-test",
+        referenceDistanceM: 1.0,
+        depthSamplesM: samples,
+        now: Date(timeIntervalSince1970: 1_700_000_000)
+    ))
+    #expect(profile.status == .qualified)
+    #expect(profile.relativeError < DeviceCalibrationEvaluator.maximumRelativeError)
+
+    let rejected = try #require(DeviceCalibrationEvaluator.evaluate(
+        rigId: "rig-a",
+        hardwareModelIdentifier: "iPhone-test",
+        referenceDistanceM: 1.0,
+        depthSamplesM: Array(repeating: 1.05, count: DeviceCalibrationEvaluator.minimumSamples)
+    ))
+    #expect(rejected.status == .rejected)
+}
+
 private func makeRawManifestData(
     sceneId: String,
     captureId: String,
@@ -568,7 +592,7 @@ struct CaptureBundleAndInferenceTests {
         try Data("{\"frame_id\":\"000001\",\"t_device_sec\":0.0,\"T_world_camera\":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}\n".utf8)
             .write(to: arkit.appendingPathComponent("poses.jsonl"))
         try Data("""
-{"frameId":"000001","tCaptureSec":0.0,"sceneDepthFile":"arkit/depth/000001.png","confidenceFile":"arkit/confidence/000001.png","trackingState":"normal","worldMappingStatus":"mapped","relocalizationEvent":false,"sharpnessScore":123.4,"depthValidFraction":0.84,"missingDepthFraction":0.16,"anchorObservations":["anchor_entry","semantic_doorway"],"coordinateFrameSessionId":"arkit-session-1"}
+{"frameId":"000001","tCaptureSec":0.0,"sceneDepthFile":"arkit/depth/000001.png","confidenceFile":"arkit/confidence/000001.png","depthImageResolution":[256,192],"confidenceImageResolution":[256,192],"trackingState":"normal","worldMappingStatus":"mapped","relocalizationEvent":false,"sharpnessScore":123.4,"depthValidFraction":0.84,"missingDepthFraction":0.16,"anchorObservations":["anchor_entry","semantic_doorway"],"coordinateFrameSessionId":"arkit-session-1"}
 """.utf8).write(to: arkit.appendingPathComponent("frames.jsonl"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("depth/000001.png"))
         try Data([0x01]).write(to: arkit.appendingPathComponent("confidence/000001.png"))
@@ -669,16 +693,23 @@ struct CaptureBundleAndInferenceTests {
         #expect(recording["world_frame_definition"] as? String == "arkit_world_origin_at_session_start")
         #expect(recording["units"] as? String == "meters")
         #expect(recording["handedness"] as? String == "right_handed")
+        #expect(recording["up_axis"] as? String == "Y")
         #expect(recording["gravity_aligned"] as? Bool == true)
         #expect((recording["session_reset_count"] as? NSNumber)?.intValue == 0)
 
         let depthManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/depth_manifest.json")))
         let depthManifest = try #require(depthManifestObject as? [String: Any])
+        #expect(depthManifest["schema_version"] as? String == "arkit_depth_manifest.v2")
+        #expect(depthManifest["depth_registered_to_arkit_camera"] as? Bool == true)
+        #expect(depthManifest["camera_ray_convention"] as? String == "arkit_x_right_y_up_z_backward")
+        #expect(depthManifest["depth_intrinsics"] is [String: Any])
         let depthFrames = try #require(depthManifest["frames"] as? [[String: Any]])
         #expect(depthFrames.count == 1)
 
         let confidenceManifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: raw.appendingPathComponent("arkit/confidence_manifest.json")))
         let confidenceManifest = try #require(confidenceManifestObject as? [String: Any])
+        #expect(confidenceManifest["schema_version"] as? String == "arkit_confidence_manifest.v2")
+        #expect((confidenceManifest["accepted_confidence_values"] as? [NSNumber])?.map(\.intValue) == [2])
         let confidenceFrames = try #require(confidenceManifest["frames"] as? [[String: Any]])
         #expect(confidenceFrames.count == 1)
     }
@@ -1095,7 +1126,7 @@ struct CaptureBundleAndInferenceTests {
         #expect(scaffolding.contains("hub_return_plan"))
         #expect(scaffolding.contains("critical_zone_revisits"))
         #expect(coveragePlan.contains(where: { $0.contains("hub") || $0.contains("Hub") }))
-        #expect(review?.nextActionLabel == "Retake the main walkthrough")
+        #expect(review?.nextActionLabel == "Retake the guided closed-loop walk")
         #expect(review?.missingItems.contains(where: { $0.contains("Hold still at the entrance") }) == true)
         #expect(pendingRequest?.metadata.sceneMemory?.continuityScore == review.map { Double($0.score) / 100.0 })
     }
@@ -1304,7 +1335,7 @@ struct CaptureBundleAndInferenceTests {
         let configured = await MainActor.run { viewModel.siteWorldWorkflowConfigured }
         let criticalZones = await MainActor.run { viewModel.selectedCriticalZoneAnchors }
 
-        #expect(currentRole == "primary")
+        #expect(currentRole == "guided_closed_loop")
         #expect(scale == .medium)
         #expect(configured == false)
         #expect(criticalZones.isEmpty)

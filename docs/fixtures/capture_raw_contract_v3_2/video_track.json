@@ -1,0 +1,10 @@
+{
+  "decoded_pts_verified": true,
+  "frame_count": 1,
+  "frame_count_source": "decoded_sample_presentation_timestamps",
+  "retained_frame_count": 1,
+  "schema_version": "v1",
+  "t_video_semantics": "decoded_source_pts_minus_video_start_pts",
+  "video_start_pts_sec": 100.25,
+  "video_time_origin": "first_decoded_sample_presentation_timestamp"
+}

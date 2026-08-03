@@ -98,6 +98,8 @@ enum CaptureVideoSynchronization {
             var syncRow: [String: Any] = [
                 "frame_id": frameId,
                 "t_video_sec": tVideoSec,
+                "decoded_source_pts_sec": decodedPTS,
+                "decoded_time_origin_pts_sec": firstDecodedPTS,
                 "t_capture_sec": tCaptureSec,
                 "pose_frame_id": frameId,
                 "sync_status": "encoded_decoded_pts_match",
@@ -154,6 +156,7 @@ enum CaptureVideoSynchronization {
                 "drop_reason": attempt["drop_reason"] ?? NSNull(),
                 "encoded_frame_index": retainedSync?["encoded_frame_index"] ?? NSNull(),
                 "t_video_sec": retainedSync?["t_video_sec"] ?? NSNull(),
+                "decoded_source_pts_sec": retainedSync?["decoded_source_pts_sec"] ?? NSNull(),
             ]
             row["source_timestamp_ns"] = sourceTimestampNs
             return row
@@ -343,8 +346,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let worldFrameDefinition: String
         let units: String
         let handedness: String
+        let upAxis: String
         let gravityAligned: Bool
         let sessionResetCount: Int
+        let initialWorldOriginResetPerformed: Bool
+        let initialSessionRunOptions: [String]
+        let postOriginResetCount: Int
+        let coordinateFrameContinuityStatus: String
         let capturedAt: String
     }
 
@@ -352,6 +360,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let worldFrameDefinition: String
         let units: String
         let handedness: String
+        let upAxis: String
         let gravityAligned: Bool
         let sessionResetCount: Int
     }
@@ -414,6 +423,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         // so validating before this point rejects otherwise valid fresh captures.
         let validationReasons = validateRawBundle(in: directory)
         if !validationReasons.isEmpty {
+            // A failed validation must never leave the completion marker behind;
+            // bridge ingestion is triggered from that marker and must fail closed.
+            try? fileManager.removeItem(
+                at: directory.appendingPathComponent(completionMarkerFilename)
+            )
             throw FinalizationError.invalidBundle(reasons: validationReasons)
         }
 
@@ -779,6 +793,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "permission_document_uri": permissionDocumentURI as Any,
             "consent_scope": rights.consentScope,
             "consent_notes": rights.consentNotes,
+            "redaction_required": true,
+            "mobile_app_direct_provider_upload_allowed": false,
+            "third_party_provider_upload_authorized": false,
+            "provider_selection_authority": "blueprint_pipeline",
+            "latest_revocation_check_required_before_downstream_use": true,
+            "retention_policy_id": "blueprint_raw_capture_lifecycle_2026-07-09",
+            "retention_live_enforcement_proven_by_bundle": false,
         ]
         if let venuePermission = rights.venuePermission {
             payload["venue_permission"] = venuePermission.provenancePayload
@@ -855,6 +876,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 worldFrameDefinition: "arkit_world_origin_at_session_start",
                 units: "meters",
                 handedness: "right_handed",
+                upAxis: "Y",
                 gravityAligned: true,
                 sessionResetCount: 0
             )
@@ -864,6 +886,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 worldFrameDefinition: "arcore_world_origin_at_session_start",
                 units: "meters",
                 handedness: "right_handed",
+                upAxis: "Y",
                 gravityAligned: true,
                 sessionResetCount: 0
             )
@@ -872,6 +895,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             worldFrameDefinition: "unavailable_no_public_world_tracking",
             units: "meters",
             handedness: "unknown",
+            upAxis: "unknown",
             gravityAligned: false,
             sessionResetCount: 0
         )
@@ -934,6 +958,20 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             json["site_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(siteIdentity))
         }
         json["capture_topology"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(topology))
+        if fileManager.fileExists(atPath: directory.appendingPathComponent("device_calibration.json").path) {
+            json["device_calibration_uri"] = "device_calibration.json"
+        }
+        json["reconstruction_qualification_request_uri"] = "reconstruction_qualification_request.json"
+        if isCaptureSchemaAtLeast(
+            json["capture_schema_version"] as? String,
+            major: 3,
+            minor: 2
+        ) {
+            json["downstream_candidate_manifest_uri"] = CaptureDownstreamCandidateManifest.filename
+        }
+        if fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/meshes", isDirectory: true).path) {
+            json["arkit_mesh_manifest_uri"] = "arkit/mesh_manifest.json"
+        }
         if let captureMode = request.metadata.captureMode {
             // Resolve the mode based on actual evidence at finalization time.
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
@@ -1188,8 +1226,20 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             worldFrameDefinition: recordingWorldFrame.worldFrameDefinition,
             units: recordingWorldFrame.units,
             handedness: recordingWorldFrame.handedness,
+            upAxis: recordingWorldFrame.upAxis,
             gravityAligned: recordingWorldFrame.gravityAligned,
             sessionResetCount: recordingWorldFrame.sessionResetCount,
+            initialWorldOriginResetPerformed:
+                recordingWorldFrame.worldFrameDefinition
+                    == "arkit_world_origin_at_session_start",
+            initialSessionRunOptions: recordingWorldFrame.worldFrameDefinition
+                == "arkit_world_origin_at_session_start"
+                ? ["reset_tracking", "remove_existing_anchors"]
+                : [],
+            postOriginResetCount: recordingWorldFrame.sessionResetCount,
+            coordinateFrameContinuityStatus: recordingWorldFrame.sessionResetCount == 0
+                ? "single_continuous_coordinate_frame"
+                : "discontinuous_segments_declared",
             capturedAt: ISO8601DateFormatter().string(from: request.metadata.capturedAt)
         )
         let recordingSessionURL = directory.appendingPathComponent("recording_session.json")
@@ -1317,6 +1367,41 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "consent_notes": rights.consentNotes,
             "redaction_required": true,
             "retention_policy": "standard_blueprint_site_capture",
+            "privacy_processing": [
+                "redaction_required": true,
+                "privacy_security_limits": request.metadata.intakePacket?.privacySecurityLimits ?? [],
+                "restricted_capture_areas": request.metadata.intakePacket?.captureRestrictions ?? [],
+                "raw_media_contains_unredacted_observations": true,
+                "derived_use_requires_privacy_preprocessing": true,
+                "privacy_authority": "explicit_capture_intake_and_downstream_policy",
+            ],
+            "provider_upload": [
+                "mobile_app_direct_provider_upload_allowed": false,
+                "third_party_provider_upload_authorized": false,
+                "allowed_mobile_destination_class": "blueprint_first_party_capture_storage_only",
+                "provider_selection_authority": "blueprint_pipeline",
+                "provider_authorization_status": "separate_downstream_gate_required",
+                "capture_manifest_cannot_authorize_provider": true,
+            ],
+            "retention": [
+                "policy_id": "blueprint_raw_capture_lifecycle_2026-07-09",
+                "policy_reference": "docs/STORAGE_RETENTION_POLICY_2026-07-09.md",
+                "review_window_days": 30,
+                "archive_after_days": 365,
+                "routine_delete_rule_present": false,
+                "minimum_retention_floor_days_if_delete_is_ever_introduced": 2555,
+                "raw_truth_preserved": true,
+                "live_enforcement_proven_by_bundle": false,
+            ],
+            "revocation": [
+                "status_at_capture": "no_revocation_record_attached_to_bundle",
+                "revocation_requested_at": NSNull(),
+                "revocation_effective_at": NSNull(),
+                "latest_status_check_required_before_downstream_use": true,
+                "revocation_authority": "blueprint_backend_and_authoritative_rights_records",
+                "provider_upload_blocked_until_latest_status_check": true,
+                "raw_retention_effect": "subject_to_authoritative_policy_and_legal_process",
+            ],
         ]
         if let venuePermission = rights.venuePermission {
             rightsConsent["venue_permission"] = venuePermission.provenancePayload
@@ -1354,8 +1439,95 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             encoding: .utf8
         )
 
+        try writeReconstructionQualificationRequest(in: directory, topology: topology)
         try writeVideoTrackFile(in: directory, mode: mode)
+        try writeDownstreamCandidateManifest(
+            in: directory,
+            request: request,
+            topology: topology,
+            rights: rights,
+            mode: mode
+        )
         try writeHashesAndProvenance(in: directory, request: request)
+    }
+
+    private func writeReconstructionQualificationRequest(
+        in directory: URL,
+        topology: CaptureTopologyMetadata
+    ) throws {
+        let frameRows = readJSONLines(from: directory.appendingPathComponent("arkit/frame_quality.jsonl"))
+        let trackingStates = frameRows.compactMap { stringValue(in: $0, keys: ["tracking_state", "trackingState"]) }
+        let normalTrackingCount = trackingStates.filter { $0 == "normal" }.count
+        let normalTrackingFraction = trackingStates.isEmpty
+            ? nil
+            : Double(normalTrackingCount) / Double(trackingStates.count)
+        let relocalizationCount = frameRows.filter {
+            boolValue(in: $0, keys: ["relocalization_event", "relocalizationEvent"]) == true
+        }.count
+        let depthFractions = frameRows.compactMap {
+            doubleValue(in: $0, keys: ["depth_valid_fraction", "depthValidFraction"])
+        }.sorted()
+        let medianDepthValidFraction = depthFractions.isEmpty ? nil : depthFractions[depthFractions.count / 2]
+        let meshManifestURL = directory.appendingPathComponent("arkit/mesh_manifest.json")
+        let meshManifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: meshManifestURL))) as? [String: Any]
+        let planeRows = readJSONLines(from: directory.appendingPathComponent("arkit/plane_observations.jsonl"))
+        let horizontalPlaneCount = planeRows.filter {
+            stringValue(in: $0, keys: ["alignment"]) == "horizontal"
+        }.count
+        let calibrationURL = directory.appendingPathComponent("device_calibration.json")
+        let calibration = (try? JSONSerialization.jsonObject(with: Data(contentsOf: calibrationURL))) as? [String: Any]
+        let calibrationQualified = (calibration?["status"] as? String) == "qualified"
+
+        var smallestMissingEvidence: [String] = []
+        if topology.loopClosureDetected != true {
+            smallestMissingEvidence.append("return_to_start_hold_or_targeted_return_segment_recapture")
+        }
+        if normalTrackingFraction == nil || relocalizationCount > 0 {
+            smallestMissingEvidence.append("targeted_recapture_of_tracking_degraded_segment")
+        }
+        if medianDepthValidFraction == nil || (medianDepthValidFraction ?? 0) <= 0 {
+            smallestMissingEvidence.append("targeted_depth_coverage_recapture")
+        }
+        if !calibrationQualified {
+            smallestMissingEvidence.append("current_device_known_rig_calibration_if_sensor_scale_gate_requires_it")
+        }
+
+        let requestedChecks: [[String: Any]] = [
+            ["check": "loop_closure", "capture_observation_available": topology.loopClosureDetected == true],
+            ["check": "tracking_quality", "capture_observation_available": !trackingStates.isEmpty],
+            ["check": "depth_reprojection_error", "capture_observation_available": false],
+            ["check": "mesh_coverage", "capture_observation_available": meshManifest != nil],
+            ["check": "floor_support_continuity", "capture_observation_available": horizontalPlaneCount > 0],
+            ["check": "physical_collision_probes", "capture_observation_available": false],
+            ["check": "postshot_registered_reconstruction", "capture_observation_available": false],
+        ]
+        let payload: [String: Any] = [
+            "schema_version": "reconstruction_qualification_request.v1",
+            "coordinate_frame_session_id": topology.coordinateFrameSessionId ?? topology.captureSessionId,
+            "capture_workflow": "single_guided_closed_loop_walk",
+            "capture_observations": [
+                "loop_closure_detected": topology.loopClosureDetected ?? false,
+                "loop_closure_translation_residual_m": topology.loopClosureTranslationResidualM ?? NSNull(),
+                "loop_closure_rotation_residual_deg": topology.loopClosureRotationResidualDeg ?? NSNull(),
+                "loop_closure_max_excursion_m": topology.loopClosureMaxExcursionM ?? NSNull(),
+                "normal_tracking_fraction": normalTrackingFraction ?? NSNull(),
+                "relocalization_count": relocalizationCount,
+                "median_depth_valid_fraction": medianDepthValidFraction ?? NSNull(),
+                "mesh_triangle_count": meshManifest?["triangle_count"] ?? 0,
+                "horizontal_plane_observation_count": horizontalPlaneCount,
+                "device_calibration_qualified": calibrationQualified,
+            ],
+            "requested_checks": requestedChecks,
+            "threshold_source": "task_site_evidence_profile_digest_bound",
+            "qualification_authority": "blueprint_pipeline",
+            "capture_decision": "abstain_pending_downstream_measurements",
+            "smallest_missing_evidence": smallestMissingEvidence,
+            "collision_artifact_status": "candidate_only",
+            "automatic_promotion_rule": "qualify_only_when_every_requested_check_passes_under_the_bound_task_site_profile",
+        ]
+        let url = directory.appendingPathComponent("reconstruction_qualification_request.json")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try data.write(to: url, options: .atomic)
     }
 
     private func writeVideoTrackFile(in directory: URL, mode: CaptureBundleFinalizationMode) throws {
@@ -1424,7 +1596,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             "dropped_frame_count": droppedCount,
             "nominal_fps": Double(nominalFPS),
             "contains_vfr": containsVFR,
-            "video_start_pts_sec": 0.0,
+            "video_start_pts_sec": decodedPresentationTimes?.first ?? 0.0,
+            "video_time_origin": decodedPresentationTimes == nil
+                ? "estimated_zero"
+                : "first_decoded_sample_presentation_timestamp",
+            "t_video_semantics": decodedPresentationTimes == nil
+                ? "estimated_capture_relative_seconds"
+                : "decoded_source_pts_minus_video_start_pts",
             "width": Int(trackSize.width.rounded()).nonZero(or: width),
             "height": Int(trackSize.height.rounded()).nonZero(or: height),
             "orientation": "portrait",
@@ -1434,6 +1612,261 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let videoTrackURL = directory.appendingPathComponent("video_track.json")
         let data = try JSONSerialization.data(withJSONObject: videoTrackPayload, options: [.prettyPrinted, .withoutEscapingSlashes])
         try data.write(to: videoTrackURL, options: .atomic)
+    }
+
+    private func writeDownstreamCandidateManifest(
+        in directory: URL,
+        request: CaptureUploadRequest,
+        topology: CaptureTopologyMetadata,
+        rights: CaptureRightsMetadata,
+        mode: CaptureBundleFinalizationMode
+    ) throws {
+        let rawManifestURL = directory.appendingPathComponent("manifest.json")
+        guard let rawManifest = (try? JSONSerialization.jsonObject(
+            with: Data(contentsOf: rawManifestURL)
+        )) as? [String: Any],
+              isCaptureSchemaAtLeast(
+                rawManifest["capture_schema_version"] as? String,
+                major: 3,
+                minor: 2
+              ) else {
+            return
+        }
+
+        let syncRows = readJSONLines(from: directory.appendingPathComponent("sync_map.jsonl"))
+        let frameRows = readJSONLines(from: directory.appendingPathComponent("arkit/frames.jsonl"))
+        let poseRows = readJSONLines(from: directory.appendingPathComponent("arkit/poses.jsonl"))
+        let qualityRows = readJSONLines(from: directory.appendingPathComponent("arkit/frame_quality.jsonl"))
+        guard !syncRows.isEmpty else {
+            throw FinalizationError.invalidBundle(
+                reasons: ["downstream_candidate_manifest_sync_rows_missing"]
+            )
+        }
+
+        var frameById: [String: [String: Any]] = [:]
+        var poseById: [String: [String: Any]] = [:]
+        var qualityById: [String: [String: Any]] = [:]
+        var frameOrdinalById: [String: Int] = [:]
+        var poseOrdinalById: [String: Int] = [:]
+        for (ordinal, row) in frameRows.enumerated() {
+            guard let frameId = stringValue(in: row, keys: ["frame_id", "frameId"])
+            else { continue }
+            guard frameById[frameId] == nil else {
+                throw FinalizationError.invalidBundle(
+                    reasons: ["downstream_candidate_duplicate_frame_id:\(frameId)"]
+                )
+            }
+            frameById[frameId] = row
+            frameOrdinalById[frameId] = ordinal
+        }
+        for (ordinal, row) in poseRows.enumerated() {
+            guard let frameId = stringValue(in: row, keys: ["frame_id", "frameId"])
+            else { continue }
+            guard poseById[frameId] == nil else {
+                throw FinalizationError.invalidBundle(
+                    reasons: ["downstream_candidate_duplicate_pose_id:\(frameId)"]
+                )
+            }
+            poseById[frameId] = row
+            poseOrdinalById[frameId] = ordinal
+        }
+        for row in qualityRows {
+            guard let frameId = stringValue(in: row, keys: ["frame_id", "frameId"])
+            else { continue }
+            qualityById[frameId] = row
+        }
+        let coordinateFrameSessionId = topology.coordinateFrameSessionId
+            ?? topology.captureSessionId
+        guard !coordinateFrameSessionId.isEmpty else {
+            throw FinalizationError.invalidBundle(
+                reasons: ["downstream_candidate_manifest_coordinate_frame_missing"]
+            )
+        }
+
+        let candidates: [[String: Any]] = try syncRows.enumerated().map { ordinal, sync in
+            guard let frameId = stringValue(in: sync, keys: ["frame_id"]),
+                  let poseFrameId = stringValue(in: sync, keys: ["pose_frame_id"]),
+                  let frame = frameById[frameId],
+                  let pose = poseById[poseFrameId],
+                  let encodedFrameIndex = objectValue(in: sync, keys: ["encoded_frame_index"]) as? NSNumber,
+                  let writeAttemptIndex = objectValue(in: sync, keys: ["write_attempt_index"]) as? NSNumber,
+                  let decodedPTS = doubleValue(in: sync, keys: ["t_video_sec"]),
+                  let decodedSourcePTS = doubleValue(in: sync, keys: ["decoded_source_pts_sec"]),
+                  let tCaptureSec = doubleValue(in: sync, keys: ["t_capture_sec"]),
+                  let transform = objectValue(in: pose, keys: ["T_site_camera", "T_world_camera"]),
+                  let intrinsicsArray = objectValue(in: frame, keys: ["intrinsics"]) as? [NSNumber],
+                  intrinsicsArray.count == 9,
+                  let resolution = objectValue(in: frame, keys: ["image_resolution", "imageResolution"]) as? [NSNumber],
+                  resolution.count == 2 else {
+                throw FinalizationError.invalidBundle(
+                    reasons: ["downstream_candidate_source_binding_missing:\(ordinal)"]
+                )
+            }
+            let quality = qualityById[frameId] ?? [:]
+            let trackingState = stringValue(
+                in: quality.isEmpty ? frame : quality,
+                keys: ["tracking_state", "trackingState"]
+            ) ?? "unknown"
+            let trackingReason = stringValue(
+                in: quality.isEmpty ? frame : quality,
+                keys: ["tracking_reason", "trackingReason"]
+            )
+            let relocalizationEvent = boolValue(
+                in: quality.isEmpty ? frame : quality,
+                keys: ["relocalization_event", "relocalizationEvent"]
+            ) ?? false
+            let fx = intrinsicsArray[0].doubleValue
+            let fy = intrinsicsArray[4].doubleValue
+            let cx = intrinsicsArray[6].doubleValue
+            let cy = intrinsicsArray[7].doubleValue
+            let cameraIntrinsics: [String: Any] = [
+                "fx": fx,
+                "fy": fy,
+                "cx": cx,
+                "cy": cy,
+                "width": resolution[0].intValue,
+                "height": resolution[1].intValue,
+                "matrix_column_major": intrinsicsArray.map(\.doubleValue),
+                "authority": "arkit_arframe_exact_per_observation",
+            ]
+            let calibrationDigest = CaptureDownstreamCandidateManifest.canonicalDigest(
+                of: cameraIntrinsics
+            ) ?? "digest_unavailable"
+            var candidate: [String: Any] = [
+                "candidate_id": String(format: "rgb_%06d", ordinal),
+                "output_image_relative_path": String(
+                    format: "candidate_rgb/%06d.png",
+                    ordinal
+                ),
+                "source_video_uri": mode.videoURI,
+                "decoded_frame_ordinal": ordinal,
+                "encoded_frame_index": encodedFrameIndex.intValue,
+                "write_attempt_index": writeAttemptIndex.intValue,
+                "decoded_pts_sec": decodedPTS,
+                "decoded_source_pts_sec": decodedSourcePTS,
+                "t_capture_sec": tCaptureSec,
+                "frame_id": frameId,
+                "pose_frame_id": poseFrameId,
+                "coordinate_frame_session_id": coordinateFrameSessionId,
+                "site_frame_id": coordinateFrameSessionId,
+                "site_frame_definition": "arkit_world_origin_at_session_start",
+                "transform_semantics": "row_major_camera_to_site",
+                "T_site_camera": transform,
+                "T_world_camera": transform,
+                "units": "meters",
+                "handedness": "right_handed",
+                "up_axis": "Y",
+                "gravity_aligned": true,
+                "camera_intrinsics": cameraIntrinsics,
+                "camera_calibration_digest": calibrationDigest,
+                "arkit_frame_row_ordinal": frameOrdinalById[frameId] ?? NSNull(),
+                "arkit_pose_row_ordinal": poseOrdinalById[poseFrameId] ?? NSNull(),
+                "tracking_state": trackingState,
+                "tracking_reason": trackingReason ?? NSNull(),
+                "world_mapping_status": stringValue(
+                    in: quality.isEmpty ? frame : quality,
+                    keys: ["world_mapping_status", "worldMappingStatus"]
+                ) ?? "unknown",
+                "relocalization_event": relocalizationEvent,
+                "pose_assisted_eligible": trackingState == "normal" && !relocalizationEvent,
+                "raw_observation_authority": true,
+                "downstream_artifact_authority": false,
+            ]
+            if let monotonic = objectValue(in: sync, keys: ["t_monotonic_ns"]) as? NSNumber {
+                candidate["t_monotonic_ns"] = monotonic.int64Value
+            }
+            if let depthPath = stringValue(
+                in: frame,
+                keys: ["smoothed_scene_depth_file", "smoothedSceneDepthFile", "scene_depth_file", "sceneDepthFile"]
+            ) {
+                candidate["depth_path"] = depthPath
+            }
+            if let confidencePath = stringValue(
+                in: frame,
+                keys: ["confidence_file", "confidenceFile"]
+            ) {
+                candidate["confidence_path"] = confidencePath
+            }
+            return candidate
+        }
+
+        let videoURL = resolvedVideoFileURL(in: directory, videoURI: mode.videoURI)
+        let sourceVideoDigest = try sha256Hex(ofFile: videoURL)
+        let privacyLimits = request.metadata.intakePacket?.privacySecurityLimits ?? []
+        var payload: [String: Any] = [
+            "schema_version": CaptureDownstreamCandidateManifest.schemaVersion,
+            "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+            "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+            "coordinate_frame_session_id": coordinateFrameSessionId,
+            "source_video_uri": mode.videoURI,
+            "source_video_sha256": sourceVideoDigest,
+            "source_video_authority": "immutable_raw_capture_video",
+            "decoded_timing_authority": "sync_map_decoded_sample_presentation_timestamps",
+            "candidate_count": candidates.count,
+            "candidate_order": "encoded_frame_index_ascending",
+            "selection_contract": [
+                "selection_authority": "blueprint_pipeline_task_site_profile",
+                "capture_default_selection": NSNull(),
+                "selection_parameters_required": true,
+                "allowed_deterministic_selectors": [
+                    "explicit_encoded_frame_ordinals",
+                    "profile_bound_even_decoded_pts_coverage",
+                    "profile_bound_quality_filter",
+                ],
+                "smallest_missing_input_when_unselectable": "task_site_evidence_profile_with_frame_selection_parameters",
+            ],
+            "provider_neutrality": [
+                "mobile_app_direct_provider_upload_allowed": false,
+                "third_party_provider_upload_authorized": false,
+                "provider_selection_authority": "blueprint_pipeline",
+                "provider_authorization_status": "not_granted_by_capture_manifest",
+            ],
+            "allowed_use_scope": [
+                "raw_observation_indexing_allowed": true,
+                "derived_processing_allowed": rights.derivedSceneGenerationAllowed,
+                "data_licensing_allowed": rights.dataLicensingAllowed,
+                "requested_outputs": request.metadata.requestedOutputs,
+                "redaction_required_before_derived_use": true,
+                "privacy_security_limits": privacyLimits,
+                "latest_revocation_check_required": true,
+                "provider_upload_requires_separate_downstream_authorization": true,
+            ],
+            "claim_boundary": [
+                "raw_capture_remains_authoritative": true,
+                "candidate_manifest_qualifies_reconstruction": false,
+                "candidate_manifest_qualifies_metric_scale": false,
+                "candidate_manifest_qualifies_collision_or_physics": false,
+                "candidate_manifest_proves_task_success": false,
+            ],
+            "candidates": candidates,
+        ]
+        payload["manifest_digest"] = CaptureDownstreamCandidateManifest.canonicalDigest(
+            of: payload
+        ) ?? "digest_unavailable"
+        let errors = CaptureDownstreamCandidateManifest.validationErrors(
+            manifest: payload,
+            syncRows: syncRows,
+            frameRows: frameRows,
+            poseRows: poseRows,
+            expectedVideoURI: mode.videoURI,
+            expectedCoordinateFrameSessionId: coordinateFrameSessionId,
+            rightsConsent: [
+                "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
+                "data_licensing_allowed": rights.dataLicensingAllowed,
+                "redaction_required": true,
+            ]
+        )
+        guard errors.isEmpty else {
+            throw FinalizationError.invalidBundle(reasons: errors)
+        }
+        let url = directory.appendingPathComponent(
+            CaptureDownstreamCandidateManifest.filename
+        )
+        let data = try JSONSerialization.data(
+            withJSONObject: payload,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
+        try data.write(to: url, options: .atomic)
     }
 
     private func decodedVideoPresentationTimes(at videoURL: URL) throws -> [Double] {
@@ -1544,8 +1977,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             guard values.isRegularFile == true else { continue }
             guard !excludedNames.contains(fileURL.lastPathComponent) else { continue }
             let relative = relativePathInBundle(for: fileURL, relativeTo: directory)
-            let data = try Data(contentsOf: fileURL)
-            hashes[relative] = sha256Hex(of: data)
+            hashes[relative] = try sha256Hex(ofFile: fileURL)
         }
         return hashes
     }
@@ -1567,6 +1999,22 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         #endif
     }
 
+    private func sha256Hex(ofFile url: URL) throws -> String {
+        #if canImport(CryptoKit)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk = try handle.read(upToCount: 1_048_576) ?? Data()
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        #else
+        return sha256Hex(of: try Data(contentsOf: url))
+        #endif
+    }
+
     private func relativePathInBundle(for url: URL, relativeTo directory: URL) -> String {
         let path = url.standardizedFileURL.path
         let basePath = directory.standardizedFileURL.path
@@ -1576,6 +2024,69 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             relative.removeFirst()
         }
         return relative.isEmpty ? url.lastPathComponent : relative
+    }
+
+    private func writeARKitMeshManifest(in directory: URL, coordinateFrameSessionId: String?) throws {
+        let meshDirectory = directory.appendingPathComponent("arkit/meshes", isDirectory: true)
+        guard fileManager.fileExists(atPath: meshDirectory.path) else { return }
+        let meshURLs = try fileManager.contentsOfDirectory(
+            at: meshDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension.lowercased() == "obj" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        let meshes: [[String: Any]] = meshURLs.map { url in
+            let contents = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            var vertexCount = 0
+            var triangleCount = 0
+            var minimum = [Double.infinity, Double.infinity, Double.infinity]
+            var maximum = [-Double.infinity, -Double.infinity, -Double.infinity]
+            for line in contents.split(whereSeparator: \.isNewline) {
+                if line.hasPrefix("v ") {
+                    let fields = line.split(separator: " ")
+                    if fields.count >= 4,
+                       let x = Double(fields[1]), let y = Double(fields[2]), let z = Double(fields[3]) {
+                        vertexCount += 1
+                        for (index, value) in [x, y, z].enumerated() {
+                            minimum[index] = min(minimum[index], value)
+                            maximum[index] = max(maximum[index], value)
+                        }
+                    }
+                } else if line.hasPrefix("f ") {
+                    triangleCount += 1
+                }
+            }
+            var entry: [String: Any] = [
+                "mesh_path": relativePathInBundle(for: url, relativeTo: directory),
+                "encoding": "wavefront_obj",
+                "vertex_count": vertexCount,
+                "triangle_count": triangleCount,
+            ]
+            if vertexCount > 0 {
+                entry["bounds_m"] = ["min": minimum, "max": maximum]
+            }
+            return entry
+        }
+        var manifest: [String: Any] = [
+            "schema_version": "arkit_mesh_manifest.v1",
+            "coordinate_frame": "arkit_world",
+            "units": "meters",
+            "up_axis": "Y",
+            "handedness": "right_handed",
+            "source": "arkit_scene_reconstruction_mesh",
+            "collision_status": "candidate_only",
+            "qualification_authority": "downstream_evidence_gates",
+            "mesh_count": meshes.count,
+            "vertex_count": meshes.reduce(0) { $0 + (($1["vertex_count"] as? Int) ?? 0) },
+            "triangle_count": meshes.reduce(0) { $0 + (($1["triangle_count"] as? Int) ?? 0) },
+            "meshes": meshes,
+        ]
+        if let coordinateFrameSessionId {
+            manifest["coordinate_frame_session_id"] = coordinateFrameSessionId
+        }
+        let url = directory.appendingPathComponent("arkit/mesh_manifest.json")
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try data.write(to: url, options: .atomic)
     }
 
     private func writeARKitDerivedSidecars(in directory: URL, coordinateFrameSessionId: String?) throws {
@@ -1772,6 +2283,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 "representation": "per_frame_depth_map",
                 "depth_source": stringValue(in: row, keys: ["depthSource", "depth_source"]) ?? "unknown",
             ]
+            if let resolution = objectValue(in: row, keys: ["depthImageResolution", "depth_image_resolution"]) as? [NSNumber],
+               resolution.count == 2 {
+                entry["width"] = resolution[0].intValue
+                entry["height"] = resolution[1].intValue
+            }
+            if let pairedConfidencePath = stringValue(in: row, keys: ["confidenceFile", "confidence_file"]) {
+                entry["paired_confidence_path"] = pairedConfidencePath
+            }
             if let depthValidFraction = doubleValue(in: row, keys: ["depthValidFraction", "depth_valid_fraction"]) {
                 entry["depth_valid_fraction"] = depthValidFraction
             }
@@ -1781,14 +2300,42 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             return entry
         }
         var depthManifest: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_depth_manifest.v2",
             "representation": "per_frame_depth_map",
+            "depth_encoding": "uint16_png",
             "encoding": "png_u16_mm",
             "units": "millimeters",
+            "scale_to_meters": 0.001,
             "invalid_value_semantics": "0_means_missing",
+            "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+            "depth_registered_to_arkit_camera": true,
+            "registration_authority": "arkit_scene_depth",
             "missing_depth_reason": NSNull(),
             "frames": depthEntries,
         ]
+        if let rgbIntrinsics = intrinsicsObject,
+           let fx = doubleValue(in: rgbIntrinsics, keys: ["fx"]),
+           let fy = doubleValue(in: rgbIntrinsics, keys: ["fy"]),
+           let cx = doubleValue(in: rgbIntrinsics, keys: ["cx"]),
+           let cy = doubleValue(in: rgbIntrinsics, keys: ["cy"]),
+           let rgbWidth = doubleValue(in: rgbIntrinsics, keys: ["width"]), rgbWidth > 0,
+           let rgbHeight = doubleValue(in: rgbIntrinsics, keys: ["height"]), rgbHeight > 0,
+           let firstDepth = depthEntries.first,
+           let depthWidth = (firstDepth["width"] as? NSNumber)?.doubleValue,
+           let depthHeight = (firstDepth["height"] as? NSNumber)?.doubleValue,
+           depthWidth > 0, depthHeight > 0 {
+            let scaleX = depthWidth / rgbWidth
+            let scaleY = depthHeight / rgbHeight
+            depthManifest["depth_intrinsics"] = [
+                "fx": fx * scaleX,
+                "fy": fy * scaleY,
+                "cx": cx * scaleX,
+                "cy": cy * scaleY,
+                "width": Int(depthWidth),
+                "height": Int(depthHeight),
+            ]
+            depthManifest["depth_intrinsics_source"] = "scaled_arkit_rgb_intrinsics_to_registered_depth_resolution"
+        }
         if let coordinateFrameSessionId {
             depthManifest["coordinate_frame_session_id"] = coordinateFrameSessionId
         }
@@ -1803,6 +2350,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
                 "confidence_path": confidencePath,
                 "representation": "per_frame_confidence_map",
             ]
+            if let resolution = objectValue(in: row, keys: ["confidenceImageResolution", "confidence_image_resolution"]) as? [NSNumber],
+               resolution.count == 2 {
+                entry["width"] = resolution[0].intValue
+                entry["height"] = resolution[1].intValue
+            }
             if let pairedDepthPath = stringValue(in: row, keys: ["smoothedSceneDepthFile", "smoothed_scene_depth_file"])
                 ?? stringValue(in: row, keys: ["sceneDepthFile", "scene_depth_file"]) {
                 entry["paired_depth_path"] = pairedDepthPath
@@ -1810,9 +2362,11 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             return entry
         }
         var confidenceManifest: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_confidence_manifest.v2",
             "representation": "per_frame_confidence_map",
+            "confidence_encoding": "uint8_png",
             "encoding": "png_u8",
+            "accepted_confidence_values": [2],
             "confidence_scale": [
                 "0": "low_or_missing",
                 "1": "medium",
@@ -1827,11 +2381,14 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         try confidenceManifestData.write(to: confidenceManifestURL, options: .atomic)
 
         var sessionIntrinsics: [String: Any] = [
-            "schema_version": "v1",
+            "schema_version": "arkit_session_intrinsics.v2",
             "camera_model": "pinhole",
             "principal_point_reference": "full_resolution_image",
-            "distortion_model": "apple_standard",
+            "pixel_orientation": "encoded_source_no_autorotate",
+            "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+            "distortion_model": "arkit_managed_not_portably_declared",
             "distortion_coeffs": [],
+            "rolling_shutter_model": "not_declared",
         ]
         if let coordinateFrameSessionId {
             sessionIntrinsics["coordinate_frame_session_id"] = coordinateFrameSessionId
@@ -1842,11 +2399,35 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         if let cameraIntrinsics = rawManifest?["camera_intrinsics"] as? [String: Any] {
             sessionIntrinsics["camera_intrinsics"] = cameraIntrinsics
         }
+        if let deviceCamera = rawManifest?["device_camera"] as? [String: Any] {
+            sessionIntrinsics["camera_identity"] = deviceCamera
+        }
+        var calibrationBinding: [String: Any] = [
+            "authority": "arkit_arframe_exact_per_observation",
+            "scope": "coordinate_frame_session",
+            "coordinate_frame_session_id": coordinateFrameSessionId ?? NSNull(),
+            "intrinsics_source": "arkit/frames.jsonl",
+            "session_intrinsics_source": "arkit/intrinsics.json",
+            "pixel_orientation": "encoded_source_no_autorotate",
+        ]
+        if let intrinsicsObject {
+            calibrationBinding["session_intrinsics"] = intrinsicsObject
+        }
+        if let deviceCamera = rawManifest?["device_camera"] as? [String: Any] {
+            calibrationBinding["camera_identity"] = deviceCamera
+        }
+        sessionIntrinsics["calibration_identity"] = [
+            "calibration_digest": CaptureDownstreamCandidateManifest.canonicalDigest(
+                of: calibrationBinding
+            ) ?? "digest_unavailable",
+            "binding": calibrationBinding,
+        ]
         if let exposureSettings = rawManifest?["exposure_settings"] as? [String: Any] {
             sessionIntrinsics["exposure_settings"] = exposureSettings
         }
         let sessionIntrinsicsData = try JSONSerialization.data(withJSONObject: sessionIntrinsics, options: [.prettyPrinted, .withoutEscapingSlashes])
         try sessionIntrinsicsData.write(to: sessionIntrinsicsURL, options: .atomic)
+        try writeARKitMeshManifest(in: directory, coordinateFrameSessionId: coordinateFrameSessionId)
     }
 
     private func groupedRelocalizationEvents(in directory: URL) -> [RelocalizationEventsFile.RelocalizationEvent] {

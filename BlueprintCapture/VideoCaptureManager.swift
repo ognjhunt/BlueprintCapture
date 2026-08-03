@@ -71,6 +71,24 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let durationSec: Double         // total hold duration in seconds
     }
 
+    struct LoopClosureObservation: Equatable {
+        let startFrameId: String
+        let returnStartFrameId: String
+        let returnEndFrameId: String
+        let returnTCaptureSec: Double
+        let returnHoldDurationSec: Double
+        let translationResidualM: Double
+        let rotationResidualDeg: Double
+        let maxExcursionM: Double
+    }
+
+    enum DeviceCalibrationState: Equatable {
+        case idle
+        case collecting(acceptedSamples: Int, requiredSamples: Int)
+        case completed(DeviceCalibrationProfile)
+        case failed(String)
+    }
+
     struct RecordingSessionMetadata: Equatable, Codable {
         let schemaVersion: String
         let coordinateFrameSessionId: String
@@ -104,6 +122,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let sceneDepthFile: String?
         let smoothedSceneDepthFile: String?
         let confidenceFile: String?
+        let depthImageResolution: [Int]?
+        let confidenceImageResolution: [Int]?
         let depthValidFraction: Double?
         let missingDepthFraction: Double?
         // Tracking health
@@ -163,9 +183,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let t_device_sec: Double
         let t_monotonic_ns: Int64
         let T_world_camera: [[Double]]
+        let T_site_camera: [[Double]]
+        let site_frame_id: String?
+        let site_frame_definition: String
+        let transform_semantics: String
+        let units: String
+        let handedness: String
+        let up_axis: String
+        let gravity_aligned: Bool
+        let coordinate_frame_segment_index: Int
         let tracking_state: String
         let tracking_reason: String?
         let world_mapping_status: String?
+        let relocalization_event: Bool
         let coordinate_frame_session_id: String?
 
         enum CodingKeys: String, CodingKey {
@@ -177,9 +207,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             case t_device_sec
             case t_monotonic_ns
             case T_world_camera
+            case T_site_camera
+            case site_frame_id
+            case site_frame_definition
+            case transform_semantics
+            case units
+            case handedness
+            case up_axis
+            case gravity_aligned
+            case coordinate_frame_segment_index
             case tracking_state
             case tracking_reason
             case world_mapping_status
+            case relocalization_event
             case coordinate_frame_session_id
         }
     }
@@ -200,6 +240,16 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     static func monotonicNanoseconds(from timestamp: TimeInterval) -> Int64 {
         Int64((timestamp * 1_000_000_000.0).rounded())
+    }
+
+    nonisolated static func rotationResidualDegrees(
+        from startTransform: simd_float4x4,
+        to endTransform: simd_float4x4
+    ) -> Double {
+        let start = simd_normalize(simd_quatf(startTransform))
+        let end = simd_normalize(simd_quatf(endTransform))
+        let dot = min(1.0, max(0.0, abs(simd_dot(start.vector, end.vector))))
+        return Double(2.0 * acos(dot) * 180.0 / .pi)
     }
 
     static func sampledFeaturePoints(from frame: ARFrame, limit: Int = 128) -> [simd_float3] {
@@ -268,6 +318,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
 
     @Published private(set) var captureState: CaptureState = .idle
     @Published private(set) var latestUploadPayload: CaptureUploadPayload?
+    @Published private(set) var deviceCalibrationState: DeviceCalibrationState = .idle
     let qualityMonitor = CaptureQualityMonitor()
 
     let session = AVCaptureSession()
@@ -343,11 +394,17 @@ final class VideoCaptureManager: NSObject, ObservableObject {
     private var pendingAnchorObservationExpirations: [String: Double] = [:]
     // Entry anchor hold detection state (reset at startRecording)
     private(set) var detectedEntryAnchorHold: EntryAnchorHold?
+    private(set) var detectedLoopClosure: LoopClosureObservation?
     private(set) var semanticAnchorEvents: [CaptureSemanticAnchorEvent] = []
     private(set) var latestRecordingSession: RecordingSessionMetadata?
     private var holdCandidateOrigin: simd_float3?
     private var holdCandidateStartTDeviceSec: Double = 0
     private var holdCandidateStartFrameId: String = ""
+    private var loopClosureOriginTransform: simd_float4x4?
+    private var loopClosureStartFrameId: String?
+    private var loopClosureMaxExcursionM: Float = 0
+    private var loopClosureReturnCandidateStartTDeviceSec: Double?
+    private var loopClosureReturnCandidateStartFrameId: String?
     private var exportedMeshAnchors: Set<UUID> = []
     private var isARRunning: Bool = false
     private var shouldSkipARKitOnNextRecording: Bool = false
@@ -375,6 +432,22 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         dominantAisleWidthM: nil,
         siteScaleClass: nil
     )
+    private var calibrationRigId: String?
+    private var calibrationReferenceDistanceM: Double?
+    private var calibrationDepthSamplesM: [Double] = []
+
+    var currentDeviceCalibrationProfile: DeviceCalibrationProfile? {
+        DeviceCalibrationStore.shared.profile(for: Self.hardwareModelIdentifier())
+    }
+
+    var supportsDeviceCalibration: Bool {
+        supportsARCapture && ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
+    }
+
+    private var isCaptureRecording: Bool {
+        if case .recording = captureState { return true }
+        return false
+    }
 
     override init() {
         super.init()
@@ -527,6 +600,55 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
     }
 
+    func beginDeviceCalibration(rigId: String, referenceDistanceM: Double) {
+        guard supportsDeviceCalibration else {
+            deviceCalibrationState = .failed("This device does not expose ARKit scene depth for calibration.")
+            return
+        }
+        guard !isCaptureRecording else {
+            deviceCalibrationState = .failed("Finish the active recording before calibrating this device.")
+            return
+        }
+        let normalizedRigId = rigId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedRigId.isEmpty, (0.2...5.0).contains(referenceDistanceM) else {
+            deviceCalibrationState = .failed("Enter a rig ID and a reference distance between 0.2 m and 5.0 m.")
+            return
+        }
+        calibrationRigId = normalizedRigId
+        calibrationReferenceDistanceM = referenceDistanceM
+        calibrationDepthSamplesM = []
+        deviceCalibrationState = .collecting(
+            acceptedSamples: 0,
+            requiredSamples: DeviceCalibrationEvaluator.minimumSamples
+        )
+        startARSessionForRecording()
+    }
+
+    func cancelDeviceCalibration() {
+        calibrationRigId = nil
+        calibrationReferenceDistanceM = nil
+        calibrationDepthSamplesM = []
+        deviceCalibrationState = .idle
+        if !isCaptureRecording {
+            stopARSession()
+        }
+    }
+
+    private func persistCurrentDeviceCalibrationProfile(in directory: URL) {
+        guard let profile = currentDeviceCalibrationProfile else { return }
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+            encoder.dateEncodingStrategy = .iso8601
+            try encoder.encode(profile).write(
+                to: directory.appendingPathComponent("device_calibration.json"),
+                options: .atomic
+            )
+        } catch {
+            print("Failed to persist device calibration evidence: \(error)")
+        }
+    }
+
     func startRecording(
         siteType: CaptureSiteType = .unknown,
         siteExtent: CaptureSiteExtent = CaptureSiteExtent(
@@ -558,6 +680,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         }
 
         currentArtifacts = artifacts
+        persistCurrentDeviceCalibrationProfile(in: artifacts.directoryURL)
         currentARKitArtifacts = artifacts.arKit
         let recordingSessionId = UUID().uuidString
         currentRecordingSessionId = recordingSessionId
@@ -581,9 +704,15 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         latestARFrameTCaptureSec = nil
         lastDepthSnapshotPosition = nil
         detectedEntryAnchorHold = nil
+        detectedLoopClosure = nil
         holdCandidateOrigin = nil
         holdCandidateStartTDeviceSec = 0
         holdCandidateStartFrameId = ""
+        loopClosureOriginTransform = nil
+        loopClosureStartFrameId = nil
+        loopClosureMaxExcursionM = 0
+        loopClosureReturnCandidateStartTDeviceSec = nil
+        loopClosureReturnCandidateStartFrameId = nil
         exportedMeshAnchors.removeAll()
         semanticAnchorEvents = []
         pendingAnchorObservationExpirations = [:]
@@ -1430,6 +1559,52 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             anchorObservations = []
         }
 
+        if loopClosureOriginTransform == nil, detectedEntryAnchorHold != nil {
+            loopClosureOriginTransform = frame.transform
+            loopClosureStartFrameId = detectedEntryAnchorHold?.holdEndFrameId
+        }
+        if let originTransform = loopClosureOriginTransform, detectedLoopClosure == nil {
+            let originPosition = simd_float3(
+                originTransform.columns.3.x,
+                originTransform.columns.3.y,
+                originTransform.columns.3.z
+            )
+            let currentPosition = simd_float3(
+                frame.transform.columns.3.x,
+                frame.transform.columns.3.y,
+                frame.transform.columns.3.z
+            )
+            let translationResidual = simd_length(currentPosition - originPosition)
+            loopClosureMaxExcursionM = max(loopClosureMaxExcursionM, translationResidual)
+            let hasLeftStartRegion = loopClosureMaxExcursionM >= 1.0 && tDeviceSec >= 10.0
+            if hasLeftStartRegion && translationResidual <= 0.25 {
+                if loopClosureReturnCandidateStartTDeviceSec == nil {
+                    loopClosureReturnCandidateStartTDeviceSec = tDeviceSec
+                    loopClosureReturnCandidateStartFrameId = frameId
+                }
+                let candidateStart = loopClosureReturnCandidateStartTDeviceSec ?? tDeviceSec
+                let returnHoldDuration = tDeviceSec - candidateStart
+                if returnHoldDuration >= 2.0 {
+                    detectedLoopClosure = LoopClosureObservation(
+                        startFrameId: loopClosureStartFrameId ?? detectedEntryAnchorHold?.holdEndFrameId ?? frameId,
+                        returnStartFrameId: loopClosureReturnCandidateStartFrameId ?? frameId,
+                        returnEndFrameId: frameId,
+                        returnTCaptureSec: candidateStart + returnHoldDuration / 2.0,
+                        returnHoldDurationSec: returnHoldDuration,
+                        translationResidualM: Double(translationResidual),
+                        rotationResidualDeg: Self.rotationResidualDegrees(from: originTransform, to: frame.transform),
+                        maxExcursionM: Double(loopClosureMaxExcursionM)
+                    )
+                    anchorObservations.append("anchor_entry_return")
+                }
+            } else {
+                loopClosureReturnCandidateStartTDeviceSec = nil
+                loopClosureReturnCandidateStartFrameId = nil
+            }
+        } else if detectedLoopClosure != nil {
+            anchorObservations.append("anchor_entry_return")
+        }
+
         for (anchorId, expiry) in pendingAnchorObservationExpirations where expiry >= tDeviceSec {
             anchorObservations.append(anchorId)
         }
@@ -1561,6 +1736,8 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             sceneDepthFile: sceneDepthFile,
             smoothedSceneDepthFile: smoothedDepthFile,
             confidenceFile: confidenceFile,
+            depthImageResolution: frame.depthSnapshot.map { [$0.width, $0.height] },
+            confidenceImageResolution: frame.confidenceSnapshot.map { [$0.width, $0.height] },
             depthValidFraction: depthValidFraction,
             missingDepthFraction: missingDepthFraction,
             trackingState: trackingStateStr,
@@ -1678,9 +1855,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 t_device_sec: tDeviceSec,
                 t_monotonic_ns: tMonotonicNs,
                 T_world_camera: transform,
+                T_site_camera: transform,
+                site_frame_id: currentRecordingSessionId,
+                site_frame_definition: "arkit_world_origin_at_session_start",
+                transform_semantics: "row_major_camera_to_site",
+                units: "meters",
+                handedness: "right_handed",
+                up_axis: "Y",
+                gravity_aligned: true,
+                coordinate_frame_segment_index: 0,
                 tracking_state: trackingStateStr,
                 tracking_reason: trackingReasonStr,
                 world_mapping_status: worldMappingStr,
+                relocalization_event: isRelocalization,
                 coordinate_frame_session_id: currentRecordingSessionId
             )
             do {
@@ -1889,6 +2076,7 @@ private struct ARFrameData {
 
 extension VideoCaptureManager: @preconcurrency ARSessionDelegate {
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        collectDeviceCalibrationSample(from: frame)
         if usingCustomARSessionRecorder {
             if awaitingFirstARVideoFrame {
                 awaitingFirstARVideoFrame = false
@@ -1934,6 +2122,39 @@ extension VideoCaptureManager: @preconcurrency ARSessionDelegate {
             self?.writeARFrame(snapshot)
         }
         qualityMonitor.updateFromARFrame(frame)
+    }
+
+    private func collectDeviceCalibrationSample(from frame: ARFrame) {
+        guard case .collecting = deviceCalibrationState,
+              case .normal = frame.camera.trackingState,
+              let sample = Self.highConfidenceCenterDepthSample(from: frame) else { return }
+        calibrationDepthSamplesM.append(sample)
+        let required = DeviceCalibrationEvaluator.minimumSamples
+        deviceCalibrationState = .collecting(
+            acceptedSamples: calibrationDepthSamplesM.count,
+            requiredSamples: required
+        )
+        guard calibrationDepthSamplesM.count >= required,
+              let rigId = calibrationRigId,
+              let referenceDistanceM = calibrationReferenceDistanceM,
+              let profile = DeviceCalibrationEvaluator.evaluate(
+                rigId: rigId,
+                hardwareModelIdentifier: Self.hardwareModelIdentifier(),
+                referenceDistanceM: referenceDistanceM,
+                depthSamplesM: calibrationDepthSamplesM
+              ) else { return }
+        do {
+            try DeviceCalibrationStore.shared.save(profile)
+            deviceCalibrationState = .completed(profile)
+        } catch {
+            deviceCalibrationState = .failed("Calibration was measured but could not be stored: \(error.localizedDescription)")
+        }
+        calibrationRigId = nil
+        calibrationReferenceDistanceM = nil
+        calibrationDepthSamplesM = []
+        if !isCaptureRecording {
+            stopARSession()
+        }
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
@@ -2327,11 +2548,32 @@ private extension VideoCaptureManager {
                 }
                 dict["exposure_settings"] = exposureSettings
             }
-            dict["device_camera"] = [
+            var deviceCamera: [String: Any] = [
                 "position": "back",
+                "capture_authority": self.canUseARSessionRecorder
+                    ? "arkit_arframe_captured_image"
+                    : (lastCaptureUsedScreenRecorder ? "replaykit_screen_video" : "avcapture_movie_output"),
+                "calibration_authority": self.canUseARSessionRecorder
+                    ? "arkit_arframe_exact_per_observation"
+                    : "avcapture_active_format_when_available",
                 "uses_ar_session_recorder": self.canUseARSessionRecorder,
                 "has_scene_depth_semantics": hasLiDAR,
+                "arkit_managed_camera": self.canUseARSessionRecorder,
             ]
+            if let videoDevice = self.videoDevice {
+                let dimensions = CMVideoFormatDescriptionGetDimensions(
+                    videoDevice.activeFormat.formatDescription
+                )
+                deviceCamera["avcapture_device_unique_id"] = videoDevice.uniqueID
+                deviceCamera["avcapture_device_type"] = videoDevice.deviceType.rawValue
+                deviceCamera["avcapture_localized_name"] = videoDevice.localizedName
+                deviceCamera["active_format_width"] = Int(dimensions.width)
+                deviceCamera["active_format_height"] = Int(dimensions.height)
+                deviceCamera["active_format_field_of_view_deg"] = Double(
+                    videoDevice.activeFormat.videoFieldOfView
+                )
+            }
+            dict["device_camera"] = deviceCamera
             do {
                 let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes])
                 try data.write(to: artifacts.manifestURL, options: .atomic)
@@ -2540,6 +2782,45 @@ private extension VideoCaptureManager {
             validPixelCount: validPixelCount,
             missingPixelCount: missingPixelCount
         )
+    }
+
+    static func highConfidenceCenterDepthSample(from frame: ARFrame) -> Double? {
+        guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return nil }
+        let depth = depthData.depthMap
+        guard let confidence = depthData.confidenceMap else { return nil }
+        CVPixelBufferLockBaseAddress(depth, .readOnly)
+        CVPixelBufferLockBaseAddress(confidence, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(confidence, .readOnly)
+            CVPixelBufferUnlockBaseAddress(depth, .readOnly)
+        }
+        let width = CVPixelBufferGetWidth(depth)
+        let height = CVPixelBufferGetHeight(depth)
+        guard width == CVPixelBufferGetWidth(confidence),
+              height == CVPixelBufferGetHeight(confidence),
+              let depthBase = CVPixelBufferGetBaseAddress(depth),
+              let confidenceBase = CVPixelBufferGetBaseAddress(confidence) else { return nil }
+        let depthStride = CVPixelBufferGetBytesPerRow(depth) / MemoryLayout<Float32>.size
+        let confidenceStride = CVPixelBufferGetBytesPerRow(confidence)
+        let depthValues = depthBase.assumingMemoryBound(to: Float32.self)
+        let confidenceValues = confidenceBase.assumingMemoryBound(to: UInt8.self)
+        let xRadius = max(4, width / 10)
+        let yRadius = max(4, height / 10)
+        let centerX = width / 2
+        let centerY = height / 2
+        var samples: [Double] = []
+        for y in stride(from: max(0, centerY - yRadius), through: min(height - 1, centerY + yRadius), by: 2) {
+            for x in stride(from: max(0, centerX - xRadius), through: min(width - 1, centerX + xRadius), by: 2) {
+                guard confidenceValues[y * confidenceStride + x] == 2 else { continue }
+                let meters = depthValues[y * depthStride + x]
+                if meters.isFinite && meters > 0.2 && meters < 5.0 {
+                    samples.append(Double(meters))
+                }
+            }
+        }
+        guard samples.count >= 24 else { return nil }
+        samples.sort()
+        return samples[samples.count / 2]
     }
 
     static func makeConfidenceSnapshot(from pixelBuffer: CVPixelBuffer?) -> ConfidenceFrameSnapshot? {

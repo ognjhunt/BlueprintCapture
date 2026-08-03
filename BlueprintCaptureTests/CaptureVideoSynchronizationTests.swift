@@ -42,6 +42,8 @@ struct CaptureVideoSynchronizationTests {
         #expect(result.syncRows[0]["frame_id"] as? String == "000001")
         #expect(result.syncRows[1]["frame_id"] as? String == "000003")
         #expect(result.syncRows[0]["t_video_sec"] as? Double == 0.0)
+        #expect(result.syncRows[0]["decoded_source_pts_sec"] as? Double == 5.0)
+        #expect(result.syncRows[0]["decoded_time_origin_pts_sec"] as? Double == 5.0)
         #expect(abs((result.syncRows[1]["t_video_sec"] as? Double ?? 0.0) - 0.066) < 0.000_001)
         #expect(result.syncRows.allSatisfy {
             ($0["sync_status"] as? String) == "encoded_decoded_pts_match"
@@ -50,6 +52,8 @@ struct CaptureVideoSynchronizationTests {
         #expect(result.retentionRows[1]["retention_status"] as? String == "dropped_backpressure")
         #expect(result.retentionRows[1]["frame_id"] as? String == "000002")
         #expect(result.retentionRows[1]["t_video_sec"] is NSNull)
+        #expect(result.retentionRows[0]["decoded_source_pts_sec"] as? Double == 5.0)
+        #expect(result.retentionRows[1]["decoded_source_pts_sec"] is NSNull)
     }
 
     @Test
@@ -131,6 +135,39 @@ struct CaptureVideoSynchronizationTests {
             Issue.record("Expected dropped attempt source-frame mismatch")
         } catch let error as CaptureVideoSynchronizationError {
             #expect(error == .writeAttemptMissingFrame(sourceTimestampNs: 100_033_000_000))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test
+    func nonMonotonicDecodedPresentationTimesFailClosed() {
+        let frames: [[String: Any]] = [
+            ["frame_id": "000001", "timestamp": 100.0, "t_capture_sec": 0.0],
+            ["frame_id": "000002", "timestamp": 100.033, "t_capture_sec": 0.033],
+        ]
+        let attempts: [[String: Any]] = [
+            [
+                "write_attempt_index": 0,
+                "source_timestamp_sec": 100.0,
+                "retention_status": "retained",
+            ],
+            [
+                "write_attempt_index": 1,
+                "source_timestamp_sec": 100.033,
+                "retention_status": "retained",
+            ],
+        ]
+
+        do {
+            _ = try CaptureVideoSynchronization.build(
+                frameRows: frames,
+                writeAttemptRows: attempts,
+                decodedPresentationTimes: [5.033, 5.0]
+            )
+            Issue.record("Expected non-monotonic decoded PTS failure")
+        } catch let error as CaptureVideoSynchronizationError {
+            #expect(error == .decodedPresentationTimeNonMonotonic(index: 1))
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
