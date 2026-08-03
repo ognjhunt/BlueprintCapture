@@ -60,6 +60,12 @@ final class CaptureRawContractV3Validator {
            !fileExists(rawDirectoryURL, "video_frame_retention.jsonl") {
             errors.append("missing_required_file:video_frame_retention.jsonl")
         }
+        if requiresDecodedVideoSynchronization,
+           !fileExists(rawDirectoryURL, CaptureDownstreamCandidateManifest.filename) {
+            errors.append(
+                "missing_required_file:\(CaptureDownstreamCandidateManifest.filename)"
+            )
+        }
 
         if !hasCanonicalVideo(in: rawDirectoryURL, manifest: manifest) {
             errors.append("missing_required_file:walkthrough")
@@ -171,6 +177,12 @@ final class CaptureRawContractV3Validator {
         let completion = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("capture_upload_complete.json"), errors: &errors)
         let hashes = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("hashes.json"), errors: &errors)
         let videoTrack = loadJSONObject(at: rawDirectoryURL.appendingPathComponent("video_track.json"), errors: &errors)
+        let downstreamCandidateManifest = loadJSONObjectIfPresent(
+            at: rawDirectoryURL.appendingPathComponent(
+                CaptureDownstreamCandidateManifest.filename
+            ),
+            errors: &errors
+        )
         let depthManifest = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/depth_manifest.json"), errors: &errors)
         let confidenceManifest = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/confidence_manifest.json"), errors: &errors)
         let sessionIntrinsics = loadJSONObjectIfPresent(at: rawDirectoryURL.appendingPathComponent("arkit/session_intrinsics.json"), errors: &errors)
@@ -215,6 +227,8 @@ final class CaptureRawContractV3Validator {
             recordingSession,
             captureCapabilities: captureCapabilities,
             hasPoseWorldTracking: !poses.isEmpty || !arcorePoses.isEmpty || !companionPhonePoses.isEmpty,
+            requiresV32ResetDeclaration: requiresDecodedVideoSynchronization
+                && captureSource == "iphone",
             errors: &errors
         )
 
@@ -260,6 +274,13 @@ final class CaptureRawContractV3Validator {
                 retentionRows: videoFrameRetention,
                 errors: &errors
             )
+            errors.append(contentsOf: CaptureDownstreamCandidateManifest.validationErrors(
+                manifest: downstreamCandidateManifest,
+                syncRows: syncMap,
+                expectedVideoURI: manifest["video_uri"] as? String,
+                expectedCoordinateFrameSessionId: expectedCfs,
+                rightsConsent: rightsConsent
+            ))
         }
 
         for pose in poses + arcorePoses + companionPhonePoses {
@@ -269,6 +290,22 @@ final class CaptureRawContractV3Validator {
             }
             if let poseCfs = pose["coordinate_frame_session_id"] as? String, let expectedCfs, poseCfs != expectedCfs {
                 errors.append("coordinate_frame_session_mismatch:pose:\(frameId)")
+            }
+            if requiresDecodedVideoSynchronization && captureSource == "iphone" {
+                if !isValidTransformMatrix(pose["T_site_camera"])
+                    || !transformMatricesEqual(
+                        pose["T_site_camera"],
+                        pose["T_world_camera"]
+                    ) {
+                    errors.append("camera_to_site_transform_invalid:\(frameId)")
+                }
+                if pose["site_frame_id"] as? String != expectedCfs {
+                    errors.append("site_frame_identity_mismatch:\(frameId)")
+                }
+                if pose["transform_semantics"] as? String
+                    != "row_major_camera_to_site" {
+                    errors.append("camera_to_site_transform_semantics_invalid:\(frameId)")
+                }
             }
         }
 
@@ -312,6 +349,9 @@ final class CaptureRawContractV3Validator {
 
         if let rightsConsent, (rightsConsent["redaction_required"] as? Bool) != true {
             warnings.append("rights_redaction_not_explicitly_required")
+        }
+        if requiresDecodedVideoSynchronization {
+            validateRightsProcessingLimits(rightsConsent, errors: &errors)
         }
 
         validateHashes(rawDirectoryURL: rawDirectoryURL, hashes: hashes, errors: &errors)
@@ -437,6 +477,19 @@ final class CaptureRawContractV3Validator {
             errors.append("decoded_video_has_no_frames")
             return
         }
+        let tolerance = 0.000_1
+        if let declaredStartPTS = numericValue(videoTrack["video_start_pts_sec"]),
+           abs(declaredStartPTS - firstPTS) > tolerance {
+            errors.append("video_track_start_pts_mismatch")
+        }
+        if videoTrack["video_time_origin"] as? String
+            != "first_decoded_sample_presentation_timestamp" {
+            errors.append("video_track_time_origin_invalid")
+        }
+        if videoTrack["t_video_semantics"] as? String
+            != "decoded_source_pts_minus_video_start_pts" {
+            errors.append("video_track_time_semantics_invalid")
+        }
 
         let retainedRows = retentionRows.filter {
             ($0["retention_status"] as? String) == "retained"
@@ -496,7 +549,6 @@ final class CaptureRawContractV3Validator {
             }
         }
 
-        let tolerance = 0.000_1
         for (index, decoded) in decodedPTS.enumerated() {
             if index > 0, decoded < decodedPTS[index - 1] {
                 errors.append("decoded_video_pts_non_monotonic")
@@ -513,6 +565,15 @@ final class CaptureRawContractV3Validator {
                 errors.append("sync_map_decoded_pts_mismatch:\(index)")
                 continue
             }
+            guard let decodedSourcePTS = numericValue(row["decoded_source_pts_sec"]),
+                  abs(decodedSourcePTS - decoded) <= tolerance,
+                  let decodedOriginPTS = numericValue(
+                    row["decoded_time_origin_pts_sec"]
+                  ),
+                  abs(decodedOriginPTS - firstPTS) <= tolerance else {
+                errors.append("sync_map_decoded_source_pts_mismatch:\(index)")
+                continue
+            }
             guard let encodedIndex = (row["encoded_frame_index"] as? NSNumber)?.intValue else {
                 errors.append("sync_map_encoded_frame_index_missing:\(index)")
                 continue
@@ -524,6 +585,12 @@ final class CaptureRawContractV3Validator {
                 let retention = retainedRows[index]
                 if (retention["frame_id"] as? String) != (row["frame_id"] as? String) {
                     errors.append("sync_map_retention_frame_mismatch:\(index)")
+                }
+                guard let retentionPTS = numericValue(
+                    retention["decoded_source_pts_sec"]
+                ), abs(retentionPTS - decoded) <= tolerance else {
+                    errors.append("retention_decoded_source_pts_mismatch:\(index)")
+                    continue
                 }
             }
         }
@@ -641,11 +708,10 @@ final class CaptureRawContractV3Validator {
 
         for (relativePath, expectedHash) in artifacts {
             let fileURL = rawDirectoryURL.appendingPathComponent(relativePath)
-            guard let data = try? Data(contentsOf: fileURL) else {
+            guard let actualHash = try? sha256Hex(ofFile: fileURL) else {
                 errors.append("hash_target_missing:\(relativePath)")
                 continue
             }
-            let actualHash = sha256Hex(of: data)
             if actualHash != expectedHash {
                 errors.append("hash_mismatch:\(relativePath)")
             }
@@ -737,6 +803,7 @@ final class CaptureRawContractV3Validator {
         _ recordingSession: [String: Any]?,
         captureCapabilities: [String: Any],
         hasPoseWorldTracking: Bool,
+        requiresV32ResetDeclaration: Bool,
         errors: inout [String]
     ) {
         guard let recordingSession else {
@@ -776,6 +843,23 @@ final class CaptureRawContractV3Validator {
         }
         if hasPoseWorldTracking && (recordingSession["up_axis"] as? String) != "Y" {
             errors.append("recording_session_invalid_up_axis")
+        }
+        if requiresV32ResetDeclaration {
+            if recordingSession["initial_world_origin_reset_performed"] as? Bool
+                != true {
+                errors.append("recording_session_initial_reset_not_declared")
+            }
+            let options = recordingSession["initial_session_run_options"] as? [String]
+                ?? []
+            if !options.contains("reset_tracking")
+                || !options.contains("remove_existing_anchors") {
+                errors.append("recording_session_initial_run_options_invalid")
+            }
+            if !(recordingSession["post_origin_reset_count"] is NSNumber)
+                || (recordingSession["coordinate_frame_continuity_status"] as? String)?.isEmpty
+                    != false {
+                errors.append("recording_session_reset_continuity_invalid")
+            }
         }
     }
 
@@ -884,6 +968,59 @@ final class CaptureRawContractV3Validator {
         }
     }
 
+    private func transformMatricesEqual(_ lhs: Any?, _ rhs: Any?) -> Bool {
+        guard let left = lhs as? [[NSNumber]], let right = rhs as? [[NSNumber]],
+              left.count == right.count else { return false }
+        return zip(left, right).allSatisfy { leftRow, rightRow in
+            leftRow.count == rightRow.count && zip(leftRow, rightRow).allSatisfy {
+                abs($0.0.doubleValue - $0.1.doubleValue) <= 0.000_001
+            }
+        }
+    }
+
+    private func validateRightsProcessingLimits(
+        _ rightsConsent: [String: Any]?,
+        errors: inout [String]
+    ) {
+        guard let rightsConsent else {
+            errors.append("rights_processing_limits_missing")
+            return
+        }
+        guard let privacy = rightsConsent["privacy_processing"] as? [String: Any] else {
+            errors.append("rights_privacy_processing_missing")
+            return
+        }
+        if privacy["redaction_required"] as? Bool != true
+            || !(privacy["privacy_security_limits"] is [String]) {
+            errors.append("rights_privacy_processing_invalid")
+        }
+        guard let providerUpload = rightsConsent["provider_upload"] as? [String: Any] else {
+            errors.append("rights_provider_upload_limits_missing")
+            return
+        }
+        if providerUpload["mobile_app_direct_provider_upload_allowed"] as? Bool
+            != false
+            || providerUpload["third_party_provider_upload_authorized"] as? Bool
+                != false
+            || providerUpload["provider_selection_authority"] as? String
+                != "blueprint_pipeline" {
+            errors.append("rights_provider_upload_limits_invalid")
+        }
+        guard let retention = rightsConsent["retention"] as? [String: Any],
+              (retention["policy_id"] as? String)?.isEmpty == false,
+              retention["live_enforcement_proven_by_bundle"] as? Bool == false else {
+            errors.append("rights_retention_declaration_invalid")
+            return
+        }
+        guard let revocation = rightsConsent["revocation"] as? [String: Any],
+              (revocation["status_at_capture"] as? String)?.isEmpty == false,
+              revocation["latest_status_check_required_before_downstream_use"] as? Bool
+                == true else {
+            errors.append("rights_revocation_declaration_invalid")
+            return
+        }
+    }
+
     private func numericValue(_ value: Any?) -> Double? {
         if let number = value as? NSNumber {
             return number.doubleValue
@@ -897,6 +1034,22 @@ final class CaptureRawContractV3Validator {
         return digest.map { String(format: "%02x", $0) }.joined()
         #else
         return data.base64EncodedString()
+        #endif
+    }
+
+    private func sha256Hex(ofFile url: URL) throws -> String {
+        #if canImport(CryptoKit)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        while true {
+            let chunk = try handle.read(upToCount: 1_048_576) ?? Data()
+            if chunk.isEmpty { break }
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        #else
+        return sha256Hex(of: try Data(contentsOf: url))
         #endif
     }
 

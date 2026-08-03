@@ -31,7 +31,12 @@ struct CaptureRawContractV3ValidatorTests {
 
         #expect(result.isValid == false)
         #expect(result.errors.contains("missing_required_file:video_frame_retention.jsonl"))
+        #expect(result.errors.contains(
+            "missing_required_file:downstream_candidate_manifest.json"
+        ))
         #expect(result.errors.contains("decoded_video_pts_not_verified"))
+        #expect(result.errors.contains("recording_session_initial_reset_not_declared"))
+        #expect(result.errors.contains("camera_to_site_transform_invalid:000001"))
     }
 
     @Test

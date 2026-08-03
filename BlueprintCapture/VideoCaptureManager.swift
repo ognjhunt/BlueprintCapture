@@ -183,9 +183,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         let t_device_sec: Double
         let t_monotonic_ns: Int64
         let T_world_camera: [[Double]]
+        let T_site_camera: [[Double]]
+        let site_frame_id: String?
+        let site_frame_definition: String
+        let transform_semantics: String
+        let units: String
+        let handedness: String
+        let up_axis: String
+        let gravity_aligned: Bool
+        let coordinate_frame_segment_index: Int
         let tracking_state: String
         let tracking_reason: String?
         let world_mapping_status: String?
+        let relocalization_event: Bool
         let coordinate_frame_session_id: String?
 
         enum CodingKeys: String, CodingKey {
@@ -197,9 +207,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             case t_device_sec
             case t_monotonic_ns
             case T_world_camera
+            case T_site_camera
+            case site_frame_id
+            case site_frame_definition
+            case transform_semantics
+            case units
+            case handedness
+            case up_axis
+            case gravity_aligned
+            case coordinate_frame_segment_index
             case tracking_state
             case tracking_reason
             case world_mapping_status
+            case relocalization_event
             case coordinate_frame_session_id
         }
     }
@@ -1835,9 +1855,19 @@ final class VideoCaptureManager: NSObject, ObservableObject {
                 t_device_sec: tDeviceSec,
                 t_monotonic_ns: tMonotonicNs,
                 T_world_camera: transform,
+                T_site_camera: transform,
+                site_frame_id: currentRecordingSessionId,
+                site_frame_definition: "arkit_world_origin_at_session_start",
+                transform_semantics: "row_major_camera_to_site",
+                units: "meters",
+                handedness: "right_handed",
+                up_axis: "Y",
+                gravity_aligned: true,
+                coordinate_frame_segment_index: 0,
                 tracking_state: trackingStateStr,
                 tracking_reason: trackingReasonStr,
                 world_mapping_status: worldMappingStr,
+                relocalization_event: isRelocalization,
                 coordinate_frame_session_id: currentRecordingSessionId
             )
             do {
@@ -2518,11 +2548,32 @@ private extension VideoCaptureManager {
                 }
                 dict["exposure_settings"] = exposureSettings
             }
-            dict["device_camera"] = [
+            var deviceCamera: [String: Any] = [
                 "position": "back",
+                "capture_authority": self.canUseARSessionRecorder
+                    ? "arkit_arframe_captured_image"
+                    : (lastCaptureUsedScreenRecorder ? "replaykit_screen_video" : "avcapture_movie_output"),
+                "calibration_authority": self.canUseARSessionRecorder
+                    ? "arkit_arframe_exact_per_observation"
+                    : "avcapture_active_format_when_available",
                 "uses_ar_session_recorder": self.canUseARSessionRecorder,
                 "has_scene_depth_semantics": hasLiDAR,
+                "arkit_managed_camera": self.canUseARSessionRecorder,
             ]
+            if let videoDevice = self.videoDevice {
+                let dimensions = CMVideoFormatDescriptionGetDimensions(
+                    videoDevice.activeFormat.formatDescription
+                )
+                deviceCamera["avcapture_device_unique_id"] = videoDevice.uniqueID
+                deviceCamera["avcapture_device_type"] = videoDevice.deviceType.rawValue
+                deviceCamera["avcapture_localized_name"] = videoDevice.localizedName
+                deviceCamera["active_format_width"] = Int(dimensions.width)
+                deviceCamera["active_format_height"] = Int(dimensions.height)
+                deviceCamera["active_format_field_of_view_deg"] = Double(
+                    videoDevice.activeFormat.videoFieldOfView
+                )
+            }
+            dict["device_camera"] = deviceCamera
             do {
                 let data = try JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes])
                 try data.write(to: artifacts.manifestURL, options: .atomic)
