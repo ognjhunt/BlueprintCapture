@@ -37,9 +37,6 @@ For V3.2 bundles:
   or `dropped_backpressure` with a precise reason;
 - `sync_map.jsonl` contains only successfully retained frames, paired by ordinal
   with decoded video sample presentation timestamps;
-- `downstream_candidate_manifest.json` binds every retained decoded RGB
-  observation to its exact source PTS, ARKit pose, per-frame intrinsics, and
-  coordinate-frame identity without selecting or authorizing a provider;
 - the first retained video frame is both `t_video_sec = 0` and
   `t_capture_sec = 0`; if that first frame cannot be retained, capture fails and
   requests recapture;
@@ -96,7 +93,6 @@ raw/
   walkthrough.mov                            required
   sync_map.jsonl                             required
   video_frame_retention.jsonl                required when capture_schema_version>=3.2
-  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
   downstream_candidate_manifest.json        required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
@@ -944,45 +940,23 @@ Required top-level fields:
   `claim_boundary`
 - `candidate_count` and `candidates`
 
-Each candidate binds `decoded_source_pts_sec`, capture-relative time,
-`frame_id`, `pose_frame_id`, `T_site_camera`, camera intrinsics, tracking and
-relocalization state, and deterministic output-image addressing. Candidate
-order and count must exactly match `sync_map.jsonl`.
-
-This registry is capture truth plus deterministic addressing. It does not
-qualify reconstruction appearance, registration, metric scale, collision
-geometry, physics, task success, provider selection, or provider upload.
-
-### `downstream_candidate_manifest.json`
-
-Purpose:
-- Give downstream code a deterministic, immutable address for every retained
-  decoded RGB observation and its exact ARKit pose/intrinsics row.
-- Keep task/site frame selection and reconstruction-provider authorization out
-  of the capture client.
-
-Required top-level fields include `schema_version =
-"downstream_candidate_manifest.v1"`, identity and coordinate-frame IDs,
-`source_video_uri`, `source_video_sha256`, `candidate_count`,
-`selection_contract`, `provider_neutrality`, `allowed_use_scope`,
-`claim_boundary`, `candidates`, and a canonical `manifest_digest`.
-
 Each candidate binds a unique candidate ID and safe prospective output path to
 the decoded ordinal/source PTS, encoder write attempt, raw frame and pose IDs,
 `T_site_camera`, per-observation ARKit intrinsics, calibration digest, tracking
-state, and optional depth/confidence references. The prospective image need not
-already exist in the raw bundle.
+and relocalization state, and optional depth/confidence references. Candidate
+order and count must exactly match `sync_map.jsonl`. The prospective image need
+not already exist in the raw bundle.
 
-The manifest must state that direct mobile/provider upload and third-party
-provider authorization are false. Pipeline selection requires an explicit,
-digest-bound task/site evidence profile. If none exists, the exact blocker is
+Pipeline selection requires an explicit, digest-bound task/site evidence
+profile. If none exists, the exact blocker is
 `task_site_evidence_profile_with_frame_selection_parameters`; Capture does not
-invent a default.
+invent a default. Direct mobile/provider upload and third-party provider
+authorization remain false.
 
-The manifest proves only deterministic addressing of captured observations. It
-does not prove provider readiness, reconstruction quality, metric scale,
-collision/physics validity, Task Evaluation Run success, or physical transfer.
-A compact versioned example is under
+This registry is capture truth plus deterministic addressing. It does not
+qualify provider readiness, reconstruction appearance or registration, metric
+scale, collision/physics validity, Task Evaluation Run success, or physical
+transfer. A compact versioned example is under
 `docs/fixtures/capture_raw_contract_v3_2/`.
 
 ### `motion.jsonl`
