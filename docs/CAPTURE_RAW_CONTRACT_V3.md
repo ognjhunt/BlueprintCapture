@@ -97,7 +97,6 @@ raw/
   sync_map.jsonl                             required
   video_frame_retention.jsonl                required when capture_schema_version>=3.2
   downstream_candidate_manifest.json        required when capture_schema_version>=3.2
-  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
   reconstruction_qualification_request.json required for canonical iPhone closed-loop capture
@@ -926,52 +925,29 @@ and is not valid for V3.2. A compatibility-only projection from AR rows uses
 ### `downstream_candidate_manifest.json`
 
 Purpose:
-- Provide a deterministic, provider-neutral registry from every retained RGB
-  observation to the immutable video, decoded source PTS, ARKit camera pose,
-  per-frame intrinsics, tracking state, and optional depth/confidence files.
+- Give downstream code a deterministic, provider-neutral address for every
+  retained decoded RGB observation and its exact ARKit pose/intrinsics row.
 - Let Pipeline construct Postshot/COLMAP inputs without guessing frame order,
-  using nominal frame rate, or silently selecting a provider in the client.
+  using nominal frame rate, or selecting a provider in the client.
 - Bind rights, revocation, redaction, and separate provider-authorization
-  requirements before any derived processing.
+  requirements while keeping task/site frame selection downstream.
 
 Required top-level fields:
 - `schema_version = "downstream_candidate_manifest.v1"`
 - `manifest_digest`
 - `source_video_uri` and `source_video_sha256`
-- `coordinate_frame_session_id`
+- identity fields and `coordinate_frame_session_id`
 - `source_video_authority`, `decoded_timing_authority`, and `candidate_order`
 - `selection_contract`, `provider_neutrality`, `allowed_use_scope`, and
   `claim_boundary`
 - `candidate_count` and `candidates`
 
-Each candidate binds `decoded_source_pts_sec`, capture-relative time,
-`frame_id`, `pose_frame_id`, `T_site_camera`, camera intrinsics, tracking and
-relocalization state, and deterministic output-image addressing. Candidate
-order and count must exactly match `sync_map.jsonl`.
-
-This registry is capture truth plus deterministic addressing. It does not
-qualify reconstruction appearance, registration, metric scale, collision
-geometry, physics, task success, provider selection, or provider upload.
-
-### `downstream_candidate_manifest.json`
-
-Purpose:
-- Give downstream code a deterministic, immutable address for every retained
-  decoded RGB observation and its exact ARKit pose/intrinsics row.
-- Keep task/site frame selection and reconstruction-provider authorization out
-  of the capture client.
-
-Required top-level fields include `schema_version =
-"downstream_candidate_manifest.v1"`, identity and coordinate-frame IDs,
-`source_video_uri`, `source_video_sha256`, `candidate_count`,
-`selection_contract`, `provider_neutrality`, `allowed_use_scope`,
-`claim_boundary`, `candidates`, and a canonical `manifest_digest`.
-
 Each candidate binds a unique candidate ID and safe prospective output path to
-the decoded ordinal/source PTS, encoder write attempt, raw frame and pose IDs,
-`T_site_camera`, per-observation ARKit intrinsics, calibration digest, tracking
-state, and optional depth/confidence references. The prospective image need not
-already exist in the raw bundle.
+the decoded ordinal/source PTS, capture-relative time, encoder write attempt,
+raw frame and pose IDs, `T_site_camera`, per-observation ARKit intrinsics,
+calibration digest, tracking/relocalization state, and optional depth/confidence
+references. Candidate order and count must exactly match `sync_map.jsonl`. The
+prospective image need not already exist in the raw bundle.
 
 The manifest must state that direct mobile/provider upload and third-party
 provider authorization are false. Pipeline selection requires an explicit,
@@ -979,8 +955,8 @@ digest-bound task/site evidence profile. If none exists, the exact blocker is
 `task_site_evidence_profile_with_frame_selection_parameters`; Capture does not
 invent a default.
 
-The manifest proves only deterministic addressing of captured observations. It
-does not prove provider readiness, reconstruction quality, metric scale,
+The manifest is capture truth plus deterministic addressing. It does not prove
+provider readiness, reconstruction appearance or registration, metric scale,
 collision/physics validity, Task Evaluation Run success, or physical transfer.
 A compact versioned example is under
 `docs/fixtures/capture_raw_contract_v3_2/`.
