@@ -1677,7 +1677,7 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         }
         let coordinateFrameSessionId = topology.coordinateFrameSessionId
             ?? topology.captureSessionId
-        guard let coordinateFrameSessionId, !coordinateFrameSessionId.isEmpty else {
+        guard !coordinateFrameSessionId.isEmpty else {
             throw FinalizationError.invalidBundle(
                 reasons: ["downstream_candidate_manifest_coordinate_frame_missing"]
             )
@@ -1846,10 +1846,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
         let errors = CaptureDownstreamCandidateManifest.validationErrors(
             manifest: payload,
             syncRows: syncRows,
+            frameRows: frameRows,
+            poseRows: poseRows,
             expectedVideoURI: mode.videoURI,
             expectedCoordinateFrameSessionId: coordinateFrameSessionId,
             rightsConsent: [
                 "derived_scene_generation_allowed": rights.derivedSceneGenerationAllowed,
+                "data_licensing_allowed": rights.dataLicensingAllowed,
                 "redaction_required": true,
             ]
         )

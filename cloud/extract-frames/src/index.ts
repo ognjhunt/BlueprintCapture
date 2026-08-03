@@ -10,6 +10,7 @@ import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 import {
   buildCaptureBundleReferences,
+  buildDownstreamCandidateIndex,
   buildPoseIndex,
   buildVideoSyncIndex,
   chooseKeyframeCandidate,
@@ -17,6 +18,7 @@ import {
   evaluateQualityGate,
   findClosestPoseByTime,
   findClosestVideoSyncByTime,
+  classifyVideoSyncAssociation,
   parsePoseRows,
   parseVideoSyncRows,
   percentile,
@@ -71,7 +73,11 @@ export const DEFAULT_EXTRACT_FRAMES_MAX_INSTANCES = 10;
 
 type StorageBucket = ReturnType<typeof storage.bucket>;
 
-type PoseMatchType = "sync_map_frame_id" | "time" | "legacy_frame_id_unverified";
+type PoseMatchType =
+  | "sync_map_frame_id"
+  | "nearest_sync_map_frame_id"
+  | "time"
+  | "legacy_frame_id_unverified";
 type InlineFrameExtractionSizeGate = {
   inlineAllowed: boolean;
   blockCode: string | null;
@@ -1907,7 +1913,14 @@ export const extractFrames = onObjectFinalized(
     });
     const manifestValidation = validateManifest(manifest);
     const walkthroughObjectName = resolveWalkthroughObjectName(manifest, pathInfo, objectName);
-    const [walkthroughExists, completionMarker, poseIndex, videoSyncIndex, arkitFrameQuality, intrinsics] =
+    const [
+      walkthroughExists,
+      completionMarker,
+      poseIndex,
+      videoSyncIndex,
+      arkitFrameQuality,
+      intrinsics,
+    ] =
       await Promise.all([
         waitForObjectExists(bucket, walkthroughObjectName, 45000, 1000),
         objectKind === "completion_marker"
@@ -1925,6 +1938,11 @@ export const extractFrames = onObjectFinalized(
       arkitConfidenceAvailable,
       arkitMeshesAvailable,
       motionAvailable,
+      arkitFramesAvailable,
+      arkitFrameQualityAvailable,
+      arkitFeaturePointsAvailable,
+      arkitPlanesAvailable,
+      arkitLightEstimatesAvailable,
       arcorePoseAvailable,
       arcoreSessionIntrinsics,
       arcoreDepthManifestExists,
@@ -1939,11 +1957,19 @@ export const extractFrames = onObjectFinalized(
       companionPhonePoseAvailable,
       companionPhoneSessionIntrinsics,
       companionPhoneCalibrationExists,
+      reconstructionQualificationRequest,
+      deviceCalibration,
+      downstreamCandidateManifest,
     ] = await Promise.all([
       prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/depth/`),
       prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/confidence/`),
       prefixHasObjects(bucket, `${pathInfo.rawPrefix}/arkit/meshes/`),
       fileHasContent(bucket, `${pathInfo.rawPrefix}/motion.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arkit/frames.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arkit/frame_quality.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arkit/feature_points.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arkit/plane_observations.jsonl`),
+      fileHasContent(bucket, `${pathInfo.rawPrefix}/arkit/light_estimates.jsonl`),
       fileHasContent(bucket, `${pathInfo.rawPrefix}/arcore/poses.jsonl`),
       loadJsonObject(bucket, `${pathInfo.rawPrefix}/arcore/session_intrinsics.json`, tmp),
       fileExists(bucket, `${pathInfo.rawPrefix}/arcore/depth_manifest.json`),
@@ -1958,7 +1984,28 @@ export const extractFrames = onObjectFinalized(
       fileHasContent(bucket, `${pathInfo.rawPrefix}/companion_phone/poses.jsonl`),
       loadJsonObject(bucket, `${pathInfo.rawPrefix}/companion_phone/session_intrinsics.json`, tmp),
       fileExists(bucket, `${pathInfo.rawPrefix}/companion_phone/calibration.json`),
+      loadJsonObject(
+        bucket,
+        `${pathInfo.rawPrefix}/reconstruction_qualification_request.json`,
+        tmp
+      ),
+      loadJsonObject(bucket, `${pathInfo.rawPrefix}/device_calibration.json`, tmp),
+      loadJsonObject(
+        bucket,
+        `${pathInfo.rawPrefix}/downstream_candidate_manifest.json`,
+        tmp
+      ),
     ]);
+    const downstreamCandidateIndex = buildDownstreamCandidateIndex(
+      downstreamCandidateManifest
+    );
+    const requiresDownstreamCandidateManifest =
+      asString(manifest?.capture_source) === "iphone" &&
+      (asString(manifest?.capture_schema_version)?.startsWith("3.2") ?? false);
+    if (requiresDownstreamCandidateManifest && !downstreamCandidateIndex.valid) {
+      manifestValidation.missingRequired.push(...downstreamCandidateIndex.errors);
+      manifestValidation.valid = false;
+    }
     const actualAvailability: ArtifactAvailability = {
       arkit_poses: poseIndex.byFrameId.size > 0 || poseIndex.byTime.length > 0,
       arkit_intrinsics: isValidIntrinsicsPayload(intrinsics),
@@ -1966,6 +2013,12 @@ export const extractFrames = onObjectFinalized(
       arkit_confidence: arkitConfidenceAvailable,
       arkit_meshes: arkitMeshesAvailable,
       motion: motionAvailable,
+      video_sync: videoSyncIndex.byVideoTime.length > 0,
+      arkit_frames: arkitFramesAvailable,
+      arkit_frame_quality: arkitFrameQualityAvailable,
+      arkit_feature_points: arkitFeaturePointsAvailable,
+      arkit_planes: arkitPlanesAvailable,
+      arkit_light_estimates: arkitLightEstimatesAvailable,
       camera_pose: arcorePoseAvailable,
       camera_intrinsics: isValidIntrinsicsPayload(arcoreSessionIntrinsics),
       depth: arcoreDepthManifestExists || arcoreDepthPrefixHasObjects,
@@ -2114,15 +2167,31 @@ export const extractFrames = onObjectFinalized(
       };
       const videoSync = findClosestVideoSyncByTime(videoSyncIndex.byVideoTime, tVideoSec);
       const sourceFrameId = videoSync?.frame_id;
+      const syncAssociation = videoSync
+        ? classifyVideoSyncAssociation(videoSync, tVideoSec)
+        : undefined;
       if (videoSync) {
         entry.source_frame_id = videoSync.frame_id;
         entry.source_pose_frame_id = videoSync.pose_frame_id ?? videoSync.frame_id;
         entry.encoded_frame_index = videoSync.encoded_frame_index ?? null;
         entry.capture_sync_status = videoSync.sync_status ?? null;
         entry.capture_sync_delta_ms = videoSync.delta_ms ?? null;
-        entry.extraction_to_decoded_frame_delta_ms = Number(
-          (Math.abs(videoSync.t_video_sec - tVideoSec) * 1000).toFixed(3)
-        );
+        entry.extraction_to_decoded_frame_delta_ms = syncAssociation?.deltaMs ?? null;
+        entry.source_observation_match = syncAssociation?.match ?? null;
+        if (syncAssociation?.match === "exact_retained_observation") {
+          const candidate = downstreamCandidateIndex.byDecodedFrameOrdinal.get(
+            videoSync.encoded_frame_index ?? -1
+          );
+          if (
+            candidate &&
+            candidate.frame_id === videoSync.frame_id &&
+            candidate.pose_frame_id === (videoSync.pose_frame_id ?? videoSync.frame_id)
+          ) {
+            entry.source_candidate_id = candidate.candidate_id;
+            entry.source_candidate_manifest_digest =
+              downstreamCandidateIndex.manifestDigest ?? null;
+          }
+        }
       }
       if (packingPlan) {
         const memberName = sortedFiles[i];
@@ -2137,7 +2206,9 @@ export const extractFrames = onObjectFinalized(
         ? posesByFrameId.get(synchronizedPoseFrameId)
         : undefined;
       if (pose) {
-        poseMatchType = "sync_map_frame_id";
+        poseMatchType = syncAssociation?.match === "exact_retained_observation"
+          ? "sync_map_frame_id"
+          : "nearest_sync_map_frame_id";
       } else if (posesByTime.length > 0) {
         pose = findClosestPoseByTime(posesByTime, tVideoSec);
         if (pose) {
@@ -2413,15 +2484,35 @@ export const extractFrames = onObjectFinalized(
       arkit_meshes: claimedSensorRecord.arkit_meshes === true,
       motion:
         claimedCapabilities.motion === true || claimedSensorRecord.motion === true,
-      camera_pose: claimedCapabilities.camera_pose === true,
-      camera_intrinsics: claimedCapabilities.camera_intrinsics === true,
-      depth: claimedCapabilities.depth === true,
-      depth_confidence: claimedCapabilities.depth_confidence === true,
-      point_cloud: claimedCapabilities.point_cloud === true,
-      planes: claimedCapabilities.planes === true,
-      tracking_state: claimedCapabilities.tracking_state === true,
-      light_estimate: claimedCapabilities.light_estimate === true,
-      geospatial: claimedCapabilities.geospatial === true,
+      video_sync:
+        captureSource === "iphone" &&
+        (asString(manifest?.capture_schema_version)?.startsWith("3.2") ?? false),
+      arkit_frames:
+        captureSource === "iphone" && claimedCapabilities.camera_pose === true,
+      arkit_frame_quality:
+        captureSource === "iphone" && claimedCapabilities.tracking_state === true,
+      arkit_feature_points:
+        captureSource === "iphone" && claimedCapabilities.feature_points === true,
+      arkit_planes:
+        captureSource === "iphone" && claimedCapabilities.planes === true,
+      arkit_light_estimates:
+        captureSource === "iphone" && claimedCapabilities.light_estimate === true,
+      camera_pose:
+        captureSource === "android" && claimedCapabilities.camera_pose === true,
+      camera_intrinsics:
+        captureSource === "android" && claimedCapabilities.camera_intrinsics === true,
+      depth: captureSource === "android" && claimedCapabilities.depth === true,
+      depth_confidence:
+        captureSource === "android" && claimedCapabilities.depth_confidence === true,
+      point_cloud:
+        captureSource === "android" && claimedCapabilities.point_cloud === true,
+      planes: captureSource === "android" && claimedCapabilities.planes === true,
+      tracking_state:
+        captureSource === "android" && claimedCapabilities.tracking_state === true,
+      light_estimate:
+        captureSource === "android" && claimedCapabilities.light_estimate === true,
+      geospatial:
+        captureSource === "android" && claimedCapabilities.geospatial === true,
       companion_phone_pose: claimedCapabilities.companion_phone_pose === true,
       companion_phone_intrinsics: claimedCapabilities.companion_phone_intrinsics === true,
       companion_phone_calibration: claimedCapabilities.companion_phone_calibration === true,
@@ -2532,9 +2623,16 @@ export const extractFrames = onObjectFinalized(
         declaredReferences: {
           reconstructionQualificationRequest:
             asString(manifest?.reconstruction_qualification_request_uri) ===
-            "reconstruction_qualification_request.json",
+              "reconstruction_qualification_request.json" &&
+            reconstructionQualificationRequest?.schema_version ===
+              "reconstruction_qualification_request.v1",
           deviceCalibration:
-            asString(manifest?.device_calibration_uri) === "device_calibration.json",
+            asString(manifest?.device_calibration_uri) === "device_calibration.json" &&
+            deviceCalibration?.schema_version === "device_calibration.v1",
+          downstreamCandidateManifest:
+            asString(manifest?.downstream_candidate_manifest_uri) ===
+              "downstream_candidate_manifest.json" &&
+            downstreamCandidateIndex.valid,
         },
       }),
       site_submission_id: asString(manifest?.site_submission_id) ?? null,

@@ -34,11 +34,21 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   capture_upload_complete.json
   task_hypothesis.json
   walkthrough.mov
+  video_track.json
+  video_frame_retention.jsonl
+  sync_map.jsonl
+  downstream_candidate_manifest.json
   motion.jsonl
+  reconstruction_qualification_request.json
+  device_calibration.json                  # optional known-rig evidence
   arkit/
     poses.jsonl
     frames.jsonl
-    intrinsics.json
+    frame_quality.jsonl
+    session_intrinsics.json
+    feature_points.jsonl
+    plane_observations.jsonl
+    light_estimates.jsonl
     depth/
     confidence/
     meshes/

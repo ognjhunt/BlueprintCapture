@@ -35,7 +35,10 @@ enum CaptureDownstreamCandidateManifest {
     static func validationErrors(
         manifest: [String: Any]?,
         syncRows: [[String: Any]],
+        frameRows: [[String: Any]],
+        poseRows: [[String: Any]],
         expectedVideoURI: String?,
+        expectedSourceVideoSHA256: String? = nil,
         expectedCoordinateFrameSessionId: String?,
         rightsConsent: [String: Any]?
     ) -> [String] {
@@ -65,6 +68,40 @@ enum CaptureDownstreamCandidateManifest {
         if sourceVideoDigest.range(of: "^[0-9a-f]{64}$", options: .regularExpression) == nil {
             errors.append("downstream_candidate_source_video_digest_invalid")
         }
+        if let expectedSourceVideoSHA256,
+           sourceVideoDigest != expectedSourceVideoSHA256 {
+            errors.append("downstream_candidate_source_video_digest_mismatch")
+        }
+        if manifest["source_video_authority"] as? String
+            != "immutable_raw_capture_video" {
+            errors.append("downstream_candidate_source_video_authority_invalid")
+        }
+        if manifest["decoded_timing_authority"] as? String
+            != "sync_map_decoded_sample_presentation_timestamps" {
+            errors.append("downstream_candidate_timing_authority_invalid")
+        }
+        if manifest["candidate_order"] as? String != "encoded_frame_index_ascending" {
+            errors.append("downstream_candidate_order_invalid")
+        }
+
+        let selection = manifest["selection_contract"] as? [String: Any]
+        if selection?["selection_authority"] as? String
+            != "blueprint_pipeline_task_site_profile"
+            || !(selection?["capture_default_selection"] is NSNull)
+            || selection?["selection_parameters_required"] as? Bool != true
+            || selection?["smallest_missing_input_when_unselectable"] as? String
+                != "task_site_evidence_profile_with_frame_selection_parameters" {
+            errors.append("downstream_candidate_selection_contract_invalid")
+        }
+        let expectedSelectors = [
+            "explicit_encoded_frame_ordinals",
+            "profile_bound_even_decoded_pts_coverage",
+            "profile_bound_quality_filter",
+        ]
+        if selection?["allowed_deterministic_selectors"] as? [String]
+            != expectedSelectors {
+            errors.append("downstream_candidate_selectors_invalid")
+        }
 
         let neutrality = manifest["provider_neutrality"] as? [String: Any]
         if neutrality?["mobile_app_direct_provider_upload_allowed"] as? Bool != false {
@@ -76,7 +113,11 @@ enum CaptureDownstreamCandidateManifest {
         if neutrality?["provider_selection_authority"] as? String != "blueprint_pipeline" {
             errors.append("downstream_candidate_provider_authority_invalid")
         }
-        if neutrality?["provider_selected"] is String {
+        if neutrality?["provider_authorization_status"] as? String
+            != "not_granted_by_capture_manifest" {
+            errors.append("downstream_candidate_provider_authorization_invalid")
+        }
+        if neutrality?["provider_selected"] != nil {
             errors.append("downstream_candidate_provider_selection_forbidden")
         }
 
@@ -85,12 +126,34 @@ enum CaptureDownstreamCandidateManifest {
         if allowedUse?["derived_processing_allowed"] as? Bool != derivedAllowed {
             errors.append("downstream_candidate_rights_binding_mismatch")
         }
+        let dataLicensingAllowed = rightsConsent?["data_licensing_allowed"] as? Bool == true
+        if allowedUse?["data_licensing_allowed"] as? Bool != dataLicensingAllowed {
+            errors.append("downstream_candidate_data_licensing_binding_mismatch")
+        }
         if allowedUse?["latest_revocation_check_required"] as? Bool != true {
             errors.append("downstream_candidate_revocation_check_missing")
         }
         if allowedUse?["redaction_required_before_derived_use"] as? Bool
             != (rightsConsent?["redaction_required"] as? Bool ?? true) {
             errors.append("downstream_candidate_redaction_binding_mismatch")
+        }
+        if allowedUse?["raw_observation_indexing_allowed"] as? Bool != true
+            || allowedUse?["provider_upload_requires_separate_downstream_authorization"]
+                as? Bool != true {
+            errors.append("downstream_candidate_use_scope_invalid")
+        }
+
+        let claimBoundary = manifest["claim_boundary"] as? [String: Any]
+        if claimBoundary?["raw_capture_remains_authoritative"] as? Bool != true
+            || claimBoundary?["candidate_manifest_qualifies_reconstruction"] as? Bool
+                != false
+            || claimBoundary?["candidate_manifest_qualifies_metric_scale"] as? Bool
+                != false
+            || claimBoundary?["candidate_manifest_qualifies_collision_or_physics"] as? Bool
+                != false
+            || claimBoundary?["candidate_manifest_proves_task_success"] as? Bool
+                != false {
+            errors.append("downstream_candidate_claim_boundary_invalid")
         }
 
         guard let candidates = manifest["candidates"] as? [[String: Any]] else {
@@ -106,20 +169,48 @@ enum CaptureDownstreamCandidateManifest {
 
         var candidateIds = Set<String>()
         var imagePaths = Set<String>()
+        let framesById = Dictionary(
+            frameRows.compactMap { row in
+                (row["frame_id"] as? String).map { ($0, row) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let posesById = Dictionary(
+            poseRows.compactMap { row in
+                (row["frame_id"] as? String).map { ($0, row) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let frameOrdinals = Dictionary(
+            frameRows.enumerated().compactMap { ordinal, row in
+                (row["frame_id"] as? String).map { ($0, ordinal) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let poseOrdinals = Dictionary(
+            poseRows.enumerated().compactMap { ordinal, row in
+                (row["frame_id"] as? String).map { ($0, ordinal) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
         let tolerance = 0.000_1
         for (ordinal, candidate) in candidates.enumerated() {
             let candidateId = candidate["candidate_id"] as? String ?? ""
-            if candidateId.isEmpty || !candidateIds.insert(candidateId).inserted {
+            if candidateId != String(format: "rgb_%06d", ordinal)
+                || !candidateIds.insert(candidateId).inserted {
                 errors.append("downstream_candidate_id_invalid:\(ordinal)")
             }
             let imagePath = candidate["output_image_relative_path"] as? String ?? ""
-            if !isSafeRelativePath(imagePath) || !imagePaths.insert(imagePath).inserted {
+            if imagePath != String(format: "candidate_rgb/%06d.png", ordinal)
+                || !isSafeRelativePath(imagePath)
+                || !imagePaths.insert(imagePath).inserted {
                 errors.append("downstream_candidate_output_path_invalid:\(ordinal)")
             }
             guard ordinal < syncRows.count else { continue }
             let sync = syncRows[ordinal]
             if number(candidate["decoded_frame_ordinal"])?.intValue != ordinal
-                || number(candidate["encoded_frame_index"])?.intValue != ordinal {
+                || number(candidate["encoded_frame_index"])?.intValue
+                    != number(sync["encoded_frame_index"])?.intValue {
                 errors.append("downstream_candidate_ordinal_invalid:\(ordinal)")
             }
             if candidate["frame_id"] as? String != sync["frame_id"] as? String
@@ -129,6 +220,9 @@ enum CaptureDownstreamCandidateManifest {
             if number(candidate["write_attempt_index"])?.intValue
                 != number(sync["write_attempt_index"])?.intValue {
                 errors.append("downstream_candidate_attempt_binding_mismatch:\(ordinal)")
+            }
+            if candidate["source_video_uri"] as? String != expectedVideoURI {
+                errors.append("downstream_candidate_row_video_binding_mismatch:\(ordinal)")
             }
             for (candidateKey, syncKey) in [
                 ("decoded_pts_sec", "t_video_sec"),
@@ -147,10 +241,40 @@ enum CaptureDownstreamCandidateManifest {
                 != expectedCoordinateFrameSessionId {
                 errors.append("downstream_candidate_row_coordinate_frame_mismatch:\(ordinal)")
             }
+            if candidate["site_frame_id"] as? String != expectedCoordinateFrameSessionId
+                || candidate["site_frame_definition"] as? String
+                    != "arkit_world_origin_at_session_start"
+                || candidate["transform_semantics"] as? String
+                    != "row_major_camera_to_site"
+                || candidate["units"] as? String != "meters"
+                || candidate["handedness"] as? String != "right_handed"
+                || candidate["up_axis"] as? String != "Y"
+                || candidate["gravity_aligned"] as? Bool != true {
+                errors.append("downstream_candidate_site_frame_semantics_invalid:\(ordinal)")
+            }
             if !isValidTransformMatrix(candidate["T_site_camera"])
                 || !isValidTransformMatrix(candidate["T_world_camera"])
                 || !matricesEqual(candidate["T_site_camera"], candidate["T_world_camera"]) {
                 errors.append("downstream_candidate_camera_to_site_transform_invalid:\(ordinal)")
+            }
+            let frameId = candidate["frame_id"] as? String ?? ""
+            let poseFrameId = candidate["pose_frame_id"] as? String ?? ""
+            guard let sourceFrame = framesById[frameId],
+                  let sourcePose = posesById[poseFrameId] else {
+                errors.append("downstream_candidate_source_observation_missing:\(ordinal)")
+                continue
+            }
+            if number(candidate["arkit_frame_row_ordinal"])?.intValue
+                != frameOrdinals[frameId]
+                || number(candidate["arkit_pose_row_ordinal"])?.intValue
+                    != poseOrdinals[poseFrameId] {
+                errors.append("downstream_candidate_source_row_ordinal_invalid:\(ordinal)")
+            }
+            if !matricesEqual(
+                candidate["T_site_camera"],
+                sourcePose["T_site_camera"] ?? sourcePose["T_world_camera"]
+            ) {
+                errors.append("downstream_candidate_pose_binding_mismatch:\(ordinal)")
             }
             let trackingState = candidate["tracking_state"] as? String ?? "unknown"
             let relocalization = candidate["relocalization_event"] as? Bool ?? false
@@ -165,6 +289,26 @@ enum CaptureDownstreamCandidateManifest {
                   ["cx", "cy"].allSatisfy({ number(intrinsics[$0]) != nil }) else {
                 errors.append("downstream_candidate_intrinsics_invalid:\(ordinal)")
                 continue
+            }
+            guard let sourceIntrinsics = sourceFrame["intrinsics"] as? [NSNumber],
+                  sourceIntrinsics.count == 9,
+                  let resolution = sourceFrame["image_resolution"] as? [NSNumber],
+                  resolution.count == 2,
+                  intrinsics["matrix_column_major"] as? [NSNumber] == sourceIntrinsics,
+                  number(intrinsics["width"])?.intValue == resolution[0].intValue,
+                  number(intrinsics["height"])?.intValue == resolution[1].intValue,
+                  intrinsics["authority"] as? String
+                    == "arkit_arframe_exact_per_observation" else {
+                errors.append("downstream_candidate_intrinsics_binding_mismatch:\(ordinal)")
+                continue
+            }
+            if candidate["camera_calibration_digest"] as? String
+                != canonicalDigest(of: intrinsics) {
+                errors.append("downstream_candidate_calibration_digest_invalid:\(ordinal)")
+            }
+            if candidate["raw_observation_authority"] as? Bool != true
+                || candidate["downstream_artifact_authority"] as? Bool != false {
+                errors.append("downstream_candidate_row_authority_invalid:\(ordinal)")
             }
         }
         return errors

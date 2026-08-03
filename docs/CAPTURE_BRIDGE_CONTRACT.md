@@ -21,6 +21,20 @@ The bridge must preserve the raw-vs-derived distinction:
 - downstream geometry remains derived and must not be mislabeled as raw evidence
 - Android XR projected glasses currently use `android_xr_glasses` as a video-first profile and must not promote ARCore sidecars into pose, depth, geospatial, or payout proof
 
+## Additive V3.2 iPhone Note
+
+For a V3.2 iPhone bundle, the bridge preserves references to
+`sync_map.jsonl`, `video_frame_retention.jsonl`, and
+`downstream_candidate_manifest.json`. The latter is a provider-neutral raw
+observation registry; it is not authorization to upload to any reconstruction
+provider.
+
+Bridge JPEGs remain compatibility previews sampled by the bridge extraction
+profile. A nearest synchronization row is approximate and must not be treated
+as the exact retained source observation. Only an exact decoded-PTS match may
+carry a candidate ID. Pipeline reconstruction selection consumes the raw
+candidate registry using an explicit task/site evidence profile.
+
 ## Input Paths
 
 Canonical:
@@ -45,6 +59,10 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   capture_context.json
   capture_upload_complete.json
   task_hypothesis.json
+  rights_consent.json
+  sync_map.jsonl
+  video_frame_retention.jsonl
+  downstream_candidate_manifest.json
   walkthrough.mov
   motion.jsonl
   arkit/...
@@ -63,7 +81,7 @@ scenes/{scene_id}/captures/{capture_id}/raw/
   "height": 1440,
   "capture_start_epoch_ms": 1702137045123,
   "has_lidar": true,
-  "capture_schema_version": "3.1.0",
+  "capture_schema_version": "3.2.0",
   "capture_source": "iphone|android|glasses",
   "capture_tier_hint": "tier1_iphone|tier2_android|tier2_glasses",
   "capture_profile_id": "iphone_arkit_lidar|iphone_arkit_non_lidar|android_arcore_depth|android_arcore_pose_only|android_camera_only|glasses_pov|glasses_pov_companion_phone|android_xr_glasses",
@@ -192,6 +210,9 @@ scenes/{scene_id}/images/{capture_id}_keyframe.jpg
     "arkit_confidence_prefix_uri": "gs://...",
     "arkit_meshes_prefix_uri": "gs://...",
     "motion_uri": "gs://...",
+    "sync_map_uri": "gs://...",
+    "video_frame_retention_uri": "gs://...",
+    "downstream_candidate_manifest_uri": "gs://...",
     "artifact_validity": {
       "arkit_poses": true,
       "arkit_intrinsics": true,

@@ -37,6 +37,9 @@ For V3.2 bundles:
   or `dropped_backpressure` with a precise reason;
 - `sync_map.jsonl` contains only successfully retained frames, paired by ordinal
   with decoded video sample presentation timestamps;
+- `downstream_candidate_manifest.json` binds every retained decoded RGB
+  observation to its exact source PTS, ARKit pose, per-frame intrinsics, and
+  coordinate-frame identity without selecting or authorizing a provider;
 - the first retained video frame is both `t_video_sec = 0` and
   `t_capture_sec = 0`; if that first frame cannot be retained, capture fails and
   requests recapture;
@@ -44,6 +47,19 @@ For V3.2 bundles:
   closed on count, ordering, timestamp, or source-frame binding mismatch.
 - finalization drains the AR and motion writer queues before deriving or hashing
   synchronization artifacts.
+- `decoded_source_pts_sec` preserves the presentation timestamp read from the
+  finalized video, while `t_video_sec` is that timestamp minus
+  `video_track.json.video_start_pts_sec`;
+- every retained observation is indexed in
+  `downstream_candidate_manifest.json`. This is a provider-neutral registry,
+  not a frame selection, provider authorization, reconstruction result, or
+  qualification;
+- each pose row declares `T_site_camera` as the exact alias of
+  `T_world_camera`, plus the site-frame definition, matrix layout, units,
+  handedness, gravity alignment, and reset segment;
+- `rights_consent.json` explicitly declares privacy processing, retention,
+  revocation, and that the mobile bundle does not authorize a third-party
+  provider upload.
 
 ## Goals
 
@@ -80,6 +96,8 @@ raw/
   walkthrough.mov                            required
   sync_map.jsonl                             required
   video_frame_retention.jsonl                required when capture_schema_version>=3.2
+  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
+  downstream_candidate_manifest.json        required when capture_schema_version>=3.2
   motion.jsonl                               required
   semantic_anchor_observations.jsonl         required
   reconstruction_qualification_request.json required for canonical iPhone closed-loop capture
@@ -786,7 +804,9 @@ Example:
   "dropped_frame_count": 3,
   "nominal_fps": 30.0,
   "contains_vfr": false,
-  "video_start_pts_sec": 0.0,
+  "video_start_pts_sec": 8123.3371,
+  "video_time_origin": "first_decoded_sample_presentation_timestamp",
+  "t_video_semantics": "decoded_source_pts_minus_video_start_pts",
   "width": 1920,
   "height": 1440,
   "orientation": "portrait",
@@ -815,12 +835,13 @@ Required per-line fields:
 - `drop_reason`
 - `encoded_frame_index`
 - `t_video_sec`
+- `decoded_source_pts_sec` for retained V3.2 rows
 
 Retained rows bind to a decoded frame index and decoded PTS. Dropped rows retain
 their source frame identity but use null encoded-frame and video-time fields.
 
 ```json
-{"write_attempt_index":741,"source_timestamp_sec":8123.3371,"frame_id":"000742","t_capture_sec":24.733333,"retention_status":"retained","drop_reason":null,"encoded_frame_index":739,"t_video_sec":24.733333}
+{"write_attempt_index":741,"source_timestamp_sec":8123.3371,"frame_id":"000742","t_capture_sec":24.733333,"retention_status":"retained","drop_reason":null,"encoded_frame_index":739,"t_video_sec":24.733333,"decoded_source_pts_sec":8148.070433}
 {"write_attempt_index":742,"source_timestamp_sec":8123.3704,"frame_id":"000743","t_capture_sec":24.766666,"retention_status":"dropped_backpressure","drop_reason":"asset_writer_input_not_ready","encoded_frame_index":null,"t_video_sec":null}
 ```
 
@@ -889,16 +910,80 @@ Required per-line fields:
 - `delta_ms`
 - `encoded_frame_index` for V3.2
 - `write_attempt_index` for V3.2
+- `decoded_source_pts_sec` for V3.2
+- `decoded_time_origin_pts_sec` for V3.2
 
 Example line:
 
 ```json
-{"frame_id":"000742","t_video_sec":24.733333,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","sync_status":"encoded_decoded_pts_match","delta_ms":0.0,"encoded_frame_index":739,"write_attempt_index":741}
+{"frame_id":"000742","t_video_sec":24.733333,"decoded_source_pts_sec":8148.070433,"decoded_time_origin_pts_sec":8123.3371,"t_capture_sec":24.733333,"t_monotonic_ns":91234567890123,"pose_frame_id":"000742","sync_status":"encoded_decoded_pts_match","delta_ms":0.0,"encoded_frame_index":739,"write_attempt_index":741}
 ```
 
 `exact_frame_id_match` does not prove video retention or decoded PTS alignment
 and is not valid for V3.2. A compatibility-only projection from AR rows uses
 `unverified_ar_frame_only` and must be treated as weaker evidence.
+
+### `downstream_candidate_manifest.json`
+
+Purpose:
+- Provide a deterministic, provider-neutral registry from every retained RGB
+  observation to the immutable video, decoded source PTS, ARKit camera pose,
+  per-frame intrinsics, tracking state, and optional depth/confidence files.
+- Let Pipeline construct Postshot/COLMAP inputs without guessing frame order,
+  using nominal frame rate, or silently selecting a provider in the client.
+- Bind rights, revocation, redaction, and separate provider-authorization
+  requirements before any derived processing.
+
+Required top-level fields:
+- `schema_version = "downstream_candidate_manifest.v1"`
+- `manifest_digest`
+- `source_video_uri` and `source_video_sha256`
+- `coordinate_frame_session_id`
+- `source_video_authority`, `decoded_timing_authority`, and `candidate_order`
+- `selection_contract`, `provider_neutrality`, `allowed_use_scope`, and
+  `claim_boundary`
+- `candidate_count` and `candidates`
+
+Each candidate binds `decoded_source_pts_sec`, capture-relative time,
+`frame_id`, `pose_frame_id`, `T_site_camera`, camera intrinsics, tracking and
+relocalization state, and deterministic output-image addressing. Candidate
+order and count must exactly match `sync_map.jsonl`.
+
+This registry is capture truth plus deterministic addressing. It does not
+qualify reconstruction appearance, registration, metric scale, collision
+geometry, physics, task success, provider selection, or provider upload.
+
+### `downstream_candidate_manifest.json`
+
+Purpose:
+- Give downstream code a deterministic, immutable address for every retained
+  decoded RGB observation and its exact ARKit pose/intrinsics row.
+- Keep task/site frame selection and reconstruction-provider authorization out
+  of the capture client.
+
+Required top-level fields include `schema_version =
+"downstream_candidate_manifest.v1"`, identity and coordinate-frame IDs,
+`source_video_uri`, `source_video_sha256`, `candidate_count`,
+`selection_contract`, `provider_neutrality`, `allowed_use_scope`,
+`claim_boundary`, `candidates`, and a canonical `manifest_digest`.
+
+Each candidate binds a unique candidate ID and safe prospective output path to
+the decoded ordinal/source PTS, encoder write attempt, raw frame and pose IDs,
+`T_site_camera`, per-observation ARKit intrinsics, calibration digest, tracking
+state, and optional depth/confidence references. The prospective image need not
+already exist in the raw bundle.
+
+The manifest must state that direct mobile/provider upload and third-party
+provider authorization are false. Pipeline selection requires an explicit,
+digest-bound task/site evidence profile. If none exists, the exact blocker is
+`task_site_evidence_profile_with_frame_selection_parameters`; Capture does not
+invent a default.
+
+The manifest proves only deterministic addressing of captured observations. It
+does not prove provider readiness, reconstruction quality, metric scale,
+collision/physics validity, Task Evaluation Run success, or physical transfer.
+A compact versioned example is under
+`docs/fixtures/capture_raw_contract_v3_2/`.
 
 ### `motion.jsonl`
 

@@ -21,9 +21,19 @@ struct PipelineContractTests {
             t_device_sec: 0.0,
             t_monotonic_ns: 123_456_000_000,
             T_world_camera: transform,
+            T_site_camera: transform,
+            site_frame_id: "cfs-1",
+            site_frame_definition: "arkit_world_origin_at_initial_session_run",
+            transform_semantics: "row_major_camera_to_site",
+            units: "meters",
+            handedness: "right_handed",
+            up_axis: "+Y_gravity_aligned",
+            gravity_aligned: true,
+            coordinate_frame_segment_index: 0,
             tracking_state: "normal",
             tracking_reason: nil,
             world_mapping_status: "mapped",
+            relocalization_event: false,
             coordinate_frame_session_id: "cfs-1"
         )
 
@@ -39,6 +49,10 @@ struct PipelineContractTests {
         #expect((json["t_monotonic_ns"] as? NSNumber)?.int64Value == 123_456_000_000)
         #expect((json["transform"] as? [[Double]])?.count == 4)
         #expect((json["T_world_camera"] as? [[Double]])?.count == 4)
+        #expect((json["T_site_camera"] as? [[Double]])?.count == 4)
+        #expect(json["site_frame_id"] as? String == "cfs-1")
+        #expect(json["transform_semantics"] as? String == "row_major_camera_to_site")
+        #expect(json["units"] as? String == "meters")
     }
 
     @Test

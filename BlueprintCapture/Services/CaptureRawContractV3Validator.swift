@@ -274,10 +274,21 @@ final class CaptureRawContractV3Validator {
                 retentionRows: videoFrameRetention,
                 errors: &errors
             )
+            let videoHashPath = (manifest["video_uri"] as? String)?.replacingOccurrences(
+                of: "raw/",
+                with: "",
+                options: [.anchored]
+            )
+            let expectedVideoSHA256 = videoHashPath.flatMap {
+                (hashes?["artifacts"] as? [String: String])?[$0]
+            }
             errors.append(contentsOf: CaptureDownstreamCandidateManifest.validationErrors(
                 manifest: downstreamCandidateManifest,
                 syncRows: syncMap,
+                frameRows: frames,
+                poseRows: poses,
                 expectedVideoURI: manifest["video_uri"] as? String,
+                expectedSourceVideoSHA256: expectedVideoSHA256,
                 expectedCoordinateFrameSessionId: expectedCfs,
                 rightsConsent: rightsConsent
             ))
