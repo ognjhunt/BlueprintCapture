@@ -2,6 +2,30 @@ import Foundation
 import Testing
 @testable import BlueprintCapture
 
+@Test
+func deviceCalibrationEvaluatorQualifiesOnlyBoundedKnownRigMeasurements() throws {
+    let samples = (0..<DeviceCalibrationEvaluator.minimumSamples).map { index in
+        1.002 + Double((index % 5) - 2) * 0.0005
+    }
+    let profile = try #require(DeviceCalibrationEvaluator.evaluate(
+        rigId: "rig-a",
+        hardwareModelIdentifier: "iPhone-test",
+        referenceDistanceM: 1.0,
+        depthSamplesM: samples,
+        now: Date(timeIntervalSince1970: 1_700_000_000)
+    ))
+    #expect(profile.status == .qualified)
+    #expect(profile.relativeError < DeviceCalibrationEvaluator.maximumRelativeError)
+
+    let rejected = try #require(DeviceCalibrationEvaluator.evaluate(
+        rigId: "rig-a",
+        hardwareModelIdentifier: "iPhone-test",
+        referenceDistanceM: 1.0,
+        depthSamplesM: Array(repeating: 1.05, count: DeviceCalibrationEvaluator.minimumSamples)
+    ))
+    #expect(rejected.status == .rejected)
+}
+
 private func makeRawManifestData(
     sceneId: String,
     captureId: String,

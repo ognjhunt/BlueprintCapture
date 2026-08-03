@@ -939,6 +939,13 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             json["site_identity"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(siteIdentity))
         }
         json["capture_topology"] = try JSONSerialization.jsonObject(with: JSONEncoder.snakeCase.encode(topology))
+        if fileManager.fileExists(atPath: directory.appendingPathComponent("device_calibration.json").path) {
+            json["device_calibration_uri"] = "device_calibration.json"
+        }
+        json["reconstruction_qualification_request_uri"] = "reconstruction_qualification_request.json"
+        if fileManager.fileExists(atPath: directory.appendingPathComponent("arkit/meshes", isDirectory: true).path) {
+            json["arkit_mesh_manifest_uri"] = "arkit/mesh_manifest.json"
+        }
         if let captureMode = request.metadata.captureMode {
             // Resolve the mode based on actual evidence at finalization time.
             let resolvedMode = CaptureBundleContext.worldModelCandidate(for: request, evidence: evidence)
@@ -1360,8 +1367,88 @@ final class CaptureBundleFinalizer: CaptureBundleFinalizerProtocol {
             encoding: .utf8
         )
 
+        try writeReconstructionQualificationRequest(in: directory, topology: topology)
         try writeVideoTrackFile(in: directory, mode: mode)
         try writeHashesAndProvenance(in: directory, request: request)
+    }
+
+    private func writeReconstructionQualificationRequest(
+        in directory: URL,
+        topology: CaptureTopologyMetadata
+    ) throws {
+        let frameRows = readJSONLines(from: directory.appendingPathComponent("arkit/frame_quality.jsonl"))
+        let trackingStates = frameRows.compactMap { stringValue(in: $0, keys: ["tracking_state", "trackingState"]) }
+        let normalTrackingCount = trackingStates.filter { $0 == "normal" }.count
+        let normalTrackingFraction = trackingStates.isEmpty
+            ? nil
+            : Double(normalTrackingCount) / Double(trackingStates.count)
+        let relocalizationCount = frameRows.filter {
+            boolValue(in: $0, keys: ["relocalization_event", "relocalizationEvent"]) == true
+        }.count
+        let depthFractions = frameRows.compactMap {
+            doubleValue(in: $0, keys: ["depth_valid_fraction", "depthValidFraction"])
+        }.sorted()
+        let medianDepthValidFraction = depthFractions.isEmpty ? nil : depthFractions[depthFractions.count / 2]
+        let meshManifestURL = directory.appendingPathComponent("arkit/mesh_manifest.json")
+        let meshManifest = (try? JSONSerialization.jsonObject(with: Data(contentsOf: meshManifestURL))) as? [String: Any]
+        let planeRows = readJSONLines(from: directory.appendingPathComponent("arkit/plane_observations.jsonl"))
+        let horizontalPlaneCount = planeRows.filter {
+            stringValue(in: $0, keys: ["alignment"]) == "horizontal"
+        }.count
+        let calibrationURL = directory.appendingPathComponent("device_calibration.json")
+        let calibration = (try? JSONSerialization.jsonObject(with: Data(contentsOf: calibrationURL))) as? [String: Any]
+        let calibrationQualified = (calibration?["status"] as? String) == "qualified"
+
+        var smallestMissingEvidence: [String] = []
+        if topology.loopClosureDetected != true {
+            smallestMissingEvidence.append("return_to_start_hold_or_targeted_return_segment_recapture")
+        }
+        if normalTrackingFraction == nil || relocalizationCount > 0 {
+            smallestMissingEvidence.append("targeted_recapture_of_tracking_degraded_segment")
+        }
+        if medianDepthValidFraction == nil || (medianDepthValidFraction ?? 0) <= 0 {
+            smallestMissingEvidence.append("targeted_depth_coverage_recapture")
+        }
+        if !calibrationQualified {
+            smallestMissingEvidence.append("current_device_known_rig_calibration_if_sensor_scale_gate_requires_it")
+        }
+
+        let requestedChecks: [[String: Any]] = [
+            ["check": "loop_closure", "capture_observation_available": topology.loopClosureDetected == true],
+            ["check": "tracking_quality", "capture_observation_available": !trackingStates.isEmpty],
+            ["check": "depth_reprojection_error", "capture_observation_available": false],
+            ["check": "mesh_coverage", "capture_observation_available": meshManifest != nil],
+            ["check": "floor_support_continuity", "capture_observation_available": horizontalPlaneCount > 0],
+            ["check": "physical_collision_probes", "capture_observation_available": false],
+            ["check": "postshot_registered_reconstruction", "capture_observation_available": false],
+        ]
+        let payload: [String: Any] = [
+            "schema_version": "reconstruction_qualification_request.v1",
+            "coordinate_frame_session_id": topology.coordinateFrameSessionId ?? topology.captureSessionId,
+            "capture_workflow": "single_guided_closed_loop_walk",
+            "capture_observations": [
+                "loop_closure_detected": topology.loopClosureDetected ?? false,
+                "loop_closure_translation_residual_m": topology.loopClosureTranslationResidualM ?? NSNull(),
+                "loop_closure_rotation_residual_deg": topology.loopClosureRotationResidualDeg ?? NSNull(),
+                "loop_closure_max_excursion_m": topology.loopClosureMaxExcursionM ?? NSNull(),
+                "normal_tracking_fraction": normalTrackingFraction ?? NSNull(),
+                "relocalization_count": relocalizationCount,
+                "median_depth_valid_fraction": medianDepthValidFraction ?? NSNull(),
+                "mesh_triangle_count": meshManifest?["triangle_count"] ?? 0,
+                "horizontal_plane_observation_count": horizontalPlaneCount,
+                "device_calibration_qualified": calibrationQualified,
+            ],
+            "requested_checks": requestedChecks,
+            "threshold_source": "task_site_evidence_profile_digest_bound",
+            "qualification_authority": "blueprint_pipeline",
+            "capture_decision": "abstain_pending_downstream_measurements",
+            "smallest_missing_evidence": smallestMissingEvidence,
+            "collision_artifact_status": "candidate_only",
+            "automatic_promotion_rule": "qualify_only_when_every_requested_check_passes_under_the_bound_task_site_profile",
+        ]
+        let url = directory.appendingPathComponent("reconstruction_qualification_request.json")
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .withoutEscapingSlashes])
+        try data.write(to: url, options: .atomic)
     }
 
     private func writeVideoTrackFile(in directory: URL, mode: CaptureBundleFinalizationMode) throws {

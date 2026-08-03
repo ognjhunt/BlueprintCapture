@@ -2731,7 +2731,7 @@ private extension VideoCaptureManager {
     static func highConfidenceCenterDepthSample(from frame: ARFrame) -> Double? {
         guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return nil }
         let depth = depthData.depthMap
-        let confidence = depthData.confidenceMap
+        guard let confidence = depthData.confidenceMap else { return nil }
         CVPixelBufferLockBaseAddress(depth, .readOnly)
         CVPixelBufferLockBaseAddress(confidence, .readOnly)
         defer {
