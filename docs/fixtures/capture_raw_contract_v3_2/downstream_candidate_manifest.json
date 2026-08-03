@@ -55,7 +55,7 @@
   },
   "coordinate_frame_session_id": "cfs_fixture_001",
   "decoded_timing_authority": "sync_map_decoded_sample_presentation_timestamps",
-  "manifest_digest": "sha256:9cd3c3adede4cc68b8e3b8cfa31e7417d0e5dcb3a680048b6bd945733ee25456",
+  "manifest_digest": "sha256:a8f26287f7bc453ec4e8475841b00675d7269c8fb81a0117c30f5075d251e9d4",
   "provider_neutrality": {
     "mobile_app_direct_provider_upload_allowed": false,
     "provider_authorization_status": "not_granted_by_capture_manifest",

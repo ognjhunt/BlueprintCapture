@@ -165,6 +165,26 @@ test("bridge rejects provider authorization in a candidate manifest", () => {
   assert.ok(index.errors.includes("downstream_candidate_provider_neutrality_invalid"));
 });
 
+test("bridge rejects qualified claims and tampered camera calibration", () => {
+  const fixture = JSON.parse(readFileSync(
+    "../../docs/fixtures/capture_raw_contract_v3_2/downstream_candidate_manifest.json",
+    "utf8"
+  )) as Record<string, unknown>;
+  fixture.claim_boundary = {
+    raw_capture_remains_authoritative: true,
+    candidate_manifest_qualifies_reconstruction: false,
+    candidate_manifest_qualifies_metric_scale: true,
+    candidate_manifest_qualifies_collision_or_physics: false,
+    candidate_manifest_proves_task_success: false,
+  };
+  const candidates = fixture.candidates as Array<Record<string, unknown>>;
+  candidates[0].camera_calibration_digest = `sha256:${"0".repeat(64)}`;
+  const index = buildDownstreamCandidateIndex(fixture);
+  assert.equal(index.valid, false);
+  assert.ok(index.errors.includes("downstream_candidate_claim_boundary_invalid"));
+  assert.ok(index.errors.includes("downstream_candidate_row_invalid:0"));
+});
+
 test("chooseKeyframeCandidate uses middle-third and sharpness proxy", () => {
   const files = ["000001.jpg", "000002.jpg", "000003.jpg", "000004.jpg", "000005.jpg", "000006.jpg"];
   const sizes: Record<string, number> = {
