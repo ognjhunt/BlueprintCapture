@@ -37,9 +37,6 @@ For V3.2 bundles:
   or `dropped_backpressure` with a precise reason;
 - `sync_map.jsonl` contains only successfully retained frames, paired by ordinal
   with decoded video sample presentation timestamps;
-- `downstream_candidate_manifest.json` binds every retained decoded RGB
-  observation to its exact source PTS, ARKit pose, per-frame intrinsics, and
-  coordinate-frame identity without selecting or authorizing a provider;
 - the first retained video frame is both `t_video_sec = 0` and
   `t_capture_sec = 0`; if that first frame cannot be retained, capture fails and
   requests recapture;
@@ -949,16 +946,16 @@ calibration digest, tracking/relocalization state, and optional depth/confidence
 references. Candidate order and count must exactly match `sync_map.jsonl`. The
 prospective image need not already exist in the raw bundle.
 
-The manifest must state that direct mobile/provider upload and third-party
-provider authorization are false. Pipeline selection requires an explicit,
-digest-bound task/site evidence profile. If none exists, the exact blocker is
+Pipeline selection requires an explicit, digest-bound task/site evidence
+profile. If none exists, the exact blocker is
 `task_site_evidence_profile_with_frame_selection_parameters`; Capture does not
-invent a default.
+invent a default. Direct mobile/provider upload and third-party provider
+authorization remain false.
 
-The manifest is capture truth plus deterministic addressing. It does not prove
-provider readiness, reconstruction appearance or registration, metric scale,
-collision/physics validity, Task Evaluation Run success, or physical transfer.
-A compact versioned example is under
+This registry is capture truth plus deterministic addressing. It does not
+qualify provider readiness, reconstruction appearance or registration, metric
+scale, collision/physics validity, Task Evaluation Run success, or physical
+transfer. A compact versioned example is under
 `docs/fixtures/capture_raw_contract_v3_2/`.
 
 ### `motion.jsonl`
