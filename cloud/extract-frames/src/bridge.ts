@@ -475,6 +475,10 @@ export function buildCaptureBundleReferences(input: {
   bucketName: string;
   rawPrefix: string;
   availability: ArtifactAvailability;
+  declaredReferences?: {
+    reconstructionQualificationRequest?: boolean;
+    deviceCalibration?: boolean;
+  };
 }): Record<string, unknown> {
   const base = `gs://${input.bucketName}/${input.rawPrefix}`;
   const captureBundle: Record<string, unknown> = {
@@ -495,6 +499,7 @@ export function buildCaptureBundleReferences(input: {
   }
   if (input.availability.arkit_meshes) {
     captureBundle.arkit_meshes_prefix_uri = `${base}/arkit/meshes`;
+    captureBundle.arkit_mesh_manifest_uri = `${base}/arkit/mesh_manifest.json`;
   }
   if (input.availability.motion) {
     captureBundle.motion_uri = `${base}/motion.jsonl`;
@@ -539,6 +544,13 @@ export function buildCaptureBundleReferences(input: {
   if (input.availability.companion_phone_calibration) {
     captureBundle.companion_phone_calibration_uri =
       `${base}/companion_phone/calibration.json`;
+  }
+  if (input.declaredReferences?.reconstructionQualificationRequest) {
+    captureBundle.reconstruction_qualification_request_uri =
+      `${base}/reconstruction_qualification_request.json`;
+  }
+  if (input.declaredReferences?.deviceCalibration) {
+    captureBundle.device_calibration_uri = `${base}/device_calibration.json`;
   }
 
   return captureBundle;

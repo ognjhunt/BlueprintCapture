@@ -1126,7 +1126,7 @@ struct CaptureBundleAndInferenceTests {
         #expect(scaffolding.contains("hub_return_plan"))
         #expect(scaffolding.contains("critical_zone_revisits"))
         #expect(coveragePlan.contains(where: { $0.contains("hub") || $0.contains("Hub") }))
-        #expect(review?.nextActionLabel == "Retake the main walkthrough")
+        #expect(review?.nextActionLabel == "Retake the guided closed-loop walk")
         #expect(review?.missingItems.contains(where: { $0.contains("Hold still at the entrance") }) == true)
         #expect(pendingRequest?.metadata.sceneMemory?.continuityScore == review.map { Double($0.score) / 100.0 })
     }
@@ -1335,7 +1335,7 @@ struct CaptureBundleAndInferenceTests {
         let configured = await MainActor.run { viewModel.siteWorldWorkflowConfigured }
         let criticalZones = await MainActor.run { viewModel.selectedCriticalZoneAnchors }
 
-        #expect(currentRole == "primary")
+        #expect(currentRole == "guided_closed_loop")
         #expect(scale == .medium)
         #expect(configured == false)
         #expect(criticalZones.isEmpty)

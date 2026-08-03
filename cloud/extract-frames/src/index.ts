@@ -2529,6 +2529,13 @@ export const extractFrames = onObjectFinalized(
         bucketName,
         rawPrefix: pathInfo.rawPrefix,
         availability: claimedArtifactEvaluation.valid,
+        declaredReferences: {
+          reconstructionQualificationRequest:
+            asString(manifest?.reconstruction_qualification_request_uri) ===
+            "reconstruction_qualification_request.json",
+          deviceCalibration:
+            asString(manifest?.device_calibration_uri) === "device_calibration.json",
+        },
       }),
       site_submission_id: asString(manifest?.site_submission_id) ?? null,
       buyer_request_id: asString(manifest?.buyer_request_id) ?? null,

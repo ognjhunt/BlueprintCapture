@@ -270,8 +270,12 @@ test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
       arkit_intrinsics: false,
       arkit_depth: true,
       arkit_confidence: false,
-      arkit_meshes: false,
+      arkit_meshes: true,
       motion: true,
+    },
+    declaredReferences: {
+      reconstructionQualificationRequest: true,
+      deviceCalibration: true,
     },
   });
 
@@ -285,4 +289,16 @@ test("buildCaptureBundleReferences only emits URIs for valid artifacts", () => {
     "gs://bucket/scenes/scene/captures/capture/raw/arkit/depth"
   );
   assert.equal(captureBundle.motion_uri, "gs://bucket/scenes/scene/captures/capture/raw/motion.jsonl");
+  assert.equal(
+    captureBundle.arkit_mesh_manifest_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/arkit/mesh_manifest.json"
+  );
+  assert.equal(
+    captureBundle.reconstruction_qualification_request_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/reconstruction_qualification_request.json"
+  );
+  assert.equal(
+    captureBundle.device_calibration_uri,
+    "gs://bucket/scenes/scene/captures/capture/raw/device_calibration.json"
+  );
 });
