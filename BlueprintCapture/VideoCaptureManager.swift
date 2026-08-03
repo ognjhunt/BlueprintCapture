@@ -424,6 +424,11 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         supportsARCapture && ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
     }
 
+    private var isCaptureRecording: Bool {
+        if case .recording = captureState { return true }
+        return false
+    }
+
     override init() {
         super.init()
         arSession.delegate = self
@@ -580,7 +585,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
             deviceCalibrationState = .failed("This device does not expose ARKit scene depth for calibration.")
             return
         }
-        guard !captureState.isRecording else {
+        guard !isCaptureRecording else {
             deviceCalibrationState = .failed("Finish the active recording before calibrating this device.")
             return
         }
@@ -604,7 +609,7 @@ final class VideoCaptureManager: NSObject, ObservableObject {
         calibrationReferenceDistanceM = nil
         calibrationDepthSamplesM = []
         deviceCalibrationState = .idle
-        if !captureState.isRecording {
+        if !isCaptureRecording {
             stopARSession()
         }
     }
@@ -2117,7 +2122,7 @@ extension VideoCaptureManager: @preconcurrency ARSessionDelegate {
         calibrationRigId = nil
         calibrationReferenceDistanceM = nil
         calibrationDepthSamplesM = []
-        if !captureState.isRecording {
+        if !isCaptureRecording {
             stopARSession()
         }
     }
