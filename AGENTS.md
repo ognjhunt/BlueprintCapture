@@ -2,7 +2,10 @@
 
 ## Mission
 
-`BlueprintCapture` is the evidence-capture client. It records truthful site evidence and uploads canonical capture bundles for downstream processing.
+`BlueprintCapture` is the evidence-capture client for Blueprint's sole active
+program, Arm Decision Proof v1. It must record the truthful structured capture
+for one previously unseen fixed-arm workcell without inventing downstream
+qualification.
 
 This repo must stay aligned with:
 
@@ -18,6 +21,16 @@ This repo must stay aligned with:
 
 ## Product Rules
 
+- Arm Decision Proof v1 is the sole active program. Capture work must unblock its
+  day-14 immutable-capture or registration evidence, or preserve required
+  compatibility. Humanoid, broad marketplace, unrelated capture-mode, and growth
+  work is frozen.
+- The immediate program is public-reference harness first. Do not build new
+  capture/reconstruction features until ADP-008 passes and a measured harness or
+  partner blocker identifies a missing measurement existing inputs cannot supply.
+- Existing captures may exercise downstream Pipeline seams but remain
+  `development_only`; they cannot prove the new partner capture, task truth,
+  robot registration, task physics, sim-to-real fidelity, or partner value.
 - Qualification comes after truthful evidence capture.
 - Preserve raw capture truth, timestamps, motion, poses, intrinsics, depth, and device metadata when available.
 - Do not fabricate live supply, payout readiness, provider readiness, or rights states.
@@ -58,7 +71,10 @@ how all three blocks diverged on 2026-07-29 without any gate firing.
 
 ## Working Rules
 
-- Favor truthful capture, bundle integrity, upload reliability, and explicit user state.
+- Favor the smallest truthful one-walk fixed-arm workcell capture, bundle
+  integrity, decoded-time alignment, upload reliability, and explicit user state.
+- Require every task to name the Arm Decision Proof backlog item, gate, observed
+  blocker, and completion artifact it serves.
 - Keep contracts compatible with `BlueprintCapturePipeline`.
 - Avoid UI or backend behavior that implies unsupported provider or payout readiness.
 - Treat capture bundle correctness as a first-order requirement.
