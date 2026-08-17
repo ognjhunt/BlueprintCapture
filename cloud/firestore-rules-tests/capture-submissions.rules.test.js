@@ -488,3 +488,64 @@ describe("capture_submissions transitions", () => {
     await assertFails(submissionDoc(anonDb()).get());
   });
 });
+
+// The Pipeline reports reconstruction outcomes onto this same document via the
+// Admin SDK. A capturer must not be able to author or edit that verdict, and —
+// less obviously — a server write must not lock the capturer out of its own
+// document, because the update rule validates the whole resulting doc.
+describe("capture_submissions server-owned reconstruction field", () => {
+  const reconstruction = {
+    schema_version: "capture_reconstruction_status.v1",
+    capture_id: CAPTURE_ID,
+    state: "published",
+  };
+
+  async function serverWritesReconstruction(captureId = CAPTURE_ID) {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await context
+        .firestore()
+        .collection("capture_submissions")
+        .doc(captureId)
+        .set({ reconstruction }, { merge: true });
+    });
+  }
+
+  it("denies a client creating a submission that declares itself reconstructed", async () => {
+    await assertFails(
+      submissionDoc(ownerDb()).set({
+        ...androidCreatePayload(),
+        reconstruction,
+      }),
+    );
+  });
+
+  it("denies a client editing the reconstruction verdict", async () => {
+    await assertSucceeds(submissionDoc(ownerDb()).set(androidCreatePayload()));
+    await serverWritesReconstruction();
+    await assertFails(
+      submissionDoc(ownerDb()).set(
+        { reconstruction: { ...reconstruction, state: "published_by_me" } },
+        { merge: true },
+      ),
+    );
+  });
+
+  it("still allows normal client updates after the server reports a result", async () => {
+    // Regression: the update rule checks the whole resulting document, so a
+    // server-owned field that is not excluded would deny every later client
+    // write — including an upload retry.
+    await assertSucceeds(submissionDoc(ownerDb()).set(androidCreatePayload()));
+    await serverWritesReconstruction();
+    await assertSucceeds(
+      submissionDoc(ownerDb()).set(completionMerge(), { merge: true }),
+    );
+  });
+
+  it("still allows a client failure transition after a server result", async () => {
+    await assertSucceeds(submissionDoc(ownerDb()).set(androidCreatePayload()));
+    await serverWritesReconstruction();
+    await assertSucceeds(
+      submissionDoc(ownerDb()).set(failureMerge(), { merge: true }),
+    );
+  });
+});
