@@ -225,8 +225,21 @@ service cloud.firestore {
         );
     }
 
+    // Fields only the Pipeline (Admin SDK) may write. They are excluded from
+    // the client shape check below so that a server write does not lock the
+    // capturer out of its own document: the update rule validates the whole
+    // resulting doc, so without this exclusion the first server-written field
+    // would make every later client update fail hasOnly().
+    function captureSubmissionServerOwnedKeys() {
+      return [
+        'reconstruction'
+      ];
+    }
+
     function hasOnlyCaptureSubmissionClientCreateKeys(data) {
-      return data.keys().hasOnly(captureSubmissionClientCreateKeys());
+      return data.keys()
+        .removeAll(captureSubmissionServerOwnedKeys())
+        .hasOnly(captureSubmissionClientCreateKeys());
     }
 
     function captureSubmissionIsClientUploaded(data) {
@@ -387,6 +400,8 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && resource.data.creator_id == request.auth.uid;
       allow create: if isOwner(request.resource.data.creator_id)
+        // A device may not declare its own capture reconstructed.
+        && !request.resource.data.keys().hasAny(captureSubmissionServerOwnedKeys())
         && hasValidClientCaptureSubmissionPayload(request.resource.data);
       allow update: if isOwner(resource.data.creator_id)
         && request.resource.data.creator_id == resource.data.creator_id
