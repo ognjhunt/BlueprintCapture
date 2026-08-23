@@ -2,6 +2,9 @@ import Foundation
 #if canImport(CryptoKit)
 import CryptoKit
 #endif
+#if canImport(JavaScriptCore)
+import JavaScriptCore
+#endif
 
 /// Contract checks for the provider-neutral retained RGB observation registry.
 ///
@@ -18,10 +21,8 @@ enum CaptureDownstreamCandidateManifest {
             payload.removeValue(forKey: "manifest_digest")
         }
         guard JSONSerialization.isValidJSONObject(payload),
-              let data = try? JSONSerialization.data(
-                withJSONObject: payload,
-                options: [.sortedKeys, .withoutEscapingSlashes]
-              ) else {
+              let canonical = canonicalJSON(payload),
+              let data = canonical.data(using: .utf8) else {
             return nil
         }
         #if canImport(CryptoKit)
@@ -29,6 +30,66 @@ enum CaptureDownstreamCandidateManifest {
         return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
         #else
         return "base64:" + data.base64EncodedString()
+        #endif
+    }
+
+    /// Match the production bridge's canonical JSON byte-for-byte.
+    ///
+    /// Foundation and ECMAScript serialize finite floating-point values
+    /// differently (for example `1e-8` and negative zero). The bridge uses
+    /// `JSON.stringify` for primitives, so using Foundation's encoder here can
+    /// make a truthful ARKit manifest fail its immutable digest check after
+    /// upload. JavaScriptCore is an Apple system framework and gives the app the
+    /// same primitive serialization as the Node.js consumer without network or
+    /// dynamic provider code.
+    private static func canonicalJSON(_ value: Any) -> String? {
+        #if canImport(JavaScriptCore)
+        guard let context = JSContext(),
+              let stringify = context
+                .objectForKeyedSubscript("JSON")?
+                .objectForKeyedSubscript("stringify") else {
+            return nil
+        }
+
+        func encodePrimitive(_ primitive: Any) -> String? {
+            stringify.call(withArguments: [primitive])?.toString()
+        }
+
+        func encode(_ item: Any) -> String? {
+            if let object = item as? [String: Any] {
+                let keys = object.keys.sorted {
+                    $0.utf16.lexicographicallyPrecedes($1.utf16)
+                }
+                var fields: [String] = []
+                fields.reserveCapacity(keys.count)
+                for key in keys {
+                    guard let encodedKey = encodePrimitive(key),
+                          let child = object[key],
+                          let encodedValue = encode(child) else {
+                        return nil
+                    }
+                    fields.append("\(encodedKey):\(encodedValue)")
+                }
+                return "{\(fields.joined(separator: ","))}"
+            }
+            if let array = item as? [Any] {
+                var values: [String] = []
+                values.reserveCapacity(array.count)
+                for child in array {
+                    guard let encoded = encode(child) else { return nil }
+                    values.append(encoded)
+                }
+                return "[\(values.joined(separator: ","))]"
+            }
+            if item is NSNull || item is String || item is NSNumber {
+                return encodePrimitive(item)
+            }
+            return nil
+        }
+
+        return encode(value)
+        #else
+        return nil
         #endif
     }
 
