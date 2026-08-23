@@ -26,10 +26,11 @@ Two prerequisites, both requiring a human.
    The mount broke while the disk was at zero bytes. A reboot also fixes it.
    Verify with `xcrun metal --version`; it must print a version, not an error.
 
-2. **Signing.** The Release build failed with
-   `No profiles for 'Public.BlueprintCapture' were found`. Either enable
-   automatic signing in Xcode, or add `-allowProvisioningUpdates` to the build.
-   This is unrelated to the Metal problem; both must be resolved.
+2. **Signing.** The Release build previously failed with
+   `No profiles for 'Public.BlueprintCapture' were found`. The archive helper
+   now supports automatic provisioning when explicitly enabled with
+   `BLUEPRINT_ALLOW_PROVISIONING_UPDATES=1`; it is never enabled implicitly in
+   CI. This is unrelated to the Metal problem; both must be resolved.
 
 Disk: keep at least 10 GB free. The earlier failure cascade started with a full
 volume, and Xcode's failure mode was a corrupted toolchain mount rather than a
@@ -38,10 +39,9 @@ clear error.
 ## Build
 
 ```
-xcodebuild -project BlueprintCapture.xcodeproj -scheme BlueprintCapture \
-  -derivedDataPath build/DerivedData \
-  -destination 'generic/platform=iOS' -configuration Release \
-  -allowProvisioningUpdates build
+BLUEPRINT_ALLOW_PROVISIONING_UPDATES=1 \
+BLUEPRINT_BUILD_NUMBER=<unused-integer-build-number> \
+./scripts/archive_external_alpha.sh
 ```
 
 Config bound by `Config/BlueprintCapture.release.xcconfig` (untracked, local

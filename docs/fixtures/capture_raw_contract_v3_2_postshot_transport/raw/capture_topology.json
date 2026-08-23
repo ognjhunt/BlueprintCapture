@@ -1,0 +1,9 @@
+{
+  "capture_session_id": "00000000-0000-4000-8000-000000000032",
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "intended_pass_role": "development_fixture",
+  "pass_id": "pass-1",
+  "pass_index": 1,
+  "route_id": "procedural-orbit",
+  "schema_version": "v1"
+}

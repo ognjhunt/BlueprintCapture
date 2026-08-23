@@ -1,0 +1,33 @@
+{
+  "capture_basis": "blueprint_authored_procedural_fixture",
+  "capture_contributor_payout_eligible": false,
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "consent_notes": [
+    "Procedural pixels only; no physical site or person."
+  ],
+  "consent_scope": [
+    "internal_development_fixture"
+  ],
+  "consent_status": "documented",
+  "data_licensing_allowed": false,
+  "derived_scene_generation_allowed": true,
+  "permission_document_sha256": null,
+  "permission_document_uri": null,
+  "privacy_processing": {
+    "redaction_required_before_derived_use": true
+  },
+  "provider_upload": {
+    "direct_mobile_upload_allowed": false,
+    "third_party_provider_upload_authorized": false
+  },
+  "redaction_required": true,
+  "retention": {
+    "live_enforcement_proven_by_bundle": false,
+    "policy_id": "development-fixture"
+  },
+  "revocation": {
+    "latest_status_check_required_before_downstream_use": true
+  },
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "schema_version": "v1"
+}

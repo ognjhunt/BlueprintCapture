@@ -7,6 +7,25 @@ ARCHIVE_PATH="${BLUEPRINT_ARCHIVE_PATH:-$ROOT/build/BlueprintCaptureExternal.xca
 DERIVED_DATA_PATH="${BLUEPRINT_DERIVED_DATA_PATH:-$ROOT/build/DerivedDataRelease}"
 BUILD_SETTINGS_PATH="${BLUEPRINT_BUILD_SETTINGS_PATH:-$ROOT/build/BlueprintCaptureExternalRelease.settings}"
 VALIDATE_ONLY=0
+PROVISIONING_ARGS=()
+BUILD_SETTING_ARGS=()
+
+case "${BLUEPRINT_ALLOW_PROVISIONING_UPDATES:-0}" in
+  1|true|TRUE|yes|YES)
+    PROVISIONING_ARGS+=(
+      -allowProvisioningUpdates
+      -allowProvisioningDeviceRegistration
+    )
+    ;;
+esac
+
+if [[ -n "${BLUEPRINT_BUILD_NUMBER:-}" ]]; then
+  if [[ ! "${BLUEPRINT_BUILD_NUMBER}" =~ ^[0-9]+$ ]]; then
+    echo "BLUEPRINT_BUILD_NUMBER must contain decimal digits only." >&2
+    exit 1
+  fi
+  BUILD_SETTING_ARGS+=("CURRENT_PROJECT_VERSION=${BLUEPRINT_BUILD_NUMBER}")
+fi
 
 if [[ "${1:-}" == "--validate-config-only" ]]; then
   VALIDATE_ONLY=1
@@ -114,6 +133,7 @@ write_release_build_settings() {
     -configuration Release
     -derivedDataPath "$DERIVED_DATA_PATH"
     -xcconfig "$RELEASE_XCCONFIG"
+    "${BUILD_SETTING_ARGS[@]}"
   )
 
   if xcodebuild "${settings_args[@]}" > "$BUILD_SETTINGS_PATH"; then
@@ -238,7 +258,9 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE_PATH" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  -xcconfig "$RELEASE_XCCONFIG"
+  -xcconfig "$RELEASE_XCCONFIG" \
+  "${PROVISIONING_ARGS[@]}" \
+  "${BUILD_SETTING_ARGS[@]}"
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/BlueprintCapture.app"
 if [[ ! -d "$APP_PATH" ]]; then

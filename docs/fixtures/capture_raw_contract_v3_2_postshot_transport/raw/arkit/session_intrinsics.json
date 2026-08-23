@@ -1,0 +1,16 @@
+{
+  "camera_model": "pinhole",
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "distortion_coeffs": [],
+  "distortion_model": "none",
+  "intrinsics": {
+    "cx": 320,
+    "cy": 240,
+    "fx": 500,
+    "fy": 500,
+    "height": 480,
+    "width": 640
+  },
+  "principal_point_reference": "full_resolution_image",
+  "schema_version": "v1"
+}

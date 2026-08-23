@@ -96,6 +96,9 @@ final class APIService {
         requestedOutputs: [String],
         regionId: String? = nil,
         siteType: String? = nil,
+        rawBundleDigest: String,
+        rawManifestURI: String,
+        uploadCompletionDigest: String,
         status: String = "submitted"
     ) async throws {
         var request = try makeRequest(path: "v1/creator/captures", method: "POST")
@@ -111,9 +114,22 @@ final class APIService {
             requestedOutputs: requestedOutputs,
             regionId: regionId,
             siteType: siteType,
+            rawBundleDigest: rawBundleDigest,
+            rawManifestURI: rawManifestURI,
+            uploadCompletionDigest: uploadCompletionDigest,
             status: status
         ))
-        _ = try await perform(request: request, expecting: 201)
+        let (responseData, responseStatus) = try await performWithStatus(request: request)
+        // 202 is the production contract: the account-bound registration and
+        // its immutable upload identity are durable. A generic create/success
+        // code is not enough evidence to let the phone discard its retry state.
+        guard responseStatus == 202 else {
+            throw APIError.invalidResponse(statusCode: responseStatus)
+        }
+        let acceptance = try decoder.decode(CreatorCaptureAcceptance.self, from: responseData)
+        guard acceptance.accepted, acceptance.immutableUploadIdentityBound else {
+            throw APIError.invalidResponse(statusCode: responseStatus)
+        }
     }
 
     func preflightCaptureSubmission(
@@ -142,6 +158,9 @@ final class APIService {
             requestedOutputs: requestedOutputs,
             regionId: regionId,
             siteType: siteType,
+            rawBundleDigest: nil,
+            rawManifestURI: nil,
+            uploadCompletionDigest: nil,
             status: "preflight"
         ))
         _ = try await perform(request: request, expecting: 200)
@@ -159,6 +178,9 @@ final class APIService {
         requestedOutputs: [String],
         regionId: String?,
         siteType: String?,
+        rawBundleDigest: String?,
+        rawManifestURI: String?,
+        uploadCompletionDigest: String?,
         status: String
     ) -> CreatorCaptureRegistrationPayload {
         let clientInfo = CaptureClientBuildInfo.current()
@@ -180,7 +202,10 @@ final class APIService {
             clientVersion: clientInfo.appVersion,
             clientBuild: clientInfo.appBuild,
             clientOSVersion: clientInfo.osVersion,
-            clientDeviceModel: clientInfo.deviceModel
+            clientDeviceModel: clientInfo.deviceModel,
+            rawBundleDigest: rawBundleDigest,
+            rawManifestURI: rawManifestURI,
+            uploadCompletionDigest: uploadCompletionDigest
         )
         return payload
     }
@@ -560,6 +585,9 @@ private struct CreatorCaptureRegistrationPayload: Codable {
     let clientBuild: String
     let clientOSVersion: String?
     let clientDeviceModel: String?
+    let rawBundleDigest: String?
+    let rawManifestURI: String?
+    let uploadCompletionDigest: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -580,6 +608,19 @@ private struct CreatorCaptureRegistrationPayload: Codable {
         case clientBuild = "client_build"
         case clientOSVersion = "client_os_version"
         case clientDeviceModel = "client_device_model"
+        case rawBundleDigest = "raw_bundle_digest"
+        case rawManifestURI = "raw_manifest_uri"
+        case uploadCompletionDigest = "upload_completion_digest"
+    }
+}
+
+private struct CreatorCaptureAcceptance: Decodable {
+    let accepted: Bool
+    let immutableUploadIdentityBound: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case accepted
+        case immutableUploadIdentityBound = "immutable_upload_identity_bound"
     }
 }
 

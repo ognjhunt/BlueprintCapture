@@ -317,4 +317,20 @@ struct CaptureDownstreamCandidateManifestTests {
             of: manifest
         ) ?? "digest_unavailable"
     }
+
+    @Test
+    func canonicalDigestUsesProductionJavaScriptNumberEncoding() {
+        let payload: [String: Any] = [
+            "integral": 1.0,
+            "negative_zero": -0.0,
+            "small": 1e-8,
+            "fixed_threshold": 1e-6,
+            "large_fixed": 1e20,
+        ]
+
+        #expect(
+            CaptureDownstreamCandidateManifest.canonicalDigest(of: payload)
+                == "sha256:ddea0aaf526b362e0655f6a9dea48ca07d3c6cf7b7b4b0ed0aee0e25541af5a0"
+        )
+    }
 }

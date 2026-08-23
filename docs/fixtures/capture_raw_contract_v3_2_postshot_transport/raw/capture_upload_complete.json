@@ -1,0 +1,8 @@
+{
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "claim_ceiling": "development_only_procedural_fixture",
+  "completed_at": "2026-08-23T20:00:00Z",
+  "raw_prefix": "scenes/fixture-scene-postshot-transport-v1/captures/00000000-0000-4000-8000-000000000032/raw",
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "schema_version": "v1"
+}
