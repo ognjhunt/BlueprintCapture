@@ -9,6 +9,7 @@ metric scale, reconstruction fidelity, task truth, or robot behavior.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import math
@@ -177,7 +178,8 @@ def main() -> int:
         frame.unlink()
     frames_dir.rmdir()
 
-    now = "2026-08-23T20:00:00Z"
+    now_value = datetime.now(timezone.utc)
+    now = now_value.isoformat(timespec="milliseconds").replace("+00:00", "Z")
     cfs = f"cfs-{args.capture_id}"
     raw_prefix = f"scenes/{args.scene_id}/captures/{args.capture_id}/raw"
     frame_ids = [f"{index + 1:06d}" for index in range(frame_count)]
@@ -252,7 +254,7 @@ def main() -> int:
         "capture_capabilities": capabilities,
         "coordinate_frame_session_id": cfs,
         "video_uri": "walkthrough.mov",
-        "capture_start_epoch_ms": 1787515200000,
+        "capture_start_epoch_ms": int(now_value.timestamp() * 1000),
         "app_version": "1.0",
         "app_build": args.app_build,
         "ios_version": "26.0",
