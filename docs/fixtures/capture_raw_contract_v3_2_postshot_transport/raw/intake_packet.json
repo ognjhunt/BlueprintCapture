@@ -1,0 +1,11 @@
+{
+  "owner": "blueprint_release_engineering",
+  "schema_version": "v1",
+  "task_steps": [
+    "Import",
+    "Train",
+    "Export",
+    "Publish"
+  ],
+  "workflow_name": "Procedural Postshot transport check"
+}

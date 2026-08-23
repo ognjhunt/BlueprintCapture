@@ -1,0 +1,263 @@
+{
+  "camera_ray_convention": "arkit_x_right_y_up_z_backward",
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "depth_encoding": "uint16_png",
+  "depth_intrinsics": {
+    "cx": 32,
+    "cy": 24,
+    "fx": 50,
+    "fy": 50,
+    "height": 48,
+    "width": 64
+  },
+  "depth_registered_to_arkit_camera": true,
+  "encoding": "png_u16_mm",
+  "frames": [
+    {
+      "depth_path": "arkit/depth/000001.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000001",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000001.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000002.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000002",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000002.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000003.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000003",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000003.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000004.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000004",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000004.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000005.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000005",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000005.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000006.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000006",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000006.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000007.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000007",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000007.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000008.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000008",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000008.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000009.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000009",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000009.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000010.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000010",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000010.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000011.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000011",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000011.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000012.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000012",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000012.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000013.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000013",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000013.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000014.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000014",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000014.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000015.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000015",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000015.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000016.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000016",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000016.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000017.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000017",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000017.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000018.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000018",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000018.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000019.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000019",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000019.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000020.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000020",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000020.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000021.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000021",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000021.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000022.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000022",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000022.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000023.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000023",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000023.png",
+      "width": 64
+    },
+    {
+      "depth_path": "arkit/depth/000024.png",
+      "depth_source": "procedural_plane",
+      "depth_valid_fraction": 1,
+      "frame_id": "000024",
+      "height": 48,
+      "missing_depth_fraction": 0,
+      "paired_confidence_path": "arkit/confidence/000024.png",
+      "width": 64
+    }
+  ],
+  "invalid_value_semantics": "0_means_missing",
+  "missing_depth_reason": null,
+  "representation": "per_frame_depth_map",
+  "scale_to_meters": 0.001,
+  "schema_version": "arkit_depth_manifest.v2",
+  "units": "millimeters"
+}

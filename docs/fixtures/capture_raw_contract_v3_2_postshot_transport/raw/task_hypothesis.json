@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "source": "authoritative_fixture_definition",
+  "status": "accepted",
+  "task_steps": [
+    "Import",
+    "Train",
+    "Export",
+    "Publish"
+  ],
+  "workflow_name": "Procedural Postshot transport check"
+}

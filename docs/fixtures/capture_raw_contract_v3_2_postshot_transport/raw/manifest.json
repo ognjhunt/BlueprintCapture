@@ -1,0 +1,86 @@
+{
+  "app_build": "fixture-v1",
+  "app_version": "1.0",
+  "buyer_request_id": "development-fixture-buyer-request",
+  "capture_capabilities": {
+    "camera_intrinsics": true,
+    "camera_pose": true,
+    "confidence_frames": 24,
+    "depth": true,
+    "depth_authority": "procedural_development_fixture",
+    "depth_confidence": true,
+    "depth_frames": 24,
+    "geometry_expected_downstream": true,
+    "geometry_source": "arkit",
+    "intrinsics_authority": "procedural_development_fixture",
+    "intrinsics_valid": true,
+    "motion": true,
+    "motion_authoritative": false,
+    "motion_authority": "diagnostic_only",
+    "motion_provenance": "procedural_development_fixture",
+    "motion_samples": 24,
+    "pose_authority": "procedural_development_fixture",
+    "pose_rows": 24,
+    "relocalization_event_rows": 0,
+    "relocalization_events": true,
+    "tracking_state": true,
+    "tracking_state_rows": 24
+  },
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "capture_job_id": "development-fixture-capture-job",
+  "capture_profile_id": "iphone_arkit_lidar",
+  "capture_rights": {
+    "capture_contributor_payout_eligible": false,
+    "consent_notes": [
+      "No human, customer, or physical-site data is present."
+    ],
+    "consent_scope": [
+      "procedural_fixture_only"
+    ],
+    "consent_status": "documented",
+    "data_licensing_allowed": false,
+    "derived_scene_generation_allowed": true,
+    "permission_document_uri": null,
+    "redaction_required": true
+  },
+  "capture_schema_version": "3.2.0",
+  "capture_source": "iphone",
+  "capture_start_epoch_ms": 1787515200000,
+  "capture_tier_hint": "tier1_iphone",
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "depth_supported": true,
+  "device_model": "Procedural iPhone Pro contract fixture",
+  "device_model_marketing": "Procedural iPhone Pro contract fixture",
+  "fps_source": 10,
+  "hardware_model_identifier": "procedural-fixture",
+  "has_lidar": true,
+  "height": 480,
+  "ios_build": "procedural-fixture",
+  "ios_version": "26.0",
+  "os_version": "26.0",
+  "requested_outputs": [
+    "reconstruction_candidate"
+  ],
+  "rights_profile": "operator_authorized_development_fixture",
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "scene_memory_capture": {
+    "inaccessible_areas": [],
+    "operator_notes": [
+      "Procedural development-only transport fixture."
+    ],
+    "world_model_candidate": false
+  },
+  "schema_version": "v3",
+  "site_id": "development-fixture-no-physical-site",
+  "site_submission_id": "development-fixture-site-submission",
+  "task_id": "postshot-transport-only",
+  "upstream_handoff": {
+    "blockers": [],
+    "buyer_request_id": "development-fixture-buyer-request",
+    "capture_job_id": "development-fixture-capture-job",
+    "claim_ceiling": "development_only_procedural_fixture",
+    "site_submission_id": "development-fixture-site-submission"
+  },
+  "video_uri": "walkthrough.mov",
+  "width": 640
+}

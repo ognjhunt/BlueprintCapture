@@ -1,0 +1,137 @@
+{
+  "accepted_confidence_values": [
+    2
+  ],
+  "confidence_encoding": "uint8_png",
+  "confidence_scale": {
+    "0": "low_or_missing",
+    "1": "medium",
+    "2": "high"
+  },
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "encoding": "png_u8",
+  "frames": [
+    {
+      "confidence_path": "arkit/confidence/000001.png",
+      "frame_id": "000001",
+      "paired_depth_path": "arkit/depth/000001.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000002.png",
+      "frame_id": "000002",
+      "paired_depth_path": "arkit/depth/000002.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000003.png",
+      "frame_id": "000003",
+      "paired_depth_path": "arkit/depth/000003.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000004.png",
+      "frame_id": "000004",
+      "paired_depth_path": "arkit/depth/000004.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000005.png",
+      "frame_id": "000005",
+      "paired_depth_path": "arkit/depth/000005.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000006.png",
+      "frame_id": "000006",
+      "paired_depth_path": "arkit/depth/000006.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000007.png",
+      "frame_id": "000007",
+      "paired_depth_path": "arkit/depth/000007.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000008.png",
+      "frame_id": "000008",
+      "paired_depth_path": "arkit/depth/000008.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000009.png",
+      "frame_id": "000009",
+      "paired_depth_path": "arkit/depth/000009.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000010.png",
+      "frame_id": "000010",
+      "paired_depth_path": "arkit/depth/000010.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000011.png",
+      "frame_id": "000011",
+      "paired_depth_path": "arkit/depth/000011.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000012.png",
+      "frame_id": "000012",
+      "paired_depth_path": "arkit/depth/000012.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000013.png",
+      "frame_id": "000013",
+      "paired_depth_path": "arkit/depth/000013.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000014.png",
+      "frame_id": "000014",
+      "paired_depth_path": "arkit/depth/000014.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000015.png",
+      "frame_id": "000015",
+      "paired_depth_path": "arkit/depth/000015.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000016.png",
+      "frame_id": "000016",
+      "paired_depth_path": "arkit/depth/000016.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000017.png",
+      "frame_id": "000017",
+      "paired_depth_path": "arkit/depth/000017.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000018.png",
+      "frame_id": "000018",
+      "paired_depth_path": "arkit/depth/000018.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000019.png",
+      "frame_id": "000019",
+      "paired_depth_path": "arkit/depth/000019.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000020.png",
+      "frame_id": "000020",
+      "paired_depth_path": "arkit/depth/000020.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000021.png",
+      "frame_id": "000021",
+      "paired_depth_path": "arkit/depth/000021.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000022.png",
+      "frame_id": "000022",
+      "paired_depth_path": "arkit/depth/000022.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000023.png",
+      "frame_id": "000023",
+      "paired_depth_path": "arkit/depth/000023.png"
+    },
+    {
+      "confidence_path": "arkit/confidence/000024.png",
+      "frame_id": "000024",
+      "paired_depth_path": "arkit/depth/000024.png"
+    }
+  ],
+  "representation": "per_frame_confidence_map",
+  "schema_version": "arkit_confidence_manifest.v2"
+}

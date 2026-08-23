@@ -1,0 +1,13 @@
+{
+  "arkit_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "coordinate_frame_session_id": "cfs-00000000-0000-4000-8000-000000000032",
+  "gravity_aligned": true,
+  "handedness": "right_handed",
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "schema_version": "v1",
+  "session_reset_count": 0,
+  "units": "meters",
+  "up_axis": "Y",
+  "world_frame_definition": "procedural_arkit_world_origin"
+}

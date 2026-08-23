@@ -1,0 +1,12 @@
+{
+  "candidate_manifest_digest": "sha256:ad92178a1f33b76451dfeba211b86973fe8a6ebf513dccfe77e5eb67244644c0",
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "capture_job_id": "development-fixture-capture-job",
+  "claim_ceiling": "development_only_procedural_fixture",
+  "frame_count": 24,
+  "physical_truth_inferred": false,
+  "raw_bundle_digest": "sha256:ea86bbe8c094e0c8280aafc28b4da0b62ba3a702f90b1e3d907acfac65f27aeb",
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "schema_version": "blueprint.retained_raw_v3_2_procedural_fixture.v1",
+  "status": "materialized"
+}

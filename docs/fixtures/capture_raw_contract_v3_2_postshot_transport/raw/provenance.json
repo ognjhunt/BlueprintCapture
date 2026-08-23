@@ -1,0 +1,14 @@
+{
+  "bundle_created_at": "2026-08-23T20:00:00Z",
+  "bundle_sha256": "5295dfbf285969d07427d152b8986b022b0a4e88c05c86b85e607a7a0fc5bc62",
+  "capture_app_build": "fixture-v1",
+  "capture_app_version": "1.0",
+  "capture_id": "00000000-0000-4000-8000-000000000032",
+  "capture_source": "iphone",
+  "captured_by_user_id": "blueprint-release-engineering",
+  "device_installation_id": "procedural-fixture",
+  "scene_id": "fixture-scene-postshot-transport-v1",
+  "schema_version": "v1",
+  "upload_completed_at": "2026-08-23T20:00:00Z",
+  "uploaded_by_user_id": "blueprint-release-engineering"
+}
