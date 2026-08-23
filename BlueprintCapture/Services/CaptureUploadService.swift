@@ -152,6 +152,9 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         var cancelActiveTransfer: (() -> Void)?
         var attempt: UUID
         var autoRetriesRemaining: Int = CaptureUploadService.maxInSessionAutoRetries
+        var immutableBundleDigest: String?
+        var rawManifestURI: String?
+        var uploadCompletionDigest: String?
     }
 
     /// Bounded in-session automatic retry policy. The locally preserved
@@ -241,7 +244,15 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         }
 
         let attempt = UUID()
-        var record = uploads[id] ?? UploadRecord(request: request, task: nil, cancelActiveTransfer: nil, attempt: attempt)
+        var record = uploads[id] ?? UploadRecord(
+            request: request,
+            task: nil,
+            cancelActiveTransfer: nil,
+            attempt: attempt,
+            immutableBundleDigest: nil,
+            rawManifestURI: nil,
+            uploadCompletionDigest: nil
+        )
         record.request = request
         record.task = nil
         record.cancelActiveTransfer = nil
@@ -440,6 +451,24 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             print("⚠️ [UploadService] Raw contract V3 warnings captureId=\(CaptureBundleContext.captureIdentifier(for: request)) warnings=\(rawContractValidation.warnings.joined(separator: ","))")
         }
         let hashArtifacts = loadHashArtifacts(from: uploadRoot)
+        guard let immutableBundleDigest = loadBundleDigest(from: uploadRoot),
+              let completionDigest = hashArtifacts[
+                CaptureUploadFilePlan.completionMarkerFilename
+              ] else {
+            markUploadFailed(
+                id: id,
+                attempt: attempt,
+                error: .invalidBundle(reasons: ["immutable_upload_identity_missing"])
+            )
+            return false
+        }
+        queue.sync {
+            guard var latest = uploads[id], latest.attempt == attempt else { return }
+            latest.immutableBundleDigest = immutableBundleDigest
+            latest.rawManifestURI = storageBucketURL + "/" + remoteBasePath + "manifest.json"
+            latest.uploadCompletionDigest = completionDigest
+            uploads[id] = latest
+        }
 
         // Gather files
         guard let uploadPlan = CaptureUploadFilePlan.make(for: uploadRoot) else {
@@ -885,22 +914,19 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
     }
 
     private func ensureCaptureClientPreflightAllowed(for request: CaptureUploadRequest) async -> Bool {
-        // The authoritative POST v1/creator/captures/preflight route is not
-        // deployed yet (docs/PUBLIC_BETA_CLOSURE_2026-07-16), so this check is
-        // advisory: only an explicit backend policy denial (403/409/422)
-        // blocks the upload. A missing backend, missing route (404), server
-        // error, or network failure falls through to the Firestore
-        // fail-closed submission contract, which still gates the capture —
-        // otherwise every normal upload would brick against the absent route.
+        // Production owns this route. Uploading customer raw bytes without a
+        // current server policy decision would bypass the kill switch, minimum
+        // build, cohort, and account gates, so every unavailable/error response
+        // fails closed before bandwidth is spent.
         guard AppConfig.hasBackendBaseURL() else {
-            SessionEventManager.shared.logOperationalEvent(
-                operation: "capture_client_preflight",
-                status: "skipped_no_backend",
+            SessionEventManager.shared.logError(
+                errorCode: "capture_client_preflight_blocked",
                 metadata: [
-                    "capture_id": CaptureBundleContext.captureIdentifier(for: request)
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "reason": "backend_base_url_missing"
                 ]
             )
-            return true
+            return false
         }
         do {
             try await APIService.shared.preflightCaptureSubmission(
@@ -926,31 +952,69 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             )
             return true
         } catch {
-            if case APIService.APIError.invalidResponse(let statusCode) = error,
-               [403, 409, 422].contains(statusCode) {
-                // Explicit, deliberate backend denial — fail closed.
-                SessionEventManager.shared.logError(
-                    errorCode: "capture_client_preflight_blocked",
-                    metadata: [
-                        "capture_id": CaptureBundleContext.captureIdentifier(for: request),
-                        "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
-                        "status_code": "\(statusCode)",
-                        "message": error.localizedDescription
-                    ]
-                )
-                print("❌ [UploadService] Capture client preflight blocked captureId=\(CaptureBundleContext.captureIdentifier(for: request)): \(error.localizedDescription)")
-                return false
+            var metadata = [
+                "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                "message": error.localizedDescription
+            ]
+            if case APIService.APIError.invalidResponse(let statusCode) = error {
+                metadata["status_code"] = "\(statusCode)"
             }
-            // Route missing / server error / network failure: advisory only.
+            SessionEventManager.shared.logError(
+                errorCode: "capture_client_preflight_blocked",
+                metadata: metadata
+            )
+            print("❌ [UploadService] Capture client preflight unavailable or denied captureId=\(CaptureBundleContext.captureIdentifier(for: request)): \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    /// Require the authenticated HTTPS control-plane acknowledgement before
+    /// reporting completion to the user. Firestore is the native lifecycle
+    /// projection; this server response is the durable account-bound acceptance
+    /// contract. Replays are safe because the server creates by capture UUID.
+    private func ensureProductionRegistrationAccepted(
+        for request: CaptureUploadRequest,
+        immutableBundleDigest: String,
+        rawManifestURI: String,
+        uploadCompletionDigest: String
+    ) async -> Bool {
+        do {
+            try await APIService.shared.registerCaptureSubmission(
+                id: request.metadata.id,
+                targetAddress: captureRegistrationTargetAddress(for: request),
+                capturedAt: request.metadata.capturedAt,
+                quotedPayoutCents: request.metadata.quotedPayoutCents,
+                captureJobId: request.metadata.captureJobId,
+                buyerRequestId: request.metadata.buyerRequestId,
+                siteSubmissionId: request.metadata.siteSubmissionId,
+                rightsProfile: request.metadata.rightsProfile,
+                requestedOutputs: request.metadata.requestedOutputs,
+                regionId: request.metadata.regionId,
+                siteType: nil,
+                rawBundleDigest: immutableBundleDigest,
+                rawManifestURI: rawManifestURI,
+                uploadCompletionDigest: uploadCompletionDigest
+            )
             SessionEventManager.shared.logOperationalEvent(
-                operation: "capture_client_preflight",
-                status: "skipped_unavailable",
+                operation: "production_capture_registration",
+                status: "accepted",
                 metadata: [
                     "capture_id": CaptureBundleContext.captureIdentifier(for: request),
-                    "message": error.localizedDescription
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request)
                 ]
             )
             return true
+        } catch {
+            SessionEventManager.shared.logError(
+                errorCode: "production_capture_registration_failed",
+                metadata: [
+                    "capture_id": CaptureBundleContext.captureIdentifier(for: request),
+                    "scene_id": CaptureBundleContext.sceneIdentifier(for: request),
+                    "message": error.localizedDescription
+                ]
+            )
+            return false
         }
     }
 
@@ -1021,8 +1085,30 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
         guard let record, record.attempt == attempt else { return }
         let request = record.request
 
+        guard let immutableBundleDigest = record.immutableBundleDigest,
+              let rawManifestURI = record.rawManifestURI,
+              let uploadCompletionDigest = record.uploadCompletionDigest else {
+            markUploadFailed(
+                id: id,
+                attempt: attempt,
+                error: .invalidBundle(reasons: ["immutable_upload_identity_missing"])
+            )
+            return
+        }
+
         let submissionWritten = await ensureSubmissionRecordWritten(for: request)
         guard submissionWritten else {
+            markUploadFailed(id: id, attempt: attempt, error: .submissionRegistrationFailed)
+            return
+        }
+
+        let productionAccepted = await ensureProductionRegistrationAccepted(
+            for: request,
+            immutableBundleDigest: immutableBundleDigest,
+            rawManifestURI: rawManifestURI,
+            uploadCompletionDigest: uploadCompletionDigest
+        )
+        guard productionAccepted else {
             markUploadFailed(id: id, attempt: attempt, error: .submissionRegistrationFailed)
             return
         }
@@ -1293,6 +1379,17 @@ final class CaptureUploadService: CaptureUploadServiceProtocol {
             return [:]
         }
         return artifacts
+    }
+
+    private func loadBundleDigest(from rawDirectoryURL: URL) -> String? {
+        let hashesURL = rawDirectoryURL.appendingPathComponent("hashes.json")
+        guard let data = try? Data(contentsOf: hashesURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let digest = json["bundle_sha256"] as? String,
+              digest.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else {
+            return nil
+        }
+        return "sha256:" + digest
     }
 
     private func sha256Hex(for fileURL: URL) -> String? {

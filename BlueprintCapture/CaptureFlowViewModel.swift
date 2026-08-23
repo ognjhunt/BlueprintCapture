@@ -1414,22 +1414,9 @@ final class CaptureFlowViewModel: NSObject, ObservableObject {
                 captureId: CaptureBundleContext.captureIdentifier(for: request),
                 metadata: ["capture_source": request.metadata.captureSource.rawValue]
             )
-            Task { [weak self] in
-                guard let self else { return }
-                try? await self.creatorAPIService.registerCaptureSubmission(
-                    id: request.metadata.id,
-                    targetAddress: status.targetName ?? self.currentAddress ?? "Submitted space",
-                    capturedAt: request.metadata.capturedAt,
-                    quotedPayoutCents: request.metadata.quotedPayoutCents,
-                    captureJobId: request.metadata.captureJobId,
-                    buyerRequestId: request.metadata.buyerRequestId,
-                    siteSubmissionId: request.metadata.siteSubmissionId,
-                    rightsProfile: request.metadata.rightsProfile,
-                    requestedOutputs: request.metadata.requestedOutputs,
-                    regionId: request.metadata.regionId,
-                    siteType: nil
-                )
-            }
+            // CaptureUploadService has already received the durable production
+            // registration acknowledgement. Do not fire-and-forget a second
+            // registration after the UI has declared success.
             // Mark target as completed in Firestore so it no longer appears in Nearby
             if let targetId = request.metadata.targetId, !targetId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Task { [weak self] in
