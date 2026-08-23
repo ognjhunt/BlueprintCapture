@@ -35,6 +35,7 @@ struct APIServiceTests {
         #expect(uploadSource.contains("captureClientPolicyBlocked"))
         #expect(uploadSource.contains("capture_client_policy_blocked"))
         #expect(apiSource.contains("immutable_upload_identity_bound"))
+        #expect(apiSource.contains("guard responseStatus == 202"))
         #expect(apiSource.contains("raw_bundle_digest"))
         #expect(apiSource.contains("upload_completion_digest"))
         #expect(uploadSource.contains("loadBundleDigest(from:"))

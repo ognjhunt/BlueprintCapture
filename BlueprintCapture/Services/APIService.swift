@@ -121,10 +121,9 @@ final class APIService {
         ))
         let (responseData, responseStatus) = try await performWithStatus(request: request)
         // 202 is the production contract: the account-bound registration and
-        // its immutable upload identity are durable. Keep the
-        // former create/replay codes during the ordered WebApp -> iOS rollout
-        // so an already-signed build never turns a safe replay into a failure.
-        guard [200, 201, 202].contains(responseStatus) else {
+        // its immutable upload identity are durable. A generic create/success
+        // code is not enough evidence to let the phone discard its retry state.
+        guard responseStatus == 202 else {
             throw APIError.invalidResponse(statusCode: responseStatus)
         }
         let acceptance = try decoder.decode(CreatorCaptureAcceptance.self, from: responseData)
