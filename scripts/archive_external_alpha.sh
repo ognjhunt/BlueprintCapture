@@ -7,6 +7,16 @@ ARCHIVE_PATH="${BLUEPRINT_ARCHIVE_PATH:-$ROOT/build/BlueprintCaptureExternal.xca
 DERIVED_DATA_PATH="${BLUEPRINT_DERIVED_DATA_PATH:-$ROOT/build/DerivedDataRelease}"
 BUILD_SETTINGS_PATH="${BLUEPRINT_BUILD_SETTINGS_PATH:-$ROOT/build/BlueprintCaptureExternalRelease.settings}"
 VALIDATE_ONLY=0
+PROVISIONING_ARGS=()
+
+case "${BLUEPRINT_ALLOW_PROVISIONING_UPDATES:-0}" in
+  1|true|TRUE|yes|YES)
+    PROVISIONING_ARGS+=(
+      -allowProvisioningUpdates
+      -allowProvisioningDeviceRegistration
+    )
+    ;;
+esac
 
 if [[ "${1:-}" == "--validate-config-only" ]]; then
   VALIDATE_ONLY=1
@@ -238,7 +248,8 @@ xcodebuild archive \
   -destination "generic/platform=iOS" \
   -archivePath "$ARCHIVE_PATH" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  -xcconfig "$RELEASE_XCCONFIG"
+  -xcconfig "$RELEASE_XCCONFIG" \
+  "${PROVISIONING_ARGS[@]}"
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/BlueprintCapture.app"
 if [[ ! -d "$APP_PATH" ]]; then
