@@ -40,6 +40,7 @@ clear error.
 
 ```
 BLUEPRINT_ALLOW_PROVISIONING_UPDATES=1 \
+BLUEPRINT_BUILD_NUMBER=<unused-integer-build-number> \
 ./scripts/archive_external_alpha.sh
 ```
 
