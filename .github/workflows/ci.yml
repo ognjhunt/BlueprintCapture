@@ -32,6 +32,10 @@ jobs:
         working-directory: cloud/extract-frames
         run: npm ci
 
+      - name: Reject production high or critical advisories
+        working-directory: cloud/extract-frames
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Build
         working-directory: cloud/extract-frames
         run: npm run build
