@@ -273,16 +273,29 @@ service cloud.firestore {
     }
 
     // ─── Users ──────────────────────────────────────────────────────────────
+    // Profile roles support onboarding only. Execution authority is assigned
+    // by the Admin SDK/custom claims, never by an owner's profile write.
+    function hasSafeClientProfileRoles(data) {
+      return (!data.keys().hasAny(['role'])
+          || data.role in ['capturer', 'buyer', 'creator', 'customer', 'site_operator', 'robot_team', 'guest', 'user'])
+        && (!data.keys().hasAny(['roles'])
+          || (data.roles is list
+            && data.roles.hasOnly(['capturer', 'buyer', 'creator', 'customer', 'site_operator', 'robot_team', 'guest', 'user'])));
+    }
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && !request.resource.data.keys().hasAny(['admin', 'ops', 'accessRoles'])
+        && hasSafeClientProfileRoles(request.resource.data);
       // Clients may update their own non-financial fields.
       // Financial fields (stats.availableBalance, stats.totalEarnings, etc.)
       // are written only by Cloud Functions via the Admin SDK, which bypasses
       // these rules entirely.
       allow update: if isOwner(userId)
         && !request.resource.data.diff(resource.data).affectedKeys()
-            .hasAny(['stats']);
+            .hasAny(['stats', 'admin', 'ops', 'accessRoles'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'roles'])
+          || hasSafeClientProfileRoles(request.resource.data));
       // Self-service account deletion (App Store 5.1.1(v) / GDPR erasure):
       // the in-app flow deletes this document before removing the Auth user.
       // Uploaded capture evidence in capture_submissions is retained per the

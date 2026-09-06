@@ -245,6 +245,25 @@ describe("client telemetry collections", () => {
   }
 });
 
+describe("users execution authority", () => {
+  it("preserves capturer onboarding and profile edits", async () => {
+    const ref = ownerDb().collection("users").doc(OWNER_UID);
+    await assertSucceeds(ref.set({role:"capturer",roles:["capturer"],name:"Owner"}));
+    await assertSucceeds(ref.update({name:"Updated"}));
+    await assertSucceeds(ref.set({role:"guest",roles:["guest"]}));
+  });
+  it("denies profile-authored privileged roles on create", async () => {
+    const ref = ownerDb().collection("users").doc(OWNER_UID);
+    for (const value of [{admin:true},{ops:true},{accessRoles:["admin"]},{role:"admin"},{role:" Ops "},{roles:["capturer","OPS"]}]) await assertFails(ref.set(value));
+  });
+  it("retains server authority while refusing owner mutation of it", async () => {
+    await testEnv.withSecurityRulesDisabled(async context => {await context.firestore().collection("users").doc(OWNER_UID).set({admin:true,role:"admin",name:"Owner"});});
+    const ref = ownerDb().collection("users").doc(OWNER_UID);
+    await assertSucceeds(ref.update({name:"Updated"}));
+    for (const value of [{admin:false},{ops:true},{accessRoles:["ops"]},{role:"ops"},{roles:["admin"]}]) await assertFails(ref.update(value));
+  });
+});
+
 describe("users self-deletion", () => {
   async function seedUser(uid) {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
