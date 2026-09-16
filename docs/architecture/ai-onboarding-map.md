@@ -76,10 +76,15 @@ Referral rewards remain review/provider gated. Do not imply instant, guaranteed,
 
 ### Glasses
 
-- `BlueprintCapture/GlassesCaptureManager.swift`: iOS Meta glasses manager, MWDAT/mock setup, device discovery, streaming, video writing, motion logging, companion-phone AR tracking, manifest writing, and package creation.
-- `BlueprintCapture/GlassesCaptureView.swift` and `BlueprintCapture/Views/Scan/GlassesConnectSheet.swift`: iOS glasses UI.
+The iOS smart-glasses capture stack was removed: a World Labs world model
+reconstructs the scene from an ordinary phone walkthrough, so a second capture
+device no longer earns its place. The phone path is
+`BlueprintCapture/Views/Scan/JobCaptureFlowView.swift`.
 
-Smart glasses are an internal or supported-path capture modality unless there is physical-device proof plus Pipeline/WebApp proof for the same capture/job chain.
+Android still carries its own glasses implementation (see the Android section
+below). It remains an internal or supported-path capture modality unless there
+is physical-device proof plus Pipeline/WebApp proof for the same capture/job
+chain.
 
 ## Android App Map
 

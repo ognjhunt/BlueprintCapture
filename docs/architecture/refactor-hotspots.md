@@ -33,21 +33,6 @@ Safe future split:
 - Extract `ARKitDerivedSidecarWriter` for derived V3 sidecars.
 - Keep `CaptureBundleFinalizer` behavior stable and covered by raw-contract tests.
 
-## `BlueprintCapture/GlassesCaptureManager.swift`
-
-Current responsibility:
-- Owns Meta glasses setup, MWDAT/mock device handling, discovery/connection, streaming, video writer, frame metadata, motion logging, companion-phone AR tracking, manifest/package creation, and simulator/physical-device gating.
-
-Risk:
-- Real SDK availability, simulator guards, mock-vs-real behavior, companion-phone pose truth, and public-readiness copy are easy to blur. Mock support must not become public proof.
-
-Safe future split:
-- Extract `MetaWearablesAdapter` for real MWDAT registration, discovery, and stream state.
-- Extract `MockGlassesAdapter` for dev-only mock behavior.
-- Extract `GlassesArtifactWriter` for frames/video/stream metadata.
-- Extract `CompanionPhoneTracker` for ARSession pose/intrinsics/calibration sidecars.
-- Keep physical-device and mock boundaries explicit in tests and UI.
-
 ## `BlueprintCapture/Services/CaptureUploadService.swift`
 
 Current responsibility:
