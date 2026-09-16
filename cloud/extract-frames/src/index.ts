@@ -606,6 +606,19 @@ const UPSTREAM_PLACEHOLDER_PREFIXES = [
   "mock",
 ];
 
+/**
+ * A capture the site made itself, with nobody dispatched to make it.
+ *
+ * The distinction matters for exactly one thing: whether a marketplace capture
+ * job must exist behind the capture. Everything else about a self-serve
+ * walkthrough — the required manifest fields, the scene and capture id checks,
+ * the frame extraction — is identical to any other video-only capture.
+ */
+export function isSelfServeCapture(manifest: Record<string, unknown> | null): boolean {
+  const source = asString(manifest?.capture_source)?.toLowerCase() ?? "";
+  return source === "browser_self_capture";
+}
+
 function invalidUpstreamIdBlockers(
   fieldName: string,
   value: string | null,
@@ -1081,7 +1094,20 @@ export function validateIdentityMapping(input: {
   }
   if (!safeCaptureJobId && invalidCaptureJobIdBlockers.length === 0) {
     requiredUpstreamBlockers.push("missing_capture_job_id");
-    if (ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS) {
+    // A capture job is the marketplace record that commissioned a visit: who
+    // was dispatched, and who gets paid. A site that films its own workcell
+    // from a browser was never dispatched and nobody is owed, so there is no
+    // job id to carry and demanding one would be demanding a fact that does
+    // not exist for this kind of capture.
+    //
+    // Narrow on purpose. This does not relax `site_submission_id`, which a
+    // self-capture does have and still must name, and it is keyed off the
+    // capture source rather than the global
+    // ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS toggle, which would
+    // loosen the same check for device captures where a missing job id is a
+    // real defect. It stays in `warnings` and in `requiredUpstreamBlockers`,
+    // so hosted review still sees it.
+    if (ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS || isSelfServeCapture(manifest)) {
       warnings.push("missing_capture_job_id");
     } else {
       blockReasons.push("missing_capture_job_id");
