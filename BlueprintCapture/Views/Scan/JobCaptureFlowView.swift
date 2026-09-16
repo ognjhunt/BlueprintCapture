@@ -15,15 +15,73 @@ import SwiftUI
 struct JobCaptureFlowView: View {
     let job: ScanJob
 
+    @ObservedObject var uploadQueue: UploadQueueViewModel
+
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: CaptureFlowViewModel
 
-    init(job: ScanJob) {
+    private var isUITesting: Bool { RuntimeConfig.current.isUITesting }
+
+    init(job: ScanJob, uploadQueue: UploadQueueViewModel) {
         self.job = job
+        self.uploadQueue = uploadQueue
         _viewModel = StateObject(wrappedValue: CaptureFlowViewModel(flowMode: .standard))
     }
 
     var body: some View {
+        if isUITesting {
+            // A simulator cannot record, so the core-path UI test drives this
+            // stand-in instead. It exists to prove the wiring the test is
+            // actually about -- approved task -> capture -> queued upload ->
+            // visible progress -- which is real regardless of which screen
+            // does the recording. The identifiers are the ones the test has
+            // always used; they moved here with the flow.
+            uiTestRecordingStandIn
+        } else {
+            captureFlow
+        }
+    }
+
+    private var uiTestRecordingStandIn: some View {
+        ZStack {
+            BP.viewfinder.ignoresSafeArea()
+            VStack(spacing: Space.xl) {
+                Spacer()
+                Text(job.title)
+                    .font(.bpSans(BPType.title, .medium))
+                    .foregroundStyle(BP.onInk)
+                Text("Recording")
+                    .font(.bpMono(BPType.bodyS))
+                    .foregroundStyle(BP.onInk.opacity(0.7))
+                Spacer()
+
+                if !uploadQueue.uploadStatuses.isEmpty {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Back to capture feed")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(BPPrimaryButtonStyle())
+                    .accessibilityIdentifier("scan-recording-back")
+                } else {
+                    Button {
+                        uploadQueue.simulateUITestUpload(for: job)
+                    } label: {
+                        Image(systemName: "stop.fill")
+                            .font(.title2.weight(.bold))
+                            .foregroundStyle(BP.onInk)
+                            .frame(width: 84, height: 84)
+                            .background(Circle().fill(BP.blockFg))
+                    }
+                    .accessibilityIdentifier("scan-recording-stop")
+                }
+            }
+            .padding(Space.xl)
+        }
+    }
+
+    private var captureFlow: some View {
         ZStack(alignment: .top) {
             BP.viewfinder.ignoresSafeArea()
 

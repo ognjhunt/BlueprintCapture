@@ -134,7 +134,7 @@ struct ScanHomeView: View {
             )
         }
         .fullScreenCover(item: $recordingJob) { job in
-            JobCaptureFlowView(job: job)
+            JobCaptureFlowView(job: job, uploadQueue: uploadQueue)
                 .preferredColorScheme(.dark)
         }
         .fullScreenCover(item: $reviewSubmissionSeed) { seed in
