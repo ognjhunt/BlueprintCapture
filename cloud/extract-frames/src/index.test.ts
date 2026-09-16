@@ -1042,3 +1042,85 @@ test("canonicalWorldModelCandidate defers non-ARKit world model promotion until 
   assert.equal(result.candidate, false);
   assert.ok(result.reasoning.includes("awaiting_geometry_stage:true"));
 });
+
+test("validateIdentityMapping lets a browser self-capture through without a capture job", () => {
+  // A capture job is the marketplace record of who was dispatched and who gets
+  // paid. A site that filmed its own workcell was never dispatched and nobody
+  // is owed, so there is no job id to carry. Before this, the whole self-serve
+  // path ended in a blocked report: the site filmed it, uploaded it, was told
+  // we had it, and nothing ever produced a scene.
+  const pathInfo = parseCapturePath(
+    "scenes/site-req-1/captures/walkthrough-req-1/raw/capture_upload_complete.json",
+    "0"
+  );
+  assert.ok(pathInfo);
+
+  const validation = validateIdentityMapping({
+    manifest: {
+      scene_id: "site-req-1",
+      capture_id: "walkthrough-req-1",
+      capture_source: "browser_self_capture",
+      site_submission_id: "req-1",
+    },
+    completionMarker: {
+      scene_id: "site-req-1",
+      capture_id: "walkthrough-req-1",
+      raw_prefix: "scenes/site-req-1/captures/walkthrough-req-1/raw",
+    },
+    pathInfo,
+  });
+
+  assert.deepEqual(validation.blockReasons, []);
+  assert.ok(validation.warnings.includes("missing_capture_job_id"));
+  // Still visible to hosted review; downgraded, not hidden.
+  const hostedBlockers = validation.identity.hosted_review_blockers as string[];
+  assert.ok(hostedBlockers.includes("missing_capture_job_id"));
+});
+
+test("a self-capture still has to name the submission behind it", () => {
+  // The relaxation is narrow. Only the capture job is excused, because only the
+  // capture job is a fact that does not exist for this kind of capture. A
+  // walkthrough nobody can trace back to a request is an orphan either way.
+  const pathInfo = parseCapturePath(
+    "scenes/site-req-1/captures/walkthrough-req-1/raw/capture_upload_complete.json",
+    "0"
+  );
+  assert.ok(pathInfo);
+
+  const validation = validateIdentityMapping({
+    manifest: {
+      scene_id: "site-req-1",
+      capture_id: "walkthrough-req-1",
+      capture_source: "browser_self_capture",
+    },
+    completionMarker: null,
+    pathInfo,
+  });
+
+  assert.ok(validation.blockReasons.includes("missing_site_submission_id"));
+  assert.ok(!validation.blockReasons.includes("missing_capture_job_id"));
+});
+
+test("a device capture is unaffected and still blocks on a missing capture job", () => {
+  // The global ALLOW_REVIEW_ONLY_HANDOFF_WITHOUT_UPSTREAM_IDS toggle would have
+  // relaxed this for iPhone captures too, where a missing job id is a real
+  // defect. Keying off capture_source is what keeps that check where it was.
+  const pathInfo = parseCapturePath(
+    "scenes/scene-123/captures/capture-456/raw/capture_upload_complete.json",
+    "0"
+  );
+  assert.ok(pathInfo);
+
+  const validation = validateIdentityMapping({
+    manifest: {
+      scene_id: "scene-123",
+      capture_id: "capture-456",
+      capture_source: "iphone",
+      site_submission_id: "req-9",
+    },
+    completionMarker: null,
+    pathInfo,
+  });
+
+  assert.ok(validation.blockReasons.includes("missing_capture_job_id"));
+});
