@@ -315,7 +315,6 @@ enum UITestFixtures {
 }
 
 struct UITestRootView: View {
-    @StateObject private var glassesManager: GlassesCaptureManager
     @StateObject private var uploadQueue: UploadQueueViewModel
     @StateObject private var alertsManager: NearbyAlertsManager
 
@@ -327,7 +326,6 @@ struct UITestRootView: View {
     init(scenario: RuntimeConfig.UITestScenario? = nil) {
         let resolvedScenario = scenario ?? RuntimeConfig.current.uiTestScenario
         let alertsManager = NearbyAlertsManager()
-        _glassesManager = StateObject(wrappedValue: GlassesCaptureManager())
         _uploadQueue = StateObject(wrappedValue: UITestFixtures.makeUploadQueueViewModel())
         _alertsManager = StateObject(wrappedValue: alertsManager)
         self.scenario = resolvedScenario
@@ -342,7 +340,6 @@ struct UITestRootView: View {
                 UITestOnboardingView()
             case .wallet:
                 MainTabView(
-                    glassesManager: glassesManager,
                     uploadQueue: uploadQueue,
                     alertsManager: alertsManager,
                     initialSelectedTab: 1,
@@ -352,7 +349,6 @@ struct UITestRootView: View {
                 )
             case .corePath, .disabled:
                 MainTabView(
-                    glassesManager: glassesManager,
                     uploadQueue: uploadQueue,
                     alertsManager: alertsManager,
                     initialSelectedTab: 0,

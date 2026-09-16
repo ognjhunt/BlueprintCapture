@@ -81,18 +81,17 @@ capture automatically.
 ## Alpha Scope
 
 - In scope: truthful capture selection, raw bundle packaging, upload queueing, wallet history sync, and explicit open-capture flow.
-- In scope on Android: phone capture and target-scoped Meta glasses capture for approved repeat walkthroughs that finalizes into the canonical bundle/upload pipeline.
+- In scope on Android: phone capture that finalizes into the canonical bundle/upload pipeline.
 - Intentionally out of scope by default: direct-provider AI features, Street View previews, and Android payout onboarding UI that is not backed by a live provider contract.
 - External rollout scope on 2026-03-26: iOS only for the staged 10 -> 25 -> 100 tester ramp, and only when real proof links the iPhone capture, upstream request/job records, bridge handoff, Pipeline package, and WebApp sync. Android now has a repo-local release validator, but it stays internal-only until `scripts/android_alpha_readiness.sh` passes with real release config and device/App Distribution smoke is signed off.
-- Meta glasses and Android are internal-only launch paths unless a concrete assignment, physical-device proof, launch proof, and downstream Pipeline/WebApp proof exist for the same capture/job chain. Google/Meta smart-glasses public language must follow the same proof boundary.
+- Android is an internal-only launch path unless a concrete assignment, physical-device proof, launch proof, and downstream Pipeline/WebApp proof exist for the same capture/job chain.
 - Current cross-modality runtime limits are documented in [docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md](docs/CROSS_MODAL_CAPTURE_LIMITS_2026-03-25.md).
 - The canonical iPhone Pro single-walk/Postshot evidence flow and remaining physical launch gates are documented in [docs/SINGLE_WALK_POSTSHOT_LAUNCH_READINESS.md](docs/SINGLE_WALK_POSTSHOT_LAUNCH_READINESS.md).
-- The disabled-by-default vendor recording experiment is documented in [docs/NIANTIC_NSDK_CAPTURE_AUGMENTATION.md](docs/NIANTIC_NSDK_CAPTURE_AUGMENTATION.md).
 
 ## Main Areas
 
 - [BlueprintCapture/VideoCaptureManager.swift](BlueprintCapture/VideoCaptureManager.swift): iPhone capture and ARKit logging
-- [BlueprintCapture/GlassesCaptureManager.swift](BlueprintCapture/GlassesCaptureManager.swift): Meta glasses capture
+- [BlueprintCapture/Views/Scan/JobCaptureFlowView.swift](BlueprintCapture/Views/Scan/JobCaptureFlowView.swift): recording a job's walkthrough on the phone
 - [BlueprintCapture/Services/CaptureBundleSupport.swift](BlueprintCapture/Services/CaptureBundleSupport.swift): bundle finalization and export
 - [BlueprintCapture/Services/CaptureUploadService.swift](BlueprintCapture/Services/CaptureUploadService.swift): upload pipeline
 - [cloud/extract-frames/src/index.ts](cloud/extract-frames/src/index.ts): frame extraction bridge

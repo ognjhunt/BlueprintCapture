@@ -6,7 +6,6 @@ struct WalletView: View {
         let captureId: UUID
     }
 
-    @ObservedObject var glassesManager: GlassesCaptureManager
     @StateObject private var viewModel: WalletViewModel
     private let shouldAutoload: Bool
 
@@ -21,8 +20,7 @@ struct WalletView: View {
 
     private let ledgerTabs = ["Payouts", "Cashouts", "History"]
 
-    init(glassesManager: GlassesCaptureManager, viewModel: WalletViewModel? = nil, shouldAutoload: Bool = true) {
-        self.glassesManager = glassesManager
+    init(viewModel: WalletViewModel? = nil, shouldAutoload: Bool = true) {
         self.shouldAutoload = shouldAutoload
         _viewModel = StateObject(wrappedValue: viewModel ?? WalletViewModel())
     }

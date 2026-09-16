@@ -36,6 +36,10 @@ struct CaptureHandoffRoute: Equatable, Sendable {
 
 struct CaptureHandoffMetadata: Equatable, Sendable, Decodable {
     static let defaultPrivacyReminder = "Capture only approved areas. Avoid private, restricted, or sensitive content."
+    /// Fallback when the backend sends no boundary of its own. Previously lived
+    /// on the smart-glasses HUD snapshot; the claim is unchanged, minus the
+    /// reference to a HUD that no longer exists.
+    static let defaultTruthBoundary = "Scan coaching is advisory UX telemetry, not raw geometry, pose, depth, coverage, rights, or qualification proof."
 
     let requestId: String
     let captureJobId: String
@@ -96,7 +100,7 @@ struct CaptureHandoffMetadata: Equatable, Sendable, Decodable {
         captureBrief = try container.decodeOptionalString(.captureBrief, .captureBriefSnake)
         privacyReminder = try container.decodeOptionalString(.privacyReminder, .privacyReminderSnake) ?? Self.defaultPrivacyReminder
         allowedAdvisoryHints = try container.decodeOptionalStrings(.allowedAdvisoryHints, .allowedAdvisoryHintsSnake) ?? []
-        truthBoundary = try container.decodeOptionalString(.truthBoundary, .truthBoundarySnake) ?? MetaDisplayHUDSnapshot.truthBoundary
+        truthBoundary = try container.decodeOptionalString(.truthBoundary, .truthBoundarySnake) ?? Self.defaultTruthBoundary
     }
 }
 

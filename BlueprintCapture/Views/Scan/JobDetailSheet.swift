@@ -4,8 +4,9 @@ import CoreLocation
 struct JobDetailSheet: View {
     let item: ScanHomeViewModel.JobItem
     let userLocation: CLLocation?
-    let onStartCapture: () -> Void          // glasses path
-    let onStartPhoneCapture: () -> Void     // ARKit / phone camera path
+    /// Record this job's walkthrough on the phone. There is only one capture
+    /// device now, so this is the capture path.
+    let onStartCapture: () -> Void
     let onSubmitForReview: () -> Void
     let onDirections: () -> Void
 
@@ -13,7 +14,6 @@ struct JobDetailSheet: View {
 
     @State private var focusTip: String? = nil
     @State private var isLoadingTip = false
-    @State private var showCapturePicker = false
 
     private var isOnSite: Bool {
         if AppConfig.allowOffsiteCheckIn() { return true }
@@ -158,21 +158,6 @@ struct JobDetailSheet: View {
         .preferredColorScheme(.dark)
         .onAppear {
             Task { await generateFocusTip() }
-        }
-        .confirmationDialog("How do you want to capture?", isPresented: $showCapturePicker, titleVisibility: .visible) {
-            Button("Use iPhone Camera") {
-                dismiss()
-                onStartPhoneCapture()
-            }
-            .accessibilityIdentifier("job-detail-capture-iphone")
-            Button("Use Glasses") {
-                dismiss()
-                onStartCapture()
-            }
-            .accessibilityIdentifier("job-detail-capture-glasses")
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("iPhone uses ARKit + LiDAR. Glasses record hands-free.")
         }
     }
 
@@ -506,13 +491,8 @@ struct JobDetailSheet: View {
         }
         switch item.permissionTier {
         case .approved:
-            if RuntimeConfig.current.isUITesting {
-                dismiss()
-                onStartCapture()
-            } else {
-                // Ask the user whether to use iPhone camera or glasses before routing.
-                showCapturePicker = true
-            }
+            dismiss()
+            onStartCapture()
         case .reviewRequired:
             onSubmitForReview()
             dismiss()

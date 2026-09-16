@@ -13,7 +13,6 @@ import UIKit
 struct BPHomeTab: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var coordinator: RedesignCoordinator
-    @EnvironmentObject private var glassesManager: GlassesCaptureManager
     @EnvironmentObject private var uploadQueue: UploadQueueViewModel
     @EnvironmentObject private var alertsManager: NearbyAlertsManager
 
@@ -430,8 +429,8 @@ struct BPHomeTab: View {
 
         let job = item.job
 
-        // Reserve + check in against the marketplace target_state doc, mirroring the
-        // legacy ScanRecordingView flow. This is what makes the claim real and yields
+        // Reserve + check in against the marketplace target_state doc. This is
+        // what makes the claim real and yields
         // an authoritative capture_job_id (job.id). Open-capture-here has no
         // marketplace document, so we skip reservation for it.
         if job.id != ScanHomeViewModel.alphaCurrentLocationJobID {
@@ -578,7 +577,6 @@ struct BPJobRow: View {
     let alertsManager = NearbyAlertsManager()
     return BPHomeTab(alertsManager: alertsManager)
         .environmentObject(RedesignCoordinator())
-        .environmentObject(GlassesCaptureManager())
         .environmentObject(UploadQueueViewModel())
         .environmentObject(alertsManager)
 }
