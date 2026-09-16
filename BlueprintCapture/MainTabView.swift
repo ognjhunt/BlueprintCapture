@@ -2,7 +2,6 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab: Int
-    @ObservedObject var glassesManager: GlassesCaptureManager
     @ObservedObject var uploadQueue: UploadQueueViewModel
     @ObservedObject var alertsManager: NearbyAlertsManager
     private let scanHomeViewModel: ScanHomeViewModel?
@@ -10,7 +9,6 @@ struct MainTabView: View {
     private let walletShouldAutoload: Bool
 
     init(
-        glassesManager: GlassesCaptureManager,
         uploadQueue: UploadQueueViewModel,
         alertsManager: NearbyAlertsManager,
         initialSelectedTab: Int = 0,
@@ -18,7 +16,6 @@ struct MainTabView: View {
         walletViewModel: WalletViewModel? = nil,
         walletShouldAutoload: Bool = true
     ) {
-        self.glassesManager = glassesManager
         self.uploadQueue = uploadQueue
         self.alertsManager = alertsManager
         self.scanHomeViewModel = scanHomeViewModel
@@ -35,14 +32,13 @@ struct MainTabView: View {
 
             TabView(selection: $selectedTab) {
                 ScanHomeView(
-                    glassesManager: glassesManager,
                     uploadQueue: uploadQueue,
                     alertsManager: alertsManager,
                     viewModel: scanHomeViewModel
                 )
                 .tag(0)
 
-                WalletView(glassesManager: glassesManager, viewModel: walletViewModel, shouldAutoload: walletShouldAutoload)
+                WalletView(viewModel: walletViewModel, shouldAutoload: walletShouldAutoload)
                     .tag(1)
 
                 ProfileTabView()
@@ -124,7 +120,6 @@ struct MainTabView: View {
 
 #Preview {
     MainTabView(
-        glassesManager: GlassesCaptureManager(),
         uploadQueue: UploadQueueViewModel(),
         alertsManager: NearbyAlertsManager()
     )

@@ -156,7 +156,7 @@ final class SpaceDraftGenerator {
         guard case .available = SystemLanguageModel.default.availability else { return nil }
 
         let session = LanguageModelSession(
-            instructions: "You give real-time capture guidance to a field contributor wearing smart glasses and actively recording a space. Be ultra-brief, specific, and action-first. Max 15 words."
+            instructions: "You give real-time capture guidance to a field contributor recording a space on their phone. Be ultra-brief, specific, and action-first. Max 15 words."
         )
         let reqs = requirements.prefix(3).joined(separator: "; ")
         var prompt = "Job: \"\(jobTitle)\"."

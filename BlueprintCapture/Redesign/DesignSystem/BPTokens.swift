@@ -15,38 +15,48 @@ extension Color {
     }
 }
 
-// MARK: - BP — ink / paper / brass palette
+// MARK: - BP — the tryblueprint.io palette
 //
-// Non-negotiable: ink text on warm paper, brass is the only brand accent.
-// Saturated color is reserved for the signal set (proof / caution / blocker / info).
+// These are the public site's tokens, not an app-specific palette. The site
+// (`client/src/components/site/minimal-site.css` in Blueprint-WebApp) is built
+// from five colours and nothing else: paper, ink, muted, one green, one rule.
+// The app is the same product, so it uses the same five.
+//
+// What that rules out is as important as what it allows. The site has no
+// shadows, no filled cards and no second accent — structure is carried by
+// hairline rules on bare paper. Anything here that reads as "card chrome" is a
+// leftover and should go, not be restyled.
+//
+// Saturated colour stays reserved for the signal set (proof / caution /
+// blocker / info), which already matches the webapp's signal ramp exactly.
 // The live viewfinder is the only dark surface; everywhere else is paper.
 
 enum BP {
-    // brand
-    static let ink        = Color(hex: 0x0D0D0B)
-    static let graphite   = Color(hex: 0x1A1A17)
-    static let brass      = Color(hex: 0xC7A775)
-    static let brassDeep  = Color(hex: 0xA8854F)
-    static let brassLit   = Color(hex: 0xD8BD8D)
+    // brand — the five site tokens
+    static let ink        = Color(hex: 0x22251E) // --ms-ink
+    static let graphite   = Color(hex: 0x2F332B) // ink, lifted for secondary chrome
+    static let brass      = Color(hex: 0x203D2E) // --ms-green: the only accent
+    static let brassDeep  = Color(hex: 0x315440) // .ms-button:hover
+    static let brassLit   = Color(hex: 0x46705A) // nav/link hover
 
     // surfaces
-    static let canvas     = Color(hex: 0xFAF7F0)
-    static let card       = Color(hex: 0xFFFFFF)
-    static let inset      = Color(hex: 0xF5F1E8)
-    static let sunken     = Color(hex: 0xEBE4D7)
-    static let viewfinder = Color(hex: 0x15140F)
+    static let canvas     = Color(hex: 0xF6F5EF) // --ms-paper
+    static let card       = Color(hex: 0xFCFCF8) // .ms-form input / .ms-verdict fill
+    static let inset      = Color(hex: 0xF1F0E9)
+    static let sunken     = Color(hex: 0xE8E7DE)
+    static let viewfinder = Color(hex: 0x22251E) // ink, so recording reads as the same product
 
     // text
-    static let textStrong = Color(hex: 0x0D0D0B)
-    static let textBody   = Color(hex: 0x1A1A17)
-    static let textMuted  = Color(hex: 0x5F5D54)
-    static let textFaint  = Color(hex: 0x817E72)
-    static let onInk      = Color(hex: 0xF3EFE6)
+    static let textStrong = Color(hex: 0x22251E) // --ms-ink
+    static let textBody   = Color(hex: 0x32362D)
+    static let textMuted  = Color(hex: 0x62645D) // --ms-muted
+    static let textFaint  = Color(hex: 0x777E70) // .ms-form input::placeholder
+    static let onInk      = Color(hex: 0xF6F5EF) // paper on green/ink, per .ms-button
 
     // borders
-    static let line       = Color(hex: 0xDED7C8)
-    static let lineSoft   = Color(hex: 0xEBE4D7)
-    static let lineStrong = Color(hex: 0xC8BFAC)
+    static let line       = Color(hex: 0xBABDB3) // --ms-rule
+    static let lineSoft   = Color(hex: 0xD7DBD0) // .ms-legal section / .ms-inquiry-aside
+    static let lineStrong = Color(hex: 0xBAC0B2) // .ms-form input border
 
     // signal — fg / bg / border
     static let proofFg = Color(hex: 0x1F6B4F), proofBg = Color(hex: 0xEEF5F1), proofBd = Color(hex: 0xDCEBE3)
@@ -113,11 +123,14 @@ enum Space {
     static let xxl: CGFloat = 32
 }
 
+// The site is effectively square: 3pt on buttons, 2pt on inputs, and nothing
+// else is rounded at all. Panels and sheets get 0 — on paper a rule does the
+// separating, not a corner. `full` stays for status dots and avatars.
 enum Radius {
-    static let xs: CGFloat = 2
-    static let sm: CGFloat = 4
-    static let md: CGFloat = 8
-    static let lg: CGFloat = 12
+    static let xs: CGFloat = 2   // .ms-form input
+    static let sm: CGFloat = 3   // .ms-button
+    static let md: CGFloat = 3
+    static let lg: CGFloat = 0   // panels / sheets: square
     static let full: CGFloat = 999
 }
 

@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1B2C3D4019FC5D700000001 /* NSDK in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4019FC5D700000003 /* NSDK */; };
 		89BA63FB2EA834670038ECD0 /* Geohasher in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA63FA2EA834670038ECD0 /* Geohasher */; };
 		89BA64082EA885A10038ECD0 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64072EA885A10038ECD0 /* FirebaseAnalytics */; };
 		89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64092EA885A10038ECD0 /* FirebaseAuth */; };
@@ -18,10 +17,6 @@
 		89BA64392EA972510038ECD0 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA64382EA972510038ECD0 /* Alamofire */; };
 		89BA645C2EAD35DB0038ECD0 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA645B2EAD35DB0038ECD0 /* GoogleSignIn */; };
 		89BA645E2EAD35DB0038ECD0 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 89BA645D2EAD35DB0038ECD0 /* GoogleSignInSwift */; };
-		89ED659B2EE4DCB700E460D5 /* MWDATCamera in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659A2EE4DCB700E460D5 /* MWDATCamera */; };
-		89ED659D2EE4DCB700E460D5 /* MWDATCore in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659C2EE4DCB700E460D5 /* MWDATCore */; };
-		89ED659F2EE4DCB700E460D5 /* MWDATMockDevice in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */; };
-		89ED65A22EE4DCB700E460D5 /* MWDATDisplay in Frameworks */ = {isa = PBXBuildFile; productRef = 89ED65A12EE4DCB700E460D5 /* MWDATDisplay */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -83,13 +78,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D4019FC5D700000001 /* NSDK in Frameworks */,
 				89BA64082EA885A10038ECD0 /* FirebaseAnalytics in Frameworks */,
-				89ED659B2EE4DCB700E460D5 /* MWDATCamera in Frameworks */,
 				89BA640C2EA885A10038ECD0 /* FirebaseFirestore in Frameworks */,
-				89ED659D2EE4DCB700E460D5 /* MWDATCore in Frameworks */,
-				89ED65A22EE4DCB700E460D5 /* MWDATDisplay in Frameworks */,
-				89ED659F2EE4DCB700E460D5 /* MWDATMockDevice in Frameworks */,
 				89BA64122EA885A10038ECD0 /* FirebaseCrashlytics in Frameworks */,
 				89BA640A2EA885A10038ECD0 /* FirebaseAuth in Frameworks */,
 				89BA64102EA885A10038ECD0 /* FirebaseMessaging in Frameworks */,
@@ -159,7 +149,6 @@
 			);
 			name = BlueprintCapture;
 			packageProductDependencies = (
-				A1B2C3D4019FC5D700000003 /* NSDK */,
 				89BA63FA2EA834670038ECD0 /* Geohasher */,
 				89BA64072EA885A10038ECD0 /* FirebaseAnalytics */,
 				89BA64092EA885A10038ECD0 /* FirebaseAuth */,
@@ -170,10 +159,6 @@
 				89BA64382EA972510038ECD0 /* Alamofire */,
 				89BA645B2EAD35DB0038ECD0 /* GoogleSignIn */,
 				89BA645D2EAD35DB0038ECD0 /* GoogleSignInSwift */,
-				89ED659A2EE4DCB700E460D5 /* MWDATCamera */,
-				89ED659C2EE4DCB700E460D5 /* MWDATCore */,
-				89ED65A12EE4DCB700E460D5 /* MWDATDisplay */,
-				89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */,
 			);
 			productName = BlueprintCapture;
 			productReference = 8901D86C2EA7DB6000DF72ED /* BlueprintCapture.app */;
@@ -258,12 +243,10 @@
 			mainGroup = 8901D8632EA7DB6000DF72ED;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A1B2C3D4019FC5D700000002 /* XCRemoteSwiftPackageReference "nsdk-library-xcframework" */,
 				89BA63F92EA834670038ECD0 /* XCRemoteSwiftPackageReference "Geohasher" */,
 				89BA64062EA885A10038ECD0 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 				89BA64372EA972510038ECD0 /* XCRemoteSwiftPackageReference "Alamofire" */,
 				89BA645A2EAD35DB0038ECD0 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
-				89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8901D86D2EA7DB6000DF72ED /* Products */;
@@ -719,14 +702,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A1B2C3D4019FC5D700000002 /* XCRemoteSwiftPackageReference "nsdk-library-xcframework" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/nianticspatial/nsdk-library-xcframework.git";
-			requirement = {
-				kind = exactVersion;
-				version = "4.1.0-26051913";
-			};
-		};
 		89BA63F92EA834670038ECD0 /* XCRemoteSwiftPackageReference "Geohasher" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/nenosllc/Geohasher.git";
@@ -759,22 +734,9 @@
 				minimumVersion = 9.0.0;
 			};
 		};
-		89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/facebook/meta-wearables-dat-ios";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.7.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A1B2C3D4019FC5D700000003 /* NSDK */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A1B2C3D4019FC5D700000002 /* XCRemoteSwiftPackageReference "nsdk-library-xcframework" */;
-			productName = NSDK;
-		};
 		89BA63FA2EA834670038ECD0 /* Geohasher */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 89BA63F92EA834670038ECD0 /* XCRemoteSwiftPackageReference "Geohasher" */;
@@ -824,26 +786,6 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 89BA645A2EAD35DB0038ECD0 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignInSwift;
-		};
-		89ED659A2EE4DCB700E460D5 /* MWDATCamera */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATCamera;
-		};
-		89ED659C2EE4DCB700E460D5 /* MWDATCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATCore;
-		};
-		89ED65A12EE4DCB700E460D5 /* MWDATDisplay */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATDisplay;
-		};
-		89ED659E2EE4DCB700E460D5 /* MWDATMockDevice */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 89ED65992EE4DCB700E460D5 /* XCRemoteSwiftPackageReference "meta-wearables-dat-ios" */;
-			productName = MWDATMockDevice;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

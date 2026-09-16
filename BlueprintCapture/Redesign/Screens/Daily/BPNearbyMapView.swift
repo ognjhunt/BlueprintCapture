@@ -62,17 +62,19 @@ struct BPNearbyMapView: View {
 
     private func pin(for item: ScanHomeViewModel.JobItem) -> some View {
         let isSelected = item.id == selectedItemId
+        // Both states are a dark fill now that the accent is a deep green, so
+        // the glyph is paper in both. Selection reads through size and the
+        // ring, not through inverting the colours.
         return ZStack {
             Circle()
                 .fill(isSelected ? BP.ink : BP.brass)
             Circle()
-                .strokeBorder(isSelected ? BP.brass : BP.brassDeep.opacity(0.5), lineWidth: 1.5)
+                .strokeBorder(isSelected ? BP.brass : BP.ink.opacity(0.35), lineWidth: 1.5)
             Image(systemName: "camera.aperture")
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? BP.brass : BP.ink)
+                .foregroundStyle(BP.onInk)
         }
         .frame(width: isSelected ? 36 : 30, height: isSelected ? 36 : 30)
-        .shadow(color: .black.opacity(0.18), radius: 4, y: 2)
         .accessibilityLabel("\(item.job.title), \(item.payoutLabel), \(item.distanceLabel)")
     }
 

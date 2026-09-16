@@ -2,17 +2,22 @@ import SwiftUI
 
 // MARK: - Card surface
 //
-// Paper-grounded: white fill, 1pt warm hairline, 8pt radius, low shadow — no glow.
+// Paper-grounded and flat. The site draws no shadows anywhere — depth is not
+// part of the language — so a "card" here is just paper with a hairline. The
+// `shadow` parameter is kept so the ~dozen existing call sites still compile,
+// but it no longer draws anything; passing `shadow: true` is a no-op rather
+// than a lie about the surface.
 
 extension View {
-    /// White paper card: hairline border, small radius, low paper shadow.
+    /// Paper card: hairline border, near-square, no shadow.
     func bpCard(
         radius: CGFloat = Radius.md,
         fill: Color = BP.card,
         border: Color = BP.line,
-        shadow: Bool = true
+        shadow: Bool = false
     ) -> some View {
-        self
+        _ = shadow
+        return self
             .background(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(fill)
@@ -21,12 +26,19 @@ extension View {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(border, lineWidth: 1)
             )
-            .shadow(color: shadow ? Color.black.opacity(0.06) : .clear, radius: shadow ? 10 : 0, x: 0, y: shadow ? 4 : 0)
     }
 
-    /// Full-screen warm paper background.
+    /// Full-screen paper background.
     func bpPaperBackground() -> some View {
         self.background(BP.canvas.ignoresSafeArea())
+    }
+
+    /// A section separated by a rule rather than boxed into a card — the site's
+    /// default way of grouping. Prefer this over `bpCard` for new surfaces.
+    func bpRuledSection(top: Bool = true, bottom: Bool = false) -> some View {
+        self
+            .overlay(alignment: .top) { if top { BPDivider() } }
+            .overlay(alignment: .bottom) { if bottom { BPDivider() } }
     }
 }
 
@@ -39,7 +51,7 @@ struct BPCard<Content: View>: View {
     var radius: CGFloat = Radius.md
     var fill: Color = BP.card
     var border: Color = BP.line
-    var shadow: Bool = true
+    var shadow: Bool = false
     @ViewBuilder var content: () -> Content
 
     init(
@@ -47,7 +59,7 @@ struct BPCard<Content: View>: View {
         radius: CGFloat = Radius.md,
         fill: Color = BP.card,
         border: Color = BP.line,
-        shadow: Bool = true,
+        shadow: Bool = false,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.padding = padding

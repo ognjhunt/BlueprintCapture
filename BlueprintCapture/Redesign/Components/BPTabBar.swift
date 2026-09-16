@@ -78,11 +78,10 @@ struct BPTabBar: View {
             ZStack {
                 Circle()
                     .fill(captureEnabled ? BP.brass : BP.sunken)
-                    .overlay(Circle().strokeBorder(BP.brassDeep.opacity(0.5), lineWidth: 1))
-                    .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 4)
+                    .overlay(Circle().strokeBorder(captureEnabled ? BP.brass : BP.lineStrong, lineWidth: 1))
                 Image(systemName: "camera.aperture")
                     .font(.system(size: 26, weight: .regular))
-                    .foregroundStyle(BP.ink)
+                    .foregroundStyle(captureEnabled ? BP.onInk : BP.textFaint)
             }
             .frame(width: 58, height: 58)
             .offset(y: -14)

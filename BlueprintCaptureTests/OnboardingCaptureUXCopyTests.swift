@@ -6,19 +6,6 @@ import Testing
 struct OnboardingCaptureUXCopyTests {
 
     @Test
-    func completionCopyReflectsWhetherGlassesWereConnected() {
-        #expect(OnboardingCaptureUXCopy.completionTitle(glassesConnected: true) == "Capture Setup Complete")
-        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: true) == "We'll show assigned-site work, approved opportunities, and review-gated submissions separately. Payout and downstream use depend on backend review.")
-        #expect(OnboardingCaptureUXCopy.completionTitle(glassesConnected: false) == "Start with iPhone Capture")
-        #expect(OnboardingCaptureUXCopy.completionMessage(glassesConnected: false) == "You can capture assigned or operator-approved facility sites with your iPhone now. Connect glasses later for supported hands-free capture.")
-    }
-
-    @Test
-    func disconnectedGlassesSubtitleMatchesIPhoneFallback() {
-        #expect(OnboardingCaptureUXCopy.disconnectedGlassesSubtitle == "Optional for supported hands-free capture. Assigned-site work, approved jobs, and review submissions can still start with iPhone.")
-    }
-
-    @Test
     func firstCaptureGoalsLeadWithAssignedIndustrialOrApprovedSitePath() {
         #expect(OnboardingFirstCaptureGoal.storageKey == "com.blueprint.firstCaptureGoal")
         #expect(OnboardingFirstCaptureGoal.allCases.first == .assignedOrApprovedSite)

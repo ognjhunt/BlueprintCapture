@@ -1,25 +1,28 @@
 import SwiftUI
 
-// MARK: - Brass primary button
+// MARK: - Primary button
 //
-// The "next step" on every screen. Brass fill, ink label, square chrome (8pt),
-// quick mechanical press. No glow.
+// The "next step" on every screen, and a direct port of the site's
+// `.ms-button`: green fill, paper label, 3pt corner, 44pt minimum target.
+//
+// The label is paper, not ink — the accent is now a deep green, and ink on it
+// fails contrast outright.
 
 struct BPPrimaryButtonStyle: ButtonStyle {
     var enabled: Bool = true
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.bpSans(BPType.body, .semibold))
-            .foregroundStyle(BP.ink)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .font(.bpSans(BPType.bodyS, .medium))
+            .foregroundStyle(enabled ? BP.onInk : BP.textFaint)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
                     .fill(enabled ? BP.brass : BP.sunken)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Radius.md, style: .continuous)
-                    .strokeBorder(BP.brassDeep.opacity(enabled ? 0.45 : 0), lineWidth: 1)
+                RoundedRectangle(cornerRadius: Radius.sm, style: .continuous)
+                    .strokeBorder(enabled ? BP.brass : BP.line, lineWidth: 1)
             )
             .opacity(configuration.isPressed ? 0.9 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)

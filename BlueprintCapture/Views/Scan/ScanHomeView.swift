@@ -4,7 +4,6 @@ import UIKit
 import CoreLocation
 
 struct ScanHomeView: View {
-    @ObservedObject var glassesManager: GlassesCaptureManager
     @ObservedObject var uploadQueue: UploadQueueViewModel
     @ObservedObject var alertsManager: NearbyAlertsManager
 
@@ -12,7 +11,6 @@ struct ScanHomeView: View {
 
     @State private var selectedItem: ScanHomeViewModel.JobItem?
     @State private var reviewSubmissionSeed: SpaceReviewSeed?
-    @State private var showConnectSheet = false
     @State private var recordingJob: ScanJob?
     @State private var activeCategory: String? = nil
 
@@ -27,12 +25,10 @@ struct ScanHomeView: View {
     }
 
     init(
-        glassesManager: GlassesCaptureManager,
         uploadQueue: UploadQueueViewModel,
         alertsManager: NearbyAlertsManager,
         viewModel: ScanHomeViewModel? = nil
     ) {
-        self.glassesManager = glassesManager
         self.uploadQueue = uploadQueue
         self.alertsManager = alertsManager
         _viewModel = StateObject(wrappedValue: viewModel ?? ScanHomeViewModel(alertsManager: alertsManager))
@@ -97,9 +93,6 @@ struct ScanHomeView: View {
             .navigationBarHidden(true)
         }
         .blueprintAppBackground()
-        .sheet(isPresented: $showConnectSheet) {
-            GlassesConnectSheet(glassesManager: glassesManager) { showConnectSheet = false }
-        }
         .sheet(isPresented: $showingStripeOnboarding) {
             StripeOnboardingView()
         }
@@ -111,13 +104,6 @@ struct ScanHomeView: View {
                     selectedItem = nil
                     DispatchQueue.main.async {
                         recordingJob = item.job
-                    }
-                },
-                onStartPhoneCapture: {
-                    selectedItem = nil
-                    let seed = submissionSeed(for: item)
-                    DispatchQueue.main.async {
-                        reviewSubmissionSeed = seed
                     }
                 },
                 onSubmitForReview: {
@@ -148,7 +134,7 @@ struct ScanHomeView: View {
             )
         }
         .fullScreenCover(item: $recordingJob) { job in
-            ScanRecordingView(job: job, glassesManager: glassesManager, uploadQueue: uploadQueue)
+            JobCaptureFlowView(job: job, uploadQueue: uploadQueue)
                 .preferredColorScheme(.dark)
         }
         .fullScreenCover(item: $reviewSubmissionSeed) { seed in
@@ -217,7 +203,6 @@ struct ScanHomeView: View {
 
     private var statusBannerCount: Int {
         var count = 0
-        if !isGlassesConnected { count += 1 }
         if !payoutsReady { count += 1 }
         return count
     }
@@ -225,16 +210,6 @@ struct ScanHomeView: View {
     @ViewBuilder
     private var statusBanners: some View {
         VStack(spacing: 8) {
-            if !isGlassesConnected {
-                kledBanner(
-                    icon: "eyeglasses",
-                    title: glassesStatusTitle,
-                    subtitle: glassesStatusSubtitle,
-                    tone: .neutral,
-                    actionTitle: "Connect"
-                ) { showConnectSheet = true }
-                .padding(.horizontal, 20)
-            }
             if !payoutsReady {
                 let payoutsAvailability = RuntimeConfig.current.availability(for: .payouts)
                 kledBanner(
@@ -804,35 +779,6 @@ struct ScanHomeView: View {
     }
 
     // MARK: - Helpers
-
-    private var isGlassesConnected: Bool {
-        if case .connected = glassesManager.connectionState { return true }
-        return false
-    }
-
-    private var glassesStatusTitle: String {
-        switch glassesManager.connectionState {
-        case .connected: return "Capture glasses ready"
-        case .connecting: return "Connecting glasses"
-        case .registering: return "Finishing Meta setup"
-        case .waitingForDevice: return "Waiting for glasses"
-        case .permissionRequired: return "Permission needed"
-        case .error: return "Connection issue"
-        case .disconnected: return "Connect capture glasses"
-        }
-    }
-
-    private var glassesStatusSubtitle: String {
-        switch glassesManager.connectionState {
-        case .connected(let name): return name
-        case .connecting: return "Keep the device nearby."
-        case .registering: return "Approve Blueprint in Meta AI."
-        case .waitingForDevice: return "Keep the glasses connected in Meta AI and nearby."
-        case .permissionRequired(let deviceName): return "Grant camera access for \(deviceName) in Meta AI."
-        case .error(let message): return message
-        case .disconnected: return "Keep the glasses connected in Meta AI and nearby."
-        }
-    }
 
     private func submissionSeed(for item: ScanHomeViewModel.JobItem) -> SpaceReviewSeed {
         let suggestedContext = [item.job.workflowName, item.job.targetKPI, item.job.zone]

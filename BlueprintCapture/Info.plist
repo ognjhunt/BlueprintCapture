@@ -43,12 +43,6 @@
     <string>Motion data provides pose tracking for metric scale alignment.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>Your location anchors the capture to the correct address.</string>
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>Bluetooth is required to connect to your Meta smart glasses for video capture.</string>
-    <key>NSBluetoothPeripheralUsageDescription</key>
-    <string>Bluetooth is required to connect to your Meta smart glasses for video capture.</string>
-    <key>NSLocalNetworkUsageDescription</key>
-    <string>Local network access is used to discover and connect to your Meta smart glasses.</string>
     <key>BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK</key>
     <string>$(BLUEPRINT_ALLOW_MOCK_JOBS_FALLBACK)</string>
     <key>BLUEPRINT_BACKEND_BASE_URL</key>
@@ -83,27 +77,6 @@
     <string>$(BLUEPRINT_SUPPORT_EMAIL_ADDRESS)</string>
     <key>BLUEPRINT_NEARBY_DISCOVERY_PROVIDER</key>
     <string>$(BLUEPRINT_NEARBY_DISCOVERY_PROVIDER)</string>
-    <key>MWDAT</key>
-    <dict>
-        <key>AppLinkURLScheme</key>
-        <string>blueprint://</string>
-        <key>MetaAppID</key>
-        <string>1264466975619515</string>
-        <key>ClientToken</key>
-        <string>$(BLUEPRINT_META_CLIENT_TOKEN)</string>
-        <key>TeamID</key>
-        <string>$(DEVELOPMENT_TEAM)</string>
-        <key>Analytics</key>
-        <dict>
-            <key>OptOut</key>
-            <false/>
-        </dict>
-        <key>MockDevice</key>
-        <dict>
-            <key>Enabled</key>
-            <false/>
-        </dict>
-    </dict>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -128,6 +101,9 @@
 	</array>
 	<key>UIAppFonts</key>
 	<array>
+		<string>DMSans-Regular.ttf</string>
+		<string>DMSans-Medium.ttf</string>
+		<string>DMSans-Bold.ttf</string>
 		<string>Manrope-Regular.ttf</string>
 		<string>Manrope-Medium.ttf</string>
 		<string>Manrope-SemiBold.ttf</string>

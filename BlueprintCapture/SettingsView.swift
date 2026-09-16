@@ -9,7 +9,6 @@ struct SettingsView: View {
     @State private var showingManagePayouts = false
     @State private var showingEditProfile = false
     @State private var showingAuth = false
-    @State private var showingGlassesCapture = false
     @State private var showingSupportHelp = false
     @State private var showNearbyAlertInfo = false
     @State private var showDeleteAccountConfirmation = false
@@ -98,7 +97,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showingStripeOnboarding) { StripeOnboardingView() }
         .sheet(isPresented: $showingEditProfile) { EditProfileView(viewModel: viewModel) }
         .sheet(isPresented: $showingAuth) { AuthView() }
-        .sheet(isPresented: $showingGlassesCapture) { GlassesCaptureView() }
         .sheet(isPresented: $showingSupportHelp) { CapturerSupportHelpView() }
         .task {
             await viewModel.loadUserData()
@@ -212,15 +210,6 @@ struct SettingsView: View {
                     title: "Payout Setup",
                     subtitle: "Unavailable unless backend provider readiness is enabled"
                 ) { showingStripeOnboarding = true }
-
-                kledRowDivider
-
-                settingsNavRow(
-                    icon: "eyeglasses",
-                    iconBg: BlueprintTheme.brandTeal,
-                    title: "Capture Glasses",
-                    subtitle: "Connect Meta smart glasses"
-                ) { showingGlassesCapture = true }
             }
         }
     }

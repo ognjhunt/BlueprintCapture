@@ -536,51 +536,32 @@ struct ScanHomeAndUploadTests {
         #expect(sections == [.readyNearby, .nearby, .special, .submissions, .reviewSubmission])
     }
 
-    @Test @MainActor func uploadQueue_enqueuesGlassesCaptureAndCompletesTargetOnUploadCompletion() async throws {
+    @Test @MainActor func uploadQueue_marksTargetCompleteOnUploadCompletion() async throws {
+        // The phone is the only capture device now, so this exercises the
+        // ordinary path: a walkthrough is queued, the upload finishes, and the
+        // marketplace target is closed out so the capturer gets paid.
         let upload = MockCaptureUploadService()
         let targets = MockTargetStateService()
         let store = UploadQueueStore(fileURL: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("upload-queue-tests-\(UUID().uuidString).json"))
 
         let vm = UploadQueueViewModel(uploadService: upload, targetStateService: targets, store: store)
 
-        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("glasses-artifacts-\(UUID().uuidString)", isDirectory: true)
+        let baseDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("capture-artifacts-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
 
-        let artifacts = GlassesCaptureManager.CaptureArtifacts(
-            baseFilename: "test",
-            directoryURL: baseDir,
-            videoURL: baseDir.appendingPathComponent("walkthrough.mov"),
-            framesDirectoryURL: baseDir.appendingPathComponent("frames", isDirectory: true),
-            motionLogURL: baseDir.appendingPathComponent("motion.jsonl"),
-            manifestURL: baseDir.appendingPathComponent("manifest.json"),
-            glassesDirectoryURL: baseDir.appendingPathComponent("glasses", isDirectory: true),
-            streamMetadataURL: baseDir.appendingPathComponent("glasses/stream_metadata.json"),
-            frameTimestampsLogURL: baseDir.appendingPathComponent("glasses/frame_timestamps.jsonl"),
-            deviceStateLogURL: baseDir.appendingPathComponent("glasses/device_state.jsonl"),
-            healthEventsLogURL: baseDir.appendingPathComponent("glasses/health_events.jsonl"),
-            companionPhoneDirectoryURL: baseDir.appendingPathComponent("companion_phone", isDirectory: true),
-            companionPhonePosesLogURL: baseDir.appendingPathComponent("companion_phone/poses.jsonl"),
-            companionPhoneIntrinsicsURL: baseDir.appendingPathComponent("companion_phone/session_intrinsics.json"),
-            companionPhoneCalibrationURL: baseDir.appendingPathComponent("companion_phone/calibration.json"),
+        let request = makeUploadRequest(
+            id: UUID(),
             packageURL: baseDir,
-            startedAt: Date(),
-            endedAt: Date(),
-            frameCount: 10,
-            durationSeconds: 3.0
+            targetId: "job_123",
+            jobId: "job_123"
         )
 
-        let job = makeJob(id: "job_123", title: "Job", address: "Addr", lat: 0, lng: 0, payoutCents: 5000, updatedAt: Date())
+        vm.enqueue(request, targetName: "Job", estimatedPayoutRange: 40...60)
 
-        vm.enqueueGlassesCapture(artifacts: artifacts, job: job)
         #expect(upload.enqueued.count == 1)
         #expect(upload.enqueued.first?.metadata.targetId == "job_123")
         #expect(upload.enqueued.first?.metadata.jobId == "job_123")
-        #expect(upload.enqueued.first?.metadata.captureSource == .metaGlasses)
-        #expect(upload.enqueued.first?.metadata.sceneMemory?.inaccessibleAreas == ["Back office"])
-        #expect(upload.enqueued.first?.metadata.captureRights?.consentStatus == .documented)
-        #expect(upload.enqueued.first?.metadata.captureRights?.permissionDocumentURI == "https://example.com/permit.pdf")
-        #expect(upload.enqueued.first?.metadata.captureRights?.consentScope == ["Sales floor"])
-        #expect(upload.enqueued.first?.metadata.captureRights?.payoutEligible == true)
+        #expect(upload.enqueued.first?.metadata.captureSource == .iphoneVideo)
 
         // Simulate successful upload completion.
         if let req = upload.enqueued.first {
@@ -737,14 +718,19 @@ private func makeJob(
     )
 }
 
-private func makeUploadRequest(id: UUID, packageURL: URL) -> CaptureUploadRequest {
+private func makeUploadRequest(
+    id: UUID,
+    packageURL: URL,
+    targetId: String? = nil,
+    jobId: String? = nil
+) -> CaptureUploadRequest {
     CaptureUploadRequest(
         packageURL: packageURL,
         metadata: CaptureUploadMetadata(
             id: id,
-            targetId: nil,
+            targetId: targetId,
             reservationId: nil,
-            jobId: "job-\(id.uuidString)",
+            jobId: jobId ?? "job-\(id.uuidString)",
             captureJobId: nil,
             buyerRequestId: nil,
             siteSubmissionId: nil,

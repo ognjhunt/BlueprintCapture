@@ -1,4 +1,9 @@
-import { onObjectFinalized } from "firebase-functions/v2/storage";
+import { onObjectFinalized } from "firebase-functions/v2/storage";import {
+  readWorldReconstructionConfig,
+  requestWorldReconstruction,
+  worldReconstructionReceipt,
+} from "./world-reconstruction-trigger.js";
+
 import * as logger from "firebase-functions/logger";
 import { Storage } from "@google-cloud/storage";
 import { PubSub } from "@google-cloud/pubsub";
@@ -1369,6 +1374,91 @@ async function tryWriteHandoffReceiptWithPrecondition(
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Ask the WebApp to reconstruct this capture now that its frames exist.
+ *
+ * Deliberately best-effort. Frames and the Pipeline handoff above are the
+ * canonical output of this function; a world is downstream of them. If the
+ * WebApp is unreachable or refuses, the capture stays reconstructible and the
+ * reason is written beside it -- what must never happen is a successful
+ * extraction being reported as a failure because a later step was unavailable.
+ *
+ * The receipt is the idempotency guard: this trigger is at-least-once, and
+ * generating a world costs credits.
+ */
+async function requestWorldReconstructionOnce(
+  bucket: StorageBucket,
+  pathInfo: { capturesPrefix: string; framesPrefix: string; captureId: string; sceneId: string },
+  bucketName: string,
+  tmpDir: string
+): Promise<void> {
+  const receiptPath = `${pathInfo.capturesPrefix}/world_reconstruction_request.json`;
+  const requestedAt = new Date().toISOString();
+  const framesPrefixUri = `gs://${bucketName}/${pathInfo.framesPrefix}`;
+
+  const config = readWorldReconstructionConfig();
+  if ("blocker" in config) {
+    // Not configured is a deployment state, not a capture problem. Record it
+    // so an operator can see why nothing was reconstructed, and move on.
+    logger.info("World reconstruction not requested: trigger is not configured", {
+      captureId: pathInfo.captureId,
+      blocker: config.blocker,
+    });
+    await bucket.file(receiptPath).save(
+      JSON.stringify(
+        worldReconstructionReceipt({
+          captureId: pathInfo.captureId,
+          framesPrefixUri,
+          outcome: { status: "not_configured", blocker: config.blocker },
+          requestedAt,
+        }),
+        null,
+        2
+      ),
+      { contentType: "application/json" }
+    );
+    return;
+  }
+
+  const existing = await loadJsonObject(bucket, receiptPath, tmpDir);
+  const alreadyRequested = existing?.status === "requested";
+
+  const outcome = await requestWorldReconstruction({
+    config,
+    captureId: pathInfo.captureId,
+    framesPrefixUri,
+    sceneId: pathInfo.sceneId,
+    alreadyRequested,
+  });
+
+  if (outcome.status === "already_requested") {
+    logger.info("World reconstruction already requested for this capture", {
+      captureId: pathInfo.captureId,
+    });
+    return;
+  }
+
+  await bucket.file(receiptPath).save(
+    JSON.stringify(
+      worldReconstructionReceipt({
+        captureId: pathInfo.captureId,
+        framesPrefixUri,
+        outcome,
+        requestedAt,
+      }),
+      null,
+      2
+    ),
+    { contentType: "application/json" }
+  );
+
+  logger.info("World reconstruction request completed", {
+    captureId: pathInfo.captureId,
+    sceneId: pathInfo.sceneId,
+    status: outcome.status,
+  });
 }
 
 async function publishPipelineHandoffOnce(
@@ -2827,6 +2917,18 @@ export const extractFrames = onObjectFinalized(
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    }
+
+    // The walkthrough is now frames in a bucket. Hand it straight to the
+    // WebApp so a world model turns it into a scene without anyone asking.
+    try {
+      await requestWorldReconstructionOnce(bucket, pathInfo, bucketName, tmp);
+    } catch (error) {
+      logger.error("World reconstruction request failed after a successful extraction", {
+        captureId: pathInfo.captureId,
+        sceneId: pathInfo.sceneId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     logger.info("Uploaded frames, descriptor, QA report, and pipeline handoff", {

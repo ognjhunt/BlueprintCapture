@@ -48,65 +48,6 @@ final class UploadQueueViewModel: ObservableObject {
         uploadService.enqueue(request)
     }
 
-    func enqueueGlassesCapture(artifacts: GlassesCaptureManager.CaptureArtifacts, job: ScanJob) {
-        let quotedPayoutCents = job.explicitPayoutCents
-        let payoutEligible = quotedPayoutCents != nil
-        let hasUpstreamBootstrap = job.siteSubmissionId != nil || job.buyerRequestId != nil
-        let metadata = CaptureUploadMetadata(
-            id: UUID(),
-            targetId: job.id,
-            reservationId: nil,
-            jobId: job.id,
-            captureJobId: hasUpstreamBootstrap ? job.id : nil,
-            buyerRequestId: job.buyerRequestId,
-            siteSubmissionId: job.siteSubmissionId,
-            regionId: job.regionId,
-            creatorId: UserDeviceService.resolvedUserId(),
-            capturedAt: artifacts.startedAt,
-            uploadedAt: nil,
-            captureSource: .metaGlasses,
-            specialTaskType: job.captureSpecialTaskType,
-            priorityWeight: job.priorityWeight,
-            quotedPayoutCents: quotedPayoutCents,
-            rightsProfile: job.rightsProfile,
-            requestedOutputs: job.requestedOutputs,
-            intakePacket: job.qualificationIntakePacket,
-            intakeMetadata: CaptureIntakeMetadata(source: .authoritative),
-            taskHypothesis: nil,
-            scaffoldingPacket: job.defaultScaffoldingPacket,
-            captureModality: "glasses_video_only",
-            evidenceTier: "pre_screen_video",
-            captureContextHint: "\(job.title) at \(job.address)",
-            sceneMemory: SceneMemoryCaptureMetadata(
-                continuityScore: nil,
-                lightingConsistency: "unknown",
-                dynamicObjectDensity: "unknown",
-                operatorNotes: [],
-                inaccessibleAreas: job.inaccessibleAreasForCapture
-            ),
-            captureRights: CaptureRightsMetadata(
-                derivedSceneGenerationAllowed: false,
-                dataLicensingAllowed: false,
-                payoutEligible: payoutEligible,
-                consentStatus: job.captureConsentStatus,
-                permissionDocumentURI: job.permissionDocURL?.absoluteString,
-                consentScope: job.allowedAreas,
-                consentNotes: [],
-                venuePermission: VenuePermission.from(job: job)
-            ),
-            siteIdentity: nil,
-            captureTopology: nil,
-            captureMode: nil
-        )
-        let request = CaptureUploadRequest(packageURL: artifacts.packageURL, metadata: metadata)
-        ActivationFunnelStore.shared.record(
-            .captureCompletedLocally,
-            captureId: CaptureBundleContext.captureIdentifier(for: request),
-            metadata: ["capture_source": request.metadata.captureSource.rawValue]
-        )
-        enqueue(request, targetName: job.title, estimatedPayoutRange: job.explicitPayoutDollarRange)
-    }
-
     func retryUpload(id: UUID) {
         uploadService.retryUpload(id: id)
     }
@@ -134,7 +75,7 @@ final class UploadQueueViewModel: ObservableObject {
             creatorId: UserDeviceService.resolvedUserId(),
             capturedAt: now,
             uploadedAt: nil,
-            captureSource: .metaGlasses,
+            captureSource: .iphoneVideo,
             specialTaskType: job.captureSpecialTaskType,
             priorityWeight: job.priorityWeight,
             quotedPayoutCents: job.explicitPayoutCents,
@@ -144,7 +85,7 @@ final class UploadQueueViewModel: ObservableObject {
             intakeMetadata: CaptureIntakeMetadata(source: .authoritative),
             taskHypothesis: nil,
             scaffoldingPacket: job.defaultScaffoldingPacket,
-            captureModality: "glasses_video_only",
+            captureModality: "phone_video_only",
             evidenceTier: "pre_screen_video",
             captureContextHint: "\(job.title) at \(job.address)",
             sceneMemory: SceneMemoryCaptureMetadata(),

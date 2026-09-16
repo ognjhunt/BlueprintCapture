@@ -35,17 +35,3 @@ enum OnboardingFirstCaptureGoal: String, CaseIterable, Identifiable {
         }
     }
 }
-
-enum OnboardingCaptureUXCopy {
-    static func completionTitle(glassesConnected: Bool) -> String {
-        glassesConnected ? "Capture Setup Complete" : "Start with iPhone Capture"
-    }
-
-    static func completionMessage(glassesConnected: Bool) -> String {
-        glassesConnected
-        ? "We'll show assigned-site work, approved opportunities, and review-gated submissions separately. Payout and downstream use depend on backend review."
-        : "You can capture assigned or operator-approved facility sites with your iPhone now. Connect glasses later for supported hands-free capture."
-    }
-
-    static let disconnectedGlassesSubtitle = "Optional for supported hands-free capture. Assigned-site work, approved jobs, and review submissions can still start with iPhone."
-}

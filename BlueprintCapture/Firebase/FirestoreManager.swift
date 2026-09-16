@@ -1168,7 +1168,7 @@ public class FirestoreManager {
 
     
 
-    // MARK: - Wearables assistance logging
+    // MARK: - Capture assistance logging
 
     public static func createServiceRequest(
         blueprintId: String,

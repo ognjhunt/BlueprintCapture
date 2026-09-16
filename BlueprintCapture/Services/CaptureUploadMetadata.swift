@@ -481,6 +481,9 @@ enum ScaniverseAssistedCaptureContract {
 struct CaptureUploadMetadata: Identifiable, Equatable, Codable {
     enum CaptureSource: String, Codable {
         case iphoneVideo
+        /// Retired. The smart-glasses capture backend is gone, so nothing
+        /// produces this any more, but the case is kept so an upload already
+        /// queued on a device still decodes after the app updates.
         case metaGlasses
     }
 

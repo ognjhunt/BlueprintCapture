@@ -59,6 +59,7 @@ Use this index before reusing any repo text in external capturer, startup, inves
 | `android/IMPLEMENTATION_SPEC.md` | Current source-of-truth | Android implementation spec; not public launch proof. |
 | `android/README.md` | Current source-of-truth | Android local setup/readiness context; no public Android/Meta/XR claims without release proof. |
 | `cloud/AGENTS.md` | Current source-of-truth | Cloud agent rules; no fabricated provider, payout, hosted-review, or launch proof. |
+| `cloud/extract-frames/README.md` | Current source-of-truth | Frame-extraction bridge behaviour and the world-reconstruction request it makes. Describes the capturer upload path; a reconstruction request is not world proof, capture qualification, or payout eligibility. |
 | `docs/ALPHA_GO_NO_GO_CHECKLIST_2026-03-22.md` | Historical/internal | Dated go/no-go checklist; current validation scripts and `docs/PRIVATE_ALPHA_READINESS.md` win. |
 | `docs/ANDROID_XR_AI_GLASSES_READINESS.md` | Current source-of-truth | Current Android XR claim ceiling; video-first and hardware-blocked. |
 | `docs/ANDROID_XR_HARDWARE_VALIDATION_PACKET_2026-05-23.md` | Current source-of-truth | Hardware validation packet; checklist is not completed proof. |
